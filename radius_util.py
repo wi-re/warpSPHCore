@@ -24,3 +24,34 @@ class AdjacencyListWarp:
     j: wp.array(dtype=wp.int64)
     numNeighbors: wp.array(dtype=wp.int64)
     edgeOffsets: wp.array(dtype=wp.int64)
+    
+    
+from typing import NamedTuple, Union
+from typing import NamedTuple
+
+from dataclasses import dataclass
+# @torch.jit.script
+@dataclass(slots=True)
+class DomainDescription:
+    """
+    A named tuple containing the minimum and maximum domain values.
+    """
+    min: torch.Tensor
+    max: torch.Tensor
+    periodic: torch.Tensor
+    dim: int
+
+    def __ne__(self, other: 'DomainDescription') -> bool:
+        return not self.__eq__(other)
+    
+# @torch.jit.script
+@dataclass#(slots=True)
+class PointCloud:
+    """
+    A named tuple containing the positions of the particles and the number of particles.
+    """
+    positions: torch.Tensor
+    supports: torch.Tensor
+
+    def __ne__(self, other: 'PointCloud') -> bool:
+        return not self.__eq__(other)
