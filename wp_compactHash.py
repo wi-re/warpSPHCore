@@ -92,6 +92,120 @@ def compute_h(qMin, qMax, referenceSupport):
     return torch.max(h)
 
 
+@wp.func
+def computeZOrderIndex(index: wp.vec3i) -> wp.int32:
+    # Morton encoding (Z-order curve) for 3D indices
+    x = wp.uint32(index.x)
+    y = wp.uint32(index.y)
+    z = wp.uint32(index.z)
+
+    # Interleave bits of x, y, and z
+    def splitBy3Bits(n):
+        n = (n | (n << 16)) & 0x030000FF
+        n = (n | (n << 8)) & 0x0300F00F
+        n = (n | (n << 4)) & 0x030C30C3
+        n = (n | (n << 2)) & 0x09249249
+        return n
+    
+    return wp.vec3i(splitBy3Bits(x) | (splitBy3Bits(y) << 1) | (splitBy3Bits(z) << 2))
+
+@wp.func
+def mortonPattern(index: wp.int32) -> wp.uint64:
+    # This function addresses a fundamental limitaton in warp. We cannot have 64 bit literal values as python does not support the ull suffix. But, we do know the patterns. We can generate the correct ones by building them as as 32 bit values and shifting them left by 32 bits. This allows us to generate the correct patterns for the splitBy3Bits function, which is the basis for the Morton encoding.
+    # However
+    # this also would require unsigned literals which python does not support so we need to assemble these values from 16 bit components instead
+    bits_00_15 = wp.uint64(0)
+    bits_16_31 = wp.uint64(0)
+    bits_32_47 = wp.uint64(0)
+    bits_48_63 = wp.uint64(0)
+    
+    if index == 0:
+        # generate 0x1fffff:
+        # lower = wp.uint64(0x1fffff)
+        # upper = wp.uint64(0) << wp.uint64(32)
+        bits_00_15 = wp.uint64(0xffff)
+        bits_16_31 = wp.uint64(0x1fff)
+        bits_32_47 = wp.uint64(0)
+        bits_48_63 = wp.uint64(0)
+    elif index == 1:
+        # generate 0x1f0000 0000ffff:
+        # lower = wp.uint64(0x0000ffff)
+        # upper = wp.uint64(0x001f0000) << wp.uint64(32)
+        bits_00_15 = wp.uint64(0xffff)
+        bits_16_31 = wp.uint64(0x0000)
+        bits_32_47 = wp.uint64(0x0000)
+        bits_48_63 = wp.uint64(0x1f00)
+    elif index == 2:
+        # generate 0x1f0000ff 0000ff:
+        # lower = wp.uint64(0xff0000ff)
+        # upper = wp.uint64(0x001f0000) << wp.uint64(32)
+        bits_00_15 = wp.uint64(0x00ff)
+        bits_16_31 = wp.uint64(0xff00)
+        bits_32_47 = wp.uint64(0x0000)
+        bits_48_63 = wp.uint64(0x001f)
+    elif index == 3:
+        # generate 0x100f00f0 0f00f00f:
+        # lower = wp.uint64(0x0f00f00f)
+        # upper = wp.uint64(0x100f00f0) << wp.uint64(32)
+        bits_00_15 = wp.uint64(0xf00f)
+        bits_16_31 = wp.uint64(0x0f00)
+        bits_32_47 = wp.uint64(0x00f0)
+        bits_48_63 = wp.uint64(0x100f)
+    elif index == 4:
+        # genrate 0x10c30c30 c30c30c3
+        # lower = wp.uint64(0xc30c30c3)
+        # upper = wp.uint64(0x10c30c30) << wp.uint64(32)
+        bits_00_15 = wp.uint64(0x30c3)
+        bits_16_31 = wp.uint64(0xc30c)
+        bits_32_47 = wp.uint64(0xc30c)
+        bits_48_63 = wp.uint64(0x10c3)
+    elif index == 5:
+        # generate 0x12492492 49249249
+        # lower = wp.uint64(0x49249249)
+        # upper = wp.uint64(0x12492492) << wp.uint64(32)
+        bits_00_15 = wp.uint64(0x9249)
+        bits_16_31 = wp.uint64(0x4924)
+        bits_32_47 = wp.uint64(0x2492)
+        bits_48_63 = wp.uint64(0x1249)
+
+    return bits_00_15 | (bits_16_31 << wp.uint64(16)) | (bits_32_47 << wp.uint64(32)) | (bits_48_63 << wp.uint64(48))
+    
+
+@wp.func
+def splitBy3Bits64(n: wp.uint64) -> wp.uint64:
+    n = (n | (n << wp.uint64(32))) & mortonPattern(1)
+    n = (n | (n << wp.uint64(16))) & mortonPattern(2)
+    n = (n | (n << wp.uint64(8))) & mortonPattern(3)
+    n = (n | (n << wp.uint64(4))) & mortonPattern(4)
+    n = (n | (n << wp.uint64(2))) & mortonPattern(5)
+    return n
+
+@wp.func 
+def computeZOrderIndex64(index: wp.vec3i) -> wp.int64:
+    # Morton encoding (Z-order curve) for 3D indices into a 64-bit integer
+    x = wp.uint64(index.x)
+    y = wp.uint64(index.y)
+    z = wp.uint64(index.z)
+    
+    return wp.int64(splitBy3Bits64(x) | (splitBy3Bits64(y) << wp.uint64(1)) | (splitBy3Bits64(z) << wp.uint64(2)))
+    
+    
+@wp.kernel
+def indexCells(cellIndices  : wp.array2d(dtype=wp.int32), cellIndxes: wp.array(dtype=wp.int64)):
+    i = wp.tid()
+    numCells = cellIndices.shape[0]
+    dim = cellIndices.shape[1]
+    
+    if i >= numCells:
+        return
+    
+    cellIndex = wp.vec3i(0)
+    for d in range(dim):
+        cellIndex[d] = cellIndices[i, d]
+        
+    cellIndxes[i] = computeZOrderIndex64(cellIndex)
+    
+
 @torch.jit.script
 def linearIndexing(cellIndices, cellCounts):
     """
@@ -136,7 +250,13 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     qExtent = domainMax - domainMin
     cellCount = torch.ceil(qExtent / (hCell)).to(torch.int32)
     indices = torch.floor((referenceParticles - domainMin) / hCell).to(torch.int32).view(-1, referenceParticles.shape[1])
-    linearIndices = linearIndexing(indices, cellCount)
+    
+    out = wp.zeros((indices.shape[0],), dtype=wp.int64)
+    wp.launch(
+        indexCells, dim = indices.shape[0], inputs = [castTorchToWarp(indices),out],
+    )
+    linearIndices = wp.to_torch(out)
+    # linearIndices = linearIndexing(indices, cellCount)
     # with record_function("neighborSearch - sortReferenceParticles[argsort]"): 
     sortingIndices = torch.argsort(linearIndices)
     # with record_function("neighborSearch - sortReferenceParticles[resort]"): 
@@ -219,7 +339,7 @@ def radiusSearchCountNeighborsCompactHashMap(
     sortedPositions: wp.array2d(dtype=wp.float32),  # shape [M,D]
     sortedSupports: wp.array1d(dtype=wp.float32),  # shape [M]
     hashTable: wp.array2d(dtype=wp.int32),  # shape [hashMapLength,2]
-    cellTable: wp.array2d(dtype=wp.int32),  # shape [C,3] with [cellIndex, cellStart, cellCount]
+    cellTable: wp.array2d(dtype=wp.int64),  # shape [C,3] with [cellIndex, cellStart, cellCount]
     qMin: wp.array1d(dtype=wp.float32),  # shape [D]
     hCell: float,
     D: int,
@@ -268,7 +388,7 @@ def radiusSearchCountNeighborsCompactHashMap(
     # Compute the hash value for the cell index
     # hashValue = hashGridIndex(cellIndex, hashMapLength)
     numOffsets = cellOffsets.shape[0]
-    currentLinearIndex = getLinearIndex(cellIndex, numCells, D)
+    # currentLinearIndex = getLinearIndex(cellIndex, numCells, D)
     count = wp.int32(0)
     
     # wp.printf("Thread %d: Query position (%f, %f) with support %f is in cell index (%d, %d, %d)\n", i, queryPos[0], queryPos[1], querySupport, cellIndex[0], cellIndex[1], cellIndex[2])
@@ -287,7 +407,8 @@ def radiusSearchCountNeighborsCompactHashMap(
                 elif currentCellIndex[d] >= numCells[d]:
                     currentCellIndex[d] -= numCells[d]
                     
-        linearIndex = getLinearIndex(currentCellIndex, numCells, D)
+        # linearIndex = getLinearIndex(currentCellIndex, numCells, D)
+        mortonIndex = computeZOrderIndex64(currentCellIndex)
         hashValue = wp.int32(hashGridVec3i(currentCellIndex, hashMapLength, D))
         # wp.printf("\tThread %d: Checking cell index (%d, %d, %d) with hash value %d\n", i, currentCellIndex[0], currentCellIndex[1], currentCellIndex[2], hashValue)
         hashEntry = hashTable[hashValue]
@@ -301,16 +422,16 @@ def radiusSearchCountNeighborsCompactHashMap(
         
         for c in range(cellCount):
             candidateIndex = cellTable[cellStart + c, 0]
-            cellStartIndex = cellTable[cellStart + c, 1]
-            cellParticleCount = cellTable[cellStart + c, 2]
+            cellStartIndex = wp.int32(cellTable[cellStart + c, 1])
+            cellParticleCount = wp.int32(cellTable[cellStart + c, 2])
             
-            if linearIndex != candidateIndex:
+            if mortonIndex != candidateIndex:
                 # wp.printf("\t\tThread %d: Skipping cell with linear index %d as it does not match the current cell index %d\n", i, candidateIndex, linearIndex)
                 continue  # This cell does not match the current cell index
             
             # wp.printf("\t\tThread %d: Checking cell with linear index %d containing %d particles\n", i, candidateIndex, cellParticleCount)
             
-            for p in range(cellParticleCount):
+            for p in range(wp.int32(cellParticleCount)):
                 neighborIndex = cellStartIndex + p
                 neighborPos = sortedPositions[neighborIndex]
                 neighborSupport = sortedSupports[neighborIndex] if sortedSupports.shape[0] > 0 else 0.0
@@ -357,7 +478,7 @@ def radiusSearchCollectCompactHashMap(
     sortedPositions: wp.array2d(dtype=wp.float32),  # shape [M,D]
     sortedSupports: wp.array1d(dtype=wp.float32),  # shape [M]
     hashTable: wp.array2d(dtype=wp.int32),  # shape [hashMapLength,2]
-    cellTable: wp.array2d(dtype=wp.int32),  # shape [C,3] with [cellIndex, cellStart, cellCount]
+    cellTable: wp.array2d(dtype=wp.int64),  # shape [C,3] with [cellIndex, cellStart, cellCount]
     qMin: wp.array1d(dtype=wp.float32),  # shape [D]
     hCell: float,
     D: int,
@@ -412,7 +533,9 @@ def radiusSearchCollectCompactHashMap(
     # Compute the hash value for the cell index
     # hashValue = hashGridIndex(cellIndex, hashMapLength)
     numOffsets = cellOffsets.shape[0]
-    currentLinearIndex = getLinearIndex(cellIndex, numCells, D)
+    currentLinearIndex = computeZOrderIndex64(cellIndex)
+    
+    # getLinearIndex(cellIndex, numCells, D)
     count = wp.int32(0)
     
     # wp.printf("Thread %d: Query position (%f, %f) with support %f is in cell index (%d, %d, %d)\n", i, queryPos[0], queryPos[1], querySupport, cellIndex[0], cellIndex[1], cellIndex[2])
@@ -431,7 +554,8 @@ def radiusSearchCollectCompactHashMap(
                 elif currentCellIndex[d] >= numCells[d]:
                     currentCellIndex[d] -= numCells[d]
                     
-        linearIndex = getLinearIndex(currentCellIndex, numCells, D)
+        # linearIndex = getLinearIndex(currentCellIndex, numCells, D)
+        mortonIndex = computeZOrderIndex64(currentCellIndex)
         hashValue = wp.int32(hashGridVec3i(currentCellIndex, hashMapLength, D))
         # wp.printf("\tThread %d: Checking cell index (%d, %d, %d) with hash value %d\n", i, currentCellIndex[0], currentCellIndex[1], currentCellIndex[2], hashValue)
         hashEntry = hashTable[hashValue]
@@ -445,16 +569,16 @@ def radiusSearchCollectCompactHashMap(
         
         for c in range(cellCount):
             candidateIndex = cellTable[cellStart + c, 0]
-            cellStartIndex = cellTable[cellStart + c, 1]
-            cellParticleCount = cellTable[cellStart + c, 2]
+            cellStartIndex = wp.int32(cellTable[cellStart + c, 1])
+            cellParticleCount = wp.int32(cellTable[cellStart + c, 2])
             
-            if linearIndex != candidateIndex:
-                # wp.printf("\t\tThread %d: Skipping cell with linear index %d as it does not match the current cell index %d\n", i, candidateIndex, linearIndex)
+            if mortonIndex != candidateIndex:
+                # wp.printf("\t\tThread %d: Skipping cell with linear index %d as it does not match the current cell index %d\n", i, candidateIndex, mortonIndex)
                 continue  # This cell does not match the current cell index
             
             # wp.printf("\t\tThread %d: Checking cell with linear index %d containing %d particles\n", i, candidateIndex, cellParticleCount)
             
-            for p in range(cellParticleCount):
+            for p in range(wp.int32(cellParticleCount)):
                 neighborIndex = cellStartIndex + p
                 neighborPos = sortedPositions[neighborIndex]
                 neighborSupport = sortedSupports[neighborIndex] if sortedSupports.shape[0] > 0 else 0.0
