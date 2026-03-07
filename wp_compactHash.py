@@ -519,6 +519,7 @@ def radiusSearchCompactHashMap(
 
 
     x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))]).mT
+    y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
 
     sortedLinear, sortIndex, numCells, qMin, qMax, hCell = sortReferenceParticles(x, hMax, minD, maxD)
 
@@ -592,7 +593,7 @@ def radiusSearchCompactHashMap(
     M = sortedPositions.shape[0]
     edge_count = wp.zeros(queryPositions.shape[0], dtype=wp.int32)
     wp.launch(radiusSearchCountNeighborsCompactHashMap, dim=queryPositions.shape[0], inputs=[
-        castTorchToWarp(queryPositions),
+        castTorchToWarp(y),
         castTorchToWarp(querySupports),
         castTorchToWarp(sortedPositions),
         castTorchToWarp(sortedSupports),
@@ -626,7 +627,7 @@ def radiusSearchCompactHashMap(
     edge_j = wp.zeros(total_edges, dtype=wp.int64)
 
     wp.launch(radiusSearchCollectCompactHashMap, dim=queryPositions.shape[0], inputs=[
-        castTorchToWarp(queryPositions),
+        castTorchToWarp(y),
         castTorchToWarp(querySupports),
         castTorchToWarp(sortedPositions),
         castTorchToWarp(sortedSupports),

@@ -103,7 +103,13 @@ def warp_radius_search_collect_kernel_direct_2(
 import numpy as np
 from radius_util import AdjacencyList
 
-def warp_radius_search_small(x, y, supportX, supportsY, periodicity, domainDescription, mode:str = 'gather'):
+def warp_radius_search_small(queryPositions, referencePositions, supportX, supportsY, periodicity, domainDescription, mode:str = 'gather'):
+    minD = domainDescription.min.cpu()
+    maxD = domainDescription.max.cpu()
+    
+    x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))]).mT
+    y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
+    
     x_warp = castTorchToWarp(x)
     y_warp = castTorchToWarp(y)
     hx_warp = castTorchToWarp(supportX)
