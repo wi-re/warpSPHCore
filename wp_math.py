@@ -41,3 +41,38 @@ def computeCartesianDistance(
         dx = mod_distance(x[d], y[d], minDomain[d], maxDomain[d], periodic[d])
         dist_sq += dx * dx
     return wp.sqrt(dist_sq)
+
+
+@wp.func 
+def mod_warp(x : wp.float32, min: wp.float32, max: wp.float32):
+    h = max - min
+    return ((x + h / 2.0) - wp.floor((x + h / 2.0) / h) * h) - h / 2.0
+
+@wp.func
+def moduloDistanceWarp(xij:wp.array(dtype = wp.float32), periodicity: wp.array(dtype = wp.bool), min: wp.array(dtype = wp.float32), max: wp.array(dtype = wp.float32)):
+    result = wp.zeros_like(xij)
+    for i in range(periodicity.shape[0]):
+        if periodicity[i]:
+            result[i] = mod_warp(xij[i], min[i], max[i])
+        else:
+            result[i] = xij[i]
+    return result
+@wp.func
+def minimumImageDistanceWarp(x: wp.array(dtype = wp.float32), y: wp.array(dtype = wp.float32), min: wp.array(dtype = wp.float32), max: wp.array(dtype = wp.float32), periodicity: wp.array(dtype = wp.bool)):
+    x_projected = wp.zeros_like(x)
+    y_projected = wp.zeros_like(y)
+    for i in range(periodicity.shape[0]):
+        if periodicity[i]:
+            x_projected[i] = wp.remainder(x[i] - min[i], max[i] - min[i]) + min[i]
+            y_projected[i] = wp.remainder(y[i] - min[i], max[i] - min[i]) + min[i]
+        else:
+            x_projected[i] = x[i]
+            y_projected[i] = y[i]
+    xij = x_projected - y_projected
+    return moduloDistanceWarp(xij, periodicity, min, max)
+
+@wp.func 
+def computeDistance(x: wp.array(dtype = wp.float32), y: wp.array(dtype = wp.float32), min: wp.array(dtype = wp.float32), max: wp.array(dtype = wp.float32), periodicity: wp.array(dtype = wp.bool)):
+    vectorDistance = minimumImageDistanceWarp(x, y, min, max, periodicity)
+    length = wp.sqrt(wp.sum(vectorDistance * vectorDistance))
+    return length
