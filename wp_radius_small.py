@@ -136,7 +136,7 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
     mode_map = {'gather': 0, 'scatter': 1, 'symmetric': 2, 'superSymmetric': 3}
     mode_uint = mode_map.get(mode, 0)
         
-    edge_count = wp.zeros(N, dtype=wp.int32)
+    edge_count = wp.zeros(N, dtype=wp.int32, device=x_warp.device)  # Allocate on same device as input data
 
     # import time
     # wp.synchronize()  # Ensure all previous GPU work is done before starting timer
@@ -144,7 +144,7 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
 
     wp.launch(warp_radius_search_kernel_direct_2, dim=N, inputs=[
         x_warp, y_warp, hx_warp, hy_warp, min_domain_warp, max_domain_warp, periodic_warp, wp.uint32(mode_uint), edge_count
-    ])
+    ], device=x_warp.device)  # Ensure kernel runs on the same device as input data
     # wp.synchronize()  # Ensure kernel has finished before measuring time
 
     # endTime = time.time()
@@ -159,17 +159,17 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
     # Compute cumulative offsets
     edge_offsets = np.zeros(N, dtype=np.int32)
     edge_offsets[1:] = np.cumsum(edge_count_np[:-1])
-    edge_offsets_warp = wp.from_numpy(edge_offsets)
+    edge_offsets_warp = wp.from_numpy(edge_offsets, device=x_warp.device)
 
     # Allocate output arrays on GPU
-    edge_i = wp.zeros(total_edges, dtype=wp.int32)
-    edge_j = wp.zeros(total_edges, dtype=wp.int32)
+    edge_i = wp.zeros(total_edges, dtype=wp.int32, device=x_warp.device)
+    edge_j = wp.zeros(total_edges, dtype=wp.int32, device=x_warp.device)
 
     # Second pass: collect edges
     wp.launch(warp_radius_search_collect_kernel_direct_2, dim=N, inputs=[
         x_warp, y_warp, hx_warp, hy_warp, min_domain_warp, max_domain_warp,
         periodic_warp, wp.uint32(mode_uint), edge_offsets_warp, edge_i, edge_j
-    ])
+    ], device=x_warp.device)  # Ensure kernel runs on the same device as input data
 
     # Convert Warp arrays back to PyTorch tensors using wp.to_torch() for direct GPU access
     i_torch = wp.to_torch(edge_i)

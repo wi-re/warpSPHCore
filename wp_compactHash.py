@@ -250,10 +250,10 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     qExtent = domainMax - domainMin
     cellCount = torch.ceil(qExtent / (hCell)).to(torch.int32)
     indices = torch.floor((referenceParticles - domainMin) / hCell).to(torch.int32).view(-1, referenceParticles.shape[1])
-    
-    out = wp.zeros((indices.shape[0],), dtype=wp.int64)
+    warp_indices = castTorchToWarp(indices)
+    out = wp.zeros((indices.shape[0],), dtype=wp.int64, device=warp_indices.device)
     wp.launch(
-        indexCells, dim = indices.shape[0], inputs = [castTorchToWarp(indices),out],
+        indexCells, dim = indices.shape[0], inputs = [warp_indices, out], device = warp_indices.device
     )
     linearIndices = wp.to_torch(out)
     # linearIndices = linearIndexing(indices, cellCount)
@@ -677,11 +677,12 @@ def radiusSearchCompactHashMap(
     cellTable = torch.stack((cellIndices, cumCell, cellCounters), dim = 1)
     
     
-
+    warpDevice = castTorchToWarp(queryPositions).device
+    torchDevice = queryPositions.device
 
     cellGridIndices_warp = castTorchToWarp(cellGridIndices)
-    hashedIndices_warp = wp.zeros(cellGridIndices.shape[0], dtype=wp.uint32)
-    wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp])
+    hashedIndices_warp = wp.zeros(cellGridIndices.shape[0], dtype=wp.uint32, device=warpDevice)
+    wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice)
     hashedIndices = wp.to_torch(hashedIndices_warp)
     # print(hashedIndices_warp)
 
@@ -715,7 +716,7 @@ def radiusSearchCompactHashMap(
     D = domainDescription.dim
     N = queryPositions.shape[0]
     M = sortedPositions.shape[0]
-    edge_count = wp.zeros(queryPositions.shape[0], dtype=wp.int32)
+    edge_count = wp.zeros(queryPositions.shape[0], dtype=wp.int32, device=warpDevice)
     wp.launch(radiusSearchCountNeighborsCompactHashMap, dim=queryPositions.shape[0], inputs=[
         castTorchToWarp(y),
         castTorchToWarp(querySupports),
@@ -733,7 +734,7 @@ def radiusSearchCompactHashMap(
         castTorchToWarp(periodicity),
         wp.uint32(mode_uint),
         edge_count
-    ])
+    ], device=warpDevice)
 
 
 
@@ -744,11 +745,11 @@ def radiusSearchCompactHashMap(
     # Compute cumulative offsets
     edge_offsets = np.zeros(N, dtype=np.int32)
     edge_offsets[1:] = np.cumsum(edge_count_np[:-1])
-    edge_offsets_warp = wp.from_numpy(edge_offsets)
+    edge_offsets_warp = wp.from_numpy(edge_offsets, device=warpDevice)
 
     # Allocate output arrays on GPU
-    edge_i = wp.zeros(total_edges, dtype=wp.int64)
-    edge_j = wp.zeros(total_edges, dtype=wp.int64)
+    edge_i = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+    edge_j = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
 
     wp.launch(radiusSearchCollectCompactHashMap, dim=queryPositions.shape[0], inputs=[
         castTorchToWarp(y),
@@ -771,7 +772,7 @@ def radiusSearchCompactHashMap(
         castTorchToWarp(sortIndex),
         edge_i,
         edge_j
-    ])
+    ], device=warpDevice)
 
 
 
