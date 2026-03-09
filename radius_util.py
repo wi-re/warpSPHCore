@@ -55,3 +55,9 @@ class PointCloud:
 
     def __ne__(self, other: 'PointCloud') -> bool:
         return not self.__eq__(other)
+
+
+def convertModeToUint(mode: str) -> wp.uint32:
+    mode_map = {'gather': 0, 'scatter': 1, 'symmetric': 2, 'superSymmetric': 3}
+    mode_uint = mode_map.get(mode, 0)
+    return wp.uint32(mode_uint)

@@ -28,3 +28,27 @@ def castWarpToTorch(x_warp):
     
     return x_torch
 
+
+
+from warp.types import vector, matrix
+
+def castTorchToWarpAsBuiltins(x_torch):
+    """
+    Cast a PyTorch tensor to a Warp array of built-in types (e.g., float32, int32), ensuring it's on the correct device and has the right dtype.
+    
+    This function also performs conversions to builtin warp types, e.g., vec2f for 2D float tensors, vec3i for 3D int tensors, etc.
+    
+    """
+    x_torch = x_torch.contiguous()
+    
+    if len(x_torch.shape) == 1:
+        # 1D tensor, return as is with appropriate dtype
+        return wp.from_torch(x_torch)
+    elif len(x_torch.shape) == 2:
+        N, D = x_torch.shape
+        return wp.from_torch(x_torch, dtype=vector(length=D, dtype=wp.from_torch(x_torch).dtype))
+    elif len(x_torch.shape) == 3:
+        N, M, D = x_torch.shape
+        return wp.from_torch(x_torch, dtype=matrix(rows=M, cols=D, dtype=wp.from_torch(x_torch).dtype))
+    else:
+        return wp.from_torch(x_torch)
