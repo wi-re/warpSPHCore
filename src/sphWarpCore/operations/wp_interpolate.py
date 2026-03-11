@@ -50,7 +50,7 @@ def computeSPHInterpolation_Func(
         pairwiseDistance = computeDistance(xi, xj, periodicity, domainMin, domainMax)
         pairwiseSupport = computePairwiseSupport(hi, hj, mode_uint)
         if pairwiseDistance <= pairwiseSupport:
-            f_interpolated += fieldValues[j] * masses[j] * wendland4_2d(pairwiseDistance, pairwiseSupport, 2) / densities[j]
+            f_interpolated += fieldValues[j] * masses[j] * sphKernel(xi, positions[j], hi, supports[j], 0, mode_uint) / densities[j]
             
     return f_interpolated
 

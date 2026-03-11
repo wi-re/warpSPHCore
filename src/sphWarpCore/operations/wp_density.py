@@ -28,14 +28,10 @@ def computeDensityWarp(
     for neighborIndex in range(numNeighs):
         j = wp.int32(neighborList[neighborOffset + wp.int64(neighborIndex)])
         
+        # xj= referencePositions[j]
+        # hj= referenceSupports[j]
         
-        xj= referencePositions[j]
-        hj= referenceSupports[j]
-        
-        pairwiseDistance = computeDistance(xi, xj, periodicity, domainMin, domainMax)
-        pairwiseSupport = computePairwiseSupport(hi, hj, mode_uint)
-        # if pairwiseDistance <= pairwiseSupport:
-        rho += referenceMasses[j] * wendland4_2d(pairwiseDistance, pairwiseSupport, 2)
+        rho += referenceMasses[j] * sphKernel(xi, referencePositions[j], hi, referenceSupports[j], 0, mode_uint)
     return rho
 
 @wp.kernel
