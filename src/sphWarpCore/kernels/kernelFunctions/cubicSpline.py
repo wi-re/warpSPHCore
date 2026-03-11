@@ -14,10 +14,18 @@ def dkdq(q, dim: int = 2):
     return -3 * cpow(1-q, 2) + 12 * cpow(1/2 - q,2)
 @torch.jit.script
 def d2kdq2(q, dim: int = 2):        
-    return  6 * (1-q) + torch.where(q >= 0.5,0, - 24 * (1/2 - q))
+    if q >= 0.5:
+        return 6 * (1-q)
+    else:
+        return 6 * (1-q) - 24 * (1/2 - q)
+    # return  6 * (1-q) + torch.where(q >= 0.5,0, - 24 * (1/2 - q))
 @torch.jit.script
 def d3kdq3(q, dim: int = 2):
-    return -6 + torch.where(q >= 0.5,0, 24)
+    if q >= 0.5:
+        return -6
+    else:
+        return -6 + 24
+    # return -6 + torch.where(q >= 0.5,0, 24)
     
 @torch.jit.script
 def C_d(dim : int):

@@ -7,16 +7,32 @@ from warp.types import vector
 
 @torch.jit.script
 def k(q, dim: int = 2):  
-    return torch.where(q < 0.5, 2, 1) * (1-q)**3 * q**3 + torch.where(q < 0.5, -1/64, 0)
+    if q < 0.5:
+        return 2 * (1-q)**3 * q**3 - 1/64
+    else:
+        return (1-q)**3 * q**3
+    # return torch.where(q < 0.5, 2, 1) * (1-q)**3 * q**3 + torch.where(q < 0.5, -1/64, 0)
 @torch.jit.script
 def dkdq(q, dim: int = 2):    
-    return torch.where(q < 0.5, 2, 1) * (-3 *q**2 * (2*q -1) * (1-q)**2)
+    if q < 0.5:
+        return 2 * (-3 *q**2 * (2*q -1) * (1-q)**2)
+    else:
+        return 1 * (-3 *q**2 * (2*q -1) * (1-q)**2)
+    # return torch.where(q < 0.5, 2, 1) * (-3 *q**2 * (2*q -1) * (1-q)**2)
 @torch.jit.script
-def d2kdq2(q, dim: int = 2):        
-    return torch.where(q < 0.5, 2, 1) * (6 * q * (-5 *q **3 + 10 *q**2 - 6 *q + 1))
+def d2kdq2(q, dim: int = 2):
+    if q < 0.5:
+        return 2 * (6 * q * (-5 *q **3 + 10 *q**2 - 6 *q + 1))
+    else:
+        return 1 * (6 * q * (-5 *q **3 + 10 *q**2 - 6 *q + 1)) 
+    # return torch.where(q < 0.5, 2, 1) * (6 * q * (-5 *q **3 + 10 *q**2 - 6 *q + 1))
 @torch.jit.script
 def d3kdq3(q, dim: int = 2):
-    return torch.where(q < 0.5, 2, 1) * (-120 * q**3 + 180 * q**2 - 72 * q + 6)
+    if q < 0.5:
+        return 2 * (-120 * q**3 + 180 * q**2 - 72 * q + 6)
+    else:
+        return 1 * (-120 * q**3 + 180 * q**2 - 72 * q + 6)
+    # return torch.where(q < 0.5, 2, 1) * (-120 * q**3 + 180 * q**2 - 72 * q + 6)
 
 @torch.jit.script
 def C_d(dim : int):

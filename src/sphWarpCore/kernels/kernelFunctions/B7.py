@@ -6,21 +6,16 @@ from warp.types import vector
 
 
 @torch.jit.script
-def k(q_, dim: int = 2):        
-    eta_max = 4
-    q = q_.clamp(min = 0, max = 1)
-    # eta = q * eta_max
-    # k = 7
-    
+def k(q, dim: int = 2):        
+    eta_max = 4   
     
     result = 56 * bpow(q - 1/4, 7)  -28 * bpow(q - 2/4, 7) + 8 * bpow(q - 3/4, 7) - bpow(q - 1, 7)
     
     return result
 
 @torch.jit.script
-def dkdq(q_, dim: int = 2):        
+def dkdq(q, dim: int = 2):        
     eta_max = 4
-    q = q_.clamp(min = 0, max = 1)
     
     result = 56 * bpow(q - 1/4, 6)  -28 * bpow(q - 2/4, 6) + 8 * bpow(q - 3/4, 6) - bpow(q - 1, 6)
     
@@ -28,18 +23,16 @@ def dkdq(q_, dim: int = 2):
 
 
 @torch.jit.script
-def d2kdq2(q_, dim: int = 2):        
+def d2kdq2(q, dim: int = 2):        
     eta_max = 4
-    q = q_.clamp(min = 0, max = 1)
     
     result = 56 * bpow(q - 1/4, 5)  -28 * bpow(q - 2/4, 5) + 8 * bpow(q - 3/4, 5) - bpow(q - 1, 5)
     
     return result * 7 * 6
 
 @torch.jit.script
-def d3kdq3(q_, dim: int = 2):        
+def d3kdq3(q, dim: int = 2):        
     eta_max = 4
-    q = q_.clamp(min = 0, max = 1)
     
     result = 56 * bpow(q - 1/4, 4)  -28 * bpow(q - 2/4, 4) + 8 * bpow(q - 3/4, 4) - bpow(q - 1, 4)
     

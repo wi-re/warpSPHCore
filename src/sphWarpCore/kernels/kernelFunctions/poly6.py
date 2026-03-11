@@ -5,10 +5,6 @@ import warp as wp
 from warp.types import vector
 
 @torch.jit.script
-def cpow(q, p : int):
-    return torch.clamp(q, 0, 1)**p
-
-@torch.jit.script
 def k(q, dim: int = 2):  
     return (1-q**2)**3
 @torch.jit.script

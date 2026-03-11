@@ -15,7 +15,7 @@ def d2kdq2(q, dim: int = 2):
     return 6 * (1-q)
 @torch.jit.script
 def d3kdq3(q, dim: int = 2):
-    return -6 * torch.ones_like(q)
+    return -6
     
 @torch.jit.script
 def C_d(dim : int):
