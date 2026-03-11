@@ -5,6 +5,7 @@ from .wp_math import (
     moduloDistanceWarp,
     minimumImageDistanceWarp,
     computeDistance,
+    computeDistanceVec,
     safe_sqrt,
     project_mod,
     moduloDistanceComponent,
@@ -18,6 +19,7 @@ __all__ = [
     "moduloDistanceWarp",
     "minimumImageDistanceWarp",
     "computeDistance",
+    "computeDistanceVec"
     "safe_sqrt",
     "project_mod",
     "moduloDistanceComponent",

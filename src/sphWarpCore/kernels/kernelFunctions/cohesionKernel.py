@@ -4,44 +4,44 @@ from typing import Any
 import warp as wp
 from warp.types import vector
 
+@wp.func
+def cohesionKernel_k(q: wp.float32, dim: wp.int32 = 2):  
+    if q < 0.5:
+        return 2.0 * iPow(1.0 - q, 3) * iPow(q, 3) - 1.0/64.0
+    else:
+        return iPow(1.0 - q, 3) * iPow(q, 3)
 
-@torch.jit.script
-def k(q, dim: int = 2):  
+@wp.func
+def cohesionKernel_dkdq(q: wp.float32, dim: wp.int32 = 2):    
     if q < 0.5:
-        return 2 * (1-q)**3 * q**3 - 1/64
+        return 2.0 * (-3.0 * iPow(q, 2) * (2.0 * q - 1.0) * iPow(1.0 - q, 2))
     else:
-        return (1-q)**3 * q**3
-    # return torch.where(q < 0.5, 2, 1) * (1-q)**3 * q**3 + torch.where(q < 0.5, -1/64, 0)
-@torch.jit.script
-def dkdq(q, dim: int = 2):    
-    if q < 0.5:
-        return 2 * (-3 *q**2 * (2*q -1) * (1-q)**2)
-    else:
-        return 1 * (-3 *q**2 * (2*q -1) * (1-q)**2)
-    # return torch.where(q < 0.5, 2, 1) * (-3 *q**2 * (2*q -1) * (1-q)**2)
-@torch.jit.script
-def d2kdq2(q, dim: int = 2):
-    if q < 0.5:
-        return 2 * (6 * q * (-5 *q **3 + 10 *q**2 - 6 *q + 1))
-    else:
-        return 1 * (6 * q * (-5 *q **3 + 10 *q**2 - 6 *q + 1)) 
-    # return torch.where(q < 0.5, 2, 1) * (6 * q * (-5 *q **3 + 10 *q**2 - 6 *q + 1))
-@torch.jit.script
-def d3kdq3(q, dim: int = 2):
-    if q < 0.5:
-        return 2 * (-120 * q**3 + 180 * q**2 - 72 * q + 6)
-    else:
-        return 1 * (-120 * q**3 + 180 * q**2 - 72 * q + 6)
-    # return torch.where(q < 0.5, 2, 1) * (-120 * q**3 + 180 * q**2 - 72 * q + 6)
+        return -3.0 * iPow(q, 2) * (2.0 * q - 1.0) * iPow(1.0 - q, 2)
 
-@torch.jit.script
-def C_d(dim : int):
-    if dim == 1: return 32 / np.pi
-    elif dim == 2: return 32 / np.pi
-    else: return 32 / np.pi
+@wp.func
+def cohesionKernel_d2kdq2(q: wp.float32, dim: wp.int32 = 2):
+    if q < 0.5:
+        return 2.0 * (6.0 * q * (-5.0 * iPow(q, 3) + 10.0 * iPow(q, 2) - 6.0 * q + 1.0))
+    else:
+        return 6.0 * q * (-5.0 * iPow(q, 3) + 10.0 * iPow(q, 2) - 6.0 * q + 1.0)
 
-def kernelScale(dim: int = 2):
+@wp.func
+def cohesionKernel_d3kdq3(q: wp.float32, dim: wp.int32 = 2):
+    if q < 0.5:
+        return 2.0 * (-120.0 * iPow(q, 3) + 180.0 * iPow(q, 2) - 72.0 * q + 6.0)
+    else:
+        return -120.0 * iPow(q, 3) + 180.0 * iPow(q, 2) - 72.0 * q + 6.0
+
+@wp.func
+def cohesionKernel_C_d(dim: wp.int32):
+    if dim == 1: return 32.0 / np.pi
+    elif dim == 2: return 32.0 / np.pi
+    else: return 32.0 / np.pi
+
+@wp.func
+def cohesionKernel_kernelScale(dim: wp.int32 = 2):
     return 1.0
 
-def packingRatio():
+@wp.func
+def cohesionKernel_packingRatio():
     return 1.0

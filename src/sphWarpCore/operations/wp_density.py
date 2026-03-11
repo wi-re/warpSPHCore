@@ -15,6 +15,7 @@ def computeDensityWarp(
     referencePositions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), referenceSupports : wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),
     periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32),
     mode_uint: wp.uint32,
+    kernel_int: wp.int32,
     
     
     neighborList: wp.array(dtype = wp.int64), 
@@ -31,7 +32,7 @@ def computeDensityWarp(
         # xj= referencePositions[j]
         # hj= referenceSupports[j]
         
-        rho += referenceMasses[j] * sphKernel(xi, referencePositions[j], hi, referenceSupports[j], 0, mode_uint)
+        rho += referenceMasses[j] * sphKernel(xi, referencePositions[j], hi, referenceSupports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
     return rho
 
 @wp.kernel
@@ -43,6 +44,7 @@ def sphDensity_warp(
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool),
     
     mode_uint: wp.uint32,
+    kernel_int: wp.int32,
     neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),
     
     densities : wp.array(dtype = wp.float32)                                                                                                               
@@ -62,7 +64,7 @@ def sphDensity_warp(
     numNeighs = wp.int32(numNeighbors[i])
     neighborOffset = wp.int64(neighborListRowOffsets[i])
     
-    rho = computeDensityWarp(xi, hi, mi, referencePositions, referenceSupports, referenceMasses, periodicity, domainMin, domainMax, mode_uint, neighborList, neighborOffset, numNeighs)
+    rho = computeDensityWarp(xi, hi, mi, referencePositions, referenceSupports, referenceMasses, periodicity, domainMin, domainMax, mode_uint, kernel_int, neighborList, neighborOffset, numNeighs)
         
     densities[i] = rho
         
@@ -72,6 +74,7 @@ def warp_sphDensityFunction(
     queryMasses, referenceMasses,
     domainMin, domainMax, periodicity,
     mode_uint,
+    kernel_int,
     neighborList, neighborListRowOffsets, numNeighbors
 ):
     inputs = [
@@ -79,7 +82,7 @@ def warp_sphDensityFunction(
         querySupports, referenceSupports,
         queryMasses, referenceMasses,
         domainMin, domainMax, periodicity,
-        mode_uint,
+        mode_uint, kernel_int,
         neighborList, neighborListRowOffsets, numNeighbors
     ]
     requires_grad = any(input.requires_grad for input in inputs if hasattr(input, 'requires_grad'))
@@ -103,6 +106,7 @@ def warp_sphDensityFunction(
             domainMin, domainMax, periodicity,
             
             wp.uint32(mode_uint),
+            wp.int32(kernel_int),
             neighborList, neighborListRowOffsets, numNeighbors,
             
             densities
@@ -112,18 +116,23 @@ def warp_sphDensityFunction(
     
     return densities
 
+from ..enumTypes import *
 
 def computeDensity_warpBackend(
     queryPositions, referencePositions,
     querySupports, referenceSupports,
     queryMasses, referenceMasses,
     domain: DomainDescription,
-    mode: str,    
+    mode: SupportScheme,
+    kernel: KernelFunctions,    
     adjacency
 ):
     domainMin = domain.min
     domainMax = domain.max
     periodicity = domain.periodic
+
+    modeUint = wp.uint32(mode.value)
+    kernelInt = wp.int32(kernel.value)
 
     warp_sphDensity = warpWrapper(
         warp_sphDensityFunction,
@@ -131,7 +140,8 @@ def computeDensity_warpBackend(
         querySupports, referenceSupports,
         queryMasses, referenceMasses,
         domainMin, domainMax, periodicity,
-        convertModeToUint(mode),
+        modeUint,
+        kernelInt,
         adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors
     )
     

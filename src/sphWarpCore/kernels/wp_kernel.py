@@ -2,6 +2,7 @@ from typing import Any
 import warp as wp
 import numpy as np
 from .utils import *
+from ..mathutil import computeDistanceVec
 
 from .kernelFunctions.wendland2 import *
 from .kernelFunctions.wendland4 import *
@@ -12,9 +13,9 @@ from .kernelFunctions.quinticSpline import *
 from .kernelFunctions.B7 import *
 from .kernelFunctions.poly6 import *
 from .kernelFunctions.spiky import *
-from .kernelFunctions.viscosity import *
-from .kernelFunctions.adhesion import *
-from .kernelFunctions.cohesion import *
+from .kernelFunctions.viscosityKernel import *
+from .kernelFunctions.adhesionKernel import *
+from .kernelFunctions.cohesionKernel import *
 
 # Supported Kernels:
 # wendland2 [index = 0]
@@ -52,11 +53,11 @@ def eval_k(q: wp.float32, dim: wp.int32, kernel: wp.int32):
     elif kernel == 21:
         return spiky_k(q, dim)
     elif kernel == 30:
-        return viscosity_k(q, dim)
+        return viscosityKernel_k(q, dim)
     elif kernel == 31:
-        return adhesion_k(q, dim)
+        return adhesionKernel_k(q, dim)
     elif kernel == 32:         
-        return cohesion_k(q, dim)
+        return cohesionKernel_k(q, dim)
     return np.nan
 
 @wp.func
@@ -80,11 +81,11 @@ def eval_dkdq(q: wp.float32, dim: wp.int32, kernel: wp.int32):
     elif kernel == 21:
         return spiky_dkdq(q, dim)
     elif kernel == 30:
-        return viscosity_dkdq(q, dim)
+        return viscosityKernel_dkdq(q, dim)
     elif kernel == 31:
-        return adhesion_dkdq(q, dim)
+        return adhesionKernel_dkdq(q, dim)
     elif kernel == 32:         
-        return cohesion_dkdq(q, dim)
+        return cohesionKernel_dkdq(q, dim)
     return np.nan
 
 @wp.func
@@ -92,27 +93,27 @@ def eval_d2kdq2(q: wp.float32, dim: wp.int32, kernel: wp.int32):
     if kernel == 0:
         return wendland2_d2kdq2(q, dim)
     elif kernel == 1:
-        return wendland4_d2kd2q(q, dim)
+        return wendland4_d2kdq2(q, dim)
     elif kernel == 2:
-        return wendland6_d2kd2q(q, dim)
+        return wendland6_d2kdq2(q, dim)
     elif kernel == 10:
-        return cubicSpline_d2kd2q(q, dim)
+        return cubicSpline_d2kdq2(q, dim)
     elif kernel == 11:
-        return quarticSpline_d2kd2q(q, dim)
+        return quarticSpline_d2kdq2(q, dim)
     elif kernel == 12:
-        return quinticSpline_d2kd2q(q, dim)
+        return quinticSpline_d2kdq2(q, dim)
     elif kernel == 13:
-        return B7_d2kd2q(q, dim)
+        return B7_d2kdq2(q, dim)
     elif kernel == 20:
-        return poly6_d2kd2q(q, dim)
+        return poly6_d2kdq2(q, dim)
     elif kernel == 21:
-        return spiky_d2kd2q(q, dim)
+        return spiky_d2kdq2(q, dim)
     elif kernel == 30:
-        return viscosity_d2kd2q(q, dim)
+        return viscosityKernel_d2kdq2(q, dim)
     elif kernel == 31:
-        return adhesion_d2kd2q(q, dim)
+        return adhesionKernel_d2kdq2(q, dim)
     elif kernel == 32:         
-        return cohesion_d2kd2q(q, dim)
+        return cohesionKernel_d2kdq2(q, dim)
     return np.nan
 
 @wp.func
@@ -120,27 +121,27 @@ def eval_d3kdq3(q: wp.float32, dim: wp.int32, kernel: wp.int32):
     if kernel == 0:
         return wendland2_d3kdq3(q, dim)
     elif kernel == 1:
-        return wendland4_d3kd3q(q, dim)
+        return wendland4_d3kdq3(q, dim)
     elif kernel == 2:
-        return wendland6_d3kd3q(q, dim)
+        return wendland6_d3kdq3(q, dim)
     elif kernel == 10:
-        return cubicSpline_d3kd3q(q, dim)
+        return cubicSpline_d3kdq3(q, dim)
     elif kernel == 11:
-        return quarticSpline_d3kd3q(q, dim)
+        return quarticSpline_d3kdq3(q, dim)
     elif kernel == 12:
-        return quinticSpline_d3kd3q(q, dim)
+        return quinticSpline_d3kdq3(q, dim)
     elif kernel == 13:
-        return B7_d3kd3q(q, dim)
+        return B7_d3kdq3(q, dim)
     elif kernel == 20:
-        return poly6_d3kd3q(q, dim)
+        return poly6_d3kdq3(q, dim)
     elif kernel == 21:
-        return spiky_d3kd3q(q, dim)
+        return spiky_d3kdq3(q, dim)
     elif kernel == 30:
-        return viscosity_d3kd3q(q, dim)
+        return viscosityKernel_d3kdq3(q, dim)
     elif kernel == 31:
-        return adhesion_d3kd3q(q, dim)
+        return adhesionKernel_d3kdq3(q, dim)
     elif kernel == 32:         
-        return cohesion_d3kd3q(q, dim)
+        return cohesionKernel_d3kdq3(q, dim)
     return np.nan
 
 @wp.func
@@ -164,17 +165,17 @@ def eval_C_d(dim: wp.int32, kernel: wp.int32):
     elif kernel == 21:
         return spiky_C_d(dim)
     elif kernel == 30:
-        return viscosity_C_d(dim)
+        return viscosityKernel_C_d(dim)
     elif kernel == 31:
-        return adhesion_C_d(dim)
+        return adhesionKernel_C_d(dim)
     elif kernel == 32:         
-        return cohesion_C_d(dim)
+        return cohesionKernel_C_d(dim)
     return np.nan
 
 @wp.func
 def eval_kernelScale(dim: wp.int32, kernel: wp.int32):
     if kernel == 0:
-        return wendland2_kernelScaleernelScale(dim)
+        return wendland2_kernelScale(dim)
     elif kernel == 1:
         return wendland4_kernelScale(dim)
     elif kernel == 2:
@@ -192,11 +193,11 @@ def eval_kernelScale(dim: wp.int32, kernel: wp.int32):
     elif kernel == 21:
         return spiky_kernelScale(dim)
     elif kernel == 30:
-        return viscosity_kernelScale(dim)
+        return viscosityKernel_kernelScale(dim)
     elif kernel == 31:
-        return adhesion_kernelScale(dim)
+        return adhesionKernel_kernelScale(dim)
     elif kernel == 32:         
-        return cohesion_kernelScale(dim)
+        return cohesionKernel_kernelScale(dim)
     return np.nan
 
 @wp.func
@@ -220,11 +221,11 @@ def eval_packing(kernel: wp.int32):
     elif kernel == 21:
         return spiky_packingRatio()
     elif kernel == 30:
-        return viscosity_packingRatio()
+        return viscosityKernel_packingRatio()
     elif kernel == 31:
-        return adhesion_packingRatio()
+        return adhesionKernel_packingRatio()
     elif kernel == 32:         
-        return cohesion_packingRatio()
+        return cohesionKernel_packingRatio()
     return np.nan
 
 
@@ -287,12 +288,16 @@ def sphKernel(
     hi: wp.float32,
     hj: wp.float32,
     kernel: wp.int32,
-    mode: wp.uint32
+    mode: wp.uint32,
+    periodic: wp.array(dtype = wp.bool),
+    minDomain: wp.array(dtype = wp.float32),
+    maxDomain: wp.array(dtype = wp.float32),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
-    xij = xi - xj
+    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
+    if mode == 4: # SuperSymmetric
+        return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
     return sphKernel_(xij, hij, kernel)
-
 
 # Torch Version
 # @torch.jit.script
@@ -311,6 +316,37 @@ def sphKernel(
 #     normalizedKernelTerm = kernelTerm * normalizationTerm
 #     return grad * normalizedKernelTerm.view(-1,1)
 
+@wp.func
+def sphGradient_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+    dim = wp.int32(x.length)
+    r = vectorNorm_warp(x)
+    q = r / h
+    if q > 1.0:
+        return type(x)(0.0)
+    grad = vectorNormalize_warp(input = x)
+    normalizationTerm = eval_C_d(dim, kernel) / iPow(h, dim + 1)
+    kernelTerm = eval_dkdq(q, dim, kernel)
+    normalizedKernelTerm = kernelTerm * normalizationTerm
+    return grad * normalizedKernelTerm
+
+@wp.func
+def sphKernelGradient(
+    xi: vector(dtype=wp.float32, length=Any),
+    xj: vector(dtype=wp.float32, length=Any),
+    hi: wp.float32,
+    hj: wp.float32,
+    kernel: wp.int32,
+    mode: wp.uint32,
+    periodic: wp.array(dtype = wp.bool),
+    minDomain: wp.array(dtype = wp.float32),
+    maxDomain: wp.array(dtype = wp.float32),
+):
+    hij = computePairwiseSupport(hi, hj, mode)
+    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
+    if mode == 4: # SuperSymmetric
+        return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
+    return sphGradient_(xij, hij, kernel)
+
 # Torch Version
 # def Kernel_Derivative(kernel: KernelType, x: torch.Tensor, h: torch.Tensor):
 #     dim = x.shape[1]
@@ -319,6 +355,33 @@ def sphKernel(
 #     # grad = vectorNormalize(x)
 #     return eval_dkdq(kernel, q, dim) * eval_C_d(kernel, dim) / h**(dim + 1)
 
+@wp.func
+def sphKernelDerivative_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+    dim = wp.int32(x.length)
+    r = vectorNorm_warp(x)
+    q = r / h
+    if q > 1.0:
+        return 0.0
+    return eval_dkdq(q, dim, kernel) * eval_C_d(dim, kernel) / iPow(h, dim + 1)
+
+@wp.func
+def sphKernelDerivative(
+    xi: vector(dtype=wp.float32, length=Any),
+    xj: vector(dtype=wp.float32, length=Any),
+    hi: wp.float32,
+    hj: wp.float32,
+    kernel: wp.int32,
+    mode: wp.uint32,
+    periodic: wp.array(dtype = wp.bool),
+    minDomain: wp.array(dtype = wp.float32),
+    maxDomain: wp.array(dtype = wp.float32),   
+):
+    hij = computePairwiseSupport(hi, hj, mode)
+    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
+    if mode == 4: # SuperSymmetric
+        return (sphKernelDerivative_(xij,hi,kernel) + sphKernelDerivative_(xij,hj,kernel))/2.0
+    return sphKernelDerivative_(xij, hij, kernel)
+    
 
 # Torch Version
 # def Kernel_Hessian(kernel: KernelType, x: torch.Tensor, h: torch.Tensor):
@@ -345,6 +408,48 @@ def sphKernel(
 #     hessian = factorA * k2.view(-1,1,1) + factorB * k1.view(-1,1,1)
 #     return hessian
 
+from .adjoints import warp_eye
+
+@wp.func
+def sphKernelHessian_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+    r = vectorNorm_warp(x)
+    dim = wp.int32(x.length)
+    q = r / h
+    eps = 1e-5
+    
+    k1 = eval_dkdq(q, dim, kernel)   * eval_C_d(dim, kernel) / iPow(h, dim + 1)
+    k2 = eval_d2kdq2(q, dim, kernel) * eval_C_d(dim, kernel) / iPow(h, dim + 2)
+    s = (iPow(r, 2) + iPow(eps,2) *iPow(h,2))
+    
+    factorA = wp.outer(x, x) / s
+    if q < eps:
+        for i in range(dim):
+            factorA[i,i] = 1
+    
+    factorB = - wp.outer(x,x) /  (iPow(r, 3) + iPow(eps, 3) *iPow(h, 3))
+    factorB += warp_eye(x) / (r + iPow(eps, 2) * h)
+    
+    hessian = factorA * k2 + factorB * k1
+    
+@wp.func
+def sphKernelHessian(
+    xi: vector(dtype=wp.float32, length=Any),
+    xj: vector(dtype=wp.float32, length=Any),
+    hi: wp.float32,
+    hj: wp.float32,
+    kernel: wp.int32,
+    mode: wp.uint32,
+    periodic: wp.array(dtype = wp.bool),
+    minDomain: wp.array(dtype = wp.float32),
+    maxDomain: wp.array(dtype = wp.float32),
+):
+    hij = computePairwiseSupport(hi, hj, mode)
+    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
+    if mode == 4: # SuperSymmetric
+        return (sphKernelHessian_(xij,hi,kernel) + sphKernelHessian_(xij,hj,kernel))/2.0
+    return sphKernelHessian_(xij, hij, kernel)
+    
+
 
 # Torch Version
 # def Kernel_Laplacian(kernel: KernelType, x: torch.Tensor, h:torch.Tensor):
@@ -366,6 +471,47 @@ def sphKernel(
 #     laplacian[q < 1e-5] = 0
 #     return laplacian
 
+@wp.func 
+def sphKernelLaplacian_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+    dim = wp.int32(x.length)
+    r = vectorNorm_warp(x)
+    q = r / h
+    eps = 1e-5
+    r_eps = r + eps * h
+    
+    k1 = eval_dkdq(q, dim, kernel)   * eval_C_d(dim, kernel) / iPow(h, dim + 1)
+    k2 = eval_d2kdq2(q, dim, kernel) * eval_C_d(dim, kernel) / iPow(h, dim + 2)
+    
+    s = wp.dot(x,x) / iPow(r_eps, 2)
+    if q < eps:
+        s = 1
+    t = - wp.dot(x,x) / iPow(r_eps, 3)
+    t += dim / r_eps
+    
+    laplacian = s * k2 + t * k1
+    if q < eps:
+        laplacian = 0
+    return laplacian
+
+@wp.func
+def sphKernelLaplacian(
+    xi: vector(dtype=wp.float32, length=Any),
+    xj: vector(dtype=wp.float32, length=Any),
+    hi: wp.float32,
+    hj: wp.float32,
+    kernel: wp.int32,
+    mode: wp.uint32,
+    periodic: wp.array(dtype = wp.bool),
+    minDomain: wp.array(dtype = wp.float32),
+    maxDomain: wp.array(dtype = wp.float32),
+):
+    hij = computePairwiseSupport(hi, hj, mode)
+    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
+    if mode == 4: # SuperSymmetric
+        return (sphKernelLaplacian_(xij,hi,kernel) + sphKernelLaplacian_(xij,hj,kernel))/2.0
+    
+    return sphKernelLaplacian_(xij, hij, kernel)
+
 
 # Torch Version
 # def Kernel_DkDh(kernel: KernelType, x: torch.Tensor, h: torch.Tensor):
@@ -379,3 +525,36 @@ def sphKernel(
 #     normConstant = -float(Kernel_C_d(kernel, dim))/ h ** float(dim + 2)
 
 #     return normConstant * (float(dim) * h * k + r * dkdq)
+
+@wp.func
+def sphKernelDkDh_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+    dim = wp.int32(x.length)
+    r = vectorNorm_warp(x)
+    q = r/h
+    
+    k = eval_k(q, dim, kernel)
+    dkdq = eval_dkdq(q, dim, kernel)
+    
+    normConstant = - eval_C_d(dim, kernel) / iPow(h, dim + 2)
+    
+    return normConstant * (wp.float32(dim) * h * k + r * dkdq)
+
+@wp.func
+def sphKernelDkDh(
+    xi: vector(dtype=wp.float32, length=Any),
+    xj: vector(dtype=wp.float32, length=Any),
+    hi: wp.float32,
+    hj: wp.float32,
+    kernel: wp.int32,
+    mode: wp.uint32,
+    periodic: wp.array(dtype = wp.bool),
+    minDomain: wp.array(dtype = wp.float32),
+    maxDomain: wp.array(dtype = wp.float32),
+):
+    hij = computePairwiseSupport(hi, hj, mode)
+    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
+    if mode == 4: # SuperSymmetric
+        return (sphKernelDkDh_(xij,hi,kernel) + sphKernelDkDh_(xij,hj,kernel))/2.0
+    
+    return sphKernelDkDh_(xij, hij, kernel)
+    

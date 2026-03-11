@@ -4,27 +4,32 @@ from typing import Any
 import warp as wp
 from warp.types import vector
 
-@torch.jit.script
-def k(q, dim: int = 2):  
-    return -1/2 * q**3 + q**2 +1/2 / (q) - 1
-def dkdq(q, dim: int = 2):    
-    return -3/2 *q**2 - 1 /(2 * q**2) + 2 * q
-@torch.jit.script
-def d2kdq2(q, dim: int = 2):        
-    return q**(-3) - 3* q + 2
-@torch.jit.script
-def d3kdq3(q, dim: int = 2):
-    return -3 * q**(-4) - 3
+@wp.func
+def viscosityKernel_k(q: wp.float32, dim: wp.int32 = 2):  
+    return -0.5 * iPow(q, 3) + iPow(q, 2) + 0.5 / q - 1.0
 
-@torch.jit.script
-def C_d(dim : int):
-    if dim == 1: return 15 / (2 * np.pi)
-    elif dim == 2: return 10 / (9 * np.pi)
-    else: return 15 / (2 * np.pi)
+@wp.func
+def viscosityKernel_dkdq(q: wp.float32, dim: wp.int32 = 2):    
+    return -1.5 * iPow(q, 2) - 0.5 / iPow(q, 2) + 2.0 * q
 
+@wp.func
+def viscosityKernel_d2kdq2(q: wp.float32, dim: wp.int32 = 2):        
+    return 1.0 / iPow(q, 3) - 3.0 * q + 2.0
 
-def kernelScale(dim: int = 2):
+@wp.func
+def viscosityKernel_d3kdq3(q: wp.float32, dim: wp.int32 = 2):
+    return -3.0 / iPow(q, 4) - 3.0
+
+@wp.func
+def viscosityKernel_C_d(dim: wp.int32):
+    if dim == 1: return 15.0 / (2.0 * np.pi)
+    elif dim == 2: return 10.0 / (9.0 * np.pi)
+    else: return 15.0 / (2.0 * np.pi)
+
+@wp.func
+def viscosityKernel_kernelScale(dim: wp.int32 = 2):
     return 1.0
 
-def packingRatio():
+@wp.func
+def viscosityKernel_packingRatio():
     return 1.0

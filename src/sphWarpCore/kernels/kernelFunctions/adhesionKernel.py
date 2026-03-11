@@ -4,40 +4,40 @@ from typing import Any
 import warp as wp
 from warp.types import vector
 
+@wp.func
+def adhesionKernel_k(q: wp.float32, dim: wp.int32 = 2):  
+    if q > 0.5:
+        return wp.pow(-4.0 * iPow(q, 2) + 6.0 * q - 2.0, wp.float32(0.25))
+    return 0.0
 
-@torch.jit.script
-def k(q, dim: int = 2):  
+@wp.func
+def adhesionKernel_dkdq(q: wp.float32, dim: wp.int32 = 2):    
     if q > 0.5:
-        return (-4 * q**2 + 6 * q - 2)**(1/4)
+        return (6.0 - 8.0 * q) / (4.0 * wp.pow(-4.0 * iPow(q, 2) + 6.0 * q - 2.0, wp.float32(0.75)))
     return 0.0
-    # return torch.where(q > 0.5, ((-4 * q**2 + 6 * q - 2))**(1/4), 0)
-@torch.jit.script
-def dkdq(q, dim: int = 2):    
+
+@wp.func
+def adhesionKernel_d2kdq2(q: wp.float32, dim: wp.int32 = 2):
     if q > 0.5:
-        return (6 - 8 * q) / (4 * (-4 * q**2 + 6 *q -2)** (3/4))
+        return (16.0 * iPow(q, 2) - 24.0 * q + 11.0) / (8.0 * wp.pow(-4.0 * iPow(q, 2) + 6.0 * q - 2.0, wp.float32(0.75)) * (2.0 * iPow(q, 2) - 3.0 * q + 1.0))
     return 0.0
-    # return torch.where(q > 0.5, (6 - 8 * q) / (4 * (-4 * q**2 + 6 *q -2)** (3/4)),0)
-@torch.jit.script
-def d2kdq2(q, dim: int = 2):
+
+@wp.func
+def adhesionKernel_d3kdq3(q: wp.float32, dim: wp.int32 = 2):
     if q > 0.5:
-        return (16 *q**2 - 24 *q + 11) / (8 *(-4 * q**2 + 6 *q -2)**(3/4) * (2 *q**2 - 3*q + 1))
-    return 0.0        
-    # return torch.where(q > 0.5, (16 *q**2 - 24 *q + 11) / (8 *(-4 * q**2 + 6 *q -2)**(3/4) * (2 *q**2 - 3*q + 1)),0)
-@torch.jit.script
-def d3kdq3(q, dim: int = 2):
-    if q > 0.5:
-        return (48 - 32 * q) / (4 * (-4 * q**2 + 6 *q -2)**(3/4) * (2 *q**2 - 3*q + 1))
-    # return torch.where(q > 0.5, (48 - 32 * q) / (4 * (-4 * q**2 + 6 *q -2)**(3/4) * (2 *q**2 - 3*q + 1)) ,0)
-    
-@torch.jit.script
-def C_d(dim : int):
+        return (48.0 - 32.0 * q) / (4.0 * wp.pow(-4.0 * iPow(q, 2) + 6.0 * q - 2.0, wp.float32(0.75)) * (2.0 * iPow(q, 2) - 3.0 * q + 1.0))
+    return 0.0
+
+@wp.func
+def adhesionKernel_C_d(dim: wp.int32):
     if dim == 1: return 0.007
     elif dim == 2: return 0.007
     else: return 0.007
 
-
-def kernelScale(dim: int = 2):
+@wp.func
+def adhesionKernel_kernelScale(dim: wp.int32 = 2):
     return 1.0
 
-def packingRatio():
+@wp.func
+def adhesionKernel_packingRatio():
     return 1.0

@@ -30,7 +30,7 @@ def computeSPHInterpolation_Func(
     positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32),
     
     periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32),
-    mode_uint: wp.uint32,
+    mode_uint: wp.uint32, kernel_int: wp.int32,
     
     neighborList: wp.array(dtype = wp.int64),
     neighborOffset : wp.int64, numNeighs: wp.int32,
@@ -50,7 +50,7 @@ def computeSPHInterpolation_Func(
         pairwiseDistance = computeDistance(xi, xj, periodicity, domainMin, domainMax)
         pairwiseSupport = computePairwiseSupport(hi, hj, mode_uint)
         if pairwiseDistance <= pairwiseSupport:
-            f_interpolated += fieldValues[j] * masses[j] * sphKernel(xi, positions[j], hi, supports[j], 0, mode_uint) / densities[j]
+            f_interpolated += fieldValues[j] * masses[j] * sphKernel(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax) / densities[j]
             
     return f_interpolated
 
@@ -65,7 +65,7 @@ def computeSPHInterpolation_Kernel(
     
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool),
     
-    mode_uint: wp.uint32,
+    mode_uint: wp.uint32, kernel_int : wp.int32,
     neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),
     
     outputValues : wp.array(dtype = Any)
@@ -86,7 +86,7 @@ def computeSPHInterpolation_Kernel(
     outputValues[i] = computeSPHInterpolation_Func(
         xi, hi, mi, rhoi,
         referencePositions, referenceSupports, referenceMasses, referenceDensities,
-        periodicity, domainMin, domainMax, mode_uint,
+        periodicity, domainMin, domainMax, mode_uint, kernel_int,
         neighborList, neighborOffset, wp.int32(numNeighs),
         fi, referenceValues
     )
@@ -99,7 +99,7 @@ def warp_sphInterpolation(
     queryValues, referenceValues,
     
     domainMin, domainMax, periodicity,
-    mode_uint,
+    mode_uint, kernel_int,
     
     neighborList, neighborListRowOffsets, numNeighbors
 ):
@@ -129,7 +129,7 @@ def warp_sphInterpolation(
             
             domainMin, domainMax, periodicity,
             
-            wp.uint32(mode_uint),
+            mode_uint, kernel_int,
             neighborList, neighborListRowOffsets, numNeighbors,
             
             output
@@ -139,6 +139,7 @@ def warp_sphInterpolation(
     
     return output
 
+from ..enumTypes import *
 
 def computeSPHInterpolant_warpBackend(
     queryPositions, referencePositions,
@@ -147,7 +148,8 @@ def computeSPHInterpolant_warpBackend(
     queryDensities, referenceDensities,
     queryValues, referenceValues,
     domain: DomainDescription,
-    mode: str,    
+    mode: SupportScheme,
+    kernel: KernelFunctions,    
     adjacency
 ):
     domainMin = domain.min
@@ -166,6 +168,10 @@ def computeSPHInterpolant_warpBackend(
         queryValues    = queryValues.reshape(queryValues.shape[0],    flat_len).contiguous()
         referenceValues = referenceValues.reshape(referenceValues.shape[0], flat_len).contiguous()
 
+    
+    modeUint = wp.uint32(mode.value)
+    kernelInt = wp.int32(kernel.value)
+
     warp_interpolation = warpWrapper(
         warp_sphInterpolation,
         queryPositions, referencePositions,
@@ -175,7 +181,8 @@ def computeSPHInterpolant_warpBackend(
         queryValues, referenceValues,
         
         domainMin, domainMax, periodicity,
-        convertModeToUint(mode),
+        modeUint,
+        kernelInt,
         
         adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors
     )

@@ -9,13 +9,13 @@ from .radius_util import *
 
 
 def computeGridSupport(supportsX, supportsY, mode_uint):
-    if mode_uint == 0:  # gather
+    if mode_uint == 1:  # gather
         return torch.max(supportsX)
-    elif mode_uint == 1:  # scatter
+    elif mode_uint == 2:  # scatter
         return torch.max(supportsY)
-    elif mode_uint == 2:  # symmetric
+    elif mode_uint == 3:  # symmetric
         return max(torch.max(supportsX), torch.max(supportsY))
-    elif mode_uint == 3:  # superSymmetric
+    elif mode_uint == 4:  # superSymmetric
         return max(torch.max(supportsX), torch.max(supportsY))
     else:
         raise ValueError('Invalid mode')
@@ -440,13 +440,13 @@ def radiusSearchCountNeighborsCompactHashMap(
                 
                 # Determine threshold based on mode
                 threshold = 0.0
-                if mode_uint == 0:  # gather
+                if mode_uint == 1:  # gather
                     threshold = querySupport
-                elif mode_uint == 1:  # scatter
+                elif mode_uint == 2:  # scatter
                     threshold = neighborSupport
-                elif mode_uint == 2:  # symmetric
+                elif mode_uint == 3:  # symmetric
                     threshold = (querySupport + neighborSupport) / 2.0
-                elif mode_uint == 3:  # superSymmetric
+                elif mode_uint == 4:  # superSymmetric
                     threshold = wp.max(querySupport, neighborSupport)
                 
                 # Count valid neighbors
@@ -587,13 +587,13 @@ def radiusSearchCollectCompactHashMap(
                 
                 # Determine threshold based on mode
                 threshold = 0.0
-                if mode_uint == 0:  # gather
+                if mode_uint == 1:  # gather
                     threshold = querySupport
-                elif mode_uint == 1:  # scatter
+                elif mode_uint == 2:  # scatter
                     threshold = neighborSupport
-                elif mode_uint == 2:  # symmetric
+                elif mode_uint == 3:  # symmetric
                     threshold = (querySupport + neighborSupport) / 2.0
-                elif mode_uint == 3:  # superSymmetric
+                elif mode_uint == 4:  # superSymmetric
                     threshold = wp.max(querySupport, neighborSupport)
                 
                 # Count valid neighbors
@@ -633,7 +633,7 @@ def radiusSearchCompactHashMap(
 ):
 
         
-    mode_map = {'gather': 0, 'scatter': 1, 'symmetric': 2, 'superSymmetric': 3}
+    mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4}
     mode_uint = mode_map.get(mode, 0)
         
     minDomain = domainDescription.min if domainDescription.min is not None else None

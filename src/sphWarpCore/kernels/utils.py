@@ -1,15 +1,17 @@
 import warp as wp
 import numpy as np
 
+from ..enumTypes import *
+
 @wp.func
 def computePairwiseSupport(hx: wp.float32, hy: wp.float32, mode: wp.uint32):
-    if mode == 0: # gather
+    if mode == 1: # gather
         return hx
-    elif mode == 1: # scatter
+    elif mode == 2: # scatter
         return hy
-    elif mode == 2: # symmetric
+    elif mode == 3: # symmetric
         return (hx + hy) / 2.0
-    elif mode == 3: # superSymmetric
+    elif mode == 4: # superSymmetric
         return wp.max(hx, hy)
     else:
         return hx

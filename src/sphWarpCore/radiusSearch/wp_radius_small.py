@@ -35,13 +35,13 @@ def warp_radius_search_kernel_direct_2(
             
             # Determine threshold based on mode
             threshold = 0.0
-            if mode == 0:  # gather
+            if mode == 1:  # gather
                 threshold = hx[i]
-            elif mode == 1:  # scatter
+            elif mode == 2:  # scatter
                 threshold = hy[j]
-            elif mode == 2:  # symmetric
+            elif mode == 3:  # symmetric
                 threshold = (hx[i] + hy[j]) / 2.0
-            elif mode == 3:  # superSymmetric
+            elif mode == 4:  # superSymmetric
                 threshold = wp.max(hx[i], hy[j])
             
             # Count valid neighbors
@@ -84,13 +84,13 @@ def warp_radius_search_collect_kernel_direct_2(
             
             # Determine threshold based on mode
             threshold = 0.0
-            if mode == 0:  # gather
+            if mode == 1:  # gather
                 threshold = hx[i]
-            elif mode == 1:  # scatter
+            elif mode == 2:  # scatter
                 threshold = hy[j]
-            elif mode == 2:  # symmetric
+            elif mode == 3:  # symmetric
                 threshold = (hx[i] + hy[j]) / 2.0
-            elif mode == 3:  # superSymmetric
+            elif mode == 4:  # superSymmetric
                 threshold = wp.max(hx[i], hy[j])
             
             # Store valid neighbors
@@ -133,7 +133,7 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
 
     # mode = 'gather'  # Change as needed: 'gather', 'scatter', 'symmetric', 'superSymmetric'
 
-    mode_map = {'gather': 0, 'scatter': 1, 'symmetric': 2, 'superSymmetric': 3}
+    mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4}
     mode_uint = mode_map.get(mode, 0)
         
     edge_count = wp.zeros(N, dtype=wp.int32, device=x_warp.device)  # Allocate on same device as input data

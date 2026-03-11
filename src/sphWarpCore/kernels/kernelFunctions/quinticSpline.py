@@ -4,32 +4,34 @@ from typing import Any
 import warp as wp
 from warp.types import vector
 
-@torch.jit.script
-def k(q, dim: int = 2):        
-    return cpow(1-q, 5) - 6 * cpow(2/3 - q, 5) + 15 * cpow(1/3 - q, 5)
-@torch.jit.script
-def dkdq(q, dim: int = 2):     
-    return -5 * cpow(1-q, 4) + 30 * cpow(2/3 - q, 4) - 75 * cpow(1/3 - q, 4)
-@torch.jit.script
-def d2kdq2(q, dim: int = 2):        
-    return 20 * cpow(1-q,3) - 120 * cpow(2/3 - q, 3) + 300 * cpow(1/3 - q, 3)
-@torch.jit.script
-def d3kdq3(q, dim: int = 2):
-    return -60 * cpow(1-q,2) + 360 * cpow(2/3 - q, 2) - 900 * cpow(1/3 - q, 2)
+@wp.func
+def quinticSpline_k(q: wp.float32, dim: wp.int32 = 2):        
+    return cpow_warp(1.0 - q, 5) - 6.0 * cpow_warp(2.0/3.0 - q, 5) + 15.0 * cpow_warp(1.0/3.0 - q, 5)
 
-@torch.jit.script
-def C_d(dim : int):
-    if dim == 1: return 3**5/40
-    elif dim == 2: return 3**7 * 7 / (478 * np.pi)
-    else: return 3**7/ (40 * np.pi)
+@wp.func
+def quinticSpline_dkdq(q: wp.float32, dim: wp.int32 = 2):     
+    return -5.0 * cpow_warp(1.0 - q, 4) + 30.0 * cpow_warp(2.0/3.0 - q, 4) - 75.0 * cpow_warp(1.0/3.0 - q, 4)
 
-@torch.jit.script # See Dehnen & Aly: Improving convergence in smoothed particle hydrodynamics simulations
-def kernelScale(dim: int = 2):
+@wp.func
+def quinticSpline_d2kdq2(q: wp.float32, dim: wp.int32 = 2):        
+    return 20.0 * cpow_warp(1.0 - q, 3) - 120.0 * cpow_warp(2.0/3.0 - q, 3) + 300.0 * cpow_warp(1.0/3.0 - q, 3)
+
+@wp.func
+def quinticSpline_d3kdq3(q: wp.float32, dim: wp.int32 = 2):
+    return -60.0 * cpow_warp(1.0 - q, 2) + 360.0 * cpow_warp(2.0/3.0 - q, 2) - 900.0 * cpow_warp(1.0/3.0 - q, 2)
+
+@wp.func
+def quinticSpline_C_d(dim: wp.int32):
+    if dim == 1: return 243.0/40.0
+    elif dim == 2: return 15309.0 / (478.0 * np.pi)
+    else: return 2187.0 / (40.0 * np.pi)
+
+@wp.func # See Dehnen & Aly: Improving convergence in smoothed particle hydrodynamics simulations
+def quinticSpline_kernelScale(dim: wp.int32 = 2):
     if dim == 1: return 2.121321
     elif dim == 2: return 2.158131
     else: return 2.195775
 
-
-@torch.jit.script
-def packingRatio(): # See Dehnen & Aly: Improving convergence in smoothed particle hydrodynamics simulations Table 2
-    return 1.595  * 1.1425 # Factor to be in line CRKSPH
+@wp.func
+def quinticSpline_packingRatio(): # See Dehnen & Aly: Improving convergence in smoothed particle hydrodynamics simulations Table 2
+    return 1.595 * 1.1425 # Factor to be in line CRKSPH

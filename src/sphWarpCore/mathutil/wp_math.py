@@ -144,6 +144,19 @@ def computeDistance(
     distVec = minimumImageDistance(x, y, periodicity, min, max, wp.int32(x.length))
     # distVec = x-y
     return safe_sqrt(wp.dot(distVec, distVec))
+    
+@wp.func
+def computeDistanceVec(
+    x: vector(dtype=wp.float32, length=Any),
+    y: vector(dtype=wp.float32, length=Any),
+    periodicity: wp.array(dtype=wp.bool),
+    min: wp.array(dtype=wp.float32),
+    max: wp.array(dtype=wp.float32)
+):
+    distVec = minimumImageDistance(x, y, periodicity, min, max, wp.int32(x.length))
+    return distVec
+    # distVec = x-y
+    # return safe_sqrt(wp.dot(distVec, distVec))
 
 # @wp.func 
 # def computeDistance(x: vector(dtype = wp.float32), y: vector(dtype = wp.float32), periodicity: wp.array(dtype = wp.bool), min: wp.array(dtype = wp.float32), max: wp.array(dtype = wp.float32)):
