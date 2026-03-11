@@ -1,9 +1,8 @@
 import numpy as np
-import torch
-@torch.jit.script
-def cpow(q, p : int):
-    return torch.clamp(q, 0, 1)**p
-
+from ..utils import cpow_warp, iPow, bpow_warp
+from typing import Any
+import warp as wp
+from warp.types import vector
 
 @torch.jit.script
 def k(q, dim: int = 2):  
@@ -24,14 +23,8 @@ def C_d(dim : int):
     elif dim == 2: return 2 / np.pi
     else: return 15 / np.pi
 
-@torch.jit.script
-def kernel(rij, hij, dim : int = 2):
-    return k(rij, dim) * C_d(dim) / hij**dim
-    
-@torch.jit.script
-def kernelGradient(rij, xij, hij, dim : int = 2):
-    return xij * (dkdq(rij, dim) * C_d(dim) / hij**(dim + 1))[:,None]
+def kernelScale(dim: int = 2):
+    return 1.0
 
-@torch.jit.script
-def kernelLaplacian(rij, hij, dim : int = 2):
-    return ((torch.where(rij > -1e-7, ((dim - 1) / (rij *hij + 1e-7 * hij)) * dkdq(rij + 1e-7, dim) * hij, 0) + d2kdq2(rij, dim)) * C_d(dim)) / hij**(dim + 2)
+def packingRatio():
+    return 1.0

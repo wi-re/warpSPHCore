@@ -4,58 +4,227 @@ import numpy as np
 from .utils import *
 
 from .kernelFunctions.wendland2 import *
+from .kernelFunctions.wendland4 import *
+from .kernelFunctions.wendland6 import *
+from .kernelFunctions.cubicSpline import *
+from .kernelFunctions.quarticSpline import *
+from .kernelFunctions.quinticSpline import *
+from .kernelFunctions.B7 import *
+from .kernelFunctions.poly6 import *
+from .kernelFunctions.spiky import *
+from .kernelFunctions.viscosity import *
+from .kernelFunctions.adhesion import *
+from .kernelFunctions.cohesion import *
 
 # Supported Kernels:
 # wendland2 [index = 0]
 # wendland4 [index = 1]
 # wendland6 [index = 2]
-# cubicSpline [index = 3]
-# quarticSpline [index = 4]
-# quinticSpline [index = 5]
-# B7 [index = 6]
-# poly6 [index = 7]
+# cubicSpline [index = 10]
+# quarticSpline [index = 11]
+# quinticSpline [index = 12]
+# B7 [index = 13]
+# poly6 [index = 20]
+# spiky [index = 21]
+# viscosity [index = 30]
+# adhesion [index = 31]
+# cohesion [index = 32]
 
 
 @wp.func
 def eval_k(q: wp.float32, dim: wp.int32, kernel: wp.int32):
     if kernel == 0:
         return wendland2_k(q, dim)
+    elif kernel == 1:
+        return wendland4_k(q, dim)
+    elif kernel == 2:
+        return wendland6_k(q, dim)
+    elif kernel == 10:
+        return cubicSpline_k(q, dim)
+    elif kernel == 11:
+        return quarticSpline_k(q, dim)
+    elif kernel == 12:
+        return quinticSpline_k(q, dim)
+    elif kernel == 13:
+        return B7_k(q, dim)
+    elif kernel == 20:
+        return poly6_k(q, dim)
+    elif kernel == 21:
+        return spiky_k(q, dim)
+    elif kernel == 30:
+        return viscosity_k(q, dim)
+    elif kernel == 31:
+        return adhesion_k(q, dim)
+    elif kernel == 32:         
+        return cohesion_k(q, dim)
     return np.nan
 
 @wp.func
 def eval_dkdq(q: wp.float32, dim: wp.int32, kernel: wp.int32):
     if kernel == 0:
         return wendland2_dkdq(q, dim)
+    elif kernel == 1:
+        return wendland4_dkdq(q, dim)
+    elif kernel == 2:
+        return wendland6_dkdq(q, dim)
+    elif kernel == 10:
+        return cubicSpline_dkdq(q, dim)
+    elif kernel == 11:
+        return quarticSpline_dkdq(q, dim)
+    elif kernel == 12:
+        return quinticSpline_dkdq(q, dim)
+    elif kernel == 13:
+        return B7_dkdq(q, dim)
+    elif kernel == 20:
+        return poly6_dkdq(q, dim)
+    elif kernel == 21:
+        return spiky_dkdq(q, dim)
+    elif kernel == 30:
+        return viscosity_dkdq(q, dim)
+    elif kernel == 31:
+        return adhesion_dkdq(q, dim)
+    elif kernel == 32:         
+        return cohesion_dkdq(q, dim)
     return np.nan
 
 @wp.func
 def eval_d2kdq2(q: wp.float32, dim: wp.int32, kernel: wp.int32):
     if kernel == 0:
         return wendland2_d2kdq2(q, dim)
+    elif kernel == 1:
+        return wendland4_d2kd2q(q, dim)
+    elif kernel == 2:
+        return wendland6_d2kd2q(q, dim)
+    elif kernel == 10:
+        return cubicSpline_d2kd2q(q, dim)
+    elif kernel == 11:
+        return quarticSpline_d2kd2q(q, dim)
+    elif kernel == 12:
+        return quinticSpline_d2kd2q(q, dim)
+    elif kernel == 13:
+        return B7_d2kd2q(q, dim)
+    elif kernel == 20:
+        return poly6_d2kd2q(q, dim)
+    elif kernel == 21:
+        return spiky_d2kd2q(q, dim)
+    elif kernel == 30:
+        return viscosity_d2kd2q(q, dim)
+    elif kernel == 31:
+        return adhesion_d2kd2q(q, dim)
+    elif kernel == 32:         
+        return cohesion_d2kd2q(q, dim)
     return np.nan
 
 @wp.func
 def eval_d3kdq3(q: wp.float32, dim: wp.int32, kernel: wp.int32):
     if kernel == 0:
         return wendland2_d3kdq3(q, dim)
+    elif kernel == 1:
+        return wendland4_d3kd3q(q, dim)
+    elif kernel == 2:
+        return wendland6_d3kd3q(q, dim)
+    elif kernel == 10:
+        return cubicSpline_d3kd3q(q, dim)
+    elif kernel == 11:
+        return quarticSpline_d3kd3q(q, dim)
+    elif kernel == 12:
+        return quinticSpline_d3kd3q(q, dim)
+    elif kernel == 13:
+        return B7_d3kd3q(q, dim)
+    elif kernel == 20:
+        return poly6_d3kd3q(q, dim)
+    elif kernel == 21:
+        return spiky_d3kd3q(q, dim)
+    elif kernel == 30:
+        return viscosity_d3kd3q(q, dim)
+    elif kernel == 31:
+        return adhesion_d3kd3q(q, dim)
+    elif kernel == 32:         
+        return cohesion_d3kd3q(q, dim)
     return np.nan
 
 @wp.func
 def eval_C_d(dim: wp.int32, kernel: wp.int32):
     if kernel == 0:
         return wendland2_C_d(dim)
+    elif kernel == 1:
+        return wendland4_C_d(dim)
+    elif kernel == 2:
+        return wendland6_C_d(dim)
+    elif kernel == 10:
+        return cubicSpline_C_d(dim)
+    elif kernel == 11:
+        return quarticSpline_C_d(dim)
+    elif kernel == 12:
+        return quinticSpline_C_d(dim)
+    elif kernel == 13:
+        return B7_C_d(dim)
+    elif kernel == 20:
+        return poly6_C_d(dim)
+    elif kernel == 21:
+        return spiky_C_d(dim)
+    elif kernel == 30:
+        return viscosity_C_d(dim)
+    elif kernel == 31:
+        return adhesion_C_d(dim)
+    elif kernel == 32:         
+        return cohesion_C_d(dim)
     return np.nan
 
 @wp.func
 def eval_kernelScale(dim: wp.int32, kernel: wp.int32):
     if kernel == 0:
-        return wendland2_kernelScale(dim)
+        return wendland2_kernelScaleernelScale(dim)
+    elif kernel == 1:
+        return wendland4_kernelScale(dim)
+    elif kernel == 2:
+        return wendland6_kernelScale(dim)
+    elif kernel == 10:
+        return cubicSpline_kernelScale(dim)
+    elif kernel == 11:
+        return quarticSpline_kernelScale(dim)
+    elif kernel == 12:
+        return quinticSpline_kernelScale(dim)
+    elif kernel == 13:
+        return B7_kernelScale(dim)
+    elif kernel == 20:
+        return poly6_kernelScale(dim)
+    elif kernel == 21:
+        return spiky_kernelScale(dim)
+    elif kernel == 30:
+        return viscosity_kernelScale(dim)
+    elif kernel == 31:
+        return adhesion_kernelScale(dim)
+    elif kernel == 32:         
+        return cohesion_kernelScale(dim)
     return np.nan
 
 @wp.func
 def eval_packing(kernel: wp.int32):
     if kernel == 0:
         return wendland2_packingRatio()
+    elif kernel == 1:
+        return wendland4_packingRatio()
+    elif kernel == 2:
+        return wendland6_packingRatio()
+    elif kernel == 10:
+        return cubicSpline_packingRatio()
+    elif kernel == 11:
+        return quarticSpline_packingRatio()
+    elif kernel == 12:
+        return quinticSpline_packingRatio()
+    elif kernel == 13:
+        return B7_packingRatio()
+    elif kernel == 20:
+        return poly6_packingRatio()
+    elif kernel == 21:
+        return spiky_packingRatio()
+    elif kernel == 30:
+        return viscosity_packingRatio()
+    elif kernel == 31:
+        return adhesion_packingRatio()
+    elif kernel == 32:         
+        return cohesion_packingRatio()
     return np.nan
 
 

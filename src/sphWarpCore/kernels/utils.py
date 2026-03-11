@@ -39,7 +39,11 @@ def iPow(base: wp.float32, exp: int):
 
 @wp.func
 def cpow_warp(q: wp.float32, p: int):
-    return iPow(wp.clamp(q, 0.0, 1.0),p)
+    return iPow(wp.clamp(q, 0.0, 1.0), p)
+
+@wp.func
+def bpow_warp(q: wp.float32, p: int):
+    return iPow(wp.min(q, 0.0), p)
 
 
 from typing import Any
