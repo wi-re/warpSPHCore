@@ -1,0 +1,26 @@
+"""High-level SPH operations (density estimation, field interpolation)."""
+from .operations.wp_density import (
+    computeDensityWarp,
+    sphDensity_warp,
+    warp_sphDensityFunction,
+    computeDensity_warpBackend,
+)
+from .operations.wp_interpolate import (
+    computeSPHInterpolation_Func,
+    computeSPHInterpolation_Kernel,
+    warp_sphInterpolation,
+    computeSPHInterpolant_warpBackend,
+)
+
+__all__ = [
+    # density
+    "computeDensityWarp",
+    "sphDensity_warp",
+    "warp_sphDensityFunction",
+    "computeDensity_warpBackend",
+    # interpolation
+    "computeSPHInterpolation_Func",
+    "computeSPHInterpolation_Kernel",
+    "warp_sphInterpolation",
+    "computeSPHInterpolant_warpBackend",
+]

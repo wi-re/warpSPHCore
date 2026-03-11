@@ -1,7 +1,7 @@
 import torch
 import warp as wp
 from typing import Any, Tuple
-from wp_util import castTorchToWarpAsBuiltins, castWarpToTorch
+from .wp_util import castTorchToWarpAsBuiltins, castWarpToTorch
 
 
 class WarpFunctionWrapper(torch.autograd.Function):

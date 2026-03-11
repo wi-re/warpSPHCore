@@ -1,11 +1,11 @@
 import warp as wp
 import torch 
 from typing import Optional
-from wp_math import *
-from wp_util import *
+from ..mathutil.wp_math import *
+from ..utils.wp_util import *
 
 # Convert Warp arrays back to PyTorch tensors using wp.to_torch() for direct GPU access
-from radius_util import *
+from .radius_util import *
 
 
 def computeGridSupport(supportsX, supportsY, mode_uint):

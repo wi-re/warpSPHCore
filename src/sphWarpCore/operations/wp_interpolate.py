@@ -3,12 +3,12 @@ from warp.types import vector, matrix
 # from wp_tensor import tensor
 from typing import Any
 import torch
-from wp_autograd import *
-from radius_util import convertModeToUint
+from ..utils.wp_autograd import *
+from ..radiusSearch.radius_util import convertModeToUint
 
-from radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
-from wp_math import *
-from wp_kernel import *
+from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
+from ..mathutil.wp_math import *
+from ..kernels.wp_kernel import *
 
 # @wp.func
 # def zeroInit(
