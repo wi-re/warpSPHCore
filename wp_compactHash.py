@@ -683,7 +683,7 @@ def radiusSearchCompactHashMap(
     cellGridIndices_warp = castTorchToWarp(cellGridIndices)
     hashedIndices_warp = wp.zeros(cellGridIndices.shape[0], dtype=wp.uint32, device=warpDevice)
     wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice)
-    hashedIndices = wp.to_torch(hashedIndices_warp)
+    hashedIndices = wp.to_torch(hashedIndices_warp).to(torch.int32)
     # print(hashedIndices_warp)
 
     sortedSupports = referenceSupports[sortIndex] if referenceSupports is not None else None
@@ -709,7 +709,7 @@ def radiusSearchCompactHashMap(
     # in 3D for a search radius of n we will iterate over (2n+1)^3 cells, in 2D we will iterate over (2n+1)^2 cells, and in 1D we will iterate over 2n+1 cells
     searchRadius = 1
     numOffsets = (2 * searchRadius + 1) ** domainDescription.dim
-    offsets = torch.cartesian_prod(*[torch.arange(-searchRadius, searchRadius+1) for _ in range(domainDescription.dim)]).to(torch.int32)
+    offsets = torch.cartesian_prod(*[torch.arange(-searchRadius, searchRadius+1, device = queryPositions.device) for _ in range(domainDescription.dim)]).to(torch.int32)
     # print('Offsets to iterate over: ', offsets.shape, numOffsets)
     # pad to always have the same dimension for the kernel
     offsets = torch.cat((offsets, torch.zeros(numOffsets, 3 - domainDescription.dim, dtype=torch.int32, device=offsets.device)), dim = 1)

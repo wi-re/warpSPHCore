@@ -9,7 +9,7 @@ def castTorchToWarp(x_torch):
     x_torch = x_torch.contiguous()
     
     # Convert to Warp array
-    x_warp = wp.from_torch(x_torch)
+    x_warp = wp.from_torch(x_torch).contiguous()
     
     # this will return a flat Warp array, so we need to reshape it back to the original shape if necessary
     
@@ -22,7 +22,7 @@ def castWarpToTorch(x_warp):
     Cast a Warp array back to a PyTorch tensor, ensuring it's on the correct device and has the right dtype.
     """
     # Convert to PyTorch tensor
-    x_torch = x_warp.to_torch()
+    x_torch = x_warp.contiguous().to_torch()
     
     x_torch = x_torch.reshape(x_warp.shape)  # Ensure the shape matches the original Warp array
     
@@ -31,6 +31,7 @@ def castWarpToTorch(x_warp):
 
 
 from warp.types import vector, matrix
+# from wp_tensor import tensor
 
 def castTorchToWarpAsBuiltins(x_torch):
     """
@@ -49,6 +50,15 @@ def castTorchToWarpAsBuiltins(x_torch):
         return wp.from_torch(x_torch, dtype=vector(length=D, dtype=wp.from_torch(x_torch).dtype))
     elif len(x_torch.shape) == 3:
         N, M, D = x_torch.shape
-        return wp.from_torch(x_torch, dtype=matrix(rows=M, cols=D, dtype=wp.from_torch(x_torch).dtype))
+        return wp.from_torch(x_torch, dtype=matrix(shape=(M, D), dtype=wp.from_torch(x_torch).dtype))
+    elif len(x_torch.shape) == 4:
+        # Warp's kernel type system only handles rank-1 (vector) and rank-2 (matrix).
+        # Flatten the trailing three dims into a single vector dimension so the
+        # array can be used as a kernel argument type.
+        N, P, M, D = x_torch.shape
+        scalar_wp = wp.from_torch(x_torch.reshape(N, P * M * D)).dtype
+        return wp.from_torch(x_torch.reshape(N, P * M * D).contiguous(),
+                             dtype=vector(length=P * M * D, dtype=scalar_wp))
+    
     else:
         return wp.from_torch(x_torch)
