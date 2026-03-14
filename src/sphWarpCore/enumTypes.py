@@ -20,3 +20,9 @@ class KernelFunctions(Enum):
     ViscosityKernel = 30
     CohesionKernel = 31
     AdhesionKernel = 32
+
+class GradientScheme(Enum):
+    Naive = 1
+    Symmetric = 2
+    Difference = 3
+    Summation = 4

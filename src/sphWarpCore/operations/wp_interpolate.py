@@ -10,19 +10,6 @@ from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainD
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
 
-# @wp.func
-# def zeroInit(
-#     referenceValues: Any
-# ):
-#     return type(referenceValues)()
-
-# @wp.overload
-# def zeroInit(
-#     referenceValues: wp.float32
-# ):
-#     return wp.float32(0.0)
-
-
 
 @wp.func
 def computeSPHInterpolation_Func(
@@ -43,14 +30,7 @@ def computeSPHInterpolation_Func(
     for neighborIndex in range(numNeighs):
         j = wp.int32(neighborList[neighborOffset + wp.int64(neighborIndex)])
         
-        
-        xj= positions[j]
-        hj= supports[j]
-        
-        pairwiseDistance = computeDistance(xi, xj, periodicity, domainMin, domainMax)
-        pairwiseSupport = computePairwiseSupport(hi, hj, mode_uint)
-        if pairwiseDistance <= pairwiseSupport:
-            f_interpolated += fieldValues[j] * masses[j] * sphKernel(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax) / densities[j]
+        f_interpolated += fieldValues[j] * masses[j] * sphKernel(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax) / densities[j]
             
     return f_interpolated
 
@@ -91,53 +71,7 @@ def computeSPHInterpolation_Kernel(
         fi, referenceValues
     )
     
-def warp_sphInterpolation(
-    queryPositions, referencePositions,
-    querySupports, referenceSupports,
-    queryMasses, referenceMasses,
-    queryDensities, referenceDensities,
-    queryValues, referenceValues,
     
-    domainMin, domainMax, periodicity,
-    mode_uint, kernel_int,
-    
-    neighborList, neighborListRowOffsets, numNeighbors
-):
-    inputs = [
-        queryPositions, referencePositions,
-        querySupports, referenceSupports,
-        queryMasses, referenceMasses,
-        queryDensities, referenceDensities,
-        domainMin, domainMax, periodicity,
-        mode_uint,
-        neighborList, neighborListRowOffsets, numNeighbors
-    ]
-    requires_grad = any(input.requires_grad for input in inputs if hasattr(input, 'requires_grad'))
-    
-    output = wp.zeros(queryPositions.shape[0], dtype=queryValues.dtype, device=queryPositions.device)
-    output.requires_grad = requires_grad
-    
-    wp.launch(
-        computeSPHInterpolation_Kernel,
-        dim = queryPositions.shape[0],
-        inputs = [
-            queryPositions, referencePositions,
-            querySupports, referenceSupports,
-            queryMasses, referenceMasses,
-            queryDensities, referenceDensities,
-            queryValues, referenceValues,
-            
-            domainMin, domainMax, periodicity,
-            
-            mode_uint, kernel_int,
-            neighborList, neighborListRowOffsets, numNeighbors,
-            
-            output
-        ],
-        device = queryPositions.device
-    )
-    
-    return output
 
 from ..enumTypes import *
 
@@ -171,9 +105,13 @@ def computeSPHInterpolant_warpBackend(
     
     modeUint = wp.uint32(mode.value)
     kernelInt = wp.int32(kernel.value)
+    outputShape = queryValues.shape[0]
+    
+    wpValues = castTorchToWarpAsBuiltins(queryValues)
+
 
     warp_interpolation = warpWrapper(
-        warp_sphInterpolation,
+        launch_kernel, computeSPHInterpolation_Kernel, outputShape, wpValues.dtype, 
         queryPositions, referencePositions,
         querySupports, referenceSupports,
         queryMasses, referenceMasses,

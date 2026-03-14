@@ -8,7 +8,6 @@ from .operations.wp_density import (
 from .operations.wp_interpolate import (
     computeSPHInterpolation_Func,
     computeSPHInterpolation_Kernel,
-    warp_sphInterpolation,
     computeSPHInterpolant_warpBackend,
 )
 
@@ -21,6 +20,5 @@ __all__ = [
     # interpolation
     "computeSPHInterpolation_Func",
     "computeSPHInterpolation_Kernel",
-    "warp_sphInterpolation",
     "computeSPHInterpolant_warpBackend",
 ]

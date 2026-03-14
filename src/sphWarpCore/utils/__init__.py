@@ -6,6 +6,7 @@ from .wp_util import (
 from .wp_autograd import (
     WarpFunctionWrapper,
     warpWrapper,
+    launch_kernel,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "castTorchToWarpAsBuiltins",
     "WarpFunctionWrapper",
     "warpWrapper",
+    "launch_kernel",
 ]
