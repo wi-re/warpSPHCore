@@ -739,13 +739,13 @@ def radiusSearchCompactHashMap(
 
 
     # Convert counts to host (only the counts, not the main data)
-    edge_count_np = edge_count.numpy()
-    total_edges = int(np.sum(edge_count_np))
+    edge_count_t = wp.to_torch(edge_count)
+    total_edges = torch.sum(edge_count_t).cpu().item()
 
     # Compute cumulative offsets
-    edge_offsets = np.zeros(N, dtype=np.int32)
-    edge_offsets[1:] = np.cumsum(edge_count_np[:-1])
-    edge_offsets_warp = wp.from_numpy(edge_offsets, device=warpDevice)
+    edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
+    edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
+    edge_offsets_warp = wp.from_torch(edge_offsets)
 
     # Allocate output arrays on GPU
     edge_i = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
