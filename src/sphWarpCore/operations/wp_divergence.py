@@ -10,25 +10,6 @@ from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainD
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
 
-@wp.func
-def integerPower(base: wp.int32, exponent: wp.int32) -> wp.int32:
-    result = 1
-    if exponent < 0:
-        return 0  # Return 0 for negative exponents in integer power
-    elif exponent == 1:
-        return base
-    elif exponent == 0:
-        return 1
-    elif exponent == 2:
-        return base * base
-    elif exponent == 3:
-        return base * base * base
-    elif exponent == 4:
-        return base * base * base * base
-    elif exponent > 4:
-        return wp.int32(((wp.float32)(base)) ** (wp.float32(exponent)))
-    return  result
-
 # In dot mode we compute torch.einsum('nd..., nd -> n...', q, k) 
 # Otherwise we compute torch.einsum('n...d, nd -> n...', q, k)
 # the inputs are the flattened versions of the original tensors, i.e.,
@@ -72,7 +53,7 @@ def divergenceProduct(
     # we need to do a product between fij which is of shape [d^N] and kernelGradient which is of shape [d] to get an output of shape [d^(N-1)]
     
     dim = wp.int32(2) # hardcoded as this is the overload for 2D.
-    # wp.printf("divergenceProduct: numDims=%d, outputElements=%d, inputElements=%d\n", numDims, outputElements, inputElements)
+    # wp.printf("divergenceProduct: dim=%d, outputElements=%d, inputElements=%d\n", dim, outputElements, dim * outputElements)
     
     if dotMode:
         for i in range(outputElements):
@@ -96,30 +77,6 @@ def divergenceProduct(
     # in 1D the divergence product is just a simple multiplication
     res[0] = fij[0] * kernelGradient[0]
     return res 
-        
-@wp.func 
-def getOutputElements(
-    fij: vector(dtype = wp.float32, length=3),
-    numDims: wp.int32
-):
-    dim = wp.int32(3) # hardcoded as this is the overload for 3D.
-    return integerPower(dim, numDims - 1)
-
-@wp.func 
-def getOutputElements(
-    fij: vector(dtype = wp.float32, length=2),
-    numDims: wp.int32
-):
-    dim = wp.int32(2) # hardcoded as this is the overload for 2D.
-    return integerPower(dim, numDims - 1)
-
-@wp.func 
-def getOutputElements(
-    fij: vector(dtype = wp.float32, length=1),
-    numDims: wp.int32
-):
-    return wp.int32(1)
-
 
 @wp.func
 def computeSPHDivergenceTensor_Func(
@@ -132,7 +89,7 @@ def computeSPHDivergenceTensor_Func(
     
     neighborList: wp.array(dtype = wp.int64),
     neighborOffset : wp.int64, numNeighs: wp.int32,
-    numDims: wp.int32, dotMode: wp.bool,
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32, dotMode: wp.bool,
     
     outputValue: vector(dtype = wp.float32, length=Any)
 ):
@@ -151,13 +108,13 @@ def computeSPHDivergenceTensor_Func(
         kernelGradient = sphKernelGradient(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
         
         if gradientMode_int == 1: # Naive
-            grad_f_interpolated += divergenceProduct(fj * apparentVolume, kernelGradient, outputValue, getOutputElements(xi, numDims), dotMode)
+            grad_f_interpolated += divergenceProduct(fj * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == 2: # Symmetric
-            grad_f_interpolated += divergenceProduct(rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, getOutputElements(xi, numDims), dotMode)
+            grad_f_interpolated += divergenceProduct(rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == 3: # Difference
-            grad_f_interpolated += divergenceProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, getOutputElements(xi, numDims), dotMode)
+            grad_f_interpolated += divergenceProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == 4: # Summation
-            grad_f_interpolated += divergenceProduct((fj + fi) * apparentVolume, kernelGradient, outputValue, getOutputElements(xi, numDims), dotMode)
+            grad_f_interpolated += divergenceProduct((fj + fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
             
     return grad_f_interpolated
 
@@ -174,7 +131,7 @@ def computeSPHDivergenceTensor_Kernel(
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
     neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),
     
-    numDims : wp.int32, dotMode: wp.bool,
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32, dotMode: wp.bool,
     
     outputValues : wp.array(dtype = vector(length = Any, dtype = wp.float32))
 ):                                                                                    
@@ -195,7 +152,7 @@ def computeSPHDivergenceTensor_Kernel(
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int, consistentDivergence,
         neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
-        numDims, dotMode,
+        numDims, flatInputShape, flatOutputShape, dotMode,
         type(outputValues[i])(0.0))
     
 from ..enumTypes import *
@@ -248,7 +205,7 @@ def computeSPHDivergence_warpBackend(
         domainMin, domainMax, periodicity,
         mode_uint, kernel_int, gradientMode_int, wp.bool(consistentDivergence),
         adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors,
-        wp.int32(numDims), wp.bool(dotMode),
+        wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), wp.bool(dotMode),
     )
 
     return warp_result.view(queryValues.shape[0], *outputShape) # reshape back to original shape with new gradient dimension

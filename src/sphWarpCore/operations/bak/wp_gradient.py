@@ -14,7 +14,7 @@ from ...mathutil.wp_math import *
 from ...kernels.wp_kernel import *
 
 
-def computeSPHGradient_warpBackend(
+def computeSPHGradient_warpBackend_manual(
     queryPositions, referencePositions,
     querySupports, referenceSupports,
     queryMasses, referenceMasses,

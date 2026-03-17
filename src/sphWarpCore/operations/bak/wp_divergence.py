@@ -1,5 +1,5 @@
 from .wp_divergence_vector import computeSPHDivergenceVector_warpBackend
-from ..wp_divergence import computeSPHDivergenceTensor_warpBackend
+from ..wp_divergence import computeSPHDivergence_warpBackend
 
 import warp as wp
 import torch
@@ -13,7 +13,7 @@ from ...mathutil.wp_math import *
 from ...kernels.wp_kernel import *
 
 
-def computeSPHDivergence_warpBackend(
+def computeSPHDivergence_warpBackend_manual(
     queryPositions, referencePositions,
     querySupports, referenceSupports,
     queryMasses, referenceMasses,
@@ -39,7 +39,7 @@ def computeSPHDivergence_warpBackend(
         )
     # elif len(queryValues.shape) > 2 and queryValues.shape[1] == queryPositions.shape[1] and queryValues.shape[2] == queryPositions.shape[1]:
     else:
-        return computeSPHDivergenceTensor_warpBackend(
+        return computeSPHDivergence_warpBackend(
             queryPositions, referencePositions,
             querySupports, referenceSupports,
             queryMasses, referenceMasses,
