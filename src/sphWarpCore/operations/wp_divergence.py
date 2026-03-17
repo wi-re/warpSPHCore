@@ -1,10 +1,8 @@
-from .wp_divergence_vector import computeSPHDivergenceVector_warpBackend
-from .wp_divergence_tensor import computeSPHDivergenceTensor_warpBackend
-
 import warp as wp
-import torch
-
+from warp.types import vector, matrix
+# from wp_tensor import tensor
 from typing import Any
+import torch
 from ..utils.wp_autograd import *
 from ..radiusSearch.radius_util import convertModeToUint
 
@@ -12,6 +10,195 @@ from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainD
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
 
+@wp.func
+def integerPower(base: wp.int32, exponent: wp.int32) -> wp.int32:
+    result = 1
+    if exponent < 0:
+        return 0  # Return 0 for negative exponents in integer power
+    elif exponent == 1:
+        return base
+    elif exponent == 0:
+        return 1
+    elif exponent == 2:
+        return base * base
+    elif exponent == 3:
+        return base * base * base
+    elif exponent == 4:
+        return base * base * base * base
+    elif exponent > 4:
+        return wp.int32(((wp.float32)(base)) ** (wp.float32(exponent)))
+    return  result
+
+# In dot mode we compute torch.einsum('nd..., nd -> n...', q, k) 
+# Otherwise we compute torch.einsum('n...d, nd -> n...', q, k)
+# the inputs are the flattened versions of the original tensors, i.e.,
+# if q initially was of shape [n, d, d, d] it is now [n, d^3]
+# The output is always of shape [n, d^(N-1)] where N is the rank of the input tensor q. So if q was originally [n, d, d, d] the output will be [n, d^2]
+# The kernelGradient is always of shape [n, d]
+# this also allows us to overload the function based on d! We can then use the numDims parameter to do the correct indexing inside the kernel without having to write separate kernels for different dimensions.
+@wp.func
+def divergenceProduct(
+    fij: vector(dtype = wp.float32, length=Any), 
+    kernelGradient: vector(dtype = wp.float32, length=3),
+    output: vector(dtype = wp.float32, length=Any),
+    outputElements: wp.int32, dotMode: wp.bool
+):
+    res = type(output)(0.0)
+    # res is now of shape [d^(N-1)] where N is the rank of the original input tensor.
+    # we need to do a product between fij which is of shape [d^N] and kernelGradient which is of shape [d] to get an output of shape [d^(N-1)]
+    
+    dim = wp.int32(3) # hardcoded as this is the overload for 3D.
+    
+    if dotMode:
+        for i in range(outputElements):
+            for d in range(dim):
+                res[i] += fij[i * dim + d] * kernelGradient[d]
+    else:
+        for i in range(outputElements):
+            for d in range(dim):
+                res[i] += fij[i + d * outputElements] * kernelGradient[d]
+                
+    return res
+
+@wp.func
+def divergenceProduct(
+    fij: vector(dtype = wp.float32, length=Any), 
+    kernelGradient: vector(dtype = wp.float32, length=2),
+    output: vector(dtype = wp.float32, length=Any),
+    outputElements: wp.int32, dotMode: wp.bool
+):
+    res = type(output)(0.0)
+    # res is now of shape [d^(N-1)] where N is the rank of the original input tensor.
+    # we need to do a product between fij which is of shape [d^N] and kernelGradient which is of shape [d] to get an output of shape [d^(N-1)]
+    
+    dim = wp.int32(2) # hardcoded as this is the overload for 2D.
+    # wp.printf("divergenceProduct: numDims=%d, outputElements=%d, inputElements=%d\n", numDims, outputElements, inputElements)
+    
+    if dotMode:
+        for i in range(outputElements):
+            for d in range(dim):
+                res[i] += fij[i * dim + d] * kernelGradient[d]
+    else:
+        for i in range(outputElements):
+            for d in range(dim):
+                res[i] += fij[i + d * outputElements] * kernelGradient[d]
+                
+    return res
+
+@wp.func
+def divergenceProduct(
+    fij: vector(dtype = wp.float32, length=Any), 
+    kernelGradient: vector(dtype = wp.float32, length=1),
+    output: vector(dtype = wp.float32, length=Any),
+    outputElements: wp.int32, dotMode: wp.bool
+):
+    res = type(output)(0.0)
+    # in 1D the divergence product is just a simple multiplication
+    res[0] = fij[0] * kernelGradient[0]
+    return res 
+        
+@wp.func 
+def getOutputElements(
+    fij: vector(dtype = wp.float32, length=3),
+    numDims: wp.int32
+):
+    dim = wp.int32(3) # hardcoded as this is the overload for 3D.
+    return integerPower(dim, numDims - 1)
+
+@wp.func 
+def getOutputElements(
+    fij: vector(dtype = wp.float32, length=2),
+    numDims: wp.int32
+):
+    dim = wp.int32(2) # hardcoded as this is the overload for 2D.
+    return integerPower(dim, numDims - 1)
+
+@wp.func 
+def getOutputElements(
+    fij: vector(dtype = wp.float32, length=1),
+    numDims: wp.int32
+):
+    return wp.int32(1)
+
+
+@wp.func
+def computeSPHDivergenceTensor_Func(
+    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, fi : vector(dtype = wp.float32, length=Any),
+    
+    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), values: wp.array(dtype = vector(dtype = wp.float32, length=Any)),
+    
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32),
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
+    
+    neighborList: wp.array(dtype = wp.int64),
+    neighborOffset : wp.int64, numNeighs: wp.int32,
+    numDims: wp.int32, dotMode: wp.bool,
+    
+    outputValue: vector(dtype = wp.float32, length=Any)
+):
+    grad_f_interpolated = type(outputValue)(0.0)
+    
+    for neighborIndex in range(numNeighs):
+        j = wp.int32(neighborList[neighborOffset + wp.int64(neighborIndex)])
+        
+        mj = masses[j]
+        rhoj = densities[j]
+        apparentVolume = mj / rhoj
+        if consistentDivergence:
+            apparentVolume = mj / rhoi
+        fj = values[j]
+        
+        kernelGradient = sphKernelGradient(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
+        
+        if gradientMode_int == 1: # Naive
+            grad_f_interpolated += divergenceProduct(fj * apparentVolume, kernelGradient, outputValue, getOutputElements(xi, numDims), dotMode)
+        elif gradientMode_int == 2: # Symmetric
+            grad_f_interpolated += divergenceProduct(rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, getOutputElements(xi, numDims), dotMode)
+        elif gradientMode_int == 3: # Difference
+            grad_f_interpolated += divergenceProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, getOutputElements(xi, numDims), dotMode)
+        elif gradientMode_int == 4: # Summation
+            grad_f_interpolated += divergenceProduct((fj + fi) * apparentVolume, kernelGradient, outputValue, getOutputElements(xi, numDims), dotMode)
+            
+    return grad_f_interpolated
+
+@wp.kernel
+def computeSPHDivergenceTensor_Kernel(
+    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)),
+    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32),
+    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), 
+    queryDensities: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32),
+    queryValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), referenceValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)),
+    
+    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool),
+    
+    mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),
+    
+    numDims : wp.int32, dotMode: wp.bool,
+    
+    outputValues : wp.array(dtype = vector(length = Any, dtype = wp.float32))
+):                                                                                    
+    i = wp.tid()
+    if i >= queryPositions.shape[0]:
+        return
+    
+    xi = queryPositions[i]
+    hi = querySupports[i]
+    mi = queryMasses[i]
+    rhoi = queryDensities[i]
+    fi = queryValues[i]
+    
+    outputValues[i] = computeSPHDivergenceTensor_Func(
+        xi, hi, mi, rhoi, fi, 
+        referencePositions, referenceSupports, referenceMasses, referenceDensities, referenceValues,
+        
+        periodicity, domainMin, domainMax, 
+        mode_uint, kernel_int, gradientMode_int, consistentDivergence,
+        neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
+        numDims, dotMode,
+        type(outputValues[i])(0.0))
+    
+from ..enumTypes import *
 
 def computeSPHDivergence_warpBackend(
     queryPositions, referencePositions,
@@ -24,28 +211,44 @@ def computeSPHDivergence_warpBackend(
     kernel: KernelFunctions,    
     gradientMode: GradientScheme,
     adjacency: AdjacencyListWarp,
-    consistentDivergence: bool = False, dotMode: bool = False  
+    consistentDivergence: bool = False,
+    dotMode: bool = False, # if true compute the divergence based on torch.einsum('nd..., nd -> n...', q, k) instead of the normal div torch.einsum('n...d, nd -> n...', q, k)
 ):
-    if len(queryValues.shape) == 1:
-        raise NotImplementedError("Scalar divergence is not meaningfully defined.")
-    # elif len(queryValues.shape) == 2 and queryValues.shape[1] == queryPositions.shape[1]:
-    #     return computeSPHDivergenceVector_warpBackend(
-    #         queryPositions, referencePositions,
-    #         querySupports, referenceSupports,
-    #         queryMasses, referenceMasses,
-    #         queryDensities, referenceDensities,
-    #         queryValues, referenceValues,
-    #         domain, mode, kernel, gradientMode, adjacency, consistentDivergence
-    #     )
-    # elif len(queryValues.shape) > 2 and queryValues.shape[1] == queryPositions.shape[1] and queryValues.shape[2] == queryPositions.shape[1]:
-    else:
-        return computeSPHDivergenceTensor_warpBackend(
-            queryPositions, referencePositions,
-            querySupports, referenceSupports,
-            queryMasses, referenceMasses,
-            queryDensities, referenceDensities,
-            queryValues, referenceValues,
-            domain, mode, kernel, gradientMode, adjacency, consistentDivergence, dotMode
-        ).view(queryValues.shape[0], *queryValues.shape[1:-1]) # reshape back to original shape
-    # else:
-    #     raise ValueError("Unsupported value shape for SPH gradient computation. Expected (N,), (N, D), or (N, D, D) where N is the number of particles and D is the spatial dimension.")
+    domainMin = domain.min
+    domainMax = domain.max
+    periodicity = domain.periodic
+
+    mode_uint = convertModeToUint(mode.name)
+    kernel_int = kernel.value
+    gradientMode_int = gradientMode.value
+
+    # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
+    outputSize = (queryPositions.shape[0])
+    
+    inputShape = queryValues.shape[1:]
+    flatInputShape = 1
+    for dim in inputShape:
+        flatInputShape *= dim
+        
+    outputShape = inputShape[1:] if dotMode else inputShape[:-1]
+    flatOutputShape = 1
+    for dim in outputShape:
+        flatOutputShape *= dim
+    numDims = len(inputShape)
+    
+    # print(f"computeSPHDivergenceTensor_warpBackend: inputShape={inputShape}, flatInputShape={flatInputShape}, outputShape={outputShape}, flatOutputShape={flatOutputShape}, numDims={numDims}")
+
+    warp_result = warpWrapper(
+        launch_kernel, computeSPHDivergenceTensor_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
+        queryPositions, referencePositions,
+        querySupports, referenceSupports,
+        queryMasses, referenceMasses,
+        queryDensities, referenceDensities,
+        queryValues.view(-1, flatInputShape), referenceValues.view(-1, flatInputShape),
+        domainMin, domainMax, periodicity,
+        mode_uint, kernel_int, gradientMode_int, wp.bool(consistentDivergence),
+        adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors,
+        wp.int32(numDims), wp.bool(dotMode),
+    )
+
+    return warp_result.view(queryValues.shape[0], *outputShape) # reshape back to original shape with new gradient dimension

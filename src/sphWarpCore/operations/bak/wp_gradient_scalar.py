@@ -3,26 +3,26 @@ from warp.types import vector, matrix
 # from wp_tensor import tensor
 from typing import Any
 import torch
-from ..utils.wp_autograd import *
-from ..radiusSearch.radius_util import convertModeToUint
+from ...utils.wp_autograd import *
+from ...radiusSearch.radius_util import convertModeToUint
 
-from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
-from ..mathutil.wp_math import *
-from ..kernels.wp_kernel import *
+from ...radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
+from ...mathutil.wp_math import *
+from ...kernels.wp_kernel import *
 
 @wp.func
-def computeSPHDivergenceVector_Func(
-    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, fi : vector(dtype = wp.float32, length=Any),
+def computeSPHGradientScalar_Func(
+    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, fi : wp.float32,
     
-    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), values: wp.array(dtype = vector(dtype = wp.float32, length=Any)),
+    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), values: wp.array(dtype = wp.float32),
     
     periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32),
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32,
     
     neighborList: wp.array(dtype = wp.int64),
     neighborOffset : wp.int64, numNeighs: wp.int32,
     
-    outputValue: wp.float32
+    outputValue: vector(length=Any, dtype=wp.float32)
 ):
     grad_f_interpolated = type(outputValue)(0.0)
     
@@ -32,37 +32,35 @@ def computeSPHDivergenceVector_Func(
         mj = masses[j]
         rhoj = densities[j]
         apparentVolume = mj / rhoj
-        if consistentDivergence:
-            apparentVolume = mj / rhoi
         fj = values[j]
         
         kernelGradient = sphKernelGradient(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
         
         if gradientMode_int == 1: # Naive
-            grad_f_interpolated += wp.dot(fj * apparentVolume, kernelGradient)
+            grad_f_interpolated += fj * apparentVolume * kernelGradient
         elif gradientMode_int == 2: # Symmetric
-            grad_f_interpolated += wp.dot(rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient)
+            grad_f_interpolated += rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume * kernelGradient
         elif gradientMode_int == 3: # Difference
-            grad_f_interpolated += wp.dot((fj - fi) * apparentVolume, kernelGradient)
+            grad_f_interpolated += (fj - fi) * apparentVolume * kernelGradient
         elif gradientMode_int == 4: # Summation
-            grad_f_interpolated += wp.dot((fj + fi) * apparentVolume, kernelGradient)
+            grad_f_interpolated += (fj + fi) * apparentVolume * kernelGradient
             
     return grad_f_interpolated
 
 @wp.kernel
-def computeSPHDivergenceVector_Kernel(
+def computeSPHGradientScalar_Kernel(
     queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)),
     querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32),
     queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), 
     queryDensities: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32),
-    queryValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), referenceValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)),
+    queryValues: wp.array(dtype = wp.float32), referenceValues: wp.array(dtype = wp.float32),
     
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool),
     
-    mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
+    mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32,
     neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),
     
-    outputValues : wp.array(dtype = wp.float32)
+    outputValues : wp.array(dtype = vector(length=Any, dtype = wp.float32))
 ):                                                                                    
     i = wp.tid()
     if i >= queryPositions.shape[0]:
@@ -74,20 +72,20 @@ def computeSPHDivergenceVector_Kernel(
     rhoi = queryDensities[i]
     fi = queryValues[i]
     
-    outputValues[i] = computeSPHDivergenceVector_Func(
+    outputValues[i] = computeSPHGradientScalar_Func(
         xi, hi, mi, rhoi, fi, 
         referencePositions, referenceSupports, referenceMasses, referenceDensities, referenceValues,
         
         periodicity, domainMin, domainMax, 
-        mode_uint, kernel_int, gradientMode_int, consistentDivergence,
+        mode_uint, kernel_int, gradientMode_int,
         neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
         type(outputValues[i])(0.0))
     
 
 
-from ..enumTypes import *
+from ...enumTypes import *
 
-def computeSPHDivergenceVector_warpBackend(
+def computeSPHGradientScalar_warpBackend(
     queryPositions, referencePositions,
     querySupports, referenceSupports,
     queryMasses, referenceMasses,
@@ -98,7 +96,6 @@ def computeSPHDivergenceVector_warpBackend(
     kernel: KernelFunctions,    
     gradientMode: GradientScheme,
     adjacency: AdjacencyListWarp,
-    consistentDivergence: bool = False,
 ):
     domainMin = domain.min
     domainMax = domain.max
@@ -112,14 +109,14 @@ def computeSPHDivergenceVector_warpBackend(
     outputShape = (queryPositions.shape[0])
 
     warp_result = warpWrapper(
-        launch_kernel, computeSPHDivergenceVector_Kernel, outputShape, wp.float32,
+        launch_kernel, computeSPHGradientScalar_Kernel, outputShape, vector(length=queryPositions.shape[1], dtype = wp.float32),
         queryPositions, referencePositions,
         querySupports, referenceSupports,
         queryMasses, referenceMasses,
         queryDensities, referenceDensities,
         queryValues, referenceValues,
         domainMin, domainMax, periodicity,
-        mode_uint, kernel_int, gradientMode_int, wp.bool(consistentDivergence),
+        mode_uint, kernel_int, gradientMode_int,
         adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors,
     )
 
