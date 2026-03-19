@@ -75,13 +75,13 @@ def curlProduct(
     dim = wp.int32(2) # hardcoded as this is the overload for 2D.
     # stride = wp.int32(outputElements / dim) # this is the number of elements in each dimension of the input tensor fij. So if fij is of shape [d^N] and output is of shape [d^(N-1)] then stride is d^(N-1).
     # // Loop over all possible combinations of the 'trailing' indices
-    for s in range(stride):
+    for s in range(stride+1): # we loop to stride+1 because in 2D the output has one less dimension than the input so we need to compute one more element to account for this.
         # // We focus on the first index of the tensor (k) 
         # // and the vector index (j) to produce the result index (i)
         
         # // Flattened locations for T[0][s], T[1][s], T[2][s]
         k0 = wp.int32(s) # this is the location of T[0][s] in the flattened fij
-        k1 = wp.int32(s + stride) # this is the location of T[1][s] in the flattened fij
+        k1 = wp.int32(s + stride+1) # this is the location of T[1][s] in the flattened fij
         # // 2D Cross Product logic: V0*T1 - V1*T0
         # // This collapses the first dimension of T and the dimension of V
         R[s] = V[0] * T[k1] - V[1] * T[k0];
