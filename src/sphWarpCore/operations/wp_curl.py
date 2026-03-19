@@ -37,7 +37,8 @@ def curlProduct(
     T: vector(dtype = wp.float32, length=Any), 
     V: vector(dtype = wp.float32, length=3),
     output: vector(dtype = wp.float32, length=Any),
-    stride: wp.int32
+    stride: wp.int32,
+    inputElements: wp.int32, outputElements: wp.int32
 ):
     R = type(output)(0.0)
     dim = wp.int32(3) # hardcoded as this is the overload for 3D.
@@ -67,7 +68,8 @@ def curlProduct(
     T: vector(dtype = wp.float32, length=Any), 
     V: vector(dtype = wp.float32, length=2),
     output: vector(dtype = wp.float32, length=Any),
-    stride: wp.int32
+    stride: wp.int32,
+    inputElements: wp.int32, outputElements: wp.int32
 ):
     R = type(output)(0.0)
     dim = wp.int32(2) # hardcoded as this is the overload for 2D.
@@ -90,7 +92,8 @@ def curlProduct(
     T: vector(dtype = wp.float32, length=Any), 
     V: vector(dtype = wp.float32, length=1),
     output: vector(dtype = wp.float32, length=Any),
-    stride: wp.int32
+    stride: wp.int32,
+    inputElements: wp.int32, outputElements: wp.int32
 ):
     R = type(output)(0.0)
     # in 1D the curl product is just a simple multiplication
@@ -109,7 +112,7 @@ def computeSPHCurlTensor_Func(
     
     neighborList: wp.array(dtype = wp.int64),
     neighborOffset : wp.int64, numNeighs: wp.int32,
-    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     
     outputValue: vector(dtype = wp.float32, length=Any)
 ):
@@ -126,13 +129,13 @@ def computeSPHCurlTensor_Func(
         kernelGradient = sphKernelGradient(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
         
         if gradientMode_int == 1: # Naive
-            grad_f_interpolated += curlProduct(fj * apparentVolume, kernelGradient, outputValue, getStride(flatOutputShape, numDims, outputValue))
+            grad_f_interpolated += curlProduct(fj * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
         elif gradientMode_int == 2: # Symmetric
-            grad_f_interpolated += curlProduct(rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, getStride(flatOutputShape, numDims, outputValue))
+            grad_f_interpolated += curlProduct(rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
         elif gradientMode_int == 3: # Difference
-            grad_f_interpolated += curlProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, getStride(flatOutputShape, numDims, outputValue))
+            grad_f_interpolated += curlProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
         elif gradientMode_int == 4: # Summation
-            grad_f_interpolated += curlProduct((fj + fi) * apparentVolume, kernelGradient, outputValue, getStride(flatOutputShape, numDims, outputValue))
+            grad_f_interpolated += curlProduct((fj + fi) * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
             
     return grad_f_interpolated
 
@@ -149,7 +152,7 @@ def computeSPHCurlTensor_Kernel(
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32,
     neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),
     
-    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32, 
+    dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32, 
     
     outputValues : wp.array(dtype = vector(length = Any, dtype = wp.float32))
 ):                                                                                    
@@ -170,7 +173,7 @@ def computeSPHCurlTensor_Kernel(
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int,
         neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
-        numDims, flatInputShape, flatOutputShape,
+        dim, numDims, flatInputShape, flatOutputShape,
         type(outputValues[i])(0.0))
     
 from ..enumTypes import *
@@ -229,7 +232,7 @@ def computeSPHCurl_warpBackend(
         domainMin, domainMax, periodicity,
         mode_uint, kernel_int, gradientMode_int,
         adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors,
-        wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), 
+        wp.int32(queryPositions.shape[1]), wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), 
     )
 
     return warp_result.view(queryValues.shape[0], *outputShape) # reshape back to original shape with new gradient dimension
