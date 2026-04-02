@@ -105,7 +105,22 @@ def computeLaplacianDot2(
     return output
 
     
-
+@wp.func
+def positiveDotProduct(
+    x_ij: vector(dtype = wp.float32, length=Any), # type: ignore
+    fq_ij: vector(dtype = wp.float32, length=Any), # type: ignore
+    f_ij: vector(dtype = wp.float32, length=Any), # type: ignore
+    dim: wp.int32
+):
+    dot = wp.float32(0.0)
+    for d in range(dim):
+        dot += x_ij[d] * fq_ij[d]
+    
+    result = type(f_ij)(0.0)
+    if dot >= 0.0:
+        for d in range(dim):
+            result[d] = f_ij[d]
+    return result
 
 @wp.func
 def computeSPHLaplacianTensor_Func(
@@ -154,14 +169,21 @@ def computeSPHLaplacianTensor_Func(
         eps = 1e-8
         n_ij = x_ij / (r_ij + eps * h_ij)
 
+        laplacian_contribution = type(outputValue)(0.0)
+
         if laplacianMode_int == 1: # Naive
-            laplacian_result += q_ij * sphKernelLaplacian(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
+            laplacian_contribution = q_ij * sphKernelLaplacian(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
         elif laplacianMode_int == 2: # Brookshaw
-            laplacian_result += -2.0 * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
+            laplacian_contribution = -2.0 * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
         elif laplacianMode_int == 3: # Dot
-            laplacian_result += computeLaplacianDot2(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
+            laplacian_contribution = computeLaplacianDot2(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
         elif laplacianMode_int == 4: # Default
-            laplacian_result += computeDotLaplacian(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
+            laplacian_contribution = computeDotLaplacian(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
+
+        if positiveDivergence:
+            laplacian_result += positiveDotProduct(x_ij, q_ij, laplacian_contribution, dim)
+        else:
+            laplacian_result += laplacian_contribution
 
     return laplacian_result
 
