@@ -484,13 +484,13 @@ def sphKernelLaplacian_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, 
     
     s = wp.dot(x,x) / iPow(r_eps, 2)
     if q < eps:
-        s = 1
+        s = wp.float32(1.0)
     t = - wp.dot(x,x) / iPow(r_eps, 3)
-    t += dim / r_eps
+    t += wp.float32(dim) / r_eps
     
     laplacian = s * k2 + t * k1
-    if q < eps:
-        laplacian = 0
+    if q < eps or q > 1.0:
+        laplacian = wp.float32(0.0)
     return laplacian
 
 @wp.func

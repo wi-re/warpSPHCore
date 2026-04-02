@@ -20,7 +20,7 @@ def wendland2_dkdq(q : wp.float32, dim: wp.int32 = 2):
 @wp.func
 def wendland2_d2kdq2(q : wp.float32, dim: wp.int32 = 2):        
     if dim == 1:
-        return -12.0 * (3.0 * iPow(q, 2) - 4.0 * q + 1)
+        return -12.0 * (3.0 * iPow(q, 2) - 4.0 * q + 1.0)
     else:
         return 20.0 * (4.0 * q - 1.0) * cpow_warp(1.0 - q, 2)
 

@@ -9,3 +9,4 @@
 - build samples for diffusion and wave equations
 - write wrapper to fit neighborsearch into diffSPH
 - write wrapper to fit sph operations into diffSPH
+

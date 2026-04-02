@@ -110,7 +110,7 @@ def computeSPHDivergenceTensor_Func(
         if gradientMode_int == 1: # Naive
             grad_f_interpolated += divergenceProduct(fj * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == 2: # Symmetric
-            grad_f_interpolated += divergenceProduct(rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
+            grad_f_interpolated += divergenceProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == 3: # Difference
             grad_f_interpolated += divergenceProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == 4: # Summation

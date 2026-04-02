@@ -95,7 +95,7 @@ def computeSPHGradientTensor_Func(
         if gradientMode_int == 1: # Naive
             grad_f_interpolated += outerTensorProduct(fj * apparentVolume, kernelGradient, grad_f_interpolated, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == 2: # Symmetric
-            grad_f_interpolated += outerTensorProduct(rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, grad_f_interpolated, numDims, flatInputShape, flatOutputShape)
+            grad_f_interpolated += outerTensorProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, grad_f_interpolated, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == 3: # Difference
             grad_f_interpolated += outerTensorProduct((fj - fi) * apparentVolume, kernelGradient, grad_f_interpolated, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == 4: # Summation

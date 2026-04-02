@@ -131,7 +131,7 @@ def computeSPHCurlTensor_Func(
         if gradientMode_int == 1: # Naive
             grad_f_interpolated += curlProduct(fj * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
         elif gradientMode_int == 2: # Symmetric
-            grad_f_interpolated += curlProduct(rhoj * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
+            grad_f_interpolated += curlProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
         elif gradientMode_int == 3: # Difference
             grad_f_interpolated += curlProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
         elif gradientMode_int == 4: # Summation

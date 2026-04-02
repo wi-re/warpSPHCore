@@ -26,3 +26,9 @@ class GradientScheme(Enum):
     Symmetric = 2
     Difference = 3
     Summation = 4
+
+class LaplacianScheme(Enum):
+    Naive = 1
+    Brookshaw = 2
+    Dot = 3
+    Default = 4
