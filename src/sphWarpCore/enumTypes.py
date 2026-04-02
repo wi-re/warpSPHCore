@@ -32,3 +32,11 @@ class LaplacianScheme(Enum):
     Brookshaw = 2
     Dot = 3
     Default = 4
+
+class WarpOperation(Enum):
+    Interpolate = 1
+    Gradient = 2
+    Divergence = 3
+    Curl = 4
+    Laplacian = 5
+    Density = 6

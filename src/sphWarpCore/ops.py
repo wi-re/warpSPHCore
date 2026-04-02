@@ -11,14 +11,17 @@ from .operations.wp_interpolate import (
     computeSPHInterpolant_warpBackend,
 )
 
+from .operations.wp_operation import sphOperation_warp
+
 __all__ = [
+    'sphOperation_warp'
     # density
-    "computeDensityWarp",
-    "sphDensity_warp",
-    "warp_sphDensityFunction",
-    "computeDensity_warpBackend",
+    # "computeDensityWarp",
+    # "sphDensity_warp",
+    # "warp_sphDensityFunction",
+    # "computeDensity_warpBackend",
     # interpolation
-    "computeSPHInterpolation_Func",
-    "computeSPHInterpolation_Kernel",
-    "computeSPHInterpolant_warpBackend",
+    # "computeSPHInterpolation_Func",
+    # "computeSPHInterpolation_Kernel",
+    # "computeSPHInterpolant_warpBackend",
 ]
