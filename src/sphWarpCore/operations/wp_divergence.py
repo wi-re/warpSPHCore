@@ -1,7 +1,7 @@
 import warp as wp
 from warp.types import vector, matrix
 # from wp_tensor import tensor
-from typing import Any
+from typing import Any, Optional
 import torch
 from ..utils.wp_autograd import *
 from ..radiusSearch.radius_util import convertModeToUint
@@ -88,7 +88,7 @@ def computeSPHDivergenceTensor_Func(
     mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
     
     neighborList: wp.array(dtype = wp.int64),
-    neighborOffset : wp.int64, numNeighs: wp.int32,
+    neighborOffset : wp.int64, numNeighs: wp.int32, preScatteredQuantities: wp.bool,
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32, dotMode: wp.bool,
     
     outputValue: vector(dtype = wp.float32, length=Any)
@@ -96,14 +96,19 @@ def computeSPHDivergenceTensor_Func(
     grad_f_interpolated = type(outputValue)(0.0)
     
     for neighborIndex in range(numNeighs):
-        j = wp.int32(neighborList[neighborOffset + wp.int64(neighborIndex)])
+        jj = neighborOffset + wp.int64(neighborIndex)
+        j = wp.int32(neighborList[jj])
         
         mj = masses[j]
         rhoj = densities[j]
         apparentVolume = mj / rhoj
         if consistentDivergence:
             apparentVolume = mj / rhoi
-        fj = values[j]
+        fj = type(fi)(0.0)
+        if preScatteredQuantities:
+            fj = values[jj]
+        else:
+            fj = values[j]
         
         kernelGradient = sphKernelGradient(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
         
@@ -129,7 +134,7 @@ def computeSPHDivergenceTensor_Kernel(
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool),
     
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64), preScatteredQuantities: wp.bool,
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32, dotMode: wp.bool,
     
@@ -152,6 +157,7 @@ def computeSPHDivergenceTensor_Kernel(
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int, consistentDivergence,
         neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
+        preScatteredQuantities,
         numDims, flatInputShape, flatOutputShape, dotMode,
         type(outputValues[i])(0.0))
     
@@ -170,6 +176,7 @@ def computeSPHDivergence_warpBackend(
     adjacency: AdjacencyListWarp,
     consistentDivergence: bool = False,
     dotMode: bool = False, # if true compute the divergence based on torch.einsum('nd..., nd -> n...', q, k) instead of the normal div torch.einsum('n...d, nd -> n...', q, k)
+    scatteredQuantities: Optional[torch.Tensor] = None,
 ):
     domainMin = domain.min
     domainMax = domain.max
@@ -179,10 +186,21 @@ def computeSPHDivergence_warpBackend(
     kernel_int = kernel.value
     gradientMode_int = gradientMode.value
 
+    preScatteredQuantities = False
+    if queryValues is None and referenceValues is None:
+        if scatteredQuantities is None:
+            raise ValueError("If queryValues and referenceValues are not provided, then pre-scattered quantities must be provided for the divergence computation.")
+        preScatteredQuantities = True
+        qV = scatteredQuantities
+        rV = scatteredQuantities
+    else:
+        qV = queryValues
+        rV = referenceValues
+
     # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
     outputSize = (queryPositions.shape[0])
-    
-    inputShape = queryValues.shape[1:]
+
+    inputShape = qV.shape[1:]
     flatInputShape = 1
     for dim in inputShape:
         flatInputShape *= dim
@@ -201,11 +219,11 @@ def computeSPHDivergence_warpBackend(
         querySupports, referenceSupports,
         queryMasses, referenceMasses,
         queryDensities, referenceDensities,
-        queryValues.view(-1, flatInputShape), referenceValues.view(-1, flatInputShape),
+        qV.view(-1, flatInputShape), rV.view(-1, flatInputShape),
         domainMin, domainMax, periodicity,
         mode_uint, kernel_int, gradientMode_int, wp.bool(consistentDivergence),
-        adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors,
+        adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
         wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), wp.bool(dotMode),
     )
 
-    return warp_result.view(queryValues.shape[0], *outputShape) # reshape back to original shape with new gradient dimension
+    return warp_result.view(queryPositions.shape[0], *outputShape) # reshape back to original shape with new gradient dimension

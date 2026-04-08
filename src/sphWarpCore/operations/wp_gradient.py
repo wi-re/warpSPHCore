@@ -142,6 +142,7 @@ def computeSPHGradientTensor_Kernel(
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int,
         neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
+        preScatteredQuantities,
         numDims, flatInputShape, flatOutputShape,
         type(outputValues[i])(0.0))
     
@@ -171,21 +172,6 @@ def computeSPHGradient_warpBackend(
     kernel_int = kernel.value
     gradientMode_int = gradientMode.value
 
-    # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-    outputSize = (queryPositions.shape[0])
-    
-    inputShape = queryValues.shape[1:]
-    flatInputShape = 1
-    for dim in inputShape:
-        flatInputShape *= dim
-        
-    outputShape = inputShape + (queryPositions.shape[1],) # add an extra dimension for the gradient
-    flatOutputShape = 1
-    for dim in outputShape: 
-        flatOutputShape *= dim
-    # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-    numDims = len(inputShape)
-
     preScatteredQuantities = False # Indicates if the input quantities have already been scattered to the neighbor level (e.g. mass/density products), which can save some redundant computations if they are needed for multiple operations. This can also help with some custom kernels where we want to pre-compute certain quantities at the neighbor level on the Python side and pass them in as additional fields to avoid redundant computations in the kernel. 
     if queryValues is None and referenceValues is None:
         if scatteredQuantities is None:
@@ -196,6 +182,21 @@ def computeSPHGradient_warpBackend(
     else:
         qV = queryValues
         rV = referenceValues
+
+    # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
+    outputSize = (queryPositions.shape[0])
+
+    inputShape = qV.shape[1:]
+    flatInputShape = 1
+    for dim in inputShape:
+        flatInputShape *= dim
+
+    outputShape = inputShape + (queryPositions.shape[1],) # add an extra dimension for the gradient
+    flatOutputShape = 1
+    for dim in outputShape:
+        flatOutputShape *= dim
+    # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
+    numDims = len(inputShape)
 
     warp_result = warpWrapper(
         launch_kernel, computeSPHGradientTensor_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
@@ -210,4 +211,4 @@ def computeSPHGradient_warpBackend(
         wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape)
     )
 
-    return warp_result.view(queryValues.shape[0], *outputShape) # reshape back to original shape with new gradient dimension
+    return warp_result.view(queryPositions.shape[0], *outputShape) # reshape back to original shape with new gradient dimension

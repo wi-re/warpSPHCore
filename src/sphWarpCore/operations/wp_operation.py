@@ -46,6 +46,8 @@ def sphOperation_warp(
             raise ValueError("If queryValues and referenceValues are not provided, then pre-scattered quantities must be provided for the SPH operation.")
     if queryValues is not None and referenceValues is not None and preScatteredQuantities is not None:
         raise ValueError("Pre-scattered quantities should not be provided if queryValues and referenceValues are already provided, as they are redundant in this case.")
+    if preScatteredQuantities is not None and gradientMode != GradientScheme.Naive:
+        raise ValueError("Pre-scattered quantities only support the naive scheme as they are meant to provide pre-computed neighbor-level quantities for custom kernels that may not be compatible with the standard gradient schemes. If using pre-scattered quantities, the gradientMode must be set to Naive.")
     
 
     if operation == WarpOperation.Interpolate:
@@ -56,7 +58,8 @@ def sphOperation_warp(
             queryDensities, referenceDensities,
             queryValues, referenceValues,
             domain = domain, adjacency=adjacency, 
-            kernel = kernel, mode = supportMode
+            kernel = kernel, mode = supportMode,
+            scatteredQuantities= preScatteredQuantities
         )
     elif operation == WarpOperation.Gradient:
         return computeSPHGradient_warpBackend(
@@ -79,7 +82,8 @@ def sphOperation_warp(
             queryValues, referenceValues,
             domain = domain, adjacency= adjacency, 
             kernel = kernel, mode = supportMode, 
-            gradientMode= gradientMode            
+            gradientMode= gradientMode,
+            scatteredQuantities= preScatteredQuantities
         )
     elif operation == WarpOperation.Curl:
         return computeSPHCurl_warpBackend(
@@ -90,7 +94,8 @@ def sphOperation_warp(
             queryValues, referenceValues,
             domain = domain, adjacency= adjacency, 
             kernel = kernel, mode = supportMode, 
-            gradientMode= gradientMode            
+            gradientMode= gradientMode,
+            scatteredQuantities= preScatteredQuantities
         )
     elif operation == WarpOperation.Laplacian:
         return computeSPHLaplacian_warpBackend(
@@ -102,7 +107,8 @@ def sphOperation_warp(
             domain = domain, adjacency= adjacency, 
             kernel = kernel, mode = supportMode, 
             gradientMode= gradientMode, 
-            laplacianMode= laplacianMode, positiveDivergence=positiveDivergence
+            laplacianMode= laplacianMode, positiveDivergence=positiveDivergence,
+            scatteredQuantities= preScatteredQuantities
             
         )
     elif operation == WarpOperation.Density:
