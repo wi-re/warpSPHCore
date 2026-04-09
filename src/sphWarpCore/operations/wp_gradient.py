@@ -60,8 +60,6 @@ def outerTensorProduct(
     return res
     
                 
-    
-
 # For matrices we need to implement the logic manually using outer products, since Warp does not support rank-2 field types natively. The output is stored as a flattened vector and reshaped on the Python side.
 @wp.func
 def computeSPHGradientTensor_Func(
