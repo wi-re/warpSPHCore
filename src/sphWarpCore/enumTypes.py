@@ -40,3 +40,19 @@ class WarpOperation(Enum):
     Curl = 4
     Laplacian = 5
     Density = 6
+
+
+
+class ViscosityTerms(Enum):
+    Default = 0
+    MonaghanGingold1983 = 1
+    Cleary1998 = 2
+    Monaghan1992 = 3
+    Monaghan1997a = 4
+    Monaghan1997b = 5
+    Dukowicz = 6
+    Price2012_98 = 7
+    Price2012 = 8
+    Price2008 = 9
+    Wadsley2008 = 10
+    DeltaSPH = 11
