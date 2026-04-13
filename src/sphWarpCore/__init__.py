@@ -25,7 +25,14 @@ from . import radius
 from . import ops
 
 # Convenience re-exports of the most commonly used symbols
-from .util import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins
+from .util import (
+    castTorchToWarp,
+    castWarpToTorch,
+    castTorchToWarpAsBuiltins,
+    clearDummyTensorCache,
+    getCachedDummyTensor,
+    getCachedIdentityMatrices,
+)
 from .autograd import warpWrapper, WarpFunctionWrapper
 from .radius import (
     AdjacencyList,
@@ -53,6 +60,9 @@ __all__ = [
     "castTorchToWarp",
     "castWarpToTorch",
     "castTorchToWarpAsBuiltins",
+    "clearDummyTensorCache",
+    "getCachedDummyTensor",
+    "getCachedIdentityMatrices",
     # autograd
     "warpWrapper",
     "WarpFunctionWrapper",

@@ -2,6 +2,9 @@ from .wp_util import (
     castTorchToWarp,
     castWarpToTorch,
     castTorchToWarpAsBuiltins,
+    clearDummyTensorCache,
+    getCachedDummyTensor,
+    getCachedIdentityMatrices,
 )
 from .wp_autograd import (
     WarpFunctionWrapper,
@@ -13,6 +16,9 @@ __all__ = [
     "castTorchToWarp",
     "castWarpToTorch",
     "castTorchToWarpAsBuiltins",
+    "clearDummyTensorCache",
+    "getCachedDummyTensor",
+    "getCachedIdentityMatrices",
     "WarpFunctionWrapper",
     "warpWrapper",
     "launch_kernel",

@@ -1,4 +1,5 @@
 import warp as wp
+from warp.types import vector, matrix
 @wp.func
 def mod_distance(
     x : float, y: float, minDomain: float, maxDomain: float, periodic: bool
@@ -163,3 +164,103 @@ def computeDistanceVec(
 #     vectorDistance = minimumImageDistanceWarp(x, y, periodicity, min, max)
 #     length = wp.sqrt(wp.sum(vectorDistance * vectorDistance))
 #     return length
+
+
+         
+@wp.func
+def matmul(
+    mat: matrix(shape=(1, 1), dtype=wp.float32), # type: ignore
+    vec: vector(dtype = wp.float32, length=1), # type: ignore
+):
+    numRows = 1
+    numCols = 1
+    
+    res = type(vec)(0.0)
+    for i in range(numRows):
+        for j in range(numCols):
+            res[i] += mat[i, j] * vec[j]
+
+    return res
+
+@wp.func
+def matmul(
+    mat: matrix(shape=(2, 2), dtype=wp.float32), # type: ignore
+    vec: vector(dtype = wp.float32, length=2), # type: ignore
+):
+    numRows = 2
+    numCols = 2
+    
+    res = type(vec)(0.0)
+    for i in range(numRows):
+        for j in range(numCols):
+            res[i] += mat[i, j] * vec[j]
+
+    return res
+
+@wp.func
+def matmul(
+    mat: matrix(shape=(3, 3), dtype=wp.float32), # type: ignore
+    vec: vector(dtype = wp.float32, length=3), # type: ignore
+):
+    numRows = 3
+    numCols = 3
+    
+    res = type(vec)(0.0)
+    for i in range(numRows):
+        for j in range(numCols):
+            res[i] += mat[i, j] * vec[j]
+
+    return res
+
+
+from warp.types import vector, matrix
+
+@wp.func
+def outerTensorProduct(
+    tensor: vector(dtype = wp.float32, length=Any), # type: ignore
+    vec : vector(dtype = wp.float32, length=3), # type: ignore
+    out : vector(dtype = wp.float32, length=Any), # type: ignore
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32
+):
+    dim = wp.int32(3) # hardcoded as this is only implemented for 3D vectors currently.
+    
+    # the output is stored as a flattened vector, so we need to compute the correct index for accumulation
+    res = type(out)(0.0)
+    for i in range(flatInputShape): # loop over elements of input tensor
+        for j in range(dim): # loop over dimensions of output gradient
+            outIndex = j * flatInputShape + i # compute flattened index for output
+            res[outIndex] += vec[j] * tensor[i] # accumulate outer product into output
+            
+    return res
+
+@wp.func
+def outerTensorProduct(
+    tensor: vector(dtype = wp.float32, length=Any), # type: ignore
+    vec : vector(dtype = wp.float32, length=2), # type: ignore
+    out : vector(dtype = wp.float32, length=Any), # type: ignore
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32
+):
+    dim = wp.int32(2) # hardcoded as this is only implemented for 2D vectors currently.
+    
+    # the output is stored as a flattened vector, so we need to compute the correct index for accumulation
+    res = type(out)(0.0)
+    for i in range(flatInputShape): # loop over elements of input tensor
+        for j in range(dim): # loop over dimensions of output gradient
+            outIndex = j  + i * dim# compute flattened index for output
+            res[outIndex] += vec[j] * tensor[i] # accumulate outer product into output
+            
+    return res
+
+@wp.func
+def outerTensorProduct(
+    tensor: vector(dtype = wp.float32, length=Any), # type: ignore
+    vec : vector(dtype = wp.float32, length=1), # type: ignore
+    out : vector(dtype = wp.float32, length=Any), # type: ignore
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32
+):
+    # for 1D vectors the outer product is just a scalar multiplication, so we can skip the indexing logic
+    res = type(out)(0.0)
+    for i in range(flatInputShape):
+        res[i] += vec[0] * tensor[i]
+    return res
+    

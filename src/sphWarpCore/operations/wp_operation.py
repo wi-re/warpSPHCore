@@ -35,7 +35,9 @@ def sphOperation_warp(
     gradientMode: GradientScheme = GradientScheme.Naive,
     laplacianMode: LaplacianScheme = LaplacianScheme.Default,
     positiveDivergence: bool = False,
-    preScatteredQuantities: Optional[torch.Tensor] = None
+    preScatteredQuantities: Optional[torch.Tensor] = None,
+    renormalizationMatrices: Optional[torch.Tensor] = None,
+    queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
 ):
     if operation == WarpOperation.Density:
         # For density estimation, we can just use the interpolation kernel with the input values set to 1, which will give us the standard SPH density summation. This is more efficient than having a separate kernel for density estimation since we can reuse the same interpolation kernel and just change the input values. 
@@ -71,7 +73,9 @@ def sphOperation_warp(
             domain = domain, adjacency= adjacency, 
             kernel = kernel, mode = supportMode, 
             gradientMode= gradientMode,
-            scatteredQuantities= preScatteredQuantities
+            scatteredQuantities= preScatteredQuantities,
+            renormalizationMatrices= renormalizationMatrices,
+            queryOmegas= queryOmegas, referenceOmegas= referenceOmegas
         )
     elif operation == WarpOperation.Divergence:
         return computeSPHDivergence_warpBackend(
