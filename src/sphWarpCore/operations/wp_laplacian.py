@@ -286,7 +286,7 @@ def computeSPHLaplacian_warpBackend(
     numDims = len(inputShape)
     
     
-    print(f"computeSPHLaplacian_warpBackend: inputShape={inputShape}, flatInputShape={flatInputShape}, outputShape={outputShape}, flatOutputShape={flatOutputShape}, numDims={numDims}")
+    # print(f"computeSPHLaplacian_warpBackend: inputShape={inputShape}, flatInputShape={flatInputShape}, outputShape={outputShape}, flatOutputShape={flatOutputShape}, numDims={numDims}")
 
     warp_result = warpWrapper(
         launch_kernel, computeSPHLaplacianTensor_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
