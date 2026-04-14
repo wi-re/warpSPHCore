@@ -9,6 +9,7 @@ from ..radiusSearch.radius_util import convertModeToUint
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
+from torch.profiler import profile, record_function, ProfilerActivity
 
 
 @wp.func
@@ -89,59 +90,61 @@ def computeSPHInterpolant_warpBackend(
     adjacency,
     scatteredQuantities: Optional[torch.Tensor] = None,
 ):
-    domainMin = domain.min
-    domainMax = domain.max
-    periodicity = domain.periodic
+    with record_function("warpSPH[Interpolation]"):
+        with record_function("warpSPH[Interpolation] - Preprocessing"):
+            domainMin = domain.min
+            domainMax = domain.max
+            periodicity = domain.periodic
 
-    preScatteredQuantities = False
-    if queryValues is None and referenceValues is None:
-        if scatteredQuantities is None:
-            raise ValueError("If queryValues and referenceValues are not provided, then pre-scattered quantities must be provided for the interpolation computation.")
-        preScatteredQuantities = True
-        qV = scatteredQuantities
-        rV = scatteredQuantities
-    else:
-        qV = queryValues
-        rV = referenceValues
+            preScatteredQuantities = False
+            if queryValues is None and referenceValues is None:
+                if scatteredQuantities is None:
+                    raise ValueError("If queryValues and referenceValues are not provided, then pre-scattered quantities must be provided for the interpolation computation.")
+                preScatteredQuantities = True
+                qV = scatteredQuantities
+                rV = scatteredQuantities
+            else:
+                qV = queryValues
+                rV = referenceValues
 
-    # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-    # For higher-rank inputs (e.g. shape (n, p, m, d)) we flatten the field
-    # dimensions to a single vector dimension, interpolate, then restore the
-    # original shape.  Rank <= 3 inputs (scalar / vector / matrix per particle)
-    # pass through unchanged.
-    field_shape = qV.shape[1:]   # all dims after the particle batch dim
-    needs_flatten = qV.dim() > 3
-    if needs_flatten:
-        flat_len = qV[0].numel()
-        qV = qV.reshape(qV.shape[0], flat_len).contiguous()
-        rV = rV.reshape(rV.shape[0], flat_len).contiguous()
+            # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
+            # For higher-rank inputs (e.g. shape (n, p, m, d)) we flatten the field
+            # dimensions to a single vector dimension, interpolate, then restore the
+            # original shape.  Rank <= 3 inputs (scalar / vector / matrix per particle)
+            # pass through unchanged.
+            field_shape = qV.shape[1:]   # all dims after the particle batch dim
+            needs_flatten = qV.dim() > 3
+            if needs_flatten:
+                flat_len = qV[0].numel()
+                qV = qV.reshape(qV.shape[0], flat_len).contiguous()
+                rV = rV.reshape(rV.shape[0], flat_len).contiguous()
 
-    
-    modeUint = wp.uint32(mode.value)
-    kernelInt = wp.int32(kernel.value)
-    outputShape = qV.shape[0]
-    
-    wpValues = castTorchToWarpAsBuiltins(qV)
+            
+            modeUint = wp.uint32(mode.value)
+            kernelInt = wp.int32(kernel.value)
+            outputShape = qV.shape[0]
+            
+            wpValues = castTorchToWarpAsBuiltins(qV)
+        with record_function("warpSPH[Interpolation] - Kernel Launch"):
 
+            warp_interpolation = warpWrapper(
+                launch_kernel, computeSPHInterpolation_Kernel, outputShape, wpValues.dtype, 
+                queryPositions, referencePositions,
+                querySupports, referenceSupports,
+                queryMasses, referenceMasses,
+                queryDensities, referenceDensities,
+                qV, rV,
+                
+                domainMin, domainMax, periodicity,
+                modeUint,
+                kernelInt,
+                
+                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities)
+            )
 
-    warp_interpolation = warpWrapper(
-        launch_kernel, computeSPHInterpolation_Kernel, outputShape, wpValues.dtype, 
-        queryPositions, referencePositions,
-        querySupports, referenceSupports,
-        queryMasses, referenceMasses,
-        queryDensities, referenceDensities,
-        qV, rV,
-        
-        domainMin, domainMax, periodicity,
-        modeUint,
-        kernelInt,
-        
-        adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities)
-    )
-
-    if needs_flatten:
-        warp_interpolation = warp_interpolation.reshape(
-            warp_interpolation.shape[0], *field_shape
-        )
+            if needs_flatten:
+                warp_interpolation = warp_interpolation.reshape(
+                    warp_interpolation.shape[0], *field_shape
+                )
 
     return warp_interpolation

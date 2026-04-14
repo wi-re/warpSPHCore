@@ -621,6 +621,8 @@ def radiusSearchCollectCompactHashMap(
     
 import numpy as np
     
+from torch.profiler import record_function
+
 def radiusSearchCompactHashMap(
     queryPositions: torch.Tensor,
     referencePositions: torch.Tensor,
@@ -631,162 +633,166 @@ def radiusSearchCompactHashMap(
     mode: str = 'gather',
     hashMapLength: int = 4096
 ):
-
+    with record_function("warpNeighborSearch"):
+        with record_function("neighborSearch - preprocess"):
         
-    mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4}
-    mode_uint = mode_map.get(mode, 0)
-        
-    minDomain = domainDescription.min if domainDescription.min is not None else None
-    maxDomain = domainDescription.max if domainDescription.max is not None else None
-    hMax = computeGridSupport(querySupports, referenceSupports, mode_uint)
-    minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
+            mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4}
+            mode_uint = mode_map.get(mode, 0)
+                
+            minDomain = domainDescription.min if domainDescription.min is not None else None
+            maxDomain = domainDescription.max if domainDescription.max is not None else None
+            hMax = computeGridSupport(querySupports, referenceSupports, mode_uint)
+            minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
+
+        with record_function("neighborSearch - sortParticles"):
+            x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))]).mT
+            y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
+
+            sortedLinear, sortIndex, numCells, qMin, qMax, hCell = sortReferenceParticles(x, hMax, minD, maxD)
 
 
-    x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))]).mT
-    y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
 
-    sortedLinear, sortIndex, numCells, qMin, qMax, hCell = sortReferenceParticles(x, hMax, minD, maxD)
+            # Do the actual resort
+            sortedPositions = x[sortIndex,:]
+            # sortedSupports = xSupport[sortIndex]
+        with record_function("neighborSearch - buildCells"):
+            # compact teh list of occupied cells
+            cellIndices, cellCounters = torch.unique_consecutive(sortedLinear, return_counts=True, return_inverse=False)
+            cellCounters = cellCounters.to(torch.int32)
+            # Needs to zero padded for the indexing to work properly as the 0th cell is valid and cumsum doesn't include the first element
 
+            cumCell = torch.hstack((torch.tensor([0], device = cellIndices.device, dtype=cellCounters.dtype),torch.cumsum(cellCounters,dim=0)))[:-1].to(torch.int32)
 
+            # We can now use the cumCell to index into the sortedIndices to get the cell index for each particle
+            # We could have reversed the linear indices to get the cell index for each cell, but this is more reliable and avoids inverse computations
+            sortedIndices = torch.floor((sortedPositions - qMin) / hCell).to(torch.int32)
+            cellGridIndices = sortedIndices[cumCell,:]
+            # Cell indices contains the linear indices of the particles in each cell
+            # cellCounters contains the number of particles in each cell
+            # cumCell contains the cumulative sum of the number of particles in each cell, i.e., the offset into the cell
+            # With this information we can build a datastructure with [begin, end) for each cell using cellCounters and cumCell!
 
-    # Do the actual resort
-    sortedPositions = x[sortIndex,:]
-    # sortedSupports = xSupport[sortIndex]
-
-    # compact teh list of occupied cells
-    cellIndices, cellCounters = torch.unique_consecutive(sortedLinear, return_counts=True, return_inverse=False)
-    cellCounters = cellCounters.to(torch.int32)
-    # Needs to zero padded for the indexing to work properly as the 0th cell is valid and cumsum doesn't include the first element
-
-    cumCell = torch.hstack((torch.tensor([0], device = cellIndices.device, dtype=cellCounters.dtype),torch.cumsum(cellCounters,dim=0)))[:-1].to(torch.int32)
-
-    # We can now use the cumCell to index into the sortedIndices to get the cell index for each particle
-    # We could have reversed the linear indices to get the cell index for each cell, but this is more reliable and avoids inverse computations
-    sortedIndices = torch.floor((sortedPositions - qMin) / hCell).to(torch.int32)
-    cellGridIndices = sortedIndices[cumCell,:]
-    # Cell indices contains the linear indices of the particles in each cell
-    # cellCounters contains the number of particles in each cell
-    # cumCell contains the cumulative sum of the number of particles in each cell, i.e., the offset into the cell
-    # With this information we can build a datastructure with [begin, end) for each cell using cellCounters and cumCell!
-
-    # print('cellIndices', cellIndices.device, cellIndices.dtype, cellIndices.shape)
-    # print('cumCell', cumCell.device, cumCell.dtype, cumCell.shape)
-    # print('cellCounters', cellCounters.device, cellCounters.dtype, cellCounters.shape)
+            # print('cellIndices', cellIndices.device, cellIndices.dtype, cellIndices.shape)
+            # print('cumCell', cumCell.device, cumCell.dtype, cumCell.shape)
+            # print('cellCounters', cellCounters.device, cellCounters.dtype, cellCounters.shape)
 
 
-    cellTable = torch.stack((cellIndices, cumCell, cellCounters), dim = 1)
+            cellTable = torch.stack((cellIndices, cumCell, cellCounters), dim = 1)
     
-    
-    warpDevice = castTorchToWarp(queryPositions).device
-    torchDevice = queryPositions.device
+        with record_function("neighborSearch - buildHashMap"):
+            warpDevice = castTorchToWarp(queryPositions).device
+            torchDevice = queryPositions.device
 
-    cellGridIndices_warp = castTorchToWarp(cellGridIndices)
-    hashedIndices_warp = wp.zeros(cellGridIndices.shape[0], dtype=wp.uint32, device=warpDevice)
-    wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice)
-    hashedIndices = wp.to_torch(hashedIndices_warp).to(torch.int32)
-    # print(hashedIndices_warp)
+            cellGridIndices_warp = castTorchToWarp(cellGridIndices)
+            hashedIndices_warp = wp.zeros(cellGridIndices.shape[0], dtype=wp.uint32, device=warpDevice)
+            wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice)
+            hashedIndices = wp.to_torch(hashedIndices_warp).to(torch.int32)
+            # print(hashedIndices_warp)
 
-    sortedSupports = referenceSupports[sortIndex] if referenceSupports is not None else None
-
-
-    hashIndexSorting = torch.argsort(hashedIndices)
-    hashMap, hashMapCounters = torch.unique_consecutive(hashedIndices[hashIndexSorting], return_counts=True, return_inverse=False)
-    hashMapCounters = hashMapCounters.to(torch.int32)
-    # Resort the entries based on the hashIndexSorting so they can be accessed through the hashmap
-    sortedCellIndices = cellIndices[hashIndexSorting]
-    sortedCellTable = torch.stack([c[hashIndexSorting] for c in cellTable.unbind(1)], dim = 1)
-
-    # Same construction as for the cell list but this time we create a more direct table
-    # The table contains the start and length for each cell in the hash table and -1 if the cell is empty
-    hashTable = hashMap.new_ones(hashMapLength,2, dtype = torch.int32) * -1
-    hashTable[:,1] = 0
-    hashMap64 = hashMap.to(torch.int64)
-    hashTable[hashMap64,0] = torch.hstack((torch.tensor([0], device = sortedCellIndices.device, dtype=torch.int32),torch.cumsum(hashMapCounters,dim=0)))[:-1].to(torch.int32) #torch.cumsum(hashMapCounters, dim = 0) #torch.arange(hashMap.shape[0], device=hashMap.device)
-
-    hashTable[hashMap64,1] = hashMapCounters
-
-    # we precompute the offset we want to iterate over based on the searchradius parameter
-    # in 3D for a search radius of n we will iterate over (2n+1)^3 cells, in 2D we will iterate over (2n+1)^2 cells, and in 1D we will iterate over 2n+1 cells
-    searchRadius = 1
-    numOffsets = (2 * searchRadius + 1) ** domainDescription.dim
-    offsets = torch.cartesian_prod(*[torch.arange(-searchRadius, searchRadius+1, device = queryPositions.device) for _ in range(domainDescription.dim)]).to(torch.int32)
-    # print('Offsets to iterate over: ', offsets.shape, numOffsets)
-    # pad to always have the same dimension for the kernel
-    offsets = torch.cat((offsets, torch.zeros(numOffsets, 3 - domainDescription.dim, dtype=torch.int32, device=offsets.device)), dim = 1)
-    D = domainDescription.dim
-    N = queryPositions.shape[0]
-    M = sortedPositions.shape[0]
-    edge_count = wp.zeros(queryPositions.shape[0], dtype=wp.int32, device=warpDevice)
-    wp.launch(radiusSearchCountNeighborsCompactHashMap, dim=queryPositions.shape[0], inputs=[
-        castTorchToWarp(y),
-        castTorchToWarp(querySupports),
-        castTorchToWarp(sortedPositions),
-        castTorchToWarp(sortedSupports),
-        castTorchToWarp(hashTable),
-        castTorchToWarp(sortedCellTable),
-        castTorchToWarp(qMin),
-        hCell,
-        D,
-        castTorchToWarp(offsets),
-        castTorchToWarp(numCells),
-        castTorchToWarp(qMax),
-        castTorchToWarp(qMin),
-        castTorchToWarp(periodicity),
-        wp.uint32(mode_uint),
-        edge_count
-    ], device=warpDevice)
+            sortedSupports = referenceSupports[sortIndex] if referenceSupports is not None else None
 
 
+            hashIndexSorting = torch.argsort(hashedIndices)
+            hashMap, hashMapCounters = torch.unique_consecutive(hashedIndices[hashIndexSorting], return_counts=True, return_inverse=False)
+            hashMapCounters = hashMapCounters.to(torch.int32)
 
-    # Convert counts to host (only the counts, not the main data)
-    edge_count_t = wp.to_torch(edge_count)
-    total_edges = torch.sum(edge_count_t).cpu().item()
+        with record_function("neighborSearch - sort cells"):
+            # Resort the entries based on the hashIndexSorting so they can be accessed through the hashmap
+            sortedCellIndices = cellIndices[hashIndexSorting]
+            sortedCellTable = torch.stack([c[hashIndexSorting] for c in cellTable.unbind(1)], dim = 1)
+        with record_function("neighborSearch - buildHashTable"):
+            # Same construction as for the cell list but this time we create a more direct table
+            # The table contains the start and length for each cell in the hash table and -1 if the cell is empty
+            hashTable = hashMap.new_ones(hashMapLength,2, dtype = torch.int32) * -1
+            hashTable[:,1] = 0
+            hashMap64 = hashMap.to(torch.int64)
+            hashTable[hashMap64,0] = torch.hstack((torch.tensor([0], device = sortedCellIndices.device, dtype=torch.int32),torch.cumsum(hashMapCounters,dim=0)))[:-1].to(torch.int32) #torch.cumsum(hashMapCounters, dim = 0) #torch.arange(hashMap.shape[0], device=hashMap.device)
 
-    # Compute cumulative offsets
-    edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
-    edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
-    edge_offsets_warp = wp.from_torch(edge_offsets)
+            hashTable[hashMap64,1] = hashMapCounters
 
-    # Allocate output arrays on GPU
-    edge_i = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
-    edge_j = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+        with record_function("neighborSearch - count neighbors"):
+            # we precompute the offset we want to iterate over based on the searchradius parameter
+            # in 3D for a search radius of n we will iterate over (2n+1)^3 cells, in 2D we will iterate over (2n+1)^2 cells, and in 1D we will iterate over 2n+1 cells
+            searchRadius = 1
+            numOffsets = (2 * searchRadius + 1) ** domainDescription.dim
+            offsets = torch.cartesian_prod(*[torch.arange(-searchRadius, searchRadius+1, device = queryPositions.device) for _ in range(domainDescription.dim)]).to(torch.int32)
+            # print('Offsets to iterate over: ', offsets.shape, numOffsets)
+            # pad to always have the same dimension for the kernel
+            offsets = torch.cat((offsets, torch.zeros(numOffsets, 3 - domainDescription.dim, dtype=torch.int32, device=offsets.device)), dim = 1)
+            D = domainDescription.dim
+            N = queryPositions.shape[0]
+            M = sortedPositions.shape[0]
+            edge_count = wp.zeros(queryPositions.shape[0], dtype=wp.int32, device=warpDevice)
+            wp.launch(radiusSearchCountNeighborsCompactHashMap, dim=queryPositions.shape[0], inputs=[
+                castTorchToWarp(y),
+                castTorchToWarp(querySupports),
+                castTorchToWarp(sortedPositions),
+                castTorchToWarp(sortedSupports),
+                castTorchToWarp(hashTable),
+                castTorchToWarp(sortedCellTable),
+                castTorchToWarp(qMin),
+                hCell,
+                D,
+                castTorchToWarp(offsets),
+                castTorchToWarp(numCells),
+                castTorchToWarp(qMax),
+                castTorchToWarp(qMin),
+                castTorchToWarp(periodicity),
+                wp.uint32(mode_uint),
+                edge_count
+            ], device=warpDevice)
+        with record_function("neighborSearch - allocate neighbors"):
 
-    wp.launch(radiusSearchCollectCompactHashMap, dim=queryPositions.shape[0], inputs=[
-        castTorchToWarp(y),
-        castTorchToWarp(querySupports),
-        castTorchToWarp(sortedPositions),
-        castTorchToWarp(sortedSupports),
-        castTorchToWarp(hashTable),
-        castTorchToWarp(sortedCellTable),
-        castTorchToWarp(qMin),
-        hCell,
-        D,
-        castTorchToWarp(offsets),
-        castTorchToWarp(numCells),
-        castTorchToWarp(qMax),
-        castTorchToWarp(qMin),
-        castTorchToWarp(periodicity),
-        wp.uint32(mode_uint),   
-        edge_count,
-        edge_offsets_warp,
-        castTorchToWarp(sortIndex),
-        edge_i,
-        edge_j
-    ], device=warpDevice)
+
+            # Convert counts to host (only the counts, not the main data)
+            edge_count_t = wp.to_torch(edge_count)
+            total_edges = torch.sum(edge_count_t).cpu().item()
+
+            # Compute cumulative offsets
+            edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
+            edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
+            edge_offsets_warp = wp.from_torch(edge_offsets)
+
+            # Allocate output arrays on GPU
+            edge_i = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+            edge_j = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+        with record_function("neighborSearch - collect neighbors"):
+            wp.launch(radiusSearchCollectCompactHashMap, dim=queryPositions.shape[0], inputs=[
+                castTorchToWarp(y),
+                castTorchToWarp(querySupports),
+                castTorchToWarp(sortedPositions),
+                castTorchToWarp(sortedSupports),
+                castTorchToWarp(hashTable),
+                castTorchToWarp(sortedCellTable),
+                castTorchToWarp(qMin),
+                hCell,
+                D,
+                castTorchToWarp(offsets),
+                castTorchToWarp(numCells),
+                castTorchToWarp(qMax),
+                castTorchToWarp(qMin),
+                castTorchToWarp(periodicity),
+                wp.uint32(mode_uint),   
+                edge_count,
+                edge_offsets_warp,
+                castTorchToWarp(sortIndex),
+                edge_i,
+                edge_j
+            ], device=warpDevice)
 
 
+        with record_function("neighborSearch - build adjacency"):
+            i_torch = wp.to_torch(edge_i)
+            j_torch = wp.to_torch(edge_j)
 
-    i_torch = wp.to_torch(edge_i)
-    j_torch = wp.to_torch(edge_j)
-
-    adjacencyCH = AdjacencyList(
-        i=i_torch,  # Ensure dtype is long for indexing
-        j=j_torch,
-        numNeighbors=wp.to_torch(edge_count).to(dtype=torch.int64),
-        edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int64),
-        numRows=N,
-        numCols=M
-    )
+            adjacencyCH = AdjacencyList(
+                i=i_torch,  # Ensure dtype is long for indexing
+                j=j_torch,
+                numNeighbors=wp.to_torch(edge_count).to(dtype=torch.int64),
+                edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int64),
+                numRows=N,
+                numCols=M
+            )
     return adjacencyCH
 
     

@@ -8,6 +8,7 @@ from ..radiusSearch.radius_util import convertModeToUint
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
+from torch.profiler import profile, record_function, ProfilerActivity
 
 @wp.func
 def computeDensityWarp(
@@ -127,22 +128,24 @@ def computeDensity_warpBackend(
     kernel: KernelFunctions,    
     adjacency
 ):
-    domainMin = domain.min
-    domainMax = domain.max
-    periodicity = domain.periodic
+    with record_function("warpSPH[Density]"):
+        with record_function("warpSPH[Density] - Preprocessing"):
+            domainMin = domain.min
+            domainMax = domain.max
+            periodicity = domain.periodic
 
-    modeUint = wp.uint32(mode.value)
-    kernelInt = wp.int32(kernel.value)
-
-    warp_sphDensity = warpWrapper(
-        warp_sphDensityFunction,
-        queryPositions, referencePositions,
-        querySupports, referenceSupports,
-        queryMasses, referenceMasses,
-        domainMin, domainMax, periodicity,
-        modeUint,
-        kernelInt,
-        adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors
-    )
+            modeUint = wp.uint32(mode.value)
+            kernelInt = wp.int32(kernel.value)
+        with record_function("warpSPH[Density] - Kernel Execution"):
+            warp_sphDensity = warpWrapper(
+                warp_sphDensityFunction,
+                queryPositions, referencePositions,
+                querySupports, referenceSupports,
+                queryMasses, referenceMasses,
+                domainMin, domainMax, periodicity,
+                modeUint,
+                kernelInt,
+                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors
+            )
     
     return warp_sphDensity

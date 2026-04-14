@@ -9,6 +9,7 @@ from ..radiusSearch.radius_util import convertModeToUint
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
+from torch.profiler import profile, record_function, ProfilerActivity
 
 # In dot mode we compute torch.einsum('nd..., nd -> n...', q, k) 
 # Otherwise we compute torch.einsum('n...d, nd -> n...', q, k)
@@ -178,52 +179,54 @@ def computeSPHDivergence_warpBackend(
     dotMode: bool = False, # if true compute the divergence based on torch.einsum('nd..., nd -> n...', q, k) instead of the normal div torch.einsum('n...d, nd -> n...', q, k)
     scatteredQuantities: Optional[torch.Tensor] = None,
 ):
-    domainMin = domain.min
-    domainMax = domain.max
-    periodicity = domain.periodic
+    with record_function("warpSPH[Divergence]"):
+        with record_function("warpSPH[Divergence] - Preprocessing"):
+            domainMin = domain.min
+            domainMax = domain.max
+            periodicity = domain.periodic
 
-    mode_uint = convertModeToUint(mode.name)
-    kernel_int = kernel.value
-    gradientMode_int = gradientMode.value
+            mode_uint = convertModeToUint(mode.name)
+            kernel_int = kernel.value
+            gradientMode_int = gradientMode.value
 
-    preScatteredQuantities = False
-    if queryValues is None and referenceValues is None:
-        if scatteredQuantities is None:
-            raise ValueError("If queryValues and referenceValues are not provided, then pre-scattered quantities must be provided for the divergence computation.")
-        preScatteredQuantities = True
-        qV = scatteredQuantities
-        rV = scatteredQuantities
-    else:
-        qV = queryValues
-        rV = referenceValues
+            preScatteredQuantities = False
+            if queryValues is None and referenceValues is None:
+                if scatteredQuantities is None:
+                    raise ValueError("If queryValues and referenceValues are not provided, then pre-scattered quantities must be provided for the divergence computation.")
+                preScatteredQuantities = True
+                qV = scatteredQuantities
+                rV = scatteredQuantities
+            else:
+                qV = queryValues
+                rV = referenceValues
 
-    # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-    outputSize = (queryPositions.shape[0])
+            # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
+            outputSize = (queryPositions.shape[0])
 
-    inputShape = qV.shape[1:]
-    flatInputShape = 1
-    for dim in inputShape:
-        flatInputShape *= dim
-        
-    outputShape = inputShape[1:] if dotMode else inputShape[:-1]
-    flatOutputShape = 1
-    for dim in outputShape:
-        flatOutputShape *= dim
-    numDims = len(inputShape)
-    
+            inputShape = qV.shape[1:]
+            flatInputShape = 1
+            for dim in inputShape:
+                flatInputShape *= dim
+                
+            outputShape = inputShape[1:] if dotMode else inputShape[:-1]
+            flatOutputShape = 1
+            for dim in outputShape:
+                flatOutputShape *= dim
+            numDims = len(inputShape)
+            
     # print(f"computeSPHDivergenceTensor_warpBackend: inputShape={inputShape}, flatInputShape={flatInputShape}, outputShape={outputShape}, flatOutputShape={flatOutputShape}, numDims={numDims}")
-
-    warp_result = warpWrapper(
-        launch_kernel, computeSPHDivergenceTensor_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
-        queryPositions, referencePositions,
-        querySupports, referenceSupports,
-        queryMasses, referenceMasses,
-        queryDensities, referenceDensities,
-        qV.view(-1, flatInputShape), rV.view(-1, flatInputShape),
-        domainMin, domainMax, periodicity,
-        mode_uint, kernel_int, gradientMode_int, wp.bool(consistentDivergence),
-        adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
-        wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), wp.bool(dotMode),
-    )
+        with record_function("warpSPH[Divergence] - Kernel Execution"):
+            warp_result = warpWrapper(
+                launch_kernel, computeSPHDivergenceTensor_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
+                queryPositions, referencePositions,
+                querySupports, referenceSupports,
+                queryMasses, referenceMasses,
+                queryDensities, referenceDensities,
+                qV.view(-1, flatInputShape), rV.view(-1, flatInputShape),
+                domainMin, domainMax, periodicity,
+                mode_uint, kernel_int, gradientMode_int, wp.bool(consistentDivergence),
+                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
+                wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), wp.bool(dotMode),
+            )
 
     return warp_result.view(queryPositions.shape[0], *outputShape) # reshape back to original shape with new gradient dimension

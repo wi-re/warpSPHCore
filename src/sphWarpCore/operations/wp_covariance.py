@@ -10,6 +10,7 @@ from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainD
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
 from ..utils.wp_util import getCachedDummyTensor
+from torch.profiler import profile, record_function, ProfilerActivity
 
 # For matrices we need to implement the logic manually using outer products, since Warp does not support rank-2 field types natively. The output is stored as a flattened vector and reshaped on the Python side.
 @wp.func
@@ -110,46 +111,50 @@ def computeSPHCovariance_warpBackend(
     adjacency: AdjacencyListWarp,
     renormalizationMatrices: Optional[torch.Tensor] = None
 ):
-    domainMin = domain.min
-    domainMax = domain.max
-    periodicity = domain.periodic
+    with record_function("warpSPH[Covariance]"):
+        with record_function("warpSPH[Covariance] - Preprocessing"):
+            # Preprocessing and input validation
+            domainMin = domain.min
+            domainMax = domain.max
+            periodicity = domain.periodic
 
-    mode_uint = convertModeToUint(mode.name)
-    kernel_int = kernel.value
-    gradientMode_int = 0
+            mode_uint = convertModeToUint(mode.name)
+            kernel_int = kernel.value
+            gradientMode_int = 0
 
-    preScatteredQuantities = False # Indicates if the input quantities have already been scattered to the neighbor level (e.g. mass/density products), which can save some redundant computations if they are needed for multiple operations. This can also help with some custom kernels where we want to pre-compute certain quantities at the neighbor level on the Python side and pass them in as additional fields to avoid redundant computations in the kernel. 
+            preScatteredQuantities = False # Indicates if the input quantities have already been scattered to the neighbor level (e.g. mass/density products), which can save some redundant computations if they are needed for multiple operations. This can also help with some custom kernels where we want to pre-compute certain quantities at the neighbor level on the Python side and pass them in as additional fields to avoid redundant computations in the kernel. 
 
-    # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-    outputSize = (queryPositions.shape[0])
+            # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
+            outputSize = (queryPositions.shape[0])
 
-    inputShape = queryPositions.shape[1:]
-    flatInputShape = 1
-    for dim in inputShape:
-        flatInputShape *= dim
+            inputShape = queryPositions.shape[1:]
+            flatInputShape = 1
+            for dim in inputShape:
+                flatInputShape *= dim
 
-    outputShape = inputShape + (queryPositions.shape[1],) # add an extra dimension for the gradient
-    flatOutputShape = 1
-    for dim in outputShape:
-        flatOutputShape *= dim
-    # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-    numDims = len(inputShape)
+            outputShape = inputShape + (queryPositions.shape[1],) # add an extra dimension for the gradient
+            flatOutputShape = 1
+            for dim in outputShape:
+                flatOutputShape *= dim
+            # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
+            numDims = len(inputShape)
 
-    D = queryPositions.shape[1]
-    L = renormalizationMatrices if renormalizationMatrices is not None else getCachedDummyTensor((1, D, D), dtype=torch.float32, device=queryPositions.device)
-    renormalize = renormalizationMatrices is not None
+            D = queryPositions.shape[1]
+            L = renormalizationMatrices if renormalizationMatrices is not None else getCachedDummyTensor((1, D, D), dtype=torch.float32, device=queryPositions.device)
+            renormalize = renormalizationMatrices is not None
 
-    warp_result = warpWrapper(
-        launch_kernel, computeSPHCovariance_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
-        queryPositions, referencePositions,
-        querySupports, referenceSupports,
-        queryMasses, referenceMasses,
-        queryDensities, referenceDensities,
-        domainMin, domainMax, periodicity,
-        mode_uint, kernel_int, gradientMode_int,
-        adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, preScatteredQuantities,
-        wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
-        L, wp.bool(renormalize)
-    )
+        with record_function("warpSPH[Covariance] - Kernel Execution"):
+            warp_result = warpWrapper(
+                launch_kernel, computeSPHCovariance_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
+                queryPositions, referencePositions,
+                querySupports, referenceSupports,
+                queryMasses, referenceMasses,
+                queryDensities, referenceDensities,
+                domainMin, domainMax, periodicity,
+                mode_uint, kernel_int, gradientMode_int,
+                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, preScatteredQuantities,
+                wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
+                L, wp.bool(renormalize)
+            )
 
     return warp_result.view(queryPositions.shape[0], *outputShape) # reshape back to original shape with new gradient dimension
