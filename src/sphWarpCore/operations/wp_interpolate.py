@@ -10,27 +10,32 @@ from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainD
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
 from torch.profiler import profile, record_function, ProfilerActivity
+from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j
 
 
 @wp.func
 def computeSPHInterpolation_Func(
-    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32,
-    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32),
+    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, # type: ignore
+    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), # type: ignore
     
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32),
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
     mode_uint: wp.uint32, kernel_int: wp.int32,
     
-    neighborList: wp.array(dtype = wp.int64),
-    neighborOffset : wp.int64, numNeighs: wp.int32, preScatteredQuantities: wp.bool,
+    neighborList: wp.array(dtype = wp.int64), # type: ignore
+    neighborOffset : wp.int32, numNeighs: wp.int32, preScatteredQuantities: wp.bool,
     
     fi: Any,
-    fieldValues: wp.array(dtype = Any)
+    fieldValues: wp.array(dtype = Any), # type: ignore
+    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32) # type: ignore
 ):
     f_interpolated = type(fi)(0.0)
     
     for neighborIndex in range(numNeighs):
-        jj = neighborOffset + wp.int64(neighborIndex)
+        jj = neighborOffset + neighborIndex
         j = wp.int32(neighborList[jj])
+        if opInt != 0:
+            if not checkDirectionality_j(referenceKinds[j], opInt):
+                continue
 
         fv = fieldValues[jj] if preScatteredQuantities else fieldValues[j]
         f_interpolated += fv * masses[j] * sphKernel(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax) / densities[j]
@@ -40,23 +45,30 @@ def computeSPHInterpolation_Func(
 
 @wp.kernel
 def computeSPHInterpolation_Kernel(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)),
-    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32),
-    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), 
-    queryDensities: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32),
-    queryValues: wp.array(dtype = Any), referenceValues: wp.array(dtype = Any),
+    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)), # type: ignore
+    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32), # type: ignore
+    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),  # type: ignore
+    queryDensities: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32), # type: ignore
+    queryValues: wp.array(dtype = Any), referenceValues: wp.array(dtype = Any), # type: ignore
     
-    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool),
+    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64), preScatteredQuantities: wp.bool,
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), preScatteredQuantities: wp.bool,  # type: ignore
+
+    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
-    outputValues : wp.array(dtype = Any)
+    
+    outputValues : wp.array(dtype = Any) # type: ignore
 ):                                                                                    
     i = wp.tid()
     if i >= queryPositions.shape[0]:
         return
     
+    if opInt != 0:
+        if not checkDirectionality_i(queryKinds[i], opInt):
+            return
+        
     xi = queryPositions[i]
     hi = querySupports[i]
     mi = queryMasses[i]
@@ -71,7 +83,7 @@ def computeSPHInterpolation_Kernel(
         referencePositions, referenceSupports, referenceMasses, referenceDensities,
         periodicity, domainMin, domainMax, mode_uint, kernel_int,
         neighborList, neighborOffset, wp.int32(numNeighs), preScatteredQuantities,
-        fi, referenceValues
+        fi, referenceValues, opInt, referenceKinds
     )
     
     
@@ -84,9 +96,11 @@ def computeSPHInterpolant_warpBackend(
     queryMasses, referenceMasses,
     queryDensities, referenceDensities,
     queryValues, referenceValues,
+    queryKinds, referenceKinds,
     domain: DomainDescription,
     mode: SupportScheme,
     kernel: KernelFunctions,    
+    operationMode: OperationDirection,
     adjacency,
     scatteredQuantities: Optional[torch.Tensor] = None,
 ):
@@ -123,6 +137,7 @@ def computeSPHInterpolant_warpBackend(
             modeUint = wp.uint32(mode.value)
             kernelInt = wp.int32(kernel.value)
             outputShape = qV.shape[0]
+            opInt = wp.int32(operationMode.value)
             
             wpValues = castTorchToWarpAsBuiltins(qV)
         with record_function("warpSPH[Interpolation] - Kernel Launch"):
@@ -139,7 +154,8 @@ def computeSPHInterpolant_warpBackend(
                 modeUint,
                 kernelInt,
                 
-                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities)
+                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
+                opInt, queryKinds, referenceKinds,
             )
 
             if needs_flatten:

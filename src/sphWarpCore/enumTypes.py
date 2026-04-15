@@ -56,3 +56,14 @@ class ViscosityTerms(Enum):
     Price2008 = 9
     Wadsley2008 = 10
     DeltaSPH = 11
+
+class OperationDirection(Enum):
+    AllToAll = 0
+    FluidToFluid = 1
+    FluidToBoundary = 2
+    BoundaryToFluid = 3
+    BoundaryToBoundary = 4
+    FluidToGhost = 5
+    GhostToFluid = 6
+    BoundaryToGhost = 7
+    GhostToBoundary = 8

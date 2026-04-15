@@ -87,6 +87,26 @@ def getCachedIdentityMatrices(
 from warp.types import vector, matrix
 # from wp_tensor import tensor
 
+
+_TORCH_TO_WARP_SCALAR_DTYPE = {
+    torch.float16: wp.float16,
+    torch.float32: wp.float32,
+    torch.float64: wp.float64,
+    torch.int8: wp.int8,
+    torch.int16: wp.int16,
+    torch.int32: wp.int32,
+    torch.int64: wp.int64,
+    torch.uint8: wp.uint8,
+    torch.bool: wp.bool,
+}
+
+
+def _torch_scalar_to_warp_dtype(dtype: torch.dtype):
+    scalar = _TORCH_TO_WARP_SCALAR_DTYPE.get(dtype)
+    if scalar is None:
+        raise TypeError(f"Unsupported torch dtype for Warp conversion: {dtype}")
+    return scalar
+
 def castTorchToWarpAsBuiltins(x_torch):
     """
     Cast a PyTorch tensor to a Warp array of built-in types (e.g., float32, int32), ensuring it's on the correct device and has the right dtype.
@@ -95,24 +115,111 @@ def castTorchToWarpAsBuiltins(x_torch):
     
     """
     x_torch = x_torch.contiguous()
+    scalar_wp = _torch_scalar_to_warp_dtype(x_torch.dtype)
     
     if len(x_torch.shape) == 1:
         # 1D tensor, return as is with appropriate dtype
         return wp.from_torch(x_torch)
     elif len(x_torch.shape) == 2:
         N, D = x_torch.shape
-        return wp.from_torch(x_torch, dtype=vector(length=D, dtype=wp.from_torch(x_torch).dtype))
+        return wp.from_torch(x_torch, dtype=vector(length=D, dtype=scalar_wp))
     elif len(x_torch.shape) == 3:
         N, M, D = x_torch.shape
-        return wp.from_torch(x_torch, dtype=matrix(shape=(M, D), dtype=wp.from_torch(x_torch).dtype))
+        return wp.from_torch(x_torch, dtype=matrix(shape=(M, D), dtype=scalar_wp))
     elif len(x_torch.shape) == 4:
         # Warp's kernel type system only handles rank-1 (vector) and rank-2 (matrix).
         # Flatten the trailing three dims into a single vector dimension so the
         # array can be used as a kernel argument type.
         N, P, M, D = x_torch.shape
-        scalar_wp = wp.from_torch(x_torch.reshape(N, P * M * D)).dtype
         return wp.from_torch(x_torch.reshape(N, P * M * D).contiguous(),
                              dtype=vector(length=P * M * D, dtype=scalar_wp))
     
     else:
         return wp.from_torch(x_torch)
+    
+# Convention Wise kind = 0 for fluid, 1 for boundary, 2 for ghost
+# class OperationDirection(Enum):
+#     AllToAll = 0
+#     FluidToFluid = 1
+#     FluidToBoundary = 2
+#     BoundaryToFluid = 3
+#     BoundaryToBoundary = 4
+#     FluidToGhost = 5
+#     GhostToFluid = 6
+#     BoundaryToGhost = 7
+#     GhostToBoundary = 8
+
+@wp.func
+def checkDirectionality_Func(
+    queryKind: wp.int32, referenceKind: wp.int32, opInt: wp.int32
+):
+    if opInt == 0:
+        return True
+    elif opInt == 1: # fluid to fluid
+        return queryKind == 0 and referenceKind == 0
+    elif opInt == 2: # fluid to boundary
+        return queryKind == 0 and referenceKind == 1
+    elif opInt == 3: # boundary to fluid
+        return queryKind == 1 and referenceKind == 0
+    elif opInt == 4: # boundary to boundary
+        return queryKind == 1 and referenceKind == 1
+    elif opInt == 5: # fluid to ghost
+        return queryKind == 0 and referenceKind == 2
+    elif opInt == 6: # ghost to fluid
+        return queryKind == 2 and referenceKind == 0
+    elif opInt == 7: # boundary to ghost
+        return queryKind == 1 and referenceKind == 2
+    elif opInt == 8: # ghost to boundary
+        return queryKind == 2 and referenceKind == 1
+    else:
+        return False
+    
+@wp.func
+def checkDirectionality_i(
+    queryKind: wp.int32, opInt: wp.int32
+):
+    if opInt == 0:
+        return True
+    elif opInt == 1: # fluid to fluid
+        return queryKind == 0
+    elif opInt == 2: # fluid to boundary
+        return queryKind == 0
+    elif opInt == 3: # boundary to fluid
+        return queryKind == 1
+    elif opInt == 4: # boundary to boundary
+        return queryKind == 1
+    elif opInt == 5: # fluid to ghost
+        return queryKind == 0
+    elif opInt == 6: # ghost to fluid
+        return queryKind == 2
+    elif opInt == 7: # boundary to ghost
+        return queryKind == 1
+    elif opInt == 8: # ghost to boundary
+        return queryKind == 2
+    else:
+        return False
+
+@wp.func
+def checkDirectionality_j(
+    referenceKind: wp.int32, opInt: wp.int32
+):
+    if opInt == 0:
+        return True
+    elif opInt == 1: # fluid to fluid
+        return referenceKind == 0
+    elif opInt == 2: # fluid to boundary
+        return referenceKind == 1
+    elif opInt == 3: # boundary to fluid
+        return referenceKind == 0
+    elif opInt == 4: # boundary to boundary
+        return referenceKind == 1
+    elif opInt == 5: # fluid to ghost
+        return referenceKind == 2
+    elif opInt == 6: # ghost to fluid
+        return referenceKind == 0
+    elif opInt == 7: # boundary to ghost
+        return referenceKind == 2
+    elif opInt == 8: # ghost to boundary
+        return referenceKind == 1
+    else:
+        return False

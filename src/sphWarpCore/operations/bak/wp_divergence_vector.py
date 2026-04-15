@@ -20,14 +20,14 @@ def computeSPHDivergenceVector_Func(
     mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
     
     neighborList: wp.array(dtype = wp.int64),
-    neighborOffset : wp.int64, numNeighs: wp.int32,
+    neighborOffset : wp.int32, numNeighs: wp.int32,
     
     outputValue: wp.float32
 ):
     grad_f_interpolated = type(outputValue)(0.0)
     
     for neighborIndex in range(numNeighs):
-        j = wp.int32(neighborList[neighborOffset + wp.int64(neighborIndex)])
+        j = wp.int32(neighborList[neighborOffset + neighborIndex])
         
         mj = masses[j]
         rhoj = densities[j]
@@ -60,7 +60,7 @@ def computeSPHDivergenceVector_Kernel(
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool),
     
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32),
     
     outputValues : wp.array(dtype = wp.float32)
 ):                                                                                    
@@ -80,7 +80,7 @@ def computeSPHDivergenceVector_Kernel(
         
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int, consistentDivergence,
-        neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
+        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
         type(outputValues[i])(0.0))
     
 

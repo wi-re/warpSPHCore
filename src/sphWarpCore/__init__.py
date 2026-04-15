@@ -43,8 +43,9 @@ from .radius import (
     convertModeToUint,
 )
 from .ops import (
-    computeDensity_warpBackend,
-    computeSPHInterpolant_warpBackend,
+    # computeDensity_warpBackend,
+    # computeSPHInterpolant_warpBackend,
+    sphOperation_warp
 )
 
 __version__ = "0.1.0"
@@ -74,6 +75,7 @@ __all__ = [
     "radiusNaive",
     "convertModeToUint",
     # ops
-    "computeDensity_warpBackend",
-    "computeSPHInterpolant_warpBackend",
+    # "computeDensity_warpBackend",
+    # "computeSPHInterpolant_warpBackend",
+    "sphOperation_warp",
 ]

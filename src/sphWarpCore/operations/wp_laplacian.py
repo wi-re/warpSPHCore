@@ -9,6 +9,7 @@ from ..radiusSearch.radius_util import convertModeToUint
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
+from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j
 from torch.profiler import profile, record_function, ProfilerActivity
 
 
@@ -133,16 +134,20 @@ def computeSPHLaplacianTensor_Func(
     mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence: wp.bool,
     
     neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int64, numNeighs: wp.int32, preScatteredQuantities: wp.bool,
+    neighborOffset : wp.int32, numNeighs: wp.int32, preScatteredQuantities: wp.bool,
     dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
     outputValue: vector(dtype = wp.float32, length=Any) # type: ignore
 ):
     laplacian_result = type(outputValue)(0.0)
     
     for neighborIndex in range(numNeighs):
-        jj = neighborOffset + wp.int64(neighborIndex)
+        jj = neighborOffset + neighborIndex
         j = wp.int32(neighborList[jj])
+        if opInt != 0:
+            if not checkDirectionality_j(referenceKinds[j], opInt):
+                continue
 
         xj = positions[j]
         mj = masses[j]
@@ -204,15 +209,19 @@ def computeSPHLaplacianTensor_Kernel(
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence: wp.bool,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64), preScatteredQuantities: wp.bool, # type: ignore
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), preScatteredQuantities: wp.bool, # type: ignore
     
-    dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32, 
+    dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
     outputValues : wp.array(dtype = vector(length = Any, dtype = wp.float32)) # type: ignore
 ):                                                                                    
     i = wp.tid()
     if i >= queryPositions.shape[0]:
         return
+    if opInt != 0:
+        if not checkDirectionality_i(queryKinds[i], opInt):
+            return
     
     xi = queryPositions[i]
     hi = querySupports[i]
@@ -226,9 +235,10 @@ def computeSPHLaplacianTensor_Kernel(
         
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence,
-        neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
+        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
         preScatteredQuantities,
         dim, numDims, flatInputShape, flatOutputShape,
+        opInt, referenceKinds,
         type(outputValues[i])(0.0))
     
 from ..enumTypes import *
@@ -239,12 +249,14 @@ def computeSPHLaplacian_warpBackend(
     queryMasses, referenceMasses,
     queryDensities, referenceDensities,
     queryValues, referenceValues,
+    queryKinds, referenceKinds,
     domain: DomainDescription,
     mode: SupportScheme,
     kernel: KernelFunctions,    
     gradientMode: GradientScheme,
     laplacianMode: LaplacianScheme,
     positiveDivergence: bool,
+    operationMode: OperationDirection,
     adjacency: AdjacencyListWarp,
     scatteredQuantities: Optional[torch.Tensor] = None,
 ):
@@ -259,6 +271,7 @@ def computeSPHLaplacian_warpBackend(
             gradientMode_int = gradientMode.value
             laplacianMode_int = laplacianMode.value
             positiveDivergence = wp.bool(positiveDivergence)
+            opInt = wp.int32(operationMode.value)
 
 
             preScatteredQuantities = False
@@ -299,7 +312,8 @@ def computeSPHLaplacian_warpBackend(
                 domainMin, domainMax, periodicity,
                 mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence,
                 adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
-                wp.int32(queryPositions.shape[1]), wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), 
+                wp.int32(queryPositions.shape[1]), wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
+                opInt, queryKinds, referenceKinds,
             )
     # print(f"computeSPHLaplacian_warpBackend: inputShape={inputShape}, flatInputShape={flatInputShape}, outputShape={outputShape}, flatOutputShape={flatOutputShape}, numDims={numDims}")
 

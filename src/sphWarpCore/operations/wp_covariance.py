@@ -9,7 +9,7 @@ from ..radiusSearch.radius_util import convertModeToUint
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
-from ..utils.wp_util import getCachedDummyTensor
+from ..utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
 from torch.profiler import profile, record_function, ProfilerActivity
 
 # For matrices we need to implement the logic manually using outer products, since Warp does not support rank-2 field types natively. The output is stored as a flattened vector and reshaped on the Python side.
@@ -24,10 +24,11 @@ def computeSPHCovariance_Func(
     mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, # type: ignore
     
     neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int64, numNeighs: wp.int32, preScatteredQuantities: wp. bool,
+    neighborOffset : wp.int32, numNeighs: wp.int32, preScatteredQuantities: wp. bool,
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), renormalize: wp.bool, # type: ignore
+    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
     outputValue: vector(length=Any, dtype=wp.float32) # type: ignore
 ):
@@ -39,8 +40,11 @@ def computeSPHCovariance_Func(
         Li = L[i]
     
     for neighborIndex in range(numNeighs):
-        jj = neighborOffset + wp.int64(neighborIndex)
+        jj = neighborOffset + neighborIndex
         j = wp.int32(neighborList[jj])
+        if opInt != 0:
+            if not checkDirectionality_j(referenceKinds[j], opInt):
+                continue
         
         mj = masses[j]
         rhoj = densities[j]
@@ -66,16 +70,20 @@ def computeSPHCovariance_Kernel(
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64), preScatteredQuantities: wp. bool,# type: ignore
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), preScatteredQuantities: wp. bool,# type: ignore
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), renormalize: wp.bool, # type: ignore
+    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
     outputValues : wp.array(dtype = vector(length=Any, dtype = wp.float32)) # type: ignore
 ):                                                                                    
     i = wp.tid()
     if i >= queryPositions.shape[0]:
         return
+    if opInt != 0:
+        if not checkDirectionality_i(queryKinds[i], opInt):
+            return
     
     xi = queryPositions[i]
     hi = querySupports[i]
@@ -89,10 +97,11 @@ def computeSPHCovariance_Kernel(
         
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int,
-        neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
+        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
         preScatteredQuantities,
         numDims, flatInputShape, flatOutputShape,
         L, renormalize,
+        opInt, referenceKinds,
         type(outputValues[i])(0.0))
     
 
@@ -105,9 +114,11 @@ def computeSPHCovariance_warpBackend(
     querySupports, referenceSupports,
     queryMasses, referenceMasses,
     queryDensities, referenceDensities,
+    queryKinds, referenceKinds,
     domain: DomainDescription,
     mode: SupportScheme,
-    kernel: KernelFunctions,    
+    kernel: KernelFunctions,
+    operationMode: OperationDirection,
     adjacency: AdjacencyListWarp,
     renormalizationMatrices: Optional[torch.Tensor] = None
 ):
@@ -121,6 +132,7 @@ def computeSPHCovariance_warpBackend(
             mode_uint = convertModeToUint(mode.name)
             kernel_int = kernel.value
             gradientMode_int = 0
+            opInt = wp.int32(operationMode.value)
 
             preScatteredQuantities = False # Indicates if the input quantities have already been scattered to the neighbor level (e.g. mass/density products), which can save some redundant computations if they are needed for multiple operations. This can also help with some custom kernels where we want to pre-compute certain quantities at the neighbor level on the Python side and pass them in as additional fields to avoid redundant computations in the kernel. 
 
@@ -154,7 +166,8 @@ def computeSPHCovariance_warpBackend(
                 mode_uint, kernel_int, gradientMode_int,
                 adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, preScatteredQuantities,
                 wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
-                L, wp.bool(renormalize)
+                L, wp.bool(renormalize),
+                opInt, queryKinds, referenceKinds,
             )
 
     return warp_result.view(queryPositions.shape[0], *outputShape) # reshape back to original shape with new gradient dimension

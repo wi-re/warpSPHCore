@@ -788,8 +788,8 @@ def radiusSearchCompactHashMap(
             adjacencyCH = AdjacencyList(
                 i=i_torch,  # Ensure dtype is long for indexing
                 j=j_torch,
-                numNeighbors=wp.to_torch(edge_count).to(dtype=torch.int64),
-                edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int64),
+                numNeighbors=wp.to_torch(edge_count).to(dtype=torch.int32),
+                edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int32),
                 numRows=N,
                 numCols=M
             )

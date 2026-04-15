@@ -1,6 +1,7 @@
 import warp as wp
-from warp.types import vector
-from typing import Any
+from warp.types import vector, matrix
+# from wp_tensor import tensor
+from typing import Any, Optional
 import torch
 from ..utils.wp_autograd import *
 from ..radiusSearch.radius_util import convertModeToUint
@@ -9,124 +10,85 @@ from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainD
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
 from torch.profiler import profile, record_function, ProfilerActivity
+from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j
+
 
 @wp.func
-def computeDensityWarp(
-    xi : vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32,
-    referencePositions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), referenceSupports : wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32),
-    mode_uint: wp.uint32,
-    kernel_int: wp.int32,
+def computeSPHDensity_Func(
+    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, # type: ignore
+    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32),  # type: ignore
     
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
+    mode_uint: wp.uint32, kernel_int: wp.int32,
     
-    neighborList: wp.array(dtype = wp.int64), 
-    neighborOffset : wp.int64, numNeighs: wp.int32,
+    neighborList: wp.array(dtype = wp.int64), # type: ignore
+    neighborOffset : wp.int32, numNeighs: wp.int32, 
+    
+    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32) # type: ignore
 ):
-    rho = wp.float32(0.0)
-    # pairwiseDistance = computeDistance(xi, xi, periodicity, domainMin, domainMax)
-    # pairwiseSupport = computePairwiseSupport(hi, hi, mode_uint)
-    # rho = mi * ( 1.0 - pairwiseDistance) #wendland4_2d(pairwiseDistance, pairwiseSupport, 2)
+    f_interpolated = type(mi)(0.0)
     
     for neighborIndex in range(numNeighs):
-        j = wp.int32(neighborList[neighborOffset + wp.int64(neighborIndex)])
-        
-        # xj= referencePositions[j]
-        # hj= referenceSupports[j]
-        
-        rho += referenceMasses[j] * sphKernel(xi, referencePositions[j], hi, referenceSupports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
-    return rho
+        jj = neighborOffset + neighborIndex
+        j = wp.int32(neighborList[jj])
+
+        if opInt != 0:
+            if not checkDirectionality_j(referenceKinds[j], opInt):
+                continue
+
+        f_interpolated += masses[j] * sphKernel(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax) 
+            
+    return f_interpolated
 
 @wp.kernel
-def sphDensity_warp(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype = wp.float32)),
-    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32),
-    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),
+def computeSPHDensity_Kernel(
+    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)), # type: ignore
+    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32), # type: ignore
+    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),  # type: ignore
+    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
-    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool),
+    mode_uint: wp.uint32, kernel_int : wp.int32,
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32),  # type: ignore
+    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
-    mode_uint: wp.uint32,
-    kernel_int: wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),
-    
-    densities : wp.array(dtype = wp.float32)                                                                                                               
-                                                                                  
-):
-    N = queryPositions.shape[0]
-    M = referencePositions.shape[0]
-    D = queryPositions.dtype._length_
-    
+    outputValues : wp.array(dtype = Any) # type: ignore
+):                                                                                    
     i = wp.tid()
-    if i >= N:
+    if i >= queryPositions.shape[0]:
         return
+    if opInt != 0:
+        if not checkDirectionality_i(queryKinds[i], opInt):
+            return
     
-    xi= queryPositions[i]
-    hi= querySupports[i]
+    xi = queryPositions[i]
+    hi = querySupports[i]
     mi = queryMasses[i]
-    numNeighs = wp.int32(numNeighbors[i])
-    neighborOffset = wp.int64(neighborListRowOffsets[i])
     
-    rho = computeDensityWarp(xi, hi, mi, referencePositions, referenceSupports, referenceMasses, periodicity, domainMin, domainMax, mode_uint, kernel_int, neighborList, neighborOffset, numNeighs)
-        
-    densities[i] = rho
-        
-def warp_sphDensityFunction(
-    queryPositions, referencePositions,
-    querySupports, referenceSupports,
-    queryMasses, referenceMasses,
-    domainMin, domainMax, periodicity,
-    mode_uint,
-    kernel_int,
-    neighborList, neighborListRowOffsets, numNeighbors
-):
-    inputs = [
-        queryPositions, referencePositions,
-        querySupports, referenceSupports,
-        queryMasses, referenceMasses,
-        domainMin, domainMax, periodicity,
-        mode_uint, kernel_int,
-        neighborList, neighborListRowOffsets, numNeighbors
-    ]
-    requires_grad = any(input.requires_grad for input in inputs if hasattr(input, 'requires_grad'))
+    neighborOffset = neighborListRowOffsets[i]
+    numNeighs = numNeighbors[i]
     
-    # for i, input in enumerate(inputs):
-        # print(f'Input {i:02d}: type: {type(input)}')
-    
-    densities = wp.zeros(queryPositions.shape[0], dtype=querySupports.dtype, device=queryPositions.device)
-    densities.requires_grad = requires_grad
-    
-    # print(f'Output: 0: type: {type(densities)} [dtype: {densities.dtype}, device: {densities.device}, shape: {densities.shape}, requires_grad: {densities.requires_grad}]')
-    
-    wp.launch(
-        sphDensity_warp,
-        dim = queryPositions.shape[0],
-        inputs = [
-            queryPositions, referencePositions,
-            querySupports, referenceSupports,
-            queryMasses, referenceMasses,
-            
-            domainMin, domainMax, periodicity,
-            
-            wp.uint32(mode_uint),
-            wp.int32(kernel_int),
-            neighborList, neighborListRowOffsets, numNeighbors,
-            
-            densities
-        ],
-        device = queryPositions.device
+    outputValues[i] = computeSPHDensity_Func(
+        xi, hi, mi,
+        referencePositions, referenceSupports, referenceMasses,
+        periodicity, domainMin, domainMax, mode_uint, kernel_int,
+        neighborList, neighborOffset, wp.int32(numNeighs),
+        opInt, referenceKinds
     )
     
-    return densities
+    
 
 from ..enumTypes import *
 
-def computeDensity_warpBackend(
+def computeSPHDensity_warpBackend(
     queryPositions, referencePositions,
     querySupports, referenceSupports,
     queryMasses, referenceMasses,
+    queryKinds, referenceKinds,
     domain: DomainDescription,
     mode: SupportScheme,
     kernel: KernelFunctions,    
-    adjacency
+    operationMode: OperationDirection,
+    adjacency,
 ):
     with record_function("warpSPH[Density]"):
         with record_function("warpSPH[Density] - Preprocessing"):
@@ -136,16 +98,23 @@ def computeDensity_warpBackend(
 
             modeUint = wp.uint32(mode.value)
             kernelInt = wp.int32(kernel.value)
-        with record_function("warpSPH[Density] - Kernel Execution"):
-            warp_sphDensity = warpWrapper(
-                warp_sphDensityFunction,
+            outputShape = queryPositions.shape[0]
+            opInt = wp.int32(operationMode.value)
+            
+            wpValues = castTorchToWarpAsBuiltins(queryMasses)
+        with record_function("warpSPH[Density] - Kernel Launch"):
+
+            warp_interpolation = warpWrapper(
+                launch_kernel, computeSPHDensity_Kernel, outputShape, wpValues.dtype, 
                 queryPositions, referencePositions,
                 querySupports, referenceSupports,
                 queryMasses, referenceMasses,
                 domainMin, domainMax, periodicity,
                 modeUint,
                 kernelInt,
-                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors
+                
+                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors,
+                opInt, queryKinds, referenceKinds,
             )
-    
-    return warp_sphDensity
+
+    return warp_interpolation

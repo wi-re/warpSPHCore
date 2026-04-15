@@ -9,25 +9,26 @@ from ..radiusSearch.radius_util import convertModeToUint
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
+from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j
 from torch.profiler import profile, record_function, ProfilerActivity
 
 
 @wp.func
 def getStride(
     outputElements: wp.int32, numDims: wp.int32,
-    V: vector(dtype = wp.float32, length=3)
+    V: vector(dtype = wp.float32, length=3) # type: ignore
 ):
     return wp.int32(outputElements / 3)
 @wp.func
 def getStride(
     outputElements: wp.int32, numDims: wp.int32,
-    V: vector(dtype = wp.float32, length=2)
+    V: vector(dtype = wp.float32, length=2) # type: ignore
 ):
     return wp.int32(outputElements / 2)
 @wp.func
 def getStride(
     outputElements: wp.int32, numDims: wp.int32,
-    V: vector(dtype = wp.float32, length=1)
+    V: vector(dtype = wp.float32, length=1) # type: ignore
 ):
     return wp.int32(outputElements)
 
@@ -35,9 +36,9 @@ def getStride(
 # 
 @wp.func
 def curlProduct(
-    T: vector(dtype = wp.float32, length=Any), 
-    V: vector(dtype = wp.float32, length=3),
-    output: vector(dtype = wp.float32, length=Any),
+    T: vector(dtype = wp.float32, length=Any),  # type: ignore
+    V: vector(dtype = wp.float32, length=3), # type: ignore
+    output: vector(dtype = wp.float32, length=Any), # type: ignore
     stride: wp.int32,
     inputElements: wp.int32, outputElements: wp.int32
 ):
@@ -66,9 +67,9 @@ def curlProduct(
 # 
 @wp.func
 def curlProduct(
-    T: vector(dtype = wp.float32, length=Any), 
-    V: vector(dtype = wp.float32, length=2),
-    output: vector(dtype = wp.float32, length=Any),
+    T: vector(dtype = wp.float32, length=Any),  # type: ignore
+    V: vector(dtype = wp.float32, length=2), # type: ignore
+    output: vector(dtype = wp.float32, length=Any), # type: ignore
     stride: wp.int32,
     inputElements: wp.int32, outputElements: wp.int32
 ):
@@ -90,9 +91,9 @@ def curlProduct(
         
 @wp.func
 def curlProduct(
-    T: vector(dtype = wp.float32, length=Any), 
-    V: vector(dtype = wp.float32, length=1),
-    output: vector(dtype = wp.float32, length=Any),
+    T: vector(dtype = wp.float32, length=Any),  # type: ignore
+    V: vector(dtype = wp.float32, length=1), # type: ignore
+    output: vector(dtype = wp.float32, length=Any), # type: ignore
     stride: wp.int32,
     inputElements: wp.int32, outputElements: wp.int32
 ):
@@ -104,24 +105,28 @@ def curlProduct(
 
 @wp.func
 def computeSPHCurlTensor_Func(
-    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, fi : vector(dtype = wp.float32, length=Any),
+    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, fi : vector(dtype = wp.float32, length=Any), # type: ignore
     
-    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), values: wp.array(dtype = vector(dtype = wp.float32, length=Any)),
+    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), values: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
     
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32),
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
     mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, 
     
-    neighborList: wp.array(dtype = wp.int64),
-    neighborOffset : wp.int64, numNeighs: wp.int32, preScatteredQuantities: wp.bool,
+    neighborList: wp.array(dtype = wp.int64), # type: ignore
+    neighborOffset : wp.int32, numNeighs: wp.int32, preScatteredQuantities: wp.bool,
     dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
-    outputValue: vector(dtype = wp.float32, length=Any)
+    outputValue: vector(dtype = wp.float32, length=Any) # type: ignore
 ):
     grad_f_interpolated = type(outputValue)(0.0)
     
     for neighborIndex in range(numNeighs):
-        jj = neighborOffset + wp.int64(neighborIndex)
+        jj = neighborOffset + neighborIndex
         j = wp.int32(neighborList[jj])
+        if opInt != 0:
+            if not checkDirectionality_j(referenceKinds[j], opInt):
+                continue
         
         mj = masses[j]
         rhoj = densities[j]
@@ -147,24 +152,28 @@ def computeSPHCurlTensor_Func(
 
 @wp.kernel
 def computeSPHCurlTensor_Kernel(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)),
-    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32),
-    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), 
-    queryDensities: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32),
-    queryValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), referenceValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)),
+    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)), # type: ignore
+    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32), # type: ignore
+    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),  # type: ignore
+    queryDensities: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32), # type: ignore
+    queryValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), referenceValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
     
-    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool),
+    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64), preScatteredQuantities: wp.bool,
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), preScatteredQuantities: wp.bool, # type: ignore
     
-    dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32, 
+    dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
-    outputValues : wp.array(dtype = vector(length = Any, dtype = wp.float32))
+    outputValues : wp.array(dtype = vector(length = Any, dtype = wp.float32)) # type: ignore
 ):                                                                                    
     i = wp.tid()
     if i >= queryPositions.shape[0]:
         return
+    if opInt != 0:
+        if not checkDirectionality_i(queryKinds[i], opInt):
+            return
     
     xi = queryPositions[i]
     hi = querySupports[i]
@@ -178,9 +187,10 @@ def computeSPHCurlTensor_Kernel(
         
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int,
-        neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]), 
+        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
         preScatteredQuantities,
         dim, numDims, flatInputShape, flatOutputShape,
+        opInt, referenceKinds,
         type(outputValues[i])(0.0))
     
 from ..enumTypes import *
@@ -191,10 +201,12 @@ def computeSPHCurl_warpBackend(
     queryMasses, referenceMasses,
     queryDensities, referenceDensities,
     queryValues, referenceValues,
+    queryKinds, referenceKinds,
     domain: DomainDescription,
     mode: SupportScheme,
     kernel: KernelFunctions,    
     gradientMode: GradientScheme,
+    operationMode: OperationDirection,
     adjacency: AdjacencyListWarp,
     scatteredQuantities: Optional[torch.Tensor] = None,
 ):
@@ -207,6 +219,7 @@ def computeSPHCurl_warpBackend(
             mode_uint = convertModeToUint(mode.name)
             kernel_int = kernel.value
             gradientMode_int = gradientMode.value
+            opInt = wp.int32(operationMode.value)
 
             preScatteredQuantities = False
             if queryValues is None and referenceValues is None:
@@ -254,6 +267,7 @@ def computeSPHCurl_warpBackend(
                 mode_uint, kernel_int, gradientMode_int,
                 adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
                 wp.int32(queryPositions.shape[1]), wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), 
+                opInt, queryKinds, referenceKinds,
             )
 
     return warp_result.view(queryPositions.shape[0], *outputShape) # reshape back to original shape with new gradient dimension

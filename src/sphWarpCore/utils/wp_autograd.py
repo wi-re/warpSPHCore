@@ -119,20 +119,21 @@ class WarpFunctionWrapper(torch.autograd.Function):
     
 warpWrapper = WarpFunctionWrapper.apply
 
-
+from torch.profiler import record_function
 
 def launch_kernel(kernel, output_shape, output_dtype, *args):
-    inputs = list(args)
-    requires_grad = any(input.requires_grad for input in inputs if hasattr(input, 'requires_grad'))
-    
-    output = wp.zeros(output_shape, dtype=output_dtype, device=inputs[0].device)
-    output.requires_grad = requires_grad
-    
-    wp.launch(
-        kernel,
-        dim = output_shape[0] if not isinstance(output_shape, int) else output_shape,
-        inputs = list(args) + [output],
-        device = inputs[0].device
-    )
+    with record_function(f"Warp Kernel: {kernel.__name__}"):
+        inputs = list(args)
+        requires_grad = any(input.requires_grad for input in inputs if hasattr(input, 'requires_grad'))
+        
+        output = wp.zeros(output_shape, dtype=output_dtype, device=inputs[0].device)
+        output.requires_grad = requires_grad
+        
+        wp.launch(
+            kernel,
+            dim = output_shape[0] if not isinstance(output_shape, int) else output_shape,
+            inputs = list(args) + [output],
+            device = inputs[0].device
+        )
     
     return output

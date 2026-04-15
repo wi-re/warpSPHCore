@@ -169,7 +169,7 @@ def computePiViscosityKernel_Func(
     mode_uint: wp.uint32, kernel_int: wp.int32, 
     
     neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int64, numNeighs: wp.int32, 
+    neighborOffset : wp.int32, numNeighs: wp.int32, 
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     
@@ -188,7 +188,7 @@ def computePiViscosityKernel_Func(
     f_interpolated = type(fi)(0.0)
     dim = wp.int32(xi.length)
     for neighborIndex in range(numNeighs):
-        jj = neighborOffset + wp.int64(neighborIndex)
+        jj = neighborOffset + neighborIndex
         j = wp.int32(neighborList[jj])
         
         mj = masses[j]
@@ -223,7 +223,7 @@ def computeViscosityKernel(
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int64), numNeighbors: wp.array(dtype = wp.int64),  # type: ignore
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32),  # type: ignore
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     
@@ -253,7 +253,7 @@ def computeViscosityKernel(
         referencePositions, referenceSupports, referenceMasses, referenceDensities, referenceValues,
         periodicity, domainMin, domainMax,
         mode_uint, kernel_int,
-        neighborList, neighborListRowOffsets[i], wp.int32(numNeighbors[i]),
+        neighborList, neighborListRowOffsets[i], numNeighbors[i],
         numDims, flatInputShape, flatOutputShape,
         type(outputValues[i])(0.0),
         c_s, C_l, C_q, K_, viscosityTerm, scaleBeta, switch, correctXi, useJ
