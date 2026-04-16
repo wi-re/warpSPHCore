@@ -223,3 +223,55 @@ def checkDirectionality_j(
         return referenceKind == 1
     else:
         return False
+    
+
+import torch
+from ..math import volumeToSupport
+from ..radiusSearch.radius_util import DomainDescription
+
+def generateNeighborTestData(nx, targetNumNeighbors, dim, periodic, device):
+
+
+    minDomain = torch.tensor([-1] * dim, dtype = torch.float32, device = device)
+    maxDomain = torch.tensor([ 1] * dim, dtype = torch.float32, device = device)
+    periodicity = torch.tensor([periodic] * dim, device = device, dtype = torch.bool)
+
+    extent = maxDomain - minDomain
+    shortExtent = torch.min(extent, dim = 0)[0].item()
+    dx = (shortExtent / nx)
+    ny = int(1 // dx)
+    h = volumeToSupport(dx**dim, targetNumNeighbors, dim)
+    dy = dx / 1.5
+    ny = int(1 // dy)
+
+    positions = []
+    for d in range(dim):
+        positions.append(torch.linspace(minDomain[d] + dx / 2, maxDomain[d] - dx / 2, int((extent[d] - dx) / dx) + 1, device = device))
+    grid = torch.meshgrid(*positions, indexing = 'xy')
+    
+    positions = torch.stack(grid, dim = -1).reshape(-1,dim).to(device)
+    supports = torch.ones(positions.shape[0], device = device) * h
+    
+    domain = DomainDescription(minDomain, maxDomain, periodicity, dim)
+    
+    return positions, supports, positions.shape[0], domain, dx
+
+
+
+def getNextPrime(n):
+    # Compute the next larger prime number greater than n
+    # used primarily to set the hash map length to a prime number for better distribution of particles in the hash map
+    
+    def is_prime(num):
+        if num <= 1:
+            return False
+        for i in range(2, int(num**0.5) + 1):
+            if num % i == 0:
+                return False
+        return True
+    
+    prime = n + 1
+    while True:
+        if is_prime(prime):
+            return prime
+        prime += 1

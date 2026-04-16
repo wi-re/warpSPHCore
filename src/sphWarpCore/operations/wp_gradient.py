@@ -33,28 +33,30 @@ def computeSPHGradientTensor_Func(
     
     # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
     neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32, preScatteredQuantities: wp. bool,
+    neighborOffset : wp.int32, numNeighs: wp.int32, 
+    
+    # Indicates if the input quantities have already been scattered to the neighbor level 
+    preScatteredQuantities: wp. bool,
     
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
 
     # Optional Correction Terms:
-
     # Gradient renormalization matrices for each query point, used for correcting the kernel gradient based on the local particle distribution.
     useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
     # Grad-h correction terms for each query and reference point, used for correcting the kernel gradient based on the local particle distribution and smoothing length variations.
     useGradHTerms: wp.bool, queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
     # Whether to use actual volume (mass/density) or apparent volume for the gradient computation, and the corresponding volumes if needed.
-    useVolume: bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    useVolume: wp.bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
     # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
-    useCRK: bool, queryA: wp.array(dtype = wp.float32), queryB: wp.array(vector(length=Any, dtype=wp.float32)), queryGradA: wp.array(vector(length=Any, dtype=wp.float32)), queryGradB: wp.array(matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
+    useCRK: wp.bool, queryA: wp.array(dtype = wp.float32), queryB: wp.array(dtype = vector(length=Any, dtype=wp.float32)), queryGradA: wp.array(dtype=vector(length=Any, dtype=wp.float32)), queryGradB: wp.array(dtype=matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
     
     # Dummy value to allow allocation
-    outputValue: vector(length=Any, dtype=wp.float32) # type: ignore
+    outputValue: Any # type: ignore
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return
+            return outputValue * 0.0
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
@@ -71,12 +73,12 @@ def computeSPHGradientTensor_Func(
     gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*0.0
     
     # Initialize the output value
-    out = type(outputValue)(0.0)
+    out     = type(outputValue)(0.0)
 
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
         jj = neighborOffset + neighborIndex
-        j = wp.int32(neighborList[jj])
+        j  = wp.int32(neighborList[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
                 continue
@@ -84,11 +86,11 @@ def computeSPHGradientTensor_Func(
         #   The core particle-particle interaction starts here   #
         ##########################################################
         
-        mj = referenceMasses[j]
+        mj   = referenceMasses[j]
         rhoj = referenceDensities[j]
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
 
-        fj = type(fi)(0.0)
+        fj   = type(fi)(0.0)
         if preScatteredQuantities:
             if useGradHTerms:
                 fj = referenceValues[jj] / referenceOmegas[j]
@@ -132,17 +134,19 @@ def computeSPHGradientTensor_Kernel(
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), preScatteredQuantities: wp. bool,# type: ignore
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
+    
+    preScatteredQuantities: wp. bool,
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
 
     useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)),# type: ignore
     useGradHTerms: wp.bool, queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
-    useVolume: bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
-    useCRK: bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradA: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradB: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
+    useVolume: wp.bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    useCRK: wp.bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradA: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradB: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
     
-    outputValues : wp.array(dtype = vector(length=Any, dtype = wp.float32)) # type: ignore
+    outputValues : wp.array(dtype = Any) # type: ignore
 ):                                                                                    
     i = wp.tid()
     if i >= queryPositions.shape[0]:
@@ -156,6 +160,7 @@ def computeSPHGradientTensor_Kernel(
         
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int,
+
         neighborList, neighborListRowOffsets[i], numNeighbors[i], 
 
         preScatteredQuantities,

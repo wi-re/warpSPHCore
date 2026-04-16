@@ -15,50 +15,79 @@ from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j
 
 @wp.func
 def computeSPHInterpolation_Func(
-    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, # type: ignore
-    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), # type: ignore
+    # General Shape Parameters and indices
+    i : wp.int32, dim: wp.int32, 
+
+    # SPH properties for the query set (indexed by i)
+    queryPositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), querySupports: wp.array(dtype = wp.float32), queryMasses: wp.array(dtype = wp.float32), queryDensities: wp.array(dtype = wp.float32), queryValues: wp.array(dtype = Any), # type: ignore
+
+    # SPH properties for the reference set (indexed by j in the neighbor loop)
+    referencePositions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), referenceSupports : wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32), referenceValues: wp.array(dtype = Any), # type: ignore
     
+    # Domain and kernel parameters
     periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
-    mode_uint: wp.uint32, kernel_int: wp.int32,
+    mode_uint: wp.uint32, kernel_int: wp.int32, 
     
+    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
     neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32, preScatteredQuantities: wp.bool,
+    neighborOffset : wp.int32, numNeighs: wp.int32, 
     
-    fi: Any,
-    fieldValues: wp.array(dtype = Any), # type: ignore
-    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
-    useApparentVolume: wp.bool, referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
-    crkCorrection: wp.bool, Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), # type: ignore
+    # Indicates if the input quantities have already been scattered to the neighbor level 
+    preScatteredQuantities: wp. bool,
+    
+    # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
+    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+
+    # Optional Correction Terms:
+    # Whether to use actual volume (mass/density) or apparent volume for the gradient computation, and the corresponding volumes if needed.
+    useVolume: wp.bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
+    useCRK: wp.bool, queryA: wp.array(dtype = wp.float32), queryB: wp.array(dtype = vector(length=Any, dtype=wp.float32)), # type: ignore
+    
+    # Dummy value to allow allocation
+    outputValue: Any # type: ignore
 ):
-    f_interpolated = type(fi)(0.0)
+    if opInt != 0:
+        if not checkDirectionality_i(queryKinds[i], opInt):
+            return outputValue * 0.0
+    # Unpack query point properties
+    xi      = queryPositions[i]
+    hi      = querySupports[i]
+    # mi      = queryMasses[i] # Generally not needed
+    rhoi    = queryDensities[i]
+    fi      = queryValues[i]
+    # Unpack optional correction terms
+    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
+    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
     
+    # Initialize the output value
+    out     = type(outputValue)(0.0)
+    
+    # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
         jj = neighborOffset + neighborIndex
         j = wp.int32(neighborList[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
                 continue
+        ##########################################################
+        #   The core particle-particle interaction starts here   #
+        ##########################################################
 
-        fv = fieldValues[jj] if preScatteredQuantities else fieldValues[j]
+        fv = referenceValues[jj] if preScatteredQuantities else referenceValues[j]
 
-        vj = masses[j] / densities[j] if not useApparentVolume else referenceVolumes[j]
+        vj = referenceMasses[j] / referenceDensities[j] if not useVolume else referenceVolumes[j]
 
         w_ij = computeKernelCRK(
-            xi, positions[j], 
-            hi, supports[j], 
+            xi, referencePositions[j], 
+            hi, referenceSupports[j], 
             kernel_int, mode_uint, periodicity, domainMin, domainMax,
-            crkCorrection, Ai, Bi
+            useCRK, Ai, Bi
         )
 
-        # w_ij = sphKernel(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
-        # if crkCorrection:
-        #     xij = computeDistanceVec(xi, positions[j], periodicity, domainMin, domainMax)
-        #     prod = Ai * (1.0 + wp.dot(Bi, xij)) * w_ij
-        #     w_ij = prod
-
-        f_interpolated += fv * vj * w_ij
+        out += fv * vj * w_ij
             
-    return f_interpolated
+    return out
 
 
 @wp.kernel
@@ -72,13 +101,14 @@ def computeSPHInterpolation_Kernel(
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), preScatteredQuantities: wp.bool,  # type: ignore
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
+    
+    preScatteredQuantities: wp.bool,  
 
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
-    
-    useApparentVolume: bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
-    crkCorrection: bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), # type: ignore
+    useVolume: wp.bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    useCRK: wp.bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), # type: ignore
     
     outputValues : wp.array(dtype = Any) # type: ignore
 ):                                                                                    
@@ -86,30 +116,25 @@ def computeSPHInterpolation_Kernel(
     if i >= queryPositions.shape[0]:
         return
     
-    if opInt != 0:
-        if not checkDirectionality_i(queryKinds[i], opInt):
-            return
-        
-    xi = queryPositions[i]
-    hi = querySupports[i]
-    mi = queryMasses[i]
-    rhoi = queryDensities[i]
-    fi = queryValues[i]
-    
-    neighborOffset = neighborListRowOffsets[i]
-    numNeighs = numNeighbors[i]
-
-    Ai = crk_A[i] if crkCorrection else type(crk_A[0])(0.0)
-    Bi = crk_B[i] if crkCorrection else type(crk_B[0])(0.0)
-    
     outputValues[i] = computeSPHInterpolation_Func(
-        xi, hi, mi, rhoi,
-        referencePositions, referenceSupports, referenceMasses, referenceDensities,
-        periodicity, domainMin, domainMax, mode_uint, kernel_int,
-        neighborList, neighborOffset, wp.int32(numNeighs), preScatteredQuantities,
-        fi, referenceValues, opInt, referenceKinds,
-        useApparentVolume, referenceVolumes,
-        crkCorrection, Ai, Bi,
+        i, get_dim(queryPositions), 
+
+        queryPositions, querySupports, queryMasses, queryDensities, queryValues,
+        referencePositions, referenceSupports, referenceMasses, referenceDensities, referenceValues,
+
+        periodicity, domainMin, domainMax, 
+        mode_uint, kernel_int,
+
+        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
+        
+        preScatteredQuantities,
+        
+        opInt, queryKinds, referenceKinds,
+        
+        useVolume, queryVolumes, referenceVolumes,
+        useCRK, crk_A, crk_B,
+
+        outputValues[i]
     )
     
     

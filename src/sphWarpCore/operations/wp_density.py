@@ -15,40 +15,65 @@ from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j
 
 @wp.func
 def computeSPHDensity_Func(
-    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, # type: ignore
-    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32),  # type: ignore
+    # General Shape Parameters and indices
+    i : wp.int32, dim: wp.int32, 
+
+    # SPH properties for the query set (indexed by i)
+    queryPositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), querySupports: wp.array(dtype = wp.float32), queryMasses: wp.array(dtype = wp.float32), # type: ignore
+
+    # SPH properties for the reference set (indexed by j in the neighbor loop)
+    referencePositions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), referenceSupports : wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), # type: ignore
     
+    # Domain and kernel parameters
     periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
-    mode_uint: wp.uint32, kernel_int: wp.int32,
+    mode_uint: wp.uint32, kernel_int: wp.int32, 
     
+    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
     neighborList: wp.array(dtype = wp.int64), # type: ignore
     neighborOffset : wp.int32, numNeighs: wp.int32, 
-    
-    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32) # type: ignore
+        
+    # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
+    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+
+    # Optional Correction Terms:
 ):
-    f_interpolated = type(mi)(0.0)
+    if opInt != 0:
+        if not checkDirectionality_i(queryKinds[i], opInt):
+            return wp.float32(0.0)
+    # Unpack query point properties
+    xi      = queryPositions[i]
+    hi      = querySupports[i]
+    # mi      = queryMasses[i] # Generally not needed
     
+    # Initialize the output value
+    out = wp.float32(0.0)
+    
+    # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
         jj = neighborOffset + neighborIndex
         j = wp.int32(neighborList[jj])
-
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
                 continue
+        ##########################################################
+        #   The core particle-particle interaction starts here   #
+        ##########################################################
 
-        f_interpolated += masses[j] * sphKernel(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax) 
+        out += referenceMasses[j] * sphKernel(xi, referencePositions[j], hi, referenceSupports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax) 
             
-    return f_interpolated
+    return out
 
 @wp.kernel
 def computeSPHDensity_Kernel(
     queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)), # type: ignore
     querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32), # type: ignore
     queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),  # type: ignore
+    
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32),  # type: ignore
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
+    
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
     outputValues : wp.array(dtype = Any) # type: ignore
@@ -56,23 +81,20 @@ def computeSPHDensity_Kernel(
     i = wp.tid()
     if i >= queryPositions.shape[0]:
         return
-    if opInt != 0:
-        if not checkDirectionality_i(queryKinds[i], opInt):
-            return
-    
-    xi = queryPositions[i]
-    hi = querySupports[i]
-    mi = queryMasses[i]
-    
-    neighborOffset = neighborListRowOffsets[i]
-    numNeighs = numNeighbors[i]
     
     outputValues[i] = computeSPHDensity_Func(
-        xi, hi, mi,
-        referencePositions, referenceSupports, referenceMasses,
-        periodicity, domainMin, domainMax, mode_uint, kernel_int,
-        neighborList, neighborOffset, wp.int32(numNeighs),
-        opInt, referenceKinds
+        i, get_dim(queryPositions), 
+
+        queryPositions, querySupports, queryMasses, 
+        referencePositions, referenceSupports, referenceMasses, 
+
+        periodicity, domainMin, domainMax, 
+        mode_uint, kernel_int,
+
+        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
+        
+        
+        opInt, queryKinds, referenceKinds,
     )
     
     

@@ -10,8 +10,10 @@ from .mathutil.wp_math import (
     project_mod,
     moduloDistanceComponent,
     minimumImageDistance,
+    volumeToSupport,
+    volumeToSupport_warp,
+    outerTensorProduct
 )
-
 __all__ = [
     "mod_distance",
     "computeCartesianDistance",
@@ -23,4 +25,8 @@ __all__ = [
     "project_mod",
     "moduloDistanceComponent",
     "minimumImageDistance",
+    "volumeToSupport",
+    "volumeToSupport_warp",
+    "outerTensorProduct"
+
 ]

@@ -264,3 +264,38 @@ def outerTensorProduct(
         res[i] += vec[0] * tensor[i]
     return res
     
+import numpy as np
+
+import torch
+@torch.jit.script
+def volumeToSupport(volume : float, targetNeighbors : int, dim : int):
+    """
+    Calculates the support radius based on the given volume, target number of neighbors, and dimension.
+
+    Parameters:
+    volume (float): The volume of the support region.
+    targetNeighbors (int): The desired number of neighbors.
+    dim (int): The dimension of the space.
+
+    Returns:
+    torch.Tensor: The support radius.
+    """
+    if dim == 1:
+        # N_h = 2 h / v -> h = N_h * v / 2
+        return targetNeighbors * volume / 2
+    elif dim == 2:
+        # N_h = \pi h^2 / v -> h = \sqrt{N_h * v / \pi}
+        return torch.sqrt(targetNeighbors * volume / np.pi)
+    else:
+        # N_h = 4/3 \pi h^3 / v -> h = \sqrt[3]{N_h * v / \pi * 3/4}
+        return torch.pow(targetNeighbors * volume / np.pi * 3 /4, 1/3)
+    
+
+@wp.func
+def volumeToSupport_warp(volume : wp.float32, targetNeighbors : wp.int32, dim : wp.int32):
+    if dim == 1:
+        return targetNeighbors * volume / 2.0
+    elif dim == 2:
+        return safe_sqrt(targetNeighbors * volume / np.pi)
+    else:
+        return wp.pow(targetNeighbors * volume / np.pi * 3.0 /4.0, 1.0/3.0)

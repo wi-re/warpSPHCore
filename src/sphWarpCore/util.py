@@ -6,7 +6,10 @@ from .utils.wp_util import (
     clearDummyTensorCache,
     getCachedDummyTensor,
     getCachedIdentityMatrices,
+    getNextPrime,
+    generateNeighborTestData
 )
+
 
 __all__ = [
     "castTorchToWarp",
@@ -15,4 +18,7 @@ __all__ = [
     "clearDummyTensorCache",
     "getCachedDummyTensor",
     "getCachedIdentityMatrices",
+    "generateNeighborTestData",
+
+    "GetNextPrime",#
 ]

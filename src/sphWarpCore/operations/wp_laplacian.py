@@ -126,58 +126,99 @@ def positiveDotProduct(
 
 @wp.func
 def computeSPHLaplacianTensor_Func(
-    i : wp.int32,
-    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, fi : vector(dtype = wp.float32, length=Any), # type: ignore
-    
-    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), values: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
-    
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence: wp.bool,
-    
-    neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32, preScatteredQuantities: wp.bool,
-    dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
-    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+    # General Shape Parameters and indices
+    i : wp.int32, dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
 
-    useGradientRenormalization: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
-    useGradHTerms: wp.bool, referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
-    useVolume: bool, referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
-    useCRK: bool, Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), gradA_i: vector(length=Any, dtype=wp.float32), gradB_i: matrix(shape=(Any, Any), dtype=wp.float32), # type: ignore
+    # SPH properties for the query set (indexed by i)
+    queryPositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), querySupports: wp.array(dtype = wp.float32), queryMasses: wp.array(dtype = wp.float32), queryDensities: wp.array(dtype = wp.float32), queryValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
+
+    # SPH properties for the reference set (indexed by j in the neighbor loop)
+    referencePositions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), referenceSupports : wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32), referenceValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
     
-    outputValue: vector(dtype = wp.float32, length=Any) # type: ignore
+    # Domain and kernel parameters
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
+    mode_uint: wp.uint32, kernel_int: wp.int32, 
+    
+    # Operation specific parameters
+    gradientMode_int: wp.int32, # type: ignore
+    laplacianMode_int: wp.int32, # type: ignore
+    positiveDivergence: wp.bool, # type: ignore
+    
+    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
+    neighborList: wp.array(dtype = wp.int64), # type: ignore
+    neighborOffset : wp.int32, numNeighs: wp.int32, 
+    
+    # Indicates if the input quantities have already been scattered to the neighbor level 
+    preScatteredQuantities: wp. bool,
+    
+    # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
+    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+
+    # Optional Correction Terms:
+    # Gradient renormalization matrices for each query point, used for correcting the kernel gradient based on the local particle distribution.
+    useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
+    # Grad-h correction terms for each query and reference point, used for correcting the kernel gradient based on the local particle distribution and smoothing length variations.
+    useGradHTerms: wp.bool, queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
+    # Whether to use actual volume (mass/density) or apparent volume for the gradient computation, and the corresponding volumes if needed.
+    useVolume: wp.bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
+    useCRK: wp.bool, queryA: wp.array(dtype = wp.float32), queryB: wp.array(dtype = vector(length=Any, dtype=wp.float32)), queryGradA: wp.array(dtype=vector(length=Any, dtype=wp.float32)), queryGradB: wp.array(dtype=matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
+    
+    # Dummy value to allow allocation
+    outputValue: Any # type: ignore
 ):
-    laplacian_result = type(outputValue)(0.0)
-    Li = type(L[0])()
-    if useGradientRenormalization:
-        Li = L[i]
+    if opInt != 0:
+        if not checkDirectionality_i(queryKinds[i], opInt):
+            return outputValue * 0.0
+    # Unpack query point properties
+    xi      = queryPositions[i]
+    hi      = querySupports[i]
+    # mi      = queryMasses[i] # Generally not needed
+    rhoi    = queryDensities[i]
+    fi      = queryValues[i]
+    # Unpack optional correction terms
+    if useGradHTerms:
+        fi  = queryValues[i] / queryOmegas[i]
+    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*0.0
+    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
+    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
+    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(0.0)
+    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*0.0
     
+    # Initialize the output value
+    out     = type(outputValue)(0.0)
+        
+    # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
         jj = neighborOffset + neighborIndex
-        j = wp.int32(neighborList[jj])
+        j  = wp.int32(neighborList[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
                 continue
+        ##########################################################
+        #   The core particle-particle interaction starts here   #
+        ##########################################################
 
-        xj = positions[j]
-        mj = masses[j]
-        rhoj = densities[j]
+        xj = referencePositions[j]
+        mj = referenceMasses[j]
+        rhoj = referenceDensities[j]
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
         fj = type(fi)(0.0)
         if preScatteredQuantities:
             if useGradHTerms:
-                fj = values[jj] / referenceOmegas[j]
+                fj = referenceValues[jj] / referenceOmegas[j]
             else:
-                fj = values[jj]
+                fj = referenceValues[jj]
         else:
             if useGradHTerms:
-                fj = values[j] / referenceOmegas[j]
+                fj = referenceValues[j] / referenceOmegas[j]
             else:
-                fj = values[j]
-        hj = supports[j]
+                fj = referenceValues[j]
+        hj = referenceSupports[j]
         
         kernelGradient = computeKernelGradientCRK(
-            xi, positions[j], 
-            hi, supports[j],
+            xi, referencePositions[j], 
+            hi, referenceSupports[j],
             kernel_int, mode_uint, periodicity, domainMin, domainMax,
             useCRK, Ai, Bi, gradA_i, gradB_i
         )
@@ -206,7 +247,7 @@ def computeSPHLaplacianTensor_Func(
         laplacian_contribution = type(outputValue)(0.0)
 
         if laplacianMode_int == 1: # Naive
-            laplacian_contribution = q_ij * sphKernelLaplacian(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
+            laplacian_contribution = q_ij * sphKernelLaplacian(xi, referencePositions[j], hi, referenceSupports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
         elif laplacianMode_int == 2: # Brookshaw
             laplacian_contribution = -2.0 * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
         elif laplacianMode_int == 3: # Dot
@@ -215,71 +256,60 @@ def computeSPHLaplacianTensor_Func(
             laplacian_contribution = computeDotLaplacian(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
 
         if positiveDivergence:
-            laplacian_result += positiveDotProduct(x_ij, q_ij, laplacian_contribution, dim)
+            out += positiveDotProduct(x_ij, q_ij, laplacian_contribution, dim)
         else:
-            laplacian_result += laplacian_contribution
+            out += laplacian_contribution
 
-    return laplacian_result
+    return out
 
 @wp.kernel
 def computeSPHLaplacianTensor_Kernel(
     queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)), # type: ignore
     querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32), # type: ignore
-    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), # type: ignore
-    queryDensities: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32),# type: ignore
-    queryValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), referenceValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
+    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),  # type: ignore
+    queryDensities: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32), # type: ignore
+    queryValues: wp.array(dtype =vector(dtype = wp.float32, length=Any)), referenceValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
     
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence: wp.bool,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), preScatteredQuantities: wp.bool, # type: ignore
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
     
-    dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    preScatteredQuantities: wp. bool,
+    
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
 
-    useGradientRenormalization: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)),# type: ignore
+    useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)),# type: ignore
     useGradHTerms: wp.bool, queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
-    useVolume: bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
-    useCRK: bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradA: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradB: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
-    
-    outputValues : wp.array(dtype = vector(length = Any, dtype = wp.float32)) # type: ignore
+    useVolume: wp.bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    useCRK: wp.bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradA: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradB: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
+        
+    outputValues : wp.array(dtype = Any) # type: ignore
 ):                                                                                    
     i = wp.tid()
     if i >= queryPositions.shape[0]:
         return
-    if opInt != 0:
-        if not checkDirectionality_i(queryKinds[i], opInt):
-            return
-    
-    xi = queryPositions[i]
-    hi = querySupports[i]
-    mi = queryMasses[i]
-    rhoi = queryDensities[i]
-    fi = queryValues[i]
-    if useGradHTerms:
-        fi = queryValues[i] / queryOmegas[i]
-
-    Ai = crk_A[i] if useCRK else type(crk_A[0])(0.0)
-    Bi = crk_B[i] if useCRK else type(crk_B[0])(0.0)
-    gradA_i = crk_gradA[i] if useCRK else type(crk_gradA[0])(0.0)
-    gradB_i = crk_gradB[i] if useCRK else type(crk_gradB[0])()*0.0
     
     outputValues[i] = computeSPHLaplacianTensor_Func(
-        i,
-        xi, hi, mi, rhoi, fi, 
+        i, get_dim(queryPositions), numDims, flatInputShape, flatOutputShape,
+
+        queryPositions, querySupports, queryMasses, queryDensities, queryValues,
         referencePositions, referenceSupports, referenceMasses, referenceDensities, referenceValues,
         
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence,
-        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
-        preScatteredQuantities,
-        dim, numDims, flatInputShape, flatOutputShape,
-        opInt, referenceKinds,
 
-        useGradientRenormalization, L, 
-        useGradHTerms, referenceOmegas, 
-        useVolume, referenceVolumes,
-        useCRK, Ai, Bi, gradA_i, gradB_i,
+        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
+
+        preScatteredQuantities,
+        
+        opInt, queryKinds, referenceKinds,
+
+        useGradientRenormalization, queryRenormalizationMatrices, 
+        useGradHTerms, queryOmegas, referenceOmegas, 
+        useVolume, queryVolumes, referenceVolumes,
+        useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
 
         type(outputValues[i])(0.0))
     
@@ -359,7 +389,7 @@ def computeSPHLaplacian_warpBackend(
                 domainMin, domainMax, periodicity,
                 mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence,
                 adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
-                wp.int32(queryPositions.shape[1]), wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
+                wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
                 opInt, queryKinds, referenceKinds,
                 
                 wp.bool(useGradientRenormalization), renormalizationMatrices,
