@@ -12,92 +12,114 @@ from ..kernels.wp_kernel import *
 from ..utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
 from torch.profiler import profile, record_function, ProfilerActivity
 
-# For matrices we need to implement the logic manually using outer products, since Warp does not support rank-2 field types natively. The output is stored as a flattened vector and reshaped on the Python side.
+
 @wp.func
 def computeSPHGradientTensor_Func(
-    i : wp.int32,
-    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, fi : vector(dtype = wp.float32, length=Any), # type: ignore
+    # General Shape Parameters and indices
+    i : wp.int32, dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+
+    # SPH properties for the query set (indexed by i)
+    queryPositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), querySupports: wp.array(dtype = wp.float32), queryMasses: wp.array(dtype = wp.float32), queryDensities: wp.array(dtype = wp.float32), queryValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
+
+    # SPH properties for the reference set (indexed by j in the neighbor loop)
+    referencePositions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), referenceSupports : wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32), referenceValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
     
-    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), values: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
-    
+    # Domain and kernel parameters
     periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, # type: ignore
+    mode_uint: wp.uint32, kernel_int: wp.int32, 
     
+    # Operation specific parameters
+    gradientMode_int: wp.int32, # type: ignore
+    
+    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
     neighborList: wp.array(dtype = wp.int64), # type: ignore
     neighborOffset : wp.int32, numNeighs: wp.int32, preScatteredQuantities: wp. bool,
     
-    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
-    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+    # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
+    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
 
-    useGradientRenormalization: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
-    useGradHTerms: wp.bool, referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
-    useVolume: bool, referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
-    useCRK: bool, Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), gradA_i: vector(length=Any, dtype=wp.float32), gradB_i: matrix(shape=(Any, Any), dtype=wp.float32), # type: ignore
+    # Optional Correction Terms:
+
+    # Gradient renormalization matrices for each query point, used for correcting the kernel gradient based on the local particle distribution.
+    useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
+    # Grad-h correction terms for each query and reference point, used for correcting the kernel gradient based on the local particle distribution and smoothing length variations.
+    useGradHTerms: wp.bool, queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
+    # Whether to use actual volume (mass/density) or apparent volume for the gradient computation, and the corresponding volumes if needed.
+    useVolume: bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
+    useCRK: bool, queryA: wp.array(dtype = wp.float32), queryB: wp.array(vector(length=Any, dtype=wp.float32)), queryGradA: wp.array(vector(length=Any, dtype=wp.float32)), queryGradB: wp.array(matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
     
+    # Dummy value to allow allocation
     outputValue: vector(length=Any, dtype=wp.float32) # type: ignore
 ):
-    dim = wp.int32(xi.length)
-    grad_f_interpolated = type(outputValue)(0.0)
-
-    Li = type(L[0])()
-    if useGradientRenormalization:
-        Li = L[i]
+    if opInt != 0:
+        if not checkDirectionality_i(queryKinds[i], opInt):
+            return
+    # Unpack query point properties
+    xi      = queryPositions[i]
+    hi      = querySupports[i]
+    # mi      = queryMasses[i] # Generally not needed
+    rhoi    = queryDensities[i]
+    fi      = queryValues[i]
+    # Unpack optional correction terms
+    if useGradHTerms:
+        fi  = queryValues[i] / queryOmegas[i]
+    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*0.0
+    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
+    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
+    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(0.0)
+    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*0.0
     
+    # Initialize the output value
+    out = type(outputValue)(0.0)
+
+    # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
         jj = neighborOffset + neighborIndex
         j = wp.int32(neighborList[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
                 continue
+        ##########################################################
+        #   The core particle-particle interaction starts here   #
+        ##########################################################
         
-        mj = masses[j]
-        rhoj = densities[j]
+        mj = referenceMasses[j]
+        rhoj = referenceDensities[j]
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
+
         fj = type(fi)(0.0)
         if preScatteredQuantities:
             if useGradHTerms:
-                fj = values[jj] / referenceOmegas[j]
+                fj = referenceValues[jj] / referenceOmegas[j]
             else:
-                fj = values[jj]
+                fj = referenceValues[jj]
         else:
             if useGradHTerms:
-                fj = values[j] / referenceOmegas[j]
+                fj = referenceValues[j] / referenceOmegas[j]
             else:
-                fj = values[j]
-
+                fj = referenceValues[j]
 
         kernelGradient = computeKernelGradientCRK(
-            xi, positions[j], 
-            hi, supports[j],
+            xi, referencePositions[j], 
+            hi, referenceSupports[j],
             kernel_int, mode_uint, periodicity, domainMin, domainMax,
             useCRK, Ai, Bi, gradA_i, gradB_i
         )
-        # x_ij = computeDistanceVec(xi, positions[j], periodicity, domainMin, domainMax)
-        # kernelGradient = sphKernelGradient_ij(x_ij, hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
-
-        # if useCRK:
-        #     W_ij = sphKernel_ij(x_ij, hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
-        #     kernelGradient = correctGradientCRK(
-        #         W_ij,
-        #         kernelGradient, 
-        #         x_ij, 
-        #         Ai, Bi, gradA_i, gradB_i, 
-        #         get_dim(xi))
 
         if useGradientRenormalization:
             kernelGradient = matmul(Li, kernelGradient)
         
-
         if gradientMode_int == 1: # Naive
-            grad_f_interpolated += outerTensorProduct(fj * apparentVolume, kernelGradient, grad_f_interpolated, numDims, flatInputShape, flatOutputShape)
+            out += outerTensorProduct(fj * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == 2: # Symmetric
-            grad_f_interpolated += outerTensorProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, grad_f_interpolated, numDims, flatInputShape, flatOutputShape)
+            out += outerTensorProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == 3: # Difference
-            grad_f_interpolated += outerTensorProduct((fj - fi) * apparentVolume, kernelGradient, grad_f_interpolated, numDims, flatInputShape, flatOutputShape)
+            out += outerTensorProduct((fj - fi) * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == 4: # Summation
-            grad_f_interpolated += outerTensorProduct((fj + fi) * apparentVolume, kernelGradient, grad_f_interpolated, numDims, flatInputShape, flatOutputShape)
+            out += outerTensorProduct((fj + fi) * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
             
-    return grad_f_interpolated
+    return out
 
 @wp.kernel
 def computeSPHGradientTensor_Kernel(
@@ -115,7 +137,7 @@ def computeSPHGradientTensor_Kernel(
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
 
-    useGradientRenormalization: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)),# type: ignore
+    useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)),# type: ignore
     useGradHTerms: wp.bool, queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
     useVolume: bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
     useCRK: bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradA: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradB: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
@@ -125,41 +147,28 @@ def computeSPHGradientTensor_Kernel(
     i = wp.tid()
     if i >= queryPositions.shape[0]:
         return
-    if opInt != 0:
-        if not checkDirectionality_i(queryKinds[i], opInt):
-            return
-    
-    xi = queryPositions[i]
-    hi = querySupports[i]
-    mi = queryMasses[i]
-    rhoi = queryDensities[i]
-    fi = queryValues[i]
-    if useGradHTerms:
-        fi = queryValues[i] / queryOmegas[i]
-
-    Ai = crk_A[i] if useCRK else type(crk_A[0])(0.0)
-    Bi = crk_B[i] if useCRK else type(crk_B[0])(0.0)
-    gradA_i = crk_gradA[i] if useCRK else type(crk_gradA[0])(0.0)
-    gradB_i = crk_gradB[i] if useCRK else type(crk_gradB[0])()*0.0
     
     outputValues[i] = computeSPHGradientTensor_Func(
-        i,
-        xi, hi, mi, rhoi, fi, 
+        i, get_dim(queryPositions), numDims, flatInputShape, flatOutputShape,
+
+        queryPositions, querySupports, queryMasses, queryDensities, queryValues,
         referencePositions, referenceSupports, referenceMasses, referenceDensities, referenceValues,
         
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int,
         neighborList, neighborListRowOffsets[i], numNeighbors[i], 
+
         preScatteredQuantities,
-        numDims, flatInputShape, flatOutputShape,
-        opInt, referenceKinds,
+        
+        opInt, queryKinds, referenceKinds,
 
-        useGradientRenormalization, L, 
-        useGradHTerms, referenceOmegas, 
-        useVolume, referenceVolumes,
-        useCRK, Ai, Bi, gradA_i, gradB_i,
+        useGradientRenormalization, queryRenormalizationMatrices, 
+        useGradHTerms, queryOmegas, referenceOmegas, 
+        useVolume, queryVolumes, referenceVolumes,
+        useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
 
-        type(outputValues[i])(0.0))
+        type(outputValues[i])(0.0)
+    )
     
 
 
