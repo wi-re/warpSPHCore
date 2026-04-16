@@ -43,7 +43,7 @@ def sphOperation_warp(
     preScatteredQuantities: Optional[torch.Tensor] = None,
     queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,
 
-    useGradientRenormalizaiton: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
+    useGradientRenormalization: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
     useGradHTerms: bool = False, queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
     useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
@@ -55,7 +55,7 @@ def sphOperation_warp(
     if operationMode == OperationDirection.AllToAll and (referenceKinds is None):
         referenceKinds = adjacency.numNeighbors # This is safe to do as the kinds are never checked in this case
 
-    if useGradientRenormalizaiton and renormalizationMatrices is None:
+    if useGradientRenormalization and renormalizationMatrices is None:
         raise ValueError("Renormalization matrices must be provided if useGradientRenormalization is True.")
     if useGradHTerms and (queryOmegas is None or referenceOmegas is None):
         raise ValueError("Omegas must be provided if useGradHTerms is True.")
@@ -141,7 +141,7 @@ def sphOperation_warp(
 
                 useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
                 useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
-                useGradientRenormalizaiton= useGradientRenormalizaiton, renormalizationMatrices= renormalizationMatrices,
+                useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
                 useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,                
             )
         elif operation == WarpOperation.Divergence:
@@ -160,7 +160,7 @@ def sphOperation_warp(
 
                 useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
                 useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
-                useGradientRenormalizaiton= useGradientRenormalizaiton, renormalizationMatrices= renormalizationMatrices,
+                useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
                 useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
             )
         elif operation == WarpOperation.Curl:
@@ -179,7 +179,7 @@ def sphOperation_warp(
 
                 useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
                 useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
-                useGradientRenormalizaiton= useGradientRenormalizaiton, renormalizationMatrices= renormalizationMatrices,
+                useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
                 useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
             )
         elif operation == WarpOperation.Laplacian:
@@ -199,7 +199,7 @@ def sphOperation_warp(
 
                 useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
                 useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
-                useGradientRenormalizaiton= useGradientRenormalizaiton, renormalizationMatrices= renormalizationMatrices,
+                useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
                 useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
                 
             )

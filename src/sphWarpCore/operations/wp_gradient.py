@@ -29,9 +29,8 @@ def computeSPHGradientTensor_Func(
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
 
-    renormalize: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
-    gradHTerms: wp.bool, referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
-
+    useGradientRenormalization: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
+    useGradHTerms: wp.bool, referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
     useVolume: bool, referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
     useCRK: bool, Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), gradA_i: vector(length=Any, dtype=wp.float32), gradB_i: matrix(shape=(Any, Any), dtype=wp.float32), # type: ignore
     
@@ -41,7 +40,7 @@ def computeSPHGradientTensor_Func(
     grad_f_interpolated = type(outputValue)(0.0)
 
     Li = type(L[0])()
-    if renormalize:
+    if useGradientRenormalization:
         Li = L[i]
     
     for neighborIndex in range(numNeighs):
@@ -56,12 +55,12 @@ def computeSPHGradientTensor_Func(
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
         fj = type(fi)(0.0)
         if preScatteredQuantities:
-            if gradHTerms:
+            if useGradHTerms:
                 fj = values[jj] / referenceOmegas[j]
             else:
                 fj = values[jj]
         else:
-            if gradHTerms:
+            if useGradHTerms:
                 fj = values[j] / referenceOmegas[j]
             else:
                 fj = values[j]
@@ -85,7 +84,7 @@ def computeSPHGradientTensor_Func(
         #         Ai, Bi, gradA_i, gradB_i, 
         #         get_dim(xi))
 
-        if renormalize:
+        if useGradientRenormalization:
             kernelGradient = matmul(Li, kernelGradient)
         
 
@@ -116,8 +115,8 @@ def computeSPHGradientTensor_Kernel(
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
 
-    renormalize: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)),# type: ignore
-    gradHTerms: wp.bool, queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
+    useGradientRenormalization: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)),# type: ignore
+    useGradHTerms: wp.bool, queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
     useVolume: bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
     useCRK: bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradA: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradB: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
     
@@ -135,7 +134,7 @@ def computeSPHGradientTensor_Kernel(
     mi = queryMasses[i]
     rhoi = queryDensities[i]
     fi = queryValues[i]
-    if gradHTerms:
+    if useGradHTerms:
         fi = queryValues[i] / queryOmegas[i]
 
     Ai = crk_A[i] if useCRK else type(crk_A[0])(0.0)
@@ -155,8 +154,8 @@ def computeSPHGradientTensor_Kernel(
         numDims, flatInputShape, flatOutputShape,
         opInt, referenceKinds,
 
-        renormalize, L, 
-        gradHTerms, referenceOmegas, 
+        useGradientRenormalization, L, 
+        useGradHTerms, referenceOmegas, 
         useVolume, referenceVolumes,
         useCRK, Ai, Bi, gradA_i, gradB_i,
 
@@ -181,8 +180,8 @@ def computeSPHGradient_warpBackend(
     operationMode: OperationDirection,
     adjacency: AdjacencyListWarp,
     scatteredQuantities: Optional[torch.Tensor] = None,
-    
-    useGradientRenormalizaiton: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
+
+    useGradientRenormalization: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
     useGradHTerms: bool = False, queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
     useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
@@ -240,7 +239,7 @@ def computeSPHGradient_warpBackend(
                 wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
                 opInt, queryKinds, referenceKinds,
 
-                wp.bool(useGradientRenormalizaiton), renormalizationMatrices,
+                wp.bool(useGradientRenormalization), renormalizationMatrices,
                 wp.bool(useGradHTerms), queryOmegas, referenceOmegas,                
                 wp.bool(useVolume), queryVolumes, referenceVolumes,
                 wp.bool(useCRK), crk_A, crk_B, crk_gradA, crk_gradB
