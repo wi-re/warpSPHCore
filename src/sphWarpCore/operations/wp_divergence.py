@@ -190,6 +190,11 @@ def computeSPHDivergence_warpBackend(
     consistentDivergence: bool = False,
     dotMode: bool = False, # if true compute the divergence based on torch.einsum('nd..., nd -> n...', q, k) instead of the normal div torch.einsum('n...d, nd -> n...', q, k)
     scatteredQuantities: Optional[torch.Tensor] = None,
+    
+    useGradientRenormalizaiton: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
+    useGradHTerms: bool = False, queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
+    useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
 ):
     with record_function("warpSPH[Divergence]"):
         with record_function("warpSPH[Divergence] - Preprocessing"):

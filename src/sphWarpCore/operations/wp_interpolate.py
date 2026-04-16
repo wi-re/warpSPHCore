@@ -26,7 +26,9 @@ def computeSPHInterpolation_Func(
     
     fi: Any,
     fieldValues: wp.array(dtype = Any), # type: ignore
-    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32) # type: ignore
+    opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+    useApparentVolume: wp.bool, referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    crkCorrection: wp.bool, Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), # type: ignore
 ):
     f_interpolated = type(fi)(0.0)
     
@@ -38,7 +40,23 @@ def computeSPHInterpolation_Func(
                 continue
 
         fv = fieldValues[jj] if preScatteredQuantities else fieldValues[j]
-        f_interpolated += fv * masses[j] * sphKernel(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax) / densities[j]
+
+        vj = masses[j] / densities[j] if not useApparentVolume else referenceVolumes[j]
+
+        w_ij = computeKernelCRK(
+            xi, positions[j], 
+            hi, supports[j], 
+            kernel_int, mode_uint, periodicity, domainMin, domainMax,
+            crkCorrection, Ai, Bi
+        )
+
+        # w_ij = sphKernel(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
+        # if crkCorrection:
+        #     xij = computeDistanceVec(xi, positions[j], periodicity, domainMin, domainMax)
+        #     prod = Ai * (1.0 + wp.dot(Bi, xij)) * w_ij
+        #     w_ij = prod
+
+        f_interpolated += fv * vj * w_ij
             
     return f_interpolated
 
@@ -59,6 +77,9 @@ def computeSPHInterpolation_Kernel(
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
     
     
+    useApparentVolume: bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    crkCorrection: bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), # type: ignore
+    
     outputValues : wp.array(dtype = Any) # type: ignore
 ):                                                                                    
     i = wp.tid()
@@ -77,13 +98,18 @@ def computeSPHInterpolation_Kernel(
     
     neighborOffset = neighborListRowOffsets[i]
     numNeighs = numNeighbors[i]
+
+    Ai = crk_A[i] if crkCorrection else type(crk_A[0])(0.0)
+    Bi = crk_B[i] if crkCorrection else type(crk_B[0])(0.0)
     
     outputValues[i] = computeSPHInterpolation_Func(
         xi, hi, mi, rhoi,
         referencePositions, referenceSupports, referenceMasses, referenceDensities,
         periodicity, domainMin, domainMax, mode_uint, kernel_int,
         neighborList, neighborOffset, wp.int32(numNeighs), preScatteredQuantities,
-        fi, referenceValues, opInt, referenceKinds
+        fi, referenceValues, opInt, referenceKinds,
+        useApparentVolume, referenceVolumes,
+        crkCorrection, Ai, Bi,
     )
     
     
@@ -103,6 +129,8 @@ def computeSPHInterpolant_warpBackend(
     operationMode: OperationDirection,
     adjacency,
     scatteredQuantities: Optional[torch.Tensor] = None,
+    useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None,
 ):
     with record_function("warpSPH[Interpolation]"):
         with record_function("warpSPH[Interpolation] - Preprocessing"):
@@ -156,6 +184,9 @@ def computeSPHInterpolant_warpBackend(
                 
                 adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
                 opInt, queryKinds, referenceKinds,
+
+                wp.bool(useVolume), queryVolumes, referenceVolumes,
+                wp.bool(useCRK), crk_A, crk_B,
             )
 
             if needs_flatten:

@@ -299,6 +299,23 @@ def sphKernel(
         return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
     return sphKernel_(xij, hij, kernel)
 
+@wp.func
+def sphKernel_ij(
+    xij: vector(dtype=wp.float32, length=Any),
+    hi: wp.float32,
+    hj: wp.float32,
+    kernel: wp.int32,
+    mode: wp.uint32,
+    periodic: wp.array(dtype = wp.bool),
+    minDomain: wp.array(dtype = wp.float32),
+    maxDomain: wp.array(dtype = wp.float32),
+):
+    hij = computePairwiseSupport(hi, hj, mode)
+    if mode == 4: # SuperSymmetric
+        return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
+    return sphKernel_(xij, hij, kernel)
+
+
 # Torch Version
 # @torch.jit.script
 # def Kernel_Gradient(kernel: KernelType, x: torch.Tensor, h: torch.Tensor):
@@ -329,6 +346,8 @@ def sphGradient_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel:
     normalizedKernelTerm = kernelTerm * normalizationTerm
     return grad * normalizedKernelTerm
 
+
+
 @wp.func
 def sphKernelGradient(
     xi: vector(dtype=wp.float32, length=Any),
@@ -347,6 +366,22 @@ def sphKernelGradient(
         return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
     return sphGradient_(xij, hij, kernel)
 
+
+@wp.func
+def sphKernelGradient_ij(
+    xij: vector(dtype=wp.float32, length=Any),
+    hi: wp.float32,
+    hj: wp.float32,
+    kernel: wp.int32,
+    mode: wp.uint32,
+    periodic: wp.array(dtype = wp.bool),
+    minDomain: wp.array(dtype = wp.float32),
+    maxDomain: wp.array(dtype = wp.float32),
+):
+    hij = computePairwiseSupport(hi, hj, mode)
+    if mode == 4: # SuperSymmetric
+        return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
+    return sphGradient_(xij, hij, kernel)
 # Torch Version
 # def Kernel_Derivative(kernel: KernelType, x: torch.Tensor, h: torch.Tensor):
 #     dim = x.shape[1]
@@ -558,3 +593,85 @@ def sphKernelDkDh(
     
     return sphKernelDkDh_(xij, hij, kernel)
     
+
+@wp.func
+def get_dim(v: vector(length=1, dtype = wp.float32)): # type: ignore
+    return 1
+@wp.func
+def get_dim(v: vector(length=2, dtype = wp.float32)): # type: ignore
+    return 2
+@wp.func
+def get_dim(v: vector(length=3, dtype = wp.float32)): # type: ignore
+    return 3
+
+@wp.func
+def correctGradientCRK(
+    W_ij: wp.float32,
+    gradW_ij: vector(length=Any, dtype=wp.float32), # type: ignore
+    x_ij: vector(length=Any, dtype=wp.float32), # type: ignore
+    Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), gradAi: vector(length=Any, dtype=wp.float32), gradBi: matrix(shape=(Any, Any), dtype=wp.float32), # type: ignore
+    dim: wp.int32
+):
+    
+    term1 = (Ai * W_ij) * Bi 
+    term2 = (Ai * (1.0 + wp.dot(Bi, x_ij))) * gradW_ij
+    term3 = ((1.0 + wp.dot(Bi, x_ij)) * W_ij) * gradAi
+
+    factor = Ai * W_ij
+    # Compute the dot product of x_ij with each row of gradBi
+    product = type(gradW_ij)(0.0)
+    for row in range(dim):
+        for col in range(dim):
+            product[row] += x_ij[col] * gradBi[row, col]
+    term4 = factor * product
+
+    return term1 + term2 + term3  + term4
+
+
+@wp.func
+def computeKernelGradientCRK(
+    xi: vector(dtype=wp.float32, length=Any),
+    xj: vector(dtype=wp.float32, length=Any),
+    hi: wp.float32,
+    hj: wp.float32,
+    kernel: wp.int32,
+    mode: wp.uint32,
+    periodicity: wp.array(dtype = wp.bool),
+    domainMin: wp.array(dtype = wp.float32),
+    domainMax: wp.array(dtype = wp.float32),
+    useCRK: wp.bool,
+    Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), gradAi: vector(length=Any, dtype=wp.float32), gradBi: matrix(shape=(Any, Any), dtype=wp.float32), # type: ignore
+):
+    x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
+    kernelGradient = sphKernelGradient_ij(x_ij, hi, hj, kernel, mode, periodicity, domainMin, domainMax)
+
+    if useCRK:
+        W_ij = sphKernel_ij(x_ij, hi, hj, kernel, mode, periodicity, domainMin, domainMax)
+        return correctGradientCRK(
+            W_ij,
+            kernelGradient, 
+            x_ij, 
+            Ai, Bi, gradAi, gradBi, 
+            get_dim(xi))
+    return kernelGradient
+
+@wp.func
+def computeKernelCRK(
+    xi: vector(dtype=wp.float32, length=Any),
+    xj: vector(dtype=wp.float32, length=Any),
+    hi: wp.float32,
+    hj: wp.float32,
+    kernel: wp.int32,
+    mode: wp.uint32,
+    periodicity: wp.array(dtype = wp.bool),
+    domainMin: wp.array(dtype = wp.float32),
+    domainMax: wp.array(dtype = wp.float32),
+    useCRK: wp.bool,
+    Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32)
+):
+    x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
+    w_ij = sphKernel_ij(x_ij, hi, hj, kernel, mode, periodicity, domainMin, domainMax)
+    if useCRK:
+        xij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
+        return Ai * (1.0 + wp.dot(Bi, xij)) * w_ij
+    return w_ij

@@ -27,9 +27,13 @@ def computeSPHGradientTensor_Func(
     neighborOffset : wp.int32, numNeighs: wp.int32, preScatteredQuantities: wp. bool,
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
-    L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), renormalize: wp.bool, # type: ignore
-    referenceOmegas: wp.array(dtype = wp.float32), gradHTerms: wp.bool, # type: ignore
     opInt: wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+
+    renormalize: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
+    gradHTerms: wp.bool, referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
+
+    useVolume: bool, referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    useCRK: bool, Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), gradA_i: vector(length=Any, dtype=wp.float32), gradB_i: matrix(shape=(Any, Any), dtype=wp.float32), # type: ignore
     
     outputValue: vector(length=Any, dtype=wp.float32) # type: ignore
 ):
@@ -49,7 +53,7 @@ def computeSPHGradientTensor_Func(
         
         mj = masses[j]
         rhoj = densities[j]
-        apparentVolume = mj / rhoj
+        apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
         fj = type(fi)(0.0)
         if preScatteredQuantities:
             if gradHTerms:
@@ -61,8 +65,26 @@ def computeSPHGradientTensor_Func(
                 fj = values[j] / referenceOmegas[j]
             else:
                 fj = values[j]
-        
-        kernelGradient = sphKernelGradient(xi, positions[j], hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
+
+
+        kernelGradient = computeKernelGradientCRK(
+            xi, positions[j], 
+            hi, supports[j],
+            kernel_int, mode_uint, periodicity, domainMin, domainMax,
+            useCRK, Ai, Bi, gradA_i, gradB_i
+        )
+        # x_ij = computeDistanceVec(xi, positions[j], periodicity, domainMin, domainMax)
+        # kernelGradient = sphKernelGradient_ij(x_ij, hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
+
+        # if useCRK:
+        #     W_ij = sphKernel_ij(x_ij, hi, supports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
+        #     kernelGradient = correctGradientCRK(
+        #         W_ij,
+        #         kernelGradient, 
+        #         x_ij, 
+        #         Ai, Bi, gradA_i, gradB_i, 
+        #         get_dim(xi))
+
         if renormalize:
             kernelGradient = matmul(Li, kernelGradient)
         
@@ -92,9 +114,12 @@ def computeSPHGradientTensor_Kernel(
     neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), preScatteredQuantities: wp. bool,# type: ignore
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
-    L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), renormalize: wp.bool, # type: ignore
-    queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32), gradHTerms: wp.bool, # type: ignore
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+
+    renormalize: wp.bool, L: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)),# type: ignore
+    gradHTerms: wp.bool, queryOmegas: wp.array(dtype = wp.float32), referenceOmegas: wp.array(dtype = wp.float32),  # type: ignore
+    useVolume: bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
+    useCRK: bool, crk_A: wp.array(dtype = wp.float32), crk_B: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradA: wp.array(dtype = vector(length=Any, dtype=wp.float32)), crk_gradB: wp.array(dtype = matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
     
     outputValues : wp.array(dtype = vector(length=Any, dtype = wp.float32)) # type: ignore
 ):                                                                                    
@@ -112,6 +137,11 @@ def computeSPHGradientTensor_Kernel(
     fi = queryValues[i]
     if gradHTerms:
         fi = queryValues[i] / queryOmegas[i]
+
+    Ai = crk_A[i] if useCRK else type(crk_A[0])(0.0)
+    Bi = crk_B[i] if useCRK else type(crk_B[0])(0.0)
+    gradA_i = crk_gradA[i] if useCRK else type(crk_gradA[0])(0.0)
+    gradB_i = crk_gradB[i] if useCRK else type(crk_gradB[0])()*0.0
     
     outputValues[i] = computeSPHGradientTensor_Func(
         i,
@@ -123,9 +153,13 @@ def computeSPHGradientTensor_Kernel(
         neighborList, neighborListRowOffsets[i], numNeighbors[i], 
         preScatteredQuantities,
         numDims, flatInputShape, flatOutputShape,
-        L, renormalize,
-        referenceOmegas, gradHTerms,
         opInt, referenceKinds,
+
+        renormalize, L, 
+        gradHTerms, referenceOmegas, 
+        useVolume, referenceVolumes,
+        useCRK, Ai, Bi, gradA_i, gradB_i,
+
         type(outputValues[i])(0.0))
     
 
@@ -147,8 +181,11 @@ def computeSPHGradient_warpBackend(
     operationMode: OperationDirection,
     adjacency: AdjacencyListWarp,
     scatteredQuantities: Optional[torch.Tensor] = None,
-    renormalizationMatrices: Optional[torch.Tensor] = None,
-    queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
+    
+    useGradientRenormalizaiton: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
+    useGradHTerms: bool = False, queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
+    useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
 ):
     with record_function("warpSPH[Gradient]"):
         with record_function("warpSPH[Gradient] - Preprocessing"):
@@ -188,12 +225,7 @@ def computeSPHGradient_warpBackend(
             numDims = len(inputShape)
 
             D = queryPositions.shape[1]
-            L = renormalizationMatrices if renormalizationMatrices is not None else getCachedDummyTensor((1, D, D), dtype=torch.float32, device=queryPositions.device)
-            renormalize = renormalizationMatrices is not None
 
-            Oi = queryOmegas if queryOmegas is not None else getCachedDummyTensor((queryPositions.shape[0],), dtype=torch.float32, device=queryPositions.device)
-            Oj = referenceOmegas if referenceOmegas is not None else getCachedDummyTensor((referencePositions.shape[0],), dtype=torch.float32, device=queryPositions.device)
-            gradHTerms = queryOmegas is not None and referenceOmegas is not None
         with record_function("warpSPH[Gradient] - Kernel Execution"):
             warp_result = warpWrapper(
                 launch_kernel, computeSPHGradientTensor_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
@@ -206,9 +238,12 @@ def computeSPHGradient_warpBackend(
                 mode_uint, kernel_int, gradientMode_int,
                 adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, preScatteredQuantities,
                 wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
-                L, wp.bool(renormalize), 
-                Oi, Oj, wp.bool(gradHTerms),
-                opInt, queryKinds, referenceKinds
+                opInt, queryKinds, referenceKinds,
+
+                wp.bool(useGradientRenormalizaiton), renormalizationMatrices,
+                wp.bool(useGradHTerms), queryOmegas, referenceOmegas,                
+                wp.bool(useVolume), queryVolumes, referenceVolumes,
+                wp.bool(useCRK), crk_A, crk_B, crk_gradA, crk_gradB
             )
 
     return warp_result.view(queryPositions.shape[0], *outputShape) # reshape back to original shape with new gradient dimension

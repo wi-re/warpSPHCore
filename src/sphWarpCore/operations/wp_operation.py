@@ -23,6 +23,7 @@ from ..enumTypes import *
 from typing import Optional
 from torch.profiler import profile, record_function, ProfilerActivity
 
+from ..utils.wp_util import getCachedDummyTensor
 
 def sphOperation_warp(
     queryPositions, referencePositions,
@@ -40,9 +41,12 @@ def sphOperation_warp(
     operationMode: OperationDirection = OperationDirection.AllToAll,
     positiveDivergence: bool = False,
     preScatteredQuantities: Optional[torch.Tensor] = None,
-    renormalizationMatrices: Optional[torch.Tensor] = None,
-    queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
-    queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None
+    queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,
+
+    useGradientRenormalizaiton: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
+    useGradHTerms: bool = False, queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
+    useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
 ):
     if operationMode != OperationDirection.AllToAll and (queryKinds is None or referenceKinds is None):
         raise ValueError("Query and reference kinds must be provided for non AllToAll operation modes. Operation mode: {}, queryKinds is None: {}, referenceKinds is None: {}".format(operationMode, queryKinds is None, referenceKinds is None))
@@ -50,6 +54,36 @@ def sphOperation_warp(
         queryKinds = adjacency.numNeighbors # This is safe to do as the kinds are never checked in this case
     if operationMode == OperationDirection.AllToAll and (referenceKinds is None):
         referenceKinds = adjacency.numNeighbors # This is safe to do as the kinds are never checked in this case
+
+    if useGradientRenormalizaiton and renormalizationMatrices is None:
+        raise ValueError("Renormalization matrices must be provided if useGradientRenormalization is True.")
+    if useGradHTerms and (queryOmegas is None or referenceOmegas is None):
+        raise ValueError("Omegas must be provided if useGradHTerms is True.")
+    if useVolume and (queryVolumes is None or referenceVolumes is None):
+        raise ValueError("Volumes must be provided if useVolume is True.")
+    if useCRK and (crk_A is None or crk_B is None):
+        raise ValueError("CRK correction A and B tensors must be provided if useCRK is True.")
+    if useCRK and (crk_gradA is None or crk_gradB is None) and operation in [WarpOperation.Gradient, WarpOperation.Divergence, WarpOperation.Curl]:
+        raise ValueError("CRK gradient correction A and B tensors must be provided if useCRK is True and the operation is Gradient, Divergence, or Curl.")
+    if renormalizationMatrices is None:
+        renormalizationMatrices = getCachedDummyTensor((1,queryPositions.shape[1], queryPositions.shape[1]), dtype=queryPositions.dtype, device=queryPositions.device)
+    if queryOmegas is None:
+        queryOmegas = getCachedDummyTensor((1,), dtype=queryPositions.dtype, device=queryPositions.device)
+    if referenceOmegas is None:
+        referenceOmegas = getCachedDummyTensor((1,), dtype=queryPositions.dtype, device=queryPositions.device)
+    if queryVolumes is None:
+        queryVolumes = getCachedDummyTensor((1,), dtype=queryPositions.dtype, device=queryPositions.device)
+    if referenceVolumes is None:
+        referenceVolumes = getCachedDummyTensor((1,), dtype=queryPositions.dtype, device=queryPositions.device)
+    if crk_A is None:
+        crk_A = getCachedDummyTensor((1,), dtype=queryPositions.dtype, device=queryPositions.device)
+    if crk_B is None:
+        crk_B = getCachedDummyTensor((1, queryPositions.shape[1]), dtype=queryPositions.dtype, device=queryPositions.device)
+    if crk_gradA is None:
+        crk_gradA = getCachedDummyTensor((1,queryPositions.shape[1]), dtype=queryPositions.dtype, device=queryPositions.device)
+    if crk_gradB is None:
+        crk_gradB = getCachedDummyTensor((1, queryPositions.shape[1], queryPositions.shape[1]), dtype=queryPositions.dtype, device=queryPositions.device)
+
 
 
     with record_function(f"warpSPH - Operation"):
@@ -79,11 +113,15 @@ def sphOperation_warp(
                 queryMasses, referenceMasses,
                 queryDensities, referenceDensities,
                 queryValues, referenceValues,
-                queryKinds= queryKinds, referenceKinds= referenceKinds,
+                operationMode = operationMode, queryKinds= queryKinds, referenceKinds= referenceKinds,
+
                 domain = domain, adjacency=adjacency, 
-                kernel = kernel, mode = supportMode,
-                operationMode = operationMode, 
-                scatteredQuantities= preScatteredQuantities
+                kernel = kernel, mode = supportMode,           
+
+                scatteredQuantities= preScatteredQuantities,
+
+                useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+                useCRK= useCRK, crk_A= crk_A, crk_B= crk_B,
             )
         elif operation == WarpOperation.Gradient:
             return computeSPHGradient_warpBackend(
@@ -92,14 +130,19 @@ def sphOperation_warp(
                 queryMasses, referenceMasses,
                 queryDensities, referenceDensities,
                 queryValues, referenceValues,
-                queryKinds= queryKinds, referenceKinds= referenceKinds,
+                operationMode = operationMode, queryKinds= queryKinds, referenceKinds= referenceKinds,
+
                 domain = domain, adjacency= adjacency, 
                 kernel = kernel, mode = supportMode, 
-                operationMode = operationMode, 
+                
                 gradientMode= gradientMode,
+
                 scatteredQuantities= preScatteredQuantities,
-                renormalizationMatrices= renormalizationMatrices,
-                queryOmegas= queryOmegas, referenceOmegas= referenceOmegas
+
+                useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+                useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
+                useGradientRenormalizaiton= useGradientRenormalizaiton, renormalizationMatrices= renormalizationMatrices,
+                useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,                
             )
         elif operation == WarpOperation.Divergence:
             return computeSPHDivergence_warpBackend(
@@ -113,7 +156,12 @@ def sphOperation_warp(
                 kernel = kernel, mode = supportMode, 
                 operationMode = operationMode, 
                 gradientMode= gradientMode,
-                scatteredQuantities= preScatteredQuantities
+                scatteredQuantities= preScatteredQuantities,
+
+                useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+                useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
+                useGradientRenormalizaiton= useGradientRenormalizaiton, renormalizationMatrices= renormalizationMatrices,
+                useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
             )
         elif operation == WarpOperation.Curl:
             return computeSPHCurl_warpBackend(
@@ -127,7 +175,12 @@ def sphOperation_warp(
                 kernel = kernel, mode = supportMode, 
                 operationMode = operationMode, 
                 gradientMode= gradientMode,
-                scatteredQuantities= preScatteredQuantities
+                scatteredQuantities= preScatteredQuantities,
+
+                useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+                useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
+                useGradientRenormalizaiton= useGradientRenormalizaiton, renormalizationMatrices= renormalizationMatrices,
+                useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
             )
         elif operation == WarpOperation.Laplacian:
             return computeSPHLaplacian_warpBackend(
@@ -142,7 +195,12 @@ def sphOperation_warp(
                 operationMode = operationMode, 
                 gradientMode= gradientMode, 
                 laplacianMode= laplacianMode, positiveDivergence=positiveDivergence,
-                scatteredQuantities= preScatteredQuantities
+                scatteredQuantities= preScatteredQuantities,
+
+                useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+                useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
+                useGradientRenormalizaiton= useGradientRenormalizaiton, renormalizationMatrices= renormalizationMatrices,
+                useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
                 
             )
         else:
