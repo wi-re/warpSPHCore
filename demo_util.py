@@ -239,27 +239,3 @@ class PlotSet(NamedTuple):
 
 
 from diffSPH.plotting import visualizeParticles
-
-def plotToAxis(fig, axis, quantity, title, cmap, mask = None):
-    return visualizeParticles(
-        fig, axis,
-        PlotSet(
-            positions = queryPositions[mask] if mask is not None else queryPositions,
-            supports = querySupports[mask] if mask is not None else querySupports,
-            masses = queryMasses[mask] if mask is not None else queryMasses,
-            densities = queryDensities[mask] if mask is not None else queryDensities,
-            kinds = torch.zeros(queryPositions.shape[0], dtype = torch.long, device=queryPositions.device)[mask] if mask is not None else torch.zeros(queryPositions.shape[0], dtype = torch.long, device=queryPositions.device)
-        ),
-        quantity = quantity[mask] if mask is not None else quantity,
-        kernel = KernelType.Wendland2,
-        domain = domain,
-
-        cmap = cmap,
-        markerSize = markerSize,
-        gridVisualization = gridVisualization,
-        gridResolution = gridResolution,
-
-        streamLines = False,
-        plotDomain = True,
-        title = title,
-    )

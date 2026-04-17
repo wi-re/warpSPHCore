@@ -615,6 +615,25 @@ def get_dim(v: wp.array(dtype = vector(length=3, dtype = wp.float32))): # type: 
     return 3
 
 @wp.func
+def get_dim(v: matrix(shape=(1,1), dtype = wp.float32)): # type: ignore
+    return 1
+@wp.func
+def get_dim(v: matrix(shape=(2,2), dtype = wp.float32)): # type: ignore
+    return 2    
+@wp.func
+def get_dim(v: matrix(shape=(3,3), dtype = wp.float32)): # type: ignore
+    return 3
+@wp.func
+def get_dim(v: wp.array(dtype = matrix(shape=(1,1), dtype = wp.float32))): # type: ignore
+    return 1    
+@wp.func
+def get_dim(v: wp.array(dtype = matrix(shape=(2,2), dtype = wp.float32))): # type: ignore
+    return 2
+@wp.func
+def get_dim(v: wp.array(dtype = matrix(shape=(3,3), dtype = wp.float32))): # type: ignore
+    return 3
+
+@wp.func
 def correctGradientCRK(
     W_ij: wp.float32,
     gradW_ij: vector(length=Any, dtype=wp.float32), # type: ignore

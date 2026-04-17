@@ -1,6 +1,6 @@
 import torch
 import warp as wp
-from typing import Any, Tuple
+from typing import Any, List, Tuple
 from .wp_util import castTorchToWarpAsBuiltins, castWarpToTorch
 
 
@@ -125,6 +125,24 @@ def launch_kernel(kernel, output_shape, output_dtype, *args):
     with record_function(f"Warp Kernel: {kernel.__name__}"):
         inputs = list(args)
         requires_grad = any(input.requires_grad for input in inputs if hasattr(input, 'requires_grad'))
+        
+        if isinstance(output_dtype, List) or isinstance(output_dtype, Tuple):
+            outputs = []
+            for i, out_type in enumerate(output_dtype):
+                output = wp.zeros(output_shape[i] if isinstance(output_shape, List) else output_shape, dtype=out_type, device=inputs[0].device)
+                output.requires_grad = requires_grad
+                outputs.append(output)
+
+            kernel_dim = output_shape[0] if isinstance(output_shape, List) else output_shape
+            kernel_dim = kernel_dim if isinstance(kernel_dim, int) else kernel_dim[0]
+
+            wp.launch(
+                kernel,
+                dim = kernel_dim,
+                inputs = list(args) + outputs,
+                device = inputs[0].device
+            )
+            return tuple(outputs)
         
         output = wp.zeros(output_shape, dtype=output_dtype, device=inputs[0].device)
         output.requires_grad = requires_grad
