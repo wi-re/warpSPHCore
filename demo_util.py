@@ -81,7 +81,7 @@ def timeFunction(func, *args, **kwargs):
 
 
 def prepData(
-    nx, targetNumNeighbors, dim, device, periodic = False, warpOnly = False
+    nx, targetNumNeighbors, dim, device, periodic = False, warpOnly = False, noiseAmplitude = 0.1
 ):
 
     device = torch.device(device)
@@ -90,7 +90,7 @@ def prepData(
     periodic = periodic
     x, h, numParticles, domain, dx = generateNeighborTestData(nx, targetNumNeighbors, dim, periodic, device)
 
-    x += torch.randn_like(x) * dx * 0.1
+    x += torch.randn_like(x) * dx * noiseAmplitude
 
     pointCloud = PointCloud(x, h)
     queryPositions = pointCloud.positions.contiguous()
@@ -236,3 +236,30 @@ class PlotSet(NamedTuple):
     masses: torch.Tensor
     densities: torch.Tensor
     kinds: torch.Tensor
+
+
+from diffSPH.plotting import visualizeParticles
+
+def plotToAxis(fig, axis, quantity, title, cmap, mask = None):
+    return visualizeParticles(
+        fig, axis,
+        PlotSet(
+            positions = queryPositions[mask] if mask is not None else queryPositions,
+            supports = querySupports[mask] if mask is not None else querySupports,
+            masses = queryMasses[mask] if mask is not None else queryMasses,
+            densities = queryDensities[mask] if mask is not None else queryDensities,
+            kinds = torch.zeros(queryPositions.shape[0], dtype = torch.long, device=queryPositions.device)[mask] if mask is not None else torch.zeros(queryPositions.shape[0], dtype = torch.long, device=queryPositions.device)
+        ),
+        quantity = quantity[mask] if mask is not None else quantity,
+        kernel = KernelType.Wendland2,
+        domain = domain,
+
+        cmap = cmap,
+        markerSize = markerSize,
+        gridVisualization = gridVisualization,
+        gridResolution = gridResolution,
+
+        streamLines = False,
+        plotDomain = True,
+        title = title,
+    )
