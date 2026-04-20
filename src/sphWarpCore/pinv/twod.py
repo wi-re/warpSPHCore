@@ -76,7 +76,7 @@ def pseudoInverse2x2(
     S2 = safe_sqrt(square(square(a) + square(b) - square(c) - square(d)) + 4.0 * square(a * c + b *d))
 
     o1 = safe_sqrt((S1 + S2) / 2.0)
-    o2 = safe_sqrt(max(S1 - S2 + 1e-7, 1e-7) / 2.0)
+    o2 = safe_sqrt(max(S1 - S2, 1e-9) / 2.0)
 
     phi = 0.5 * wp.atan2(2.0 * a * b + 2.0 * c * d, square(a) - square(b) + square(c) - square(d))
     cosPhi = wp.cos(phi)

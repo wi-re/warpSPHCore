@@ -4,12 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "sphWarpCore"
-version = "0.1.0"
-description = "SPH (Smoothed Particle Hydrodynamics) core operations using NVIDIA Warp and PyTorch"
-readme = "README.md"
+version = "0.1.1"
+description = "GPU-accelerated SPH neighbor search and operators built with NVIDIA Warp and PyTorch"
+readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 license = { text = "MIT" }
-keywords = ["sph", "warp", "pytorch", "fluid-simulation", "neighbor-search"]
+keywords = ["sph", "warp", "pytorch", "fluid-simulation", "neighbor-search", "crksph"]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+]
 dependencies = [
     "torch",
     "warp-lang",
@@ -17,6 +26,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+notebooks = [
+    "matplotlib",
+    "ipympl",
+    "ipywidgets",
+]
 dev = [
     "pytest",
     "build",

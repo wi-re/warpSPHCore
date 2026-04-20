@@ -32,6 +32,7 @@
 *.app
 
 *.hdf5
+dist/
 
 .DS_STORE
 

@@ -248,7 +248,7 @@ def pinv2x2(M):
         S2 = torch.sqrt((a**2 + b**2 - c**2 - d**2)**2 + 4* (a * c + b *d)**2)
 
         o1 = torch.sqrt((S1 + S2) / 2)
-        o2 = torch.sqrt(torch.clamp(S1 - S2 + 1e-7, min = 1e-7) / 2)
+        o2 = torch.sqrt(torch.clamp(S1 - S2, min = 1e-9) / 2)
 
         phi = 0.5 * torch.atan2(2 * a * b + 2 * c * d, a**2 - b**2 + c**2 - d**2)
         cosPhi = torch.cos(phi)
@@ -256,25 +256,30 @@ def pinv2x2(M):
         s11 = torch.sign((a * cosTheta + c * sinTheta) * cosPhi + ( b * cosTheta + d * sinTheta) * sinPhi)
         s22 = torch.sign((a * sinTheta - c * cosTheta) * sinPhi + (-b * sinTheta + d * cosTheta) * cosPhi)
 
+        # s11 = torch.sign(o1)
+        # s22 = torch.sign(o2)
+
         V = torch.zeros_like(M)
         V[:,0,0] = cosPhi * s11
         V[:,0,1] = - sinPhi * s22
         V[:,1,0] = sinPhi * s11
         V[:,1,1] = cosPhi * s22
 
+        eigVals = torch.vstack((o1, o2)).mT
+        eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
+
+        # S = torch.diag_embed(eigVals, dim1 = 2, dim2 = 1)
 
         o1_1 = torch.zeros_like(o1)
         o2_1 = torch.zeros_like(o2)
 
-        o1_1[torch.abs(o1) > 1e-5] = 1 / o1[torch.abs(o1) > 1e-5] 
-        o2_1[torch.abs(o2) > 1e-5] = 1 / o2[torch.abs(o2) > 1e-5] 
+        o1_1[torch.abs(eigVals[:,0]) > 1e-7] = 1 / eigVals[torch.abs(eigVals[:,0]) > 1e-7, 0] 
+        o2_1[torch.abs(eigVals[:,1]) > 1e-7] = 1 / eigVals[torch.abs(eigVals[:,1]) > 1e-7, 1] 
         o = torch.vstack((o1_1, o2_1))
         S_1 = torch.diag_embed(o.mT, dim1 = 2, dim2 = 1)
-
-        eigVals = torch.vstack((o1, o2)).mT
-        eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
-
-        return torch.matmul(torch.matmul(V, S_1), U.mT), eigVals
+        
+        inv = torch.matmul(torch.matmul(V, S_1), U.mT)
+        return inv, eigVals
 
 
 def computeRenormalizationMatrices(

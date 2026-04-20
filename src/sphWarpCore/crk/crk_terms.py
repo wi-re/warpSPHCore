@@ -10,7 +10,7 @@ def computeCRKTermsWarp(
 
 
     m_2_det = torch.det(m_2).abs()
-    m_2_inv = torch.linalg.pinv(m_2) if m_2.shape[1] != 2 else pinv2x2_warp(m_2)[0]
+    m_2_inv = torch.linalg.pinv(m_2)# if m_2.shape[1] != 2 else pinv2x2(m_2)[0]
     
     # print(f'm_2_det: {m_2_det.min():8.3g}, {m_2_det.max():8.3g}, {m_2_det.mean():8.3g} has nan: {torch.isnan(m_2_det).any()} has inf: {torch.isinf(m_2_det).any()}')
     # 
