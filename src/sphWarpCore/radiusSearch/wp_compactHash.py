@@ -791,7 +791,11 @@ def radiusSearchCompactHashMap(
                 numNeighbors=wp.to_torch(edge_count).to(dtype=torch.int32),
                 edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int32),
                 numRows=N,
-                numCols=M
+                numCols=M,
+                queryPositions = queryPositions,
+                referencePositions = referencePositions,
+                querySupports = querySupports,
+                referenceSupports = referenceSupports
             )
     return adjacencyCH
 

@@ -1,0 +1,308 @@
+from .wp_compactHash import *
+
+
+# Verlet lists store not just the required neighbors but also some extra neighbors to avoid rebuilding the neighbor list every step.
+
+
+def buildVerletList(
+        queryPositions: torch.Tensor, referencePositions: torch.Tensor,
+        querySupports: torch.Tensor, referenceSupports: torch.Tensor,
+        domain : DomainDescription, verletScale : float = 1.0, 
+        mode : str = 'symmetric', 
+        priorNeighborhood : Optional[AdjacencyList] = None, 
+        verbose : bool = False):
+    with record_function(f"[Neighborhood] {mode}"):
+        if priorNeighborhood is None or (priorNeighborhood is not None and priorNeighborhood.queryPositions is None) or (priorNeighborhood is not None and priorNeighborhood.referencePositions is None):
+            if verbose:
+                print('Building neighborhood from scratch [no prior neighborhood]')
+            with record_function(f"[Neighborhood] no prior"):
+                adjacency = radiusSearchCompactHashMap(
+                    queryPositions, referencePositions,
+                    querySupports * verletScale, referenceSupports * verletScale,
+                    domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                )
+        else:
+            if queryPositions.shape[0] != priorNeighborhood.queryPositions.shape[0] or referencePositions.shape[0] != priorNeighborhood.referencePositions.shape[0]:
+                if verbose:
+                    print('Building neighborhood from scratch [different number of particles]')
+                with record_function(f"[Neighborhood] mismatch"):
+                    adjacency = radiusSearchCompactHashMap(
+                        queryPositions, referencePositions,
+                        querySupports * verletScale, referenceSupports * verletScale,
+                        domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                    )
+            else:
+                # This works because of minimum image conventions!
+                distance_a = torch.linalg.norm(queryPositions - priorNeighborhood.queryPositions, dim = -1)
+                distance_b = torch.linalg.norm(referencePositions - priorNeighborhood.referencePositions, dim = -1)
+                supports_a = priorNeighborhood.querySupports
+                supports_b = priorNeighborhood.referenceSupports
+
+                supportDistance_a = (supports_a - querySupports) #/ supports_a
+                supportDistance_b = (supports_b - referenceSupports) #/ supports_b
+                maxDistance = distance_a.max() + distance_b.max()
+                minSupport = None
+                if mode == 'symmetric':
+                    supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
+                    minSupport = min(supports_a.min(), supports_b.min())
+                elif mode == 'scatter':
+                    supportFactor = supportDistance_b.max()
+                    minSupport = supports_b.min()
+                elif mode == 'gather':
+                    supportFactor = supportDistance_a.max()
+                    minSupport = supports_a.min()
+                elif mode == 'superSymmetric':
+                    supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
+                    minSupport = min(supports_a.min(), supports_b.min())
+                else:
+                    raise ValueError('Invalid mode')
+                
+                hFactor = 1 + supportFactor / minSupport
+                dFactor = 1 + maxDistance / minSupport
+
+                if verbose:
+                    print(f'Distance a: min: {distance_a.min()}, max: {distance_a.max()}, avg: {distance_a.mean()}')
+                    print(f'Distance b: min: {distance_b.min()}, max: {distance_b.max()}, avg: {distance_b.mean()}')
+                    print(f'Support a: min: {supports_a.min()}, max: {supports_a.max()}, avg: {supports_a.mean()}')
+                    print(f'Support b: min: {supports_b.min()}, max: {supports_b.max()}, avg: {supports_b.mean()}')
+                    print(f'Support Factor: {supportFactor}, Minimum Support: {minSupport}')
+                    print(f'Max Distance: {maxDistance}')
+                    print(f'Distance Factor: {maxDistance / minSupport}')
+
+
+
+                # print(maxDistance, minSupport * verletScale)
+                if hFactor * dFactor > verletScale:
+                    if verbose:
+                # if verbose:
+                        print('Support Factor: ', supportFactor / minSupport, 'Minimum Support: ', minSupport)
+                        print('Distance Factor: ', maxDistance / minSupport)
+                        print('Ratio: ', hFactor * dFactor)
+                        print('Building neighborhood from scratch [distance larger than support]')
+                    with record_function(f"[Neighborhood] verlet"):
+                        adjacency = radiusSearchCompactHashMap(
+                            queryPositions, referencePositions,
+                            querySupports * verletScale, referenceSupports * verletScale,
+                            domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                        )
+                        
+                else:
+                    if verbose:
+                        print('Reusing neighborhood')
+                    adjacency = priorNeighborhood
+        return adjacency
+    
+from sphWarpCore.kernels import computePairwiseSupport
+
+@wp.func
+def countNeighborsVerletFunc(
+    # General Shape Parameters and indices
+    i : wp.int32,
+
+    # SPH properties for the query set (indexed by i)
+    queryPositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), querySupports: wp.array(dtype = wp.float32), # type: ignore
+    # SPH properties for the reference set (indexed by j)
+    referencePositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), referenceSupports: wp.array(dtype = wp.float32), # type: ignore
+
+    
+    # Domain and kernel parameters
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
+    mode_uint: wp.uint32,
+    
+    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
+    neighborList: wp.array(dtype = wp.int64), # type: ignore
+    neighborOffset : wp.int32, numNeighs: wp.int32, 
+):
+    xi = queryPositions[i]
+    hi = querySupports[i]
+
+    counter = wp.int32(0)
+    # Loop over neighbors to compute the gradient contribution from each neighbor    
+    for neighborIndex in range(numNeighs):
+        jj = neighborOffset + neighborIndex
+        j  = wp.int32(neighborList[jj])
+
+        xj = referencePositions[j]
+        hj = referenceSupports[j]
+        
+        x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
+        hij = computePairwiseSupport(hi, hj, mode_uint)
+        
+        r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
+
+        if r_ij <= hij:
+            counter += 1
+
+    return counter
+
+@wp.kernel
+def countNeighborsVerlet(
+    queryPositions: wp.array(dtype=vector(dtype=wp.float32, length = Any)), referencePositions: wp.array(dtype=vector(dtype=wp.float32, length = Any)), # type: ignore
+    querySupports: wp.array(dtype=wp.float32), referenceSupports: wp.array(dtype=wp.float32), # type: ignore
+
+    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
+
+    mode_uint: wp.uint32, 
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
+
+    # Output
+    neighborCounter: wp.array(dtype = wp.int32), # type: ignore    
+):                                                                            
+    i = wp.tid()
+    if i >= queryPositions.shape[0]:
+        return
+    
+    neighborCounter[i] = countNeighborsVerletFunc(
+        i, 
+        queryPositions, querySupports, 
+        referencePositions, referenceSupports, 
+        periodicity, domainMin, domainMax, 
+        mode_uint, 
+        neighborList, neighborListRowOffsets[i], numNeighbors[i]
+    )
+    
+    
+@wp.func
+def updateNeighborsVerletFunc(
+    # General Shape Parameters and indices
+    i : wp.int32,
+
+    # SPH properties for the query set (indexed by i)
+    queryPositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), querySupports: wp.array(dtype = wp.float32), # type: ignore
+    # SPH properties for the reference set (indexed by j)
+    referencePositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), referenceSupports: wp.array(dtype = wp.float32), # type: ignore
+
+    
+    # Domain and kernel parameters
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
+    mode_uint: wp.uint32, 
+    
+    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
+    neighborList: wp.array(dtype = wp.int64), # type: ignore
+    neighborOffset : wp.int32, numNeighs: wp.int32, 
+
+    # New Neighbor list data
+    newNeighborOffset: wp.int32, newNumNeighs: wp.int32, 
+    
+    # Outputs
+    edge_i: wp.array1d(dtype=wp.int64),  # shape [total_edges] # type: ignore
+    edge_j: wp.array1d(dtype=wp.int64)   # shape [total_edges] # type: ignore
+):
+    xi = queryPositions[i]
+    hi = querySupports[i]
+
+    counter = wp.int32(0)
+    # Loop over neighbors to compute the gradient contribution from each neighbor    
+    for neighborIndex in range(numNeighs):
+        jj = neighborOffset + neighborIndex
+        j  = wp.int32(neighborList[jj])
+
+        xj = referencePositions[j]
+        hj = referenceSupports[j]
+        
+        x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
+        hij = computePairwiseSupport(hi, hj, mode_uint)
+        
+        r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
+
+        edge_index = newNeighborOffset + counter
+        if r_ij <= hij:
+            edge_i[edge_index] = wp.int64(i)
+            edge_j[edge_index] = wp.int64(j)
+            counter += 1
+
+    return counter
+
+
+@wp.kernel
+def updateNeighborsVerlet(
+    queryPositions: wp.array(dtype=vector(dtype=wp.float32, length = Any)), referencePositions: wp.array(dtype=vector(dtype=wp.float32, length = Any)), # type: ignore
+    querySupports: wp.array(dtype=wp.float32), referenceSupports: wp.array(dtype=wp.float32), # type: ignore
+
+    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
+
+    mode_uint: wp.uint32, 
+    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
+
+    # Output
+    newNeighborListRowOffsets: wp.array(dtype = wp.int32), newNeighborCounter: wp.array(dtype = wp.int32), # type: ignore  
+
+    edge_i: wp.array1d(dtype=wp.int64),  # shape [total_edges] # type: ignore
+    edge_j: wp.array1d(dtype=wp.int64)   # shape [total_edges] # type: ignore  
+):                                                                            
+    i = wp.tid()
+    if i >= queryPositions.shape[0]:
+        return
+    
+    updateNeighborsVerletFunc(
+        i, 
+        queryPositions, querySupports, 
+        referencePositions, referenceSupports, 
+        periodicity, domainMin, domainMax, 
+        mode_uint, 
+        neighborList, neighborListRowOffsets[i], numNeighbors[i],
+        newNeighborListRowOffsets[i], newNeighborCounter[i],
+        edge_i, edge_j
+    )
+    
+
+# This function filters the Verlet list to produce the actual neighbor list for the current positions and supports, which may have changed since the Verlet list was built. 
+def filterVerletList(
+        queryPositions: torch.Tensor, referencePositions: torch.Tensor, 
+        querySupports: torch.Tensor, referenceSupports: torch.Tensor,
+        domain: DomainDescription, adjacency: AdjacencyList, 
+        mode : str = 'symmetric',
+):                   
+    
+    edge_count = torch.zeros_like(adjacency.numNeighbors)
+    wp.launch(
+        countNeighborsVerlet, 
+        dim = queryPositions.shape[0], 
+        inputs = [castTorchToWarpAsBuiltins(queryPositions), castTorchToWarpAsBuiltins(referencePositions), 
+        castTorchToWarp(querySupports), castTorchToWarp(referenceSupports),
+        castTorchToWarp(domain.min), castTorchToWarp(domain.max), castTorchToWarp(domain.periodic),
+
+        convertModeToUint(mode),
+        castTorchToWarp(adjacency.j), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
+        castTorchToWarp(edge_count)]
+
+    )
+    warpDevice = castTorchToWarp(queryPositions).device
+    # Convert counts to host (only the counts, not the main data)
+    edge_count_t = edge_count
+    total_edges = torch.sum(edge_count_t).cpu().item()
+
+    N = queryPositions.shape[0]
+    # Compute cumulative offsets
+    edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
+    edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
+    edge_offsets_warp = wp.from_torch(edge_offsets)
+
+    # Allocate output arrays on GPU
+    edge_i = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+    edge_j = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+
+    wp.launch(
+        updateNeighborsVerlet, 
+        dim = queryPositions.shape[0], 
+        inputs = [castTorchToWarpAsBuiltins(queryPositions), castTorchToWarpAsBuiltins(referencePositions), 
+        castTorchToWarp(querySupports), castTorchToWarp(referenceSupports),
+        castTorchToWarp(domain.min), castTorchToWarp(domain.max), castTorchToWarp(domain.periodic),
+
+        convertModeToUint(mode),
+        castTorchToWarp(adjacency.j), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
+        edge_offsets_warp, castTorchToWarp(edge_count),
+
+        edge_i, edge_j
+        ]
+    )
+    i_torch = wp.to_torch(edge_i)
+    j_torch = wp.to_torch(edge_j)
+
+    return AdjacencyList(
+        i = i_torch, j = j_torch,
+        numNeighbors=edge_count_t, edgeOffsets=edge_offsets,
+        numRows=queryPositions.shape[0], numCols=referencePositions.shape[0],
+        queryPositions = queryPositions, referencePositions = referencePositions,
+        querySupports = querySupports, referenceSupports = referenceSupports
+    )

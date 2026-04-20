@@ -17,7 +17,13 @@ class AdjacencyList:
     edgeOffsets: torch.Tensor
     numRows: int
     numCols: int
-    
+
+    # Required for velocity verlet list, which stores not just the required neighbors but also some extra neighbors to avoid rebuilding the neighbor list every step. These positions are the original positions with which the list was built, NOT the current positions. These are used to determine when the list needs to be rebuilt, by checking if any particle has moved more than a certain threshold distance from its original position.
+    queryPositions: torch.Tensor = None
+    referencePositions: torch.Tensor = None
+    querySupports: torch.Tensor = None
+    referenceSupports: torch.Tensor = None
+
 @dataclass(slots=True)
 class AdjacencyListWarp:
     i: wp.array(dtype=wp.int64)
