@@ -135,6 +135,7 @@ def castTorchToWarpAsBuiltins(x_torch):
                              dtype=vector(length=P * M * D, dtype=scalar_wp))
     
     else:
+        print(f"Warning: castTorchToWarpAsBuiltins received tensor with shape {x_torch.shape} which is not 1D, 2D, 3D, or 4D. Returning as a flat array of scalars.")
         return wp.from_torch(x_torch)
     
 # Convention Wise kind = 0 for fluid, 1 for boundary, 2 for ghost

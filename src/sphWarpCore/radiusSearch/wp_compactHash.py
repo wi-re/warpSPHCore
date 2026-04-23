@@ -623,7 +623,29 @@ import numpy as np
     
 from torch.profiler import record_function
 
-def radiusSearchCompactHashMap(
+# For some operations we want to be able to run the operations directly on the hash map, e.g., to do a particle to grid transfer. In this case we only access the neighborhood once per query set. In this case, it is not worth it to build the full neighbor list as the overhead of building the neighbor list is larger than the cost of just doing the search.
+# For this purpose we want to be able to wrap the hash map information into a datastructure that allows us to do the search directly on the hash map without building the full neighbor list. This is what the CompactHashMap class is for. It contains all the information about the hash map and the cell table, as well as the sorted positions and supports, and allows us to do the search directly on this information without building the full neighbor list.
+@dataclass
+class CompactHashMap:
+    sortedPositions: torch.Tensor
+    sortedSupports: torch.Tensor
+    sortIndex: torch.Tensor
+
+    hashTable: torch.Tensor
+    sortedCellTable: torch.Tensor
+
+    qMin: torch.Tensor
+    qMax: torch.Tensor
+    hCell: float
+    numCells: torch.Tensor
+    mode_uint: int
+    D: int
+    searchRadius: int
+    numOffsets: int
+    cellOffsets: torch.Tensor
+
+
+def buildCompactHashMap(
     queryPositions: torch.Tensor,
     referencePositions: torch.Tensor,
     querySupports: torch.Tensor,
@@ -633,7 +655,7 @@ def radiusSearchCompactHashMap(
     mode: str = 'gather',
     hashMapLength: int = 4096
 ):
-    with record_function("warpNeighborSearch"):
+    with record_function("warpNeighborSearch - buildCompactHashMap"):
         with record_function("neighborSearch - preprocess"):
         
             mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4}
@@ -709,8 +731,8 @@ def radiusSearchCompactHashMap(
             hashTable[hashMap64,0] = torch.hstack((torch.tensor([0], device = sortedCellIndices.device, dtype=torch.int32),torch.cumsum(hashMapCounters,dim=0)))[:-1].to(torch.int32) #torch.cumsum(hashMapCounters, dim = 0) #torch.arange(hashMap.shape[0], device=hashMap.device)
 
             hashTable[hashMap64,1] = hashMapCounters
-
-        with record_function("neighborSearch - count neighbors"):
+        
+        with record_function("neighborSearch - precomputeOffsets"):
             # we precompute the offset we want to iterate over based on the searchradius parameter
             # in 3D for a search radius of n we will iterate over (2n+1)^3 cells, in 2D we will iterate over (2n+1)^2 cells, and in 1D we will iterate over 2n+1 cells
             searchRadius = 1
@@ -720,84 +742,177 @@ def radiusSearchCompactHashMap(
             # pad to always have the same dimension for the kernel
             offsets = torch.cat((offsets, torch.zeros(numOffsets, 3 - domainDescription.dim, dtype=torch.int32, device=offsets.device)), dim = 1)
             D = domainDescription.dim
-            N = queryPositions.shape[0]
-            M = sortedPositions.shape[0]
-            edge_count = wp.zeros(queryPositions.shape[0], dtype=wp.int32, device=warpDevice)
-            wp.launch(radiusSearchCountNeighborsCompactHashMap, dim=queryPositions.shape[0], inputs=[
-                castTorchToWarp(y),
-                castTorchToWarp(querySupports),
-                castTorchToWarp(sortedPositions),
-                castTorchToWarp(sortedSupports),
-                castTorchToWarp(hashTable),
-                castTorchToWarp(sortedCellTable),
-                castTorchToWarp(qMin),
-                hCell,
-                D,
-                castTorchToWarp(offsets),
-                castTorchToWarp(numCells),
-                castTorchToWarp(qMax),
-                castTorchToWarp(qMin),
-                castTorchToWarp(periodicity),
-                wp.uint32(mode_uint),
-                edge_count
-            ], device=warpDevice)
-        with record_function("neighborSearch - allocate neighbors"):
+
+        hashMap = CompactHashMap(
+            sortedPositions=sortedPositions,
+            sortedSupports=sortedSupports,
+            sortIndex=sortIndex,
+            hashTable=hashTable,
+            sortedCellTable=sortedCellTable,
+            qMin=qMin,
+            qMax=qMax,
+            hCell=hCell.cpu().item(),
+            numCells=numCells,
+            mode_uint=mode_uint,
+            D = D,
+            searchRadius = 1,
+            numOffsets = numOffsets,
+            cellOffsets = offsets
+        )
+        return hashMap
+    
+
+def radiusSearchOnCompactHashMap(
+    datastructure: CompactHashMap,
+    queryPositions: torch.Tensor,
+    referencePositions: torch.Tensor,
+    querySupports: torch.Tensor,
+    referenceSupports: torch.Tensor,
+    periodicity: torch.Tensor,
+    domainDescription: DomainDescription,
+    mode: str = 'gather',
+    hashMapLength: int = 4096,
+):                
+    mode_uint = datastructure.mode_uint
+    minDomain = domainDescription.min if domainDescription.min is not None else None
+    maxDomain = domainDescription.max if domainDescription.max is not None else None
+    hMax = computeGridSupport(querySupports, referenceSupports, mode_uint)
+    minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
+    # periodicity = domainDescription.periodicity if domainDescription.periodicity is not None else [False] * referencePositions.shape[1]
+
+    x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))]).mT
+    y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
+    
+    sortedPositions = datastructure.sortedPositions
+    sortedSupports = datastructure.sortedSupports
+    sortIndex = datastructure.sortIndex
+    hashTable = datastructure.hashTable
+    sortedCellTable = datastructure.sortedCellTable
+    qMin = datastructure.qMin
+    qMax = datastructure.qMax
+    hCell = datastructure.hCell
+    numCells = datastructure.numCells
+    D = datastructure.D
+    offsets = datastructure.cellOffsets
+
+    warpDevice = castTorchToWarp(queryPositions).device
+    
+    with record_function("neighborSearch - count neighbors"):
+        N = queryPositions.shape[0]
+        M = sortedPositions.shape[0]
+        edge_count = wp.zeros(queryPositions.shape[0], dtype=wp.int32, device=warpDevice)
+        wp.launch(radiusSearchCountNeighborsCompactHashMap, dim=queryPositions.shape[0], inputs=[
+            castTorchToWarp(y),
+            castTorchToWarp(querySupports),
+            castTorchToWarp(sortedPositions),
+            castTorchToWarp(sortedSupports),
+            castTorchToWarp(hashTable),
+            castTorchToWarp(sortedCellTable),
+            castTorchToWarp(qMin),
+            hCell,
+            D,
+            castTorchToWarp(offsets),
+            castTorchToWarp(numCells),
+            castTorchToWarp(qMax),
+            castTorchToWarp(qMin),
+            castTorchToWarp(periodicity),
+            wp.uint32(mode_uint),
+            edge_count
+        ], device=warpDevice)
+    with record_function("neighborSearch - allocate neighbors"):
 
 
-            # Convert counts to host (only the counts, not the main data)
-            edge_count_t = wp.to_torch(edge_count)
-            total_edges = torch.sum(edge_count_t).cpu().item()
+        # Convert counts to host (only the counts, not the main data)
+        edge_count_t = wp.to_torch(edge_count)
+        total_edges = torch.sum(edge_count_t).cpu().item()
 
-            # Compute cumulative offsets
-            edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
-            edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
-            edge_offsets_warp = wp.from_torch(edge_offsets)
+        # Compute cumulative offsets
+        edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
+        edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
+        edge_offsets_warp = wp.from_torch(edge_offsets)
 
-            # Allocate output arrays on GPU
-            edge_i = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
-            edge_j = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
-        with record_function("neighborSearch - collect neighbors"):
-            wp.launch(radiusSearchCollectCompactHashMap, dim=queryPositions.shape[0], inputs=[
-                castTorchToWarp(y),
-                castTorchToWarp(querySupports),
-                castTorchToWarp(sortedPositions),
-                castTorchToWarp(sortedSupports),
-                castTorchToWarp(hashTable),
-                castTorchToWarp(sortedCellTable),
-                castTorchToWarp(qMin),
-                hCell,
-                D,
-                castTorchToWarp(offsets),
-                castTorchToWarp(numCells),
-                castTorchToWarp(qMax),
-                castTorchToWarp(qMin),
-                castTorchToWarp(periodicity),
-                wp.uint32(mode_uint),   
-                edge_count,
-                edge_offsets_warp,
-                castTorchToWarp(sortIndex),
-                edge_i,
-                edge_j
-            ], device=warpDevice)
+        # Allocate output arrays on GPU
+        edge_i = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+        edge_j = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+    with record_function("neighborSearch - collect neighbors"):
+        wp.launch(radiusSearchCollectCompactHashMap, dim=queryPositions.shape[0], inputs=[
+            castTorchToWarp(y),
+            castTorchToWarp(querySupports),
+            castTorchToWarp(sortedPositions),
+            castTorchToWarp(sortedSupports),
+            castTorchToWarp(hashTable),
+            castTorchToWarp(sortedCellTable),
+            castTorchToWarp(qMin),
+            hCell,
+            D,
+            castTorchToWarp(offsets),
+            castTorchToWarp(numCells),
+            castTorchToWarp(qMax),
+            castTorchToWarp(qMin),
+            castTorchToWarp(periodicity),
+            wp.uint32(mode_uint),   
+            edge_count,
+            edge_offsets_warp,
+            castTorchToWarp(sortIndex),
+            edge_i,
+            edge_j
+        ], device=warpDevice)
 
 
-        with record_function("neighborSearch - build adjacency"):
-            i_torch = wp.to_torch(edge_i)
-            j_torch = wp.to_torch(edge_j)
+    with record_function("neighborSearch - build adjacency"):
+        i_torch = wp.to_torch(edge_i)
+        j_torch = wp.to_torch(edge_j)
 
-            adjacencyCH = AdjacencyList(
-                i=i_torch,  # Ensure dtype is long for indexing
-                j=j_torch,
-                numNeighbors=wp.to_torch(edge_count).to(dtype=torch.int32),
-                edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int32),
-                numRows=N,
-                numCols=M,
-                queryPositions = queryPositions,
-                referencePositions = referencePositions,
-                querySupports = querySupports,
-                referenceSupports = referenceSupports
-            )
+        adjacencyCH = AdjacencyList(
+            i=i_torch,  # Ensure dtype is long for indexing
+            j=j_torch,
+            numNeighbors=wp.to_torch(edge_count).to(dtype=torch.int32),
+            edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int32),
+            numRows=N,
+            numCols=M,
+            queryPositions = queryPositions,
+            referencePositions = referencePositions,
+            querySupports = querySupports,
+            referenceSupports = referenceSupports
+        )
     return adjacencyCH
+    
+
+def radiusSearchCompactHashMap(
+    queryPositions: torch.Tensor,
+    referencePositions: torch.Tensor,
+    querySupports: torch.Tensor,
+    referenceSupports: torch.Tensor,
+    periodicity: torch.Tensor,
+    domainDescription: DomainDescription,
+    mode: str = 'gather',
+    hashMapLength: int = 4096,
+    returnCompactHashMap: bool = False
+):
+    with record_function("warpNeighborSearch - radiusSearchCompactHashMap"):
+        datastructure = buildCompactHashMap(
+            queryPositions,
+            referencePositions,
+            querySupports,
+            referenceSupports,
+            periodicity,
+            domainDescription,
+            mode,
+            hashMapLength
+        ) 
+        adjacencyCH = radiusSearchOnCompactHashMap(
+            datastructure,
+            queryPositions,
+            referencePositions,
+            querySupports,
+            referenceSupports,
+            periodicity,
+            domainDescription,
+            mode,
+            hashMapLength
+        )
+        
+        return adjacencyCH if not returnCompactHashMap else (adjacencyCH, datastructure)
 
     
     
