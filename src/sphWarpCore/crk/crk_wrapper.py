@@ -34,13 +34,16 @@ def computeCRKFactors(
     adjacency: AdjacencyListWarp,
     queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,    
 ):
+    if supportMode != SupportScheme.Gather:
+        raise NotImplementedError("Currently only Gather support mode is implemented for CRK factors computation.")
         
     apparentArea = computeCRKVolumeWarp(
         queryPositions, referencePositions,
         querySupports, referenceSupports,
         domain = domain, adjacency = adjacency, 
-        operationMode = OperationDirection.AllToAll,
-        kernel = KernelFunctions.Wendland2, supportMode = SupportScheme.Gather,
+        operationMode = operationMode,
+        kernel = kernel, supportMode = SupportScheme.Gather,
+        queryKinds = queryKinds, referenceKinds = referenceKinds
     )
 
         
@@ -50,8 +53,9 @@ def computeCRKFactors(
         queryMasses, referenceMasses,
         useVolume=True, queryVolumes = apparentArea, referenceVolumes = apparentArea,
         domain = domain, adjacency = adjacency, 
-        operationMode = OperationDirection.AllToAll,
-        kernel = KernelFunctions.Wendland2, supportMode = SupportScheme.Gather,
+        operationMode = operationMode,
+        kernel =  kernel, supportMode = SupportScheme.Gather,
+        queryKinds = queryKinds, referenceKinds = referenceKinds
     )
 
     A, B, gradA, gradB = computeCRKTermsWarp(
@@ -66,9 +70,10 @@ def computeCRKFactors(
         queryMasses, referenceMasses,
         useVolume=True, queryVolumes = apparentArea, referenceVolumes = apparentArea,
         domain = domain, adjacency = adjacency, 
-        operationMode = OperationDirection.AllToAll,
-        kernel = KernelFunctions.Wendland2, supportMode = SupportScheme.Gather,
-        useCRK=True, crk_A = A, crk_B = B, crk_gradA = gradA, crk_gradB = gradB
+        operationMode = operationMode,
+        kernel = kernel, supportMode = SupportScheme.Gather,
+        useCRK=True, crk_A = A, crk_B = B, crk_gradA = gradA, crk_gradB = gradB,
+        queryKinds = queryKinds, referenceKinds = referenceKinds
     )
 
     return apparentArea, crk_density, A, B, gradA, gradB

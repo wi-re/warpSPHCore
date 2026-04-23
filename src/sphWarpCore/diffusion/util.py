@@ -1,7 +1,5 @@
 import torch
-from diffSPH.sphOperations.shared import getTerms, compute_xij
-from diffSPH.kernels import Kernel_xi
-from diffSPH.enums import ViscositySwitch
+
 
 import warp as wp
 from enum import Enum
