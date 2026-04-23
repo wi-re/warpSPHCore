@@ -13,8 +13,12 @@ from ..utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDi
 from torch.profiler import profile, record_function, ProfilerActivity
 
 
+
+from ..enumTypes import *
+from ..radiusSearch.wp_compactHash import CompactHashMap, computeZOrderIndex64, hashGridVec3i
+from .grid_util import checkOffset
 @wp.func
-def computeSPHGradientTensor_Func(
+def computeSPHGradientTensor_grid_Func(
     # General Shape Parameters and indices
     i : wp.int32, dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
 
@@ -32,8 +36,8 @@ def computeSPHGradientTensor_Func(
     gradientMode_int: wp.int32, # type: ignore
     
     # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
-    neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32, 
+    cellStartIndex: wp.int32, cellParticleCount: wp.int32, 
+    sortIndex: wp.array(dtype = wp.int64), # type: ignore
     
     # Indicates if the input quantities have already been scattered to the neighbor level 
     preScatteredQuantities: wp. bool,
@@ -76,9 +80,9 @@ def computeSPHGradientTensor_Func(
     out     = type(outputValue)(0.0)
 
     # Loop over neighbors to compute the gradient contribution from each neighbor    
-    for neighborIndex in range(numNeighs):
-        jj = neighborOffset + neighborIndex
-        j  = wp.int32(neighborList[jj])
+    for neighborIndex in range(cellParticleCount):
+        jj = cellStartIndex + neighborIndex
+        j = wp.int32(sortIndex[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
                 continue
@@ -124,7 +128,7 @@ def computeSPHGradientTensor_Func(
     return out
 
 @wp.kernel
-def computeSPHGradientTensor_Kernel(
+def computeSPHGradientTensor_grid_Kernel(
     queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)), # type: ignore
     querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32), # type: ignore
     queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),  # type: ignore
@@ -134,9 +138,18 @@ def computeSPHGradientTensor_Kernel(
     domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
+    sortIndex : wp.array(dtype = wp.int64), # type: ignore
     
-    preScatteredQuantities: wp. bool,
+    qMin: wp.array(dtype=wp.float32),  # shape [D] # type: ignore
+    qMax: wp.array(dtype=wp.float32),  # shape [D] # type: ignore
+    hCell: float,
+
+    numCells: wp.array(dtype=wp.int32),  # shape [D] # type: ignore
+    hashTable: wp.array(dtype=vector(length = 2, dtype = wp.int32)),  # shape [hashMapLength,2] # type: ignore
+    cellTable: wp.array(dtype=vector(length = 3, dtype = wp.int64)),  # shape [C,3] with [cellIndex, cellStart, cellCount] # type: ignore
+    D: int,
+    numOffsets: int,
+    cellOffsets: wp.array(dtype=vector(length=3, dtype=wp.int32)), # shape [numOffsets, 3] # type: ignore
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
@@ -152,7 +165,18 @@ def computeSPHGradientTensor_Kernel(
     if i >= queryPositions.shape[0]:
         return
     
-    outputValues[i] = computeSPHGradientTensor_Func(
+    out_value = type(outputValues[0])() * 0.0
+
+    for o in range(numOffsets):
+        cellStartIndex, cellParticleCount = checkOffset(
+            i, queryPositions, numCells, D, 
+            o, cellOffsets, hashTable, cellTable,
+            periodicity, qMin, qMax, hCell
+        )
+        if cellStartIndex < 0:
+            continue
+
+        out_value += computeSPHGradientTensor_grid_Func(
         i, get_dim(queryPositions), numDims, flatInputShape, flatOutputShape,
 
         queryPositions, querySupports, queryMasses, queryDensities, queryValues,
@@ -161,9 +185,9 @@ def computeSPHGradientTensor_Kernel(
         periodicity, domainMin, domainMax, 
         mode_uint, kernel_int, gradientMode_int,
 
-        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
+        cellStartIndex, cellParticleCount, sortIndex,
 
-        preScatteredQuantities,
+        False,
         
         opInt, queryKinds, referenceKinds,
 
@@ -172,15 +196,16 @@ def computeSPHGradientTensor_Kernel(
         useVolume, queryVolumes, referenceVolumes,
         useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
 
-        type(outputValues[i])(0.0)
-    )
+            type(outputValues[0])()
+        )
+    outputValues[i] = out_value
     
 
 
 from ..enumTypes import *
 from typing import Optional
 
-def computeSPHGradient_warpBackend(
+def computeSPHGradient_grid_warpBackend(
     queryPositions, referencePositions,
     querySupports, referenceSupports,
     queryMasses, referenceMasses,
@@ -192,7 +217,7 @@ def computeSPHGradient_warpBackend(
     kernel: KernelFunctions,    
     gradientMode: GradientScheme,
     operationMode: OperationDirection,
-    adjacency: AdjacencyListWarp,
+    datastructure: CompactHashMap,
     scatteredQuantities: Optional[torch.Tensor] = None,
 
     useGradientRenormalization: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
@@ -240,8 +265,9 @@ def computeSPHGradient_warpBackend(
             D = queryPositions.shape[1]
 
         with record_function("warpSPH[Gradient] - Kernel Execution"):
+            D = queryPositions.shape[1]
             warp_result = warpWrapper(
-                launch_kernel, computeSPHGradientTensor_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
+                launch_kernel, computeSPHGradientTensor_grid_Kernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
                 queryPositions, referencePositions,
                 querySupports, referenceSupports,
                 queryMasses, referenceMasses,
@@ -249,7 +275,10 @@ def computeSPHGradient_warpBackend(
                 qV.view(-1, flatInputShape), rV.view(-1, flatInputShape),
                 domainMin, domainMax, periodicity,
                 mode_uint, kernel_int, gradientMode_int,
-                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, preScatteredQuantities,
+                datastructure.sortIndex,
+                datastructure.qMin, datastructure.qMax, datastructure.hCell,
+                datastructure.numCells, datastructure.hashTable, datastructure.sortedCellTable, D,
+                datastructure.numOffsets, datastructure.cellOffsets,
                 wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
                 opInt, queryKinds, referenceKinds,
 

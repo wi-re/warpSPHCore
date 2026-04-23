@@ -102,8 +102,6 @@ def computeSPHInterpolation_Kernel(
     
     mode_uint: wp.uint32, kernel_int : wp.int32,
     
-    sortedPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)),  # shape [N] # type: ignore
-    sortedSupports : wp.array(dtype = wp.float32),  # shape [N] # type: ignore
     sortIndex : wp.array(dtype = wp.int64), # type: ignore
     
     qMin: wp.array(dtype=wp.float32),  # shape [D] # type: ignore
@@ -128,7 +126,7 @@ def computeSPHInterpolation_Kernel(
     if i >= queryPositions.shape[0]:
         return
     
-    out_value = type(outputValues[0])(0.0)
+    out_value = type(outputValues[0])() * 0.0
 
     for o in range(numOffsets):
         cellStartIndex, cellParticleCount = checkOffset(
@@ -149,7 +147,7 @@ def computeSPHInterpolation_Kernel(
             opInt, queryKinds, referenceKinds,
             useVolume, queryVolumes, referenceVolumes,
             useCRK, crk_A, crk_B,
-            type(outputValues[0])(0.0)
+            type(outputValues[0])()
         )
     outputValues[i] = out_value
     
@@ -213,7 +211,7 @@ def computeSPHInterpolant_grid_warpBackend(
                 modeUint,
                 kernelInt,
                 
-                datastructure.sortedPositions, datastructure.sortedSupports, datastructure.sortIndex,
+                datastructure.sortIndex,
                 datastructure.qMin, datastructure.qMax, datastructure.hCell,
                 datastructure.numCells, datastructure.hashTable, datastructure.sortedCellTable, D,
                 datastructure.numOffsets, datastructure.cellOffsets,

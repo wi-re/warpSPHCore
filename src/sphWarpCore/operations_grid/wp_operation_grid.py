@@ -13,12 +13,12 @@ from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
 
 
-# from .wp_curl_grid import computeSPHCurl_warpBackend
-# from .wp_laplacian_grid import computeSPHLaplacian_warpBackend
-# from .wp_gradient_grid import computeSPHGradient_warpBackend
-# from .wp_divergence_grid import computeSPHDivergence_warpBackend
+from .wp_curl_grid import computeSPHCurl_grid_warpBackend
+from .wp_laplacian_grid import computeSPHLaplacian_grid_warpBackend
+from .wp_gradient_grid import computeSPHGradient_grid_warpBackend
+from .wp_divergence_grid import computeSPHDivergence_grid_warpBackend
 from .wp_interpolate_grid import computeSPHInterpolant_grid_warpBackend
-# from .wp_density_grid import computeSPHDensity_warpBackend
+from .wp_density_grid import computeSPHDensity_grid_warpBackend
 
 from ..enumTypes import *
 from typing import Optional
@@ -106,16 +106,16 @@ def sphOperation_warp_grid(
     y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
 
     with record_function(f"warpSPH - Operation"):
-        # if operation == WarpOperation.Density:
-        #     return computeSPHDensity_grid_warpBackend(
-        #         queryPositions, referencePositions,
-        #         querySupports, referenceSupports,
-        #         queryMasses, referenceMasses,
-        #         queryKinds= queryKinds, referenceKinds= referenceKinds,
-        #         domain = domain, datastructure=datastructure, 
-        #         kernel = kernel, mode = supportMode,
-        #         operationMode = operationMode, 
-        #     )  
+        if operation == WarpOperation.Density:
+            return computeSPHDensity_grid_warpBackend(
+                queryPositions, referencePositions,
+                querySupports, referenceSupports,
+                queryMasses, referenceMasses,
+                queryKinds= queryKinds, referenceKinds= referenceKinds,
+                domain = domain, datastructure=datastructure, 
+                kernel = kernel, mode = supportMode,
+                operationMode = operationMode, 
+            )  
         
         if queryValues is None and referenceValues is None:
             if preScatteredQuantities is None:
@@ -140,84 +140,84 @@ def sphOperation_warp_grid(
                 useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
                 useCRK= useCRK, crk_A= crk_A, crk_B= crk_B,
             )
-        # elif operation == WarpOperation.Gradient:
-        #     return computeSPHGradient_grid_warpBackend(
-        #         queryPositions, referencePositions,
-        #         querySupports, referenceSupports,
-        #         queryMasses, referenceMasses,
-        #         queryDensities, referenceDensities,
-        #         queryValues, referenceValues,
-        #         operationMode = operationMode, queryKinds= queryKinds, referenceKinds= referenceKinds,
+        elif operation == WarpOperation.Gradient:
+            return computeSPHGradient_grid_warpBackend(
+                queryPositions, referencePositions,
+                querySupports, referenceSupports,
+                queryMasses, referenceMasses,
+                queryDensities, referenceDensities,
+                queryValues, referenceValues,
+                operationMode = operationMode, queryKinds= queryKinds, referenceKinds= referenceKinds,
 
-        #         domain = domain, datastructure=datastructure, 
-        #         kernel = kernel, mode = supportMode, 
+                domain = domain, datastructure=datastructure, 
+                kernel = kernel, mode = supportMode, 
                 
-        #         gradientMode= gradientMode,
+                gradientMode= gradientMode,
 
-        #         scatteredQuantities= preScatteredQuantities,
+                scatteredQuantities= preScatteredQuantities,
 
-        #         useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
-        #         useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
-        #         useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
-        #         useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,                
-        #     )
-        # elif operation == WarpOperation.Divergence:
-        #     return computeSPHDivergence_grid_warpBackend(
-        #         queryPositions, referencePositions,
-        #         querySupports, referenceSupports,
-        #         queryMasses, referenceMasses,
-        #         queryDensities, referenceDensities,
-        #         queryValues, referenceValues,
-        #         queryKinds= queryKinds, referenceKinds= referenceKinds,
-        #         domain = domain, datastructure=datastructure, 
-        #         kernel = kernel, mode = supportMode, 
-        #         operationMode = operationMode, 
-        #         gradientMode= gradientMode,
-        #         scatteredQuantities= preScatteredQuantities,
+                useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+                useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
+                useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
+                useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,                
+            )
+        elif operation == WarpOperation.Divergence:
+            return computeSPHDivergence_grid_warpBackend(
+                queryPositions, referencePositions,
+                querySupports, referenceSupports,
+                queryMasses, referenceMasses,
+                queryDensities, referenceDensities,
+                queryValues, referenceValues,
+                queryKinds= queryKinds, referenceKinds= referenceKinds,
+                domain = domain, datastructure=datastructure, 
+                kernel = kernel, mode = supportMode, 
+                operationMode = operationMode, 
+                gradientMode= gradientMode,
+                scatteredQuantities= preScatteredQuantities,
 
-        #         useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
-        #         useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
-        #         useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
-        #         useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
-        #     )
-        # elif operation == WarpOperation.Curl:
-        #     return computeSPHCurl_grid_warpBackend(
-        #         queryPositions, referencePositions,
-        #         querySupports, referenceSupports,
-        #         queryMasses, referenceMasses,
-        #         queryDensities, referenceDensities,
-        #         queryValues, referenceValues,
-        #         queryKinds= queryKinds, referenceKinds= referenceKinds,
-        #         domain = domain, datastructure=datastructure, 
-        #         kernel = kernel, mode = supportMode, 
-        #         operationMode = operationMode, 
-        #         gradientMode= gradientMode,
-        #         scatteredQuantities= preScatteredQuantities,
+                useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+                useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
+                useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
+                useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
+            )
+        elif operation == WarpOperation.Curl:
+            return computeSPHCurl_grid_warpBackend(
+                queryPositions, referencePositions,
+                querySupports, referenceSupports,
+                queryMasses, referenceMasses,
+                queryDensities, referenceDensities,
+                queryValues, referenceValues,
+                queryKinds= queryKinds, referenceKinds= referenceKinds,
+                domain = domain, datastructure=datastructure, 
+                kernel = kernel, mode = supportMode, 
+                operationMode = operationMode, 
+                gradientMode= gradientMode,
+                scatteredQuantities= preScatteredQuantities,
 
-        #         useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
-        #         useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
-        #         useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
-        #         useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
-        #     )
-        # elif operation == WarpOperation.Laplacian:
-        #     return computeSPHLaplacian_grid_warpBackend(
-        #         queryPositions, referencePositions,
-        #         querySupports, referenceSupports,
-        #         queryMasses, referenceMasses,
-        #         queryDensities, referenceDensities,
-        #         queryValues, referenceValues,
-        #         queryKinds= queryKinds, referenceKinds= referenceKinds,
-        #         domain = domain, datastructure=datastructure, 
-        #         kernel = kernel, mode = supportMode, 
-        #         operationMode = operationMode, 
-        #         gradientMode= gradientMode, 
-        #         laplacianMode= laplacianMode, positiveDivergence=positiveDivergence,
-        #         scatteredQuantities= preScatteredQuantities,
+                useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+                useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
+                useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
+                useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
+            )
+        elif operation == WarpOperation.Laplacian:
+            return computeSPHLaplacian_grid_warpBackend(
+                queryPositions, referencePositions,
+                querySupports, referenceSupports,
+                queryMasses, referenceMasses,
+                queryDensities, referenceDensities,
+                queryValues, referenceValues,
+                queryKinds= queryKinds, referenceKinds= referenceKinds,
+                domain = domain, datastructure=datastructure, 
+                kernel = kernel, mode = supportMode, 
+                operationMode = operationMode, 
+                gradientMode= gradientMode, 
+                laplacianMode= laplacianMode, positiveDivergence=positiveDivergence,
+                scatteredQuantities= preScatteredQuantities,
 
-        #         useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
-        #         useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
-        #         useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
-        #         useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
-        #     )
+                useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+                useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
+                useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
+                useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,           
+            )
         else:
             raise ValueError("Unsupported SPH operation: {}".format(operation))

@@ -1,7 +1,8 @@
+from ..radiusSearch.wp_compactHash import CompactHashMap
 import warp as wp
 from warp.types import vector, matrix
 # from wp_tensor import tensor
-from typing import Any
+from typing import Any, Union
 import torch
 
 from ..utils.wp_autograd import *
@@ -22,6 +23,7 @@ from .wp_density import computeSPHDensity_warpBackend
 from ..enumTypes import *
 from typing import Optional
 from torch.profiler import profile, record_function, ProfilerActivity
+from ..operations_grid import sphOperation_warp_grid
 
 from ..utils.wp_util import getCachedDummyTensor
 
@@ -32,8 +34,8 @@ def sphOperation_warp(
     queryDensities, referenceDensities,
     queryValues : Optional[torch.Tensor], referenceValues : Optional[torch.Tensor],
     domain: DomainDescription,
-    adjacency: AdjacencyListWarp ,
-    operation: WarpOperation,
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,
+    operation: WarpOperation = WarpOperation.Interpolate,
     kernel: KernelFunctions = KernelFunctions.Wendland4,
     supportMode: SupportScheme = SupportScheme.Gather,    
     gradientMode: GradientScheme = GradientScheme.Naive,
@@ -48,6 +50,23 @@ def sphOperation_warp(
     useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
 ):
+    if adjacency is None or isinstance(adjacency, CompactHashMap):
+        return sphOperation_warp_grid(
+            queryPositions, referencePositions,
+            querySupports, referenceSupports,
+            queryMasses, referenceMasses,
+            queryDensities, referenceDensities,
+            queryValues, referenceValues,
+            domain = domain, datastructure=adjacency, 
+            kernel = kernel, supportMode = supportMode,
+            operation = operation, operationMode = operationMode, 
+            gradientMode= gradientMode, laplacianMode= laplacianMode, positiveDivergence=positiveDivergence,
+            preScatteredQuantities= preScatteredQuantities, queryKinds= queryKinds, referenceKinds= referenceKinds,
+            useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
+            useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,
+            useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+            useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
+        )
     if operationMode != OperationDirection.AllToAll and (queryKinds is None or referenceKinds is None):
         raise ValueError("Query and reference kinds must be provided for non AllToAll operation modes. Operation mode: {}, queryKinds is None: {}, referenceKinds is None: {}".format(operationMode, queryKinds is None, referenceKinds is None))
     if operationMode == OperationDirection.AllToAll and (queryKinds is None):
