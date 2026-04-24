@@ -18,64 +18,74 @@ Or import subpackages directly:
     from sphWarpCore.operations  import ...
 """
 
-from . import util
-from . import autograd
-from . import math
+
 from . import radius
 from . import ops
 
 # Convenience re-exports of the most commonly used symbols
-from .util import (
-    castTorchToWarp,
-    castWarpToTorch,
-    castTorchToWarpAsBuiltins,
-    clearDummyTensorCache,
-    getCachedDummyTensor,
-    getCachedIdentityMatrices,
-)
-from .autograd import warpWrapper, WarpFunctionWrapper
+
+from .autograd import WarpFunctionWrapper
 from .radius import (
     AdjacencyList,
     DomainDescription,
     PointCloud,
     radiusSearchCompactHashMap,
-    radiusNaive,
-    convertModeToUint,
+    CompactHashMap,
+    
+    buildCompactHashMap,
+    buildVerletList,
+    updateNeighborsVerlet,
+    filterVerletList,
 )
 from .ops import (
-    # computeDensity_warpBackend,
-    # computeSPHInterpolant_warpBackend,
-    sphOperation_warp
+    sphOperation_warp,
+    warpOperation
+)
+from .state import (
+    ParticleState,
+    OperationProperties,
+    CRKState,
+    GradHState,
+    RenormalizationState
 )
 
-__version__ = "0.1.1"
+from .crk.crk_wrapper import computeCRKFactors
+from .renorm.wp_covariance import computeRenormalizationMatrices
+
+from .enumTypes import (
+    KernelFunctions,
+    SupportScheme,
+    OperationDirection,
+    GradientScheme,
+    LaplacianScheme
+)
+
+__version__ = "0.2.0"
 
 __all__ = [
-    # sub-modules
-    "util",
-    "autograd",
-    "math",
     "radius",
     "ops",
-    # util
-    "castTorchToWarp",
-    "castWarpToTorch",
-    "castTorchToWarpAsBuiltins",
-    "clearDummyTensorCache",
-    "getCachedDummyTensor",
-    "getCachedIdentityMatrices",
-    # autograd
-    "warpWrapper",
-    "WarpFunctionWrapper",
-    # radius
     "AdjacencyList",
+    "CompactHashMap",
     "DomainDescription",
     "PointCloud",
     "radiusSearchCompactHashMap",
-    "radiusNaive",
-    "convertModeToUint",
-    # ops
-    # "computeDensity_warpBackend",
-    # "computeSPHInterpolant_warpBackend",
     "sphOperation_warp",
+    "WarpFunctionWrapper",
+    "buildCompactHashMap",
+    "buildVerletList",
+    "updateNeighborsVerlet",
+    "filterVerletList",
+    "computeCRKFactors",
+    "computeRenormalizationMatrices",    
+    "ParticleState",
+    "OperationProperties",
+    "CRKState",
+    "GradHState",
+    "RenormalizationState",
+    "KernelFunctions",
+    "SupportScheme",
+    "OperationDirection",
+    "GradientScheme",
+    "LaplacianScheme"
 ]

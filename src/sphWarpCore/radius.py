@@ -16,11 +16,15 @@ from .radiusSearch.wp_compactHash import (
     getDomainExtents,
     compute_h,
     sortReferenceParticles,
+    CompactHashMap,
+    buildCompactHashMap
 )
 from .radiusSearch.wp_radius_small import (
     warp_radius_search_kernel_direct_2,
     warp_radius_search_collect_kernel_direct_2,
 )
+
+from .radiusSearch.verlet import buildVerletList, updateNeighborsVerlet, filterVerletList
 
 __all__ = [
     "AdjacencyList",
@@ -37,4 +41,9 @@ __all__ = [
     "sortReferenceParticles",
     "warp_radius_search_kernel_direct_2",
     "warp_radius_search_collect_kernel_direct_2",
+    "CompactHashMap",
+    "buildCompactHashMap",
+    "buildVerletList",
+    "updateNeighborsVerlet",
+    "filterVerletList",
 ]

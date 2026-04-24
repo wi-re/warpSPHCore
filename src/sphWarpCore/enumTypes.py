@@ -6,6 +6,18 @@ class SupportScheme(Enum):
     Symmetric = 3
     SuperSymmetric = 4
 
+def supportSchemeTomode(scheme: SupportScheme) -> str:
+    if scheme == SupportScheme.Gather:
+        return 'gather'
+    elif scheme == SupportScheme.Scatter:
+        return 'scatter'
+    elif scheme == SupportScheme.Symmetric:
+        return 'symmetric'
+    elif scheme == SupportScheme.SuperSymmetric:
+        return 'superSymmetric'
+    else:
+        raise ValueError(f"Unsupported support scheme: {scheme}")
+
 # @torch.jit.script
 class KernelFunctions(Enum):
     Poly6 = 20
@@ -41,6 +53,11 @@ class WarpOperation(Enum):
     Laplacian = 5
     Density = 6
 
+
+class HashMapLengthMode(Enum):
+    Fixed = 0
+    NumberOfParticles = 1
+    NextPrime = 2
 
 
 class ViscosityTerms(Enum):

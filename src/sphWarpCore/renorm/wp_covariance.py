@@ -282,7 +282,7 @@ def pinv2x2(M):
         return inv, eigVals
 
 
-def computeRenormalizationMatrices(
+def computeRenormalizationMatrices_(
     queryPositions, referencePositions,
     querySupports, referenceSupports,
     queryMasses, referenceMasses,
@@ -305,7 +305,7 @@ def computeRenormalizationMatrices(
         queryMasses, referenceMasses, 
         queryDensities, referenceDensities, 
         domain = domain, adjacency = adjacency, 
-        mode = SupportScheme.Gather, kernel = KernelFunctions.Wendland2, renormalizationMatrices = None)
+        mode = mode, kernel = kernel, renormalizationMatrices = None)
 
     num_nbrs = adjacency.numNeighbors
     dtype = C.dtype
@@ -326,3 +326,42 @@ def computeRenormalizationMatrices(
             eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
             eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:],[1])
             eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:],[1])
+
+    return C, eigVals, L
+
+from ..state import *
+from typing import Union
+from ..radius import CompactHashMap
+
+def computeRenormalizationMatrices(
+  queryParticles: ParticleState,
+  domain: DomainDescription,
+  kernel: KernelFunctions,
+  mode: SupportScheme = SupportScheme.Gather,
+  operationMode: OperationDirection = OperationDirection.AllToAll,
+  adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None,   
+  referenceState: Optional[ParticleState] = None,   
+  returnEigVals: bool = True
+):
+    if referenceState is None:
+        referenceState = queryParticles
+
+    if adjacency is None or isinstance(adjacency, CompactHashMap):
+        raise NotImplementedError("Adjacency list must be provided for Renormalization matrices computation. Building a compact hash map and using it as adjacency is not currently supported for this operation.")
+    
+    C, eigVals, L = computeRenormalizationMatrices_(
+        queryParticles.positions, referenceState.positions, 
+        queryParticles.supports, referenceState.supports, 
+        queryParticles.masses, referenceState.masses, 
+        queryParticles.densities, 
+        referenceState.densities, 
+        queryParticles.kinds if queryParticles.kinds is not None else getCachedDummyTensor((queryParticles.masses.shape[0],), dtype=torch.int32, device=queryParticles.masses.device),
+        referenceState.kinds if referenceState.kinds is not None else getCachedDummyTensor((referenceState.masses.shape[0],), dtype=torch.int32, device=referenceState.masses.device),
+         domain = domain, adjacency = adjacency,
+         mode = mode, kernel = kernel, operationMode = operationMode
+    )
+
+    if returnEigVals:
+        return C, eigVals, RenormalizationState(renormalizationMatrices = L)
+    else:
+        return RenormalizationState(renormalizationMatrices = L)

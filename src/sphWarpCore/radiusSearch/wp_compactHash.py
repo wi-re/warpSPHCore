@@ -18,7 +18,7 @@ def computeGridSupport(supportsX, supportsY, mode_uint):
     elif mode_uint == 4:  # superSymmetric
         return max(torch.max(supportsX), torch.max(supportsY))
     else:
-        raise ValueError('Invalid mode')
+        raise ValueError('Invalid mode value. Must be 1 (gather), 2 (scatter), 3 (symmetric), or 4 (superSymmetric). Value is {}'.format(mode_uint))
     
     
 def getDomainExtents(y, minDomain: Optional[torch.Tensor], maxDomain: Optional[torch.Tensor]):
@@ -660,6 +660,8 @@ def buildCompactHashMap(
         
             mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4}
             mode_uint = mode_map.get(mode, 0)
+            if mode_uint == 0:
+                raise ValueError(f"Invalid mode: {mode}. Supported modes are: {list(mode_map.keys())}")
                 
             minDomain = domainDescription.min if domainDescription.min is not None else None
             maxDomain = domainDescription.max if domainDescription.max is not None else None
@@ -878,7 +880,7 @@ def radiusSearchOnCompactHashMap(
     return adjacencyCH
     
 
-def radiusSearchCompactHashMap(
+def radiusSearchCompactHashMap_(
     queryPositions: torch.Tensor,
     referencePositions: torch.Tensor,
     querySupports: torch.Tensor,
@@ -915,4 +917,43 @@ def radiusSearchCompactHashMap(
         return adjacencyCH if not returnCompactHashMap else (adjacencyCH, datastructure)
 
     
-    
+from ..state import *
+
+def radiusSearchCompactHashMap(
+    queryParticles: ParticleState,
+    domain: DomainDescription,
+    mode: SupportScheme = SupportScheme.Gather,
+    hashMapLengthMode: HashMapLengthMode = HashMapLengthMode.NextPrime,
+    fixedHashMapLength: int = 4096,
+    returnCompactHashMap: bool = False,
+    referenceParticles: Optional[ParticleState] = None
+):
+    referenceParticles = queryParticles
+    queryPositions = queryParticles.positions
+    referencePositions = referenceParticles.positions
+    querySupports = queryParticles.supports if queryParticles.supports is not None else torch.zeros(queryParticles.positions.shape[0], device=queryParticles.positions.device)
+    referenceSupports = referenceParticles.supports if referenceParticles.supports is not None else torch.zeros(referenceParticles.positions.shape[0], device=referenceParticles.positions.device)
+    periodicity = torch.tensor(domain.periodic if domain.periodic is not None else [False] * queryParticles.positions.shape[1], device=queryParticles.positions.device)
+
+    if hashMapLengthMode == HashMapLengthMode.Fixed:
+        hashMapLength = fixedHashMapLength
+    elif hashMapLengthMode == HashMapLengthMode.NumberOfParticles:
+        hashMapLength = queryPositions.shape[0]
+        if hashMapLength % 2 == 0:
+            hashMapLength += 1  # Ensure it's odd to reduce collisions
+    elif hashMapLengthMode == HashMapLengthMode.NextPrime:
+        hashMapLength = getNextPrime(queryPositions.shape[0])
+    else:
+        raise ValueError("Invalid hash map length mode")
+
+    return radiusSearchCompactHashMap_(
+        queryPositions,
+        referencePositions,
+        querySupports,
+        referenceSupports,
+        periodicity,
+        domain,
+        supportSchemeTomode(mode),
+        hashMapLength,
+        returnCompactHashMap
+    )

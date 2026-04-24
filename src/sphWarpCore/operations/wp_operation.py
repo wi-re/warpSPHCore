@@ -224,3 +224,88 @@ def sphOperation_warp(
             )
         else:
             raise ValueError("Unsupported SPH operation: {}".format(operation))
+        
+
+from ..state import *
+
+def warpOperation(
+    queryParticles: ParticleState,
+    operationProperties: OperationProperties,
+    domain: DomainDescription,
+    queryValues : Optional[torch.Tensor] = None, referenceValues : Optional[torch.Tensor] = None,
+    queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,
+    referenceParticles: Optional[ParticleState] = None,
+    preScatteredQuantities: Optional[torch.Tensor] = None,
+    crkState: Optional[CRKState] = None,
+    gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
+    renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
+):
+    queryPositions = queryParticles.positions
+    referencePositions = queryParticles.positions if referenceParticles is None else referenceParticles.positions
+    querySupports = queryParticles.supports
+    referenceSupports = queryParticles.supports if referenceParticles is None else referenceParticles.supports
+    queryMasses = queryParticles.masses
+    referenceMasses = queryParticles.masses if referenceParticles is None else referenceParticles.masses
+    queryDensities = queryParticles.densities
+    referenceDensities = queryParticles.densities if referenceParticles is None else referenceParticles.densities
+    queryKinds = queryParticles.kinds
+    referenceKinds = queryParticles.kinds if referenceParticles is None else referenceParticles.kinds
+
+    if gradHState is not None:
+        if isinstance(gradHState, GradHState):
+            queryOmegas = gradHState.queryOmegas
+            referenceOmegas = gradHState.referenceOmegas
+        elif isinstance(gradHState, tuple) and len(gradHState) == 2:
+            queryOmegas, referenceOmegas = gradHState
+        elif isinstance(gradHState, torch.Tensor):
+            queryOmegas = gradHState
+            referenceOmegas = gradHState
+        else:
+            raise ValueError("Invalid type for gradHState: {}. Must be either GradHState, a tuple of two tensors, or a single tensor.".format(type(gradHState)))
+        
+        if referenceOmegas is None:
+            referenceOmegas = queryOmegas
+    else:
+        queryOmegas = None
+        referenceOmegas = None
+
+    if renormalizationState is not None:
+        if isinstance(renormalizationState, RenormalizationState):
+            renormalizationMatrices = renormalizationState.renormalizationMatrices
+        elif isinstance(renormalizationState, torch.Tensor):
+            renormalizationMatrices = renormalizationState
+        else:
+            raise ValueError("Invalid type for renormalizationState: {}. Must be either RenormalizationState or torch.Tensor.".format(type(renormalizationState)))
+    else:
+        renormalizationMatrices = None
+
+    referenceVolumes = referenceVolumes if referenceVolumes is not None else (queryVolumes if queryVolumes is not None else None)
+
+    
+
+    return sphOperation_warp(
+        queryPositions, referencePositions,
+        querySupports, referenceSupports,
+        queryMasses, referenceMasses,
+        queryDensities, referenceDensities,
+        queryValues, referenceValues if referenceValues is not None else queryValues,
+        domain = domain, adjacency=adjacency,
+        operation = operationProperties.operation, supportMode = operationProperties.supportMode,
+        kernel = operationProperties.kernel, operationMode = operationProperties.operationMode,
+        gradientMode= operationProperties.gradientMode, laplacianMode= operationProperties.laplacianMode, positiveDivergence= operationProperties.positiveDivergence,
+        preScatteredQuantities= preScatteredQuantities, 
+        queryKinds= queryKinds, referenceKinds= referenceKinds,
+
+        useGradHTerms= gradHState is not None, 
+        queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,
+
+        useVolume = queryVolumes is not None,
+        queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
+
+        useCRK= crkState is not None, 
+        crk_A= crkState.A if crkState is not None else None, crk_B= crkState.B if crkState is not None else None, crk_gradA= crkState.gradA if crkState is not None else None, crk_gradB= crkState.gradB if crkState is not None else None,
+
+        useGradientRenormalization= renormalizationState is not None, renormalizationMatrices= renormalizationMatrices,
+    )
+

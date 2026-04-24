@@ -4,7 +4,7 @@ from .wp_compactHash import *
 # Verlet lists store not just the required neighbors but also some extra neighbors to avoid rebuilding the neighbor list every step.
 
 
-def buildVerletList(
+def buildVerletList_(
         queryPositions: torch.Tensor, referencePositions: torch.Tensor,
         querySupports: torch.Tensor, referenceSupports: torch.Tensor,
         domain : DomainDescription, verletScale : float = 1.0, 
@@ -16,7 +16,7 @@ def buildVerletList(
             if verbose:
                 print('Building neighborhood from scratch [no prior neighborhood]')
             with record_function(f"[Neighborhood] no prior"):
-                adjacency = radiusSearchCompactHashMap(
+                adjacency = radiusSearchCompactHashMap_(
                     queryPositions, referencePositions,
                     querySupports * verletScale, referenceSupports * verletScale,
                     domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
@@ -26,7 +26,7 @@ def buildVerletList(
                 if verbose:
                     print('Building neighborhood from scratch [different number of particles]')
                 with record_function(f"[Neighborhood] mismatch"):
-                    adjacency = radiusSearchCompactHashMap(
+                    adjacency = radiusSearchCompactHashMap_(
                         queryPositions, referencePositions,
                         querySupports * verletScale, referenceSupports * verletScale,
                         domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
@@ -80,7 +80,7 @@ def buildVerletList(
                         print('Ratio: ', hFactor * dFactor)
                         print('Building neighborhood from scratch [distance larger than support]')
                     with record_function(f"[Neighborhood] verlet"):
-                        adjacency = radiusSearchCompactHashMap(
+                        adjacency = radiusSearchCompactHashMap_(
                             queryPositions, referencePositions,
                             querySupports * verletScale, referenceSupports * verletScale,
                             domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
@@ -92,6 +92,27 @@ def buildVerletList(
                     adjacency = priorNeighborhood
         return adjacency
     
+from ..state import *
+
+def buildVerletList(
+        queryParticles: ParticleState, 
+        domain: DomainDescription, 
+        verletScale : float = 1.0,
+        supportMode: SupportScheme = SupportScheme.Gather,
+        priorNeighborhood : Optional[AdjacencyList] = None,
+        verbose : bool = False,
+        referenceParticles: Optional[ParticleState] = None
+):
+    if referenceParticles is None:
+        referenceParticles = queryParticles
+
+    return buildVerletList_(
+        queryParticles.positions, referenceParticles.positions,
+        queryParticles.supports, referenceParticles.supports,
+        domain, verletScale, supportSchemeTomode(supportMode), 
+        priorNeighborhood, verbose
+    )
+
 from sphWarpCore.kernels import computePairwiseSupport
 
 @wp.func
@@ -247,7 +268,7 @@ def updateNeighborsVerlet(
     
 
 # This function filters the Verlet list to produce the actual neighbor list for the current positions and supports, which may have changed since the Verlet list was built. 
-def filterVerletList(
+def filterVerletList_(
         queryPositions: torch.Tensor, referencePositions: torch.Tensor, 
         querySupports: torch.Tensor, referenceSupports: torch.Tensor,
         domain: DomainDescription, adjacency: AdjacencyList, 
@@ -305,4 +326,17 @@ def filterVerletList(
         numRows=queryPositions.shape[0], numCols=referencePositions.shape[0],
         queryPositions = queryPositions, referencePositions = referencePositions,
         querySupports = querySupports, referenceSupports = referenceSupports
+    )
+
+def filterVerletList(
+        queryParticles: ParticleState, 
+        domain: DomainDescription, 
+        adjacency: AdjacencyList, 
+        supportMode: SupportScheme = SupportScheme.Gather,
+        referenceParticles: Optional[ParticleState] = None, 
+):
+    return filterVerletList_(
+        queryParticles.positions, referenceParticles.positions if referenceParticles is not None else queryParticles.positions, 
+        queryParticles.supports, referenceParticles.supports if referenceParticles is not None else queryParticles.supports,
+        domain, adjacency, supportSchemeTomode(supportMode)
     )

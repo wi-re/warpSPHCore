@@ -79,6 +79,7 @@ def timeFunction(func, *args, **kwargs):
 # wp.config.verify_autograd_array_access = True
 # wp.config.verbose = True
 
+from sphWarpCore import *
 
 def prepData(
     nx, targetNumNeighbors, dim, device, periodic = False, warpOnly = False, noiseAmplitude = 0.1
@@ -103,23 +104,44 @@ def prepData(
 
     mode = 'gather'
 
+    particleState = ParticleState(
+        positions=queryPositions, 
+        supports=querySupports, 
+        masses=queryMasses, 
+        densities=None,
+        kinds = torch.zeros(x.shape[0], dtype = torch.int32, device = x.device),
+    )
+
+
     adjacency, adjacency_warp_gpu, adjacency_warp_cpu = timeFunction(radiusSearchCompactHashMap,
-            queryPositions, referencePositions, 
-            querySupports, referenceSupports, 
-            domain.periodic, domain,
-            mode, hashMapLength
+        particleState, domain, 
+        mode = SupportScheme.SuperSymmetric,
+        hashMapLengthMode = HashMapLengthMode.Fixed, fixedHashMapLength = hashMapLength
+    )
+
+    densities = warpOperation(
+        particleState,
+        operationProperties = OperationProperties(
+            operation=WarpOperation.Density,
+            kernel = KernelFunctions.Wendland2, 
+            supportMode = SupportScheme.Gather
+        ),
+        domain = domain,
+        adjacency = adjacency
     )
     
-    densities = sphOperation_warp(
-            queryPositions, referencePositions,
-            querySupports, referenceSupports,
-            queryMasses, referenceMasses,
-            None, None,
-            None, None,
-            domain, adjacency,
-            operation=WarpOperation.Density,
-            kernel = KernelFunctions.Wendland2, supportMode = SupportScheme.Gather
-    )
+    # densities = sphOperation_warp(
+    #         queryPositions, referencePositions,
+    #         querySupports, referenceSupports,
+    #         queryMasses, referenceMasses,
+    #         None, None,
+    #         None, None,
+    #         domain, adjacency,
+    #         operation=WarpOperation.Density,
+    #         kernel = KernelFunctions.Wendland2, supportMode = SupportScheme.Gather
+    # )
+    particleState.densities = densities
+
     measurement = {
         'numParticles': nx**dim,
         'targetNumNeighbors': targetNumNeighbors,
@@ -133,7 +155,7 @@ def prepData(
 
     if warpOnly == True:
         # print("Adjacency: ", adjacency)
-        return queryPositions, referencePositions, querySupports, referenceSupports, queryMasses, referenceMasses, densities, densities, domain, adjacency, None, None, [measurement]
+        return particleState, domain, adjacency, None, None, [measurement]
 
     particles_l = ParticleSet(positions = referencePositions, supports = referenceSupports, masses = referenceMasses, densities = torch.zeros_like(referenceMasses))
 
@@ -180,7 +202,7 @@ def prepData(
 
 
     simulationState.densities = densities
-    return queryPositions, referencePositions, querySupports, referenceSupports, queryMasses, referenceMasses, densities, densities, domain, adjacency, neighborhood, simulationState, [measurement, measurement_diffSPH, measurement_diffSPH_state]
+    return particleState, domain, adjacency, neighborhood, simulationState, [measurement, measurement_diffSPH, measurement_diffSPH_state]
 
 
 
@@ -239,3 +261,29 @@ class PlotSet(NamedTuple):
 
 
 from diffSPH.plotting import visualizeParticles
+
+
+
+def plotToAxis(fig, axis, particleState, quantity, title, cmap, domain, markerSize = 1, gridVisualization = False, gridResolution = 128, mask = None):
+    return visualizeParticles(
+        fig, axis,
+        particleState if mask is None else ParticleState(
+            positions = particleState.positions[mask] if particleState.positions is not None else None,
+            supports = particleState.supports[mask] if particleState.supports is not None else None,
+            masses = particleState.masses[mask] if particleState.masses is not None else None,
+            densities = particleState.densities[mask] if particleState.densities is not None else None,
+            kinds = particleState.kinds[mask] if particleState.kinds is not None else None
+        ),
+        quantity = quantity[mask] if mask is not None else quantity,
+        kernel = KernelType.Wendland2,
+        domain = domain,
+
+        cmap = cmap,
+        markerSize = markerSize,
+        gridVisualization = gridVisualization,
+        gridResolution = gridResolution,
+
+        streamLines = False,
+        plotDomain = True,
+        title = title,
+    )
