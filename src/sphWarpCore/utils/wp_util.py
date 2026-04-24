@@ -151,35 +151,12 @@ def castTorchToWarpAsBuiltins(x_torch):
 #     GhostToBoundary = 8
 
 @wp.func
-def checkDirectionality_Func(
-    queryKind: wp.int32, referenceKind: wp.int32, opInt: wp.int32
-):
-    if opInt == 0:
-        return True
-    elif opInt == 1: # fluid to fluid
-        return queryKind == 0 and referenceKind == 0
-    elif opInt == 2: # fluid to boundary
-        return queryKind == 0 and referenceKind == 1
-    elif opInt == 3: # boundary to fluid
-        return queryKind == 1 and referenceKind == 0
-    elif opInt == 4: # boundary to boundary
-        return queryKind == 1 and referenceKind == 1
-    elif opInt == 5: # fluid to ghost
-        return queryKind == 0 and referenceKind == 2
-    elif opInt == 6: # ghost to fluid
-        return queryKind == 2 and referenceKind == 0
-    elif opInt == 7: # boundary to ghost
-        return queryKind == 1 and referenceKind == 2
-    elif opInt == 8: # ghost to boundary
-        return queryKind == 2 and referenceKind == 1
-    else:
-        return False
-    
-@wp.func
 def checkDirectionality_i(
     queryKind: wp.int32, opInt: wp.int32
 ):
-    if opInt == 0:
+    if opInt == 0: # No Ghost
+        return queryKind != 2
+    elif opInt == 9: # All to all
         return True
     elif opInt == 1: # fluid to fluid
         return queryKind == 0
@@ -204,7 +181,9 @@ def checkDirectionality_i(
 def checkDirectionality_j(
     referenceKind: wp.int32, opInt: wp.int32
 ):
-    if opInt == 0:
+    if opInt == 0: # No Ghost
+        return referenceKind != 2
+    elif opInt == 9: # All to all
         return True
     elif opInt == 1: # fluid to fluid
         return referenceKind == 0
@@ -225,6 +204,11 @@ def checkDirectionality_j(
     else:
         return False
     
+@wp.func
+def checkDirectionality_Func(
+    queryKind: wp.int32, referenceKind: wp.int32, opInt: wp.int32
+):
+    return checkDirectionality_i(queryKind, opInt) and checkDirectionality_j(referenceKind, opInt)
 
 import torch
 from ..math import volumeToSupport

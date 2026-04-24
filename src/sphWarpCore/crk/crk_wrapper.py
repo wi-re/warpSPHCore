@@ -1,5 +1,5 @@
 
-from src.sphWarpCore.radiusSearch.wp_compactHash import CompactHashMap
+from ..radius import CompactHashMap
 
 from .crk_density import computeCRKDensityWarp
 from .crk_terms import computeCRKTermsWarp

@@ -56,9 +56,12 @@ from .enumTypes import (
     KernelFunctions,
     SupportScheme,
     OperationDirection,
+    WarpOperation,
     GradientScheme,
-    LaplacianScheme
+    LaplacianScheme,
+    ParticleType
 )
+from .math import (volumeToSupport)
 
 __version__ = "0.2.0"
 
@@ -87,5 +90,8 @@ __all__ = [
     "SupportScheme",
     "OperationDirection",
     "GradientScheme",
-    "LaplacianScheme"
+    "LaplacianScheme",
+    "WarpOperation",
+    "volumeToSupport",
+    "ParticleType"
 ]

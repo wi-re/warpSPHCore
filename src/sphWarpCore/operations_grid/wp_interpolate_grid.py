@@ -126,7 +126,7 @@ def computeSPHInterpolation_Kernel(
     if i >= queryPositions.shape[0]:
         return
     
-    out_value = type(outputValues[0])() * 0.0
+    out_value = type(outputValues[0])(0.0)
 
     for o in range(numOffsets):
         cellStartIndex, cellParticleCount = checkOffset(
@@ -147,7 +147,7 @@ def computeSPHInterpolation_Kernel(
             opInt, queryKinds, referenceKinds,
             useVolume, queryVolumes, referenceVolumes,
             useCRK, crk_A, crk_B,
-            type(outputValues[0])()
+            type(outputValues[0])(0.0)
         )
     outputValues[i] = out_value
     

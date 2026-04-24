@@ -19,7 +19,7 @@ def iterateCell(
         
         if mortonIndex != candidateIndex:
             # wp.printf("\t\tThread %d: Skipping cell with linear index %d as it does not match the current cell index %d\n", i, candidateIndex, mortonIndex)
-            return -1, -1  # This cell does not match the current cell index
+            continue  # Keep scanning the hash bucket for a matching morton index
         return cellStartIndex, cellParticleCount
     return -1, -1  # No matching cell found
 
