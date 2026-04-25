@@ -9,6 +9,9 @@ from .radius_util import *
 
 
 def computeGridSupport(supportsX, supportsY, mode_uint):
+    # print("Computing grid support with mode:", mode_uint, "where 1=gather, 2=scatter, 3=symmetric, 4=superSymmetric")
+    # print(f'SupportsX: {supportsX}')
+    # print(f'SupportsY: {supportsY}')
     if mode_uint == 1:  # gather
         return torch.max(supportsX)
     elif mode_uint == 2:  # scatter
@@ -928,7 +931,7 @@ def radiusSearchCompactHashMap(
     returnCompactHashMap: bool = False,
     referenceParticles: Optional[ParticleState] = None
 ):
-    referenceParticles = queryParticles
+    referenceParticles = queryParticles if referenceParticles is None else referenceParticles
     queryPositions = queryParticles.positions
     referencePositions = referenceParticles.positions
     querySupports = queryParticles.supports if queryParticles.supports is not None else torch.zeros(queryParticles.positions.shape[0], device=queryParticles.positions.device)
