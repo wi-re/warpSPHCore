@@ -97,7 +97,7 @@ def computeSPHDensity_grid_Kernel(
     if i >= queryPositions.shape[0]:
         return
     
-    out_value = type(outputValues[0])() * 0.0
+    out_value = wp.float32(0.0)
 
     for o in range(numOffsets):
         cellStartIndex, cellParticleCount = checkOffset(

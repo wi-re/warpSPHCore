@@ -121,15 +121,30 @@ warpWrapper = WarpFunctionWrapper.apply
 
 from torch.profiler import record_function
 
+from ..warp_state import *
+
 def launch_kernel(kernel, output_shape, output_dtype, *args):
     with record_function(f"Warp Kernel: {kernel.__name__}"):
         inputs = list(args)
         requires_grad = any(input.requires_grad for input in inputs if hasattr(input, 'requires_grad'))
-        
+    
+        # use the first tensor input to determine the device for the output tensors
+        firstTensorInput = next((input for input in inputs if isinstance(input, wp.array)), None)
+        if firstTensorInput is None:
+            # one of the arguments could be a domain state that contains the device information
+            domainInput = next((input for input in inputs if hasattr(input, 'domainMin')), None)
+            if domainInput is not None:
+                device = domainInput.domainMin.device
+            else:
+                raise ValueError("At least one input must be a torch.Tensor or a domainData struct to determine the device for the output.")
+            # raise ValueError("At least one input must be a torch.Tensor to determine the device for the output.")
+        else:
+            device = firstTensorInput.device
+
         if isinstance(output_dtype, List) or isinstance(output_dtype, Tuple):
             outputs = []
             for i, out_type in enumerate(output_dtype):
-                output = wp.zeros(output_shape[i] if isinstance(output_shape, List) else output_shape, dtype=out_type, device=inputs[0].device)
+                output = wp.zeros(output_shape[i] if isinstance(output_shape, List) else output_shape, dtype=out_type, device=device)
                 output.requires_grad = requires_grad
                 outputs.append(output)
 
@@ -140,18 +155,18 @@ def launch_kernel(kernel, output_shape, output_dtype, *args):
                 kernel,
                 dim = kernel_dim,
                 inputs = list(args) + outputs,
-                device = inputs[0].device
+                device = device
             )
             return tuple(outputs)
         
-        output = wp.zeros(output_shape, dtype=output_dtype, device=inputs[0].device)
+        output = wp.zeros(output_shape, dtype=output_dtype, device=device)
         output.requires_grad = requires_grad
         
         wp.launch(
             kernel,
             dim = output_shape[0] if not isinstance(output_shape, int) else output_shape,
             inputs = list(args) + [output],
-            device = inputs[0].device
+            device = device
         )
     
     return output

@@ -250,7 +250,12 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     qExtent = domainMax - domainMin
     cellCount = torch.ceil(qExtent / (hCell)).to(torch.int32)
     indices = torch.floor((referenceParticles - domainMin) / hCell).to(torch.int32).view(-1, referenceParticles.shape[1])
+    
+    
+    # print('Cell count:', cellCount, 'Cell size:', hCell, 'Domain extent:', qExtent)
+    # print('indices:', indices.contiguous())
     warp_indices = castTorchToWarp(indices)
+    
     out = wp.zeros((indices.shape[0],), dtype=wp.int64, device=warp_indices.device)
     wp.launch(
         indexCells, dim = indices.shape[0], inputs = [warp_indices, out], device = warp_indices.device

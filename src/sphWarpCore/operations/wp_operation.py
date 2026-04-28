@@ -247,10 +247,11 @@ def warpOperation(
     referenceSupports = queryParticles.supports if referenceParticles is None else referenceParticles.supports
     queryMasses = queryParticles.masses
     referenceMasses = queryParticles.masses if referenceParticles is None else referenceParticles.masses
-    queryDensities = queryParticles.densities
-    referenceDensities = queryParticles.densities if referenceParticles is None else referenceParticles.densities
-    queryKinds = queryParticles.kinds
-    referenceKinds = queryParticles.kinds if referenceParticles is None else referenceParticles.kinds
+    queryDensities = queryParticles.densities #if hasattr(queryParticles, 'densities') else None
+    referenceDensities = queryDensities if referenceParticles is None else referenceParticles.densities
+    # referenceDensities = queryDensities if referenceParticles is None or hasattr(referenceParticles,'densities') else referenceParticles.densities
+    queryKinds = queryParticles.kinds if hasattr(queryParticles, 'kinds') else None
+    referenceKinds = queryKinds if referenceParticles is None or not hasattr(referenceParticles, 'kinds') else referenceParticles.kinds
 
     if gradHState is not None:
         if isinstance(gradHState, GradHState):

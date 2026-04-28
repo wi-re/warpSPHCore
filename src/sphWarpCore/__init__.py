@@ -63,7 +63,28 @@ from .enumTypes import (
 )
 from .math import (volumeToSupport)
 
-__version__ = "0.2.0"
+from .warp_state import (
+    adjacencyData,
+    gridData,
+    domainData,
+    getParticle,
+    getL_i, getVolume_i, getVolume_j,
+    getGradH_i, getGradH_j,
+    getCRK_i
+)
+
+from .warp_state_util import parseArguments
+
+from .utils.wp_util import (zero_like_warp,
+                            checkDirectionality_i, checkDirectionality_j, getCachedDummyTensor, castTorchToWarpAsBuiltins)
+
+from .kernels.wp_kernel import eval_kernelScale, computeKernelCRK, computeKernelGradientCRK, sphKernel, sphKernelGradient, eval_k, eval_C_d
+from .mathutil.wp_math import computeDistanceVec, safe_sqrt
+from .kernels.utils import computePairwiseSupport, iPow
+from .utils.wp_autograd import launch_kernel, warpWrapper
+from .mathutil.wp_math import matmul
+
+__version__ = "0.2.2"
 
 __all__ = [
     "radius",
@@ -92,6 +113,23 @@ __all__ = [
     "GradientScheme",
     "LaplacianScheme",
     "WarpOperation",
+    "warpOperation",
     "volumeToSupport",
-    "ParticleType"
+    "ParticleType",
+    "adjacencyData",
+    "gridData",
+    "domainData",
+    "getParticle",
+    "getL_i", "getVolume_i", "getVolume_j",
+    "getGradH_i", "getGradH_j",
+    "getCRK_i",
+    "parseArguments",
+    'zero_like_warp',
+    'checkDirectionality_i', 'checkDirectionality_j', 'getCachedDummyTensor',
+    'castTorchToWarpAsBuiltins',
+    'eval_kernelScale', 'computeKernelCRK', 'computeKernelGradientCRK', 'sphKernel', 'sphKernelGradient', 'eval_k', 'eval_C_d',
+    'computeDistanceVec', 'safe_sqrt', 'computePairwiseSupport', 'iPow',
+    'launch_kernel', 'warpWrapper',
+    'matmul'
+
 ]
