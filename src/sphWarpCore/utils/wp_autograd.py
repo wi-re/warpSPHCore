@@ -89,12 +89,12 @@ class WarpFunctionWrapper(torch.autograd.Function):
         if isinstance(outputs_warp, list):
             for out_warp, grad_out in zip(outputs_warp, grad_outputs):
                 if grad_out is not None:
-                    out_warp.grad = wp.from_torch(grad_out.contiguous())
+                    out_warp.grad = castTorchToWarpAsBuiltins(grad_out.contiguous())
                     # print(f'Output Grad [{i:2d}]: {grad_out} [dtype: {grad_out.dtype}, device: {grad_out.device}, shape: {grad_out.shape}]')
                     
         else:
             if grad_outputs[0] is not None:
-                outputs_warp.grad = wp.from_torch(grad_outputs[0].contiguous())
+                outputs_warp.grad = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous())
                 # print(f'Output Grad: {grad_outputs[0]} [dtype: {grad_outputs[0].dtype}, device: {grad_outputs[0].device}, shape: {grad_outputs[0].shape}]')
                 
         

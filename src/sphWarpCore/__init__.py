@@ -84,7 +84,7 @@ from .kernels.utils import computePairwiseSupport, iPow
 from .utils.wp_autograd import launch_kernel, warpWrapper
 from .mathutil.wp_math import matmul
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
 
 __all__ = [
     "radius",
