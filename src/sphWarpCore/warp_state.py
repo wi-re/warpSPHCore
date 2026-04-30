@@ -76,6 +76,10 @@ class correctionData_1:
     queryB: wp.array(dtype=vector(length=1, dtype=wp.float32))  # type: ignore
     queryGradA: wp.array(dtype = vector(length=1, dtype=wp.float32))  # type: ignore
     queryGradB: wp.array(dtype=matrix(shape=(1,1), dtype=wp.float32)) # type: ignore
+    referenceA: wp.array(dtype = wp.float32)  # type: ignore
+    referenceB: wp.array(dtype=vector(length=1, dtype=wp.float32))  # type: ignore
+    referenceGradA: wp.array(dtype = vector(length=1, dtype=wp.float32))  # type: ignore
+    referenceGradB: wp.array(dtype=matrix(shape=(1,1), dtype=wp.float32)) # type: ignore
 
 @wp.struct
 class correctionData_2:
@@ -92,6 +96,10 @@ class correctionData_2:
     queryB: wp.array(dtype=vector(length=2, dtype=wp.float32))  # type: ignore
     queryGradA: wp.array(dtype=vector(length=2, dtype=wp.float32))  # type: ignore
     queryGradB: wp.array(dtype=matrix(shape=(2,2), dtype=wp.float32)) # type: ignore
+    referenceA: wp.array(dtype = wp.float32)  # type: ignore
+    referenceB: wp.array(dtype=vector(length=2, dtype=wp.float32))  # type: ignore
+    referenceGradA: wp.array(dtype = vector(length=2, dtype=wp.float32))  # type: ignore
+    referenceGradB: wp.array(dtype=matrix(shape=(2,2), dtype=wp.float32)) # type: ignore
 
 @wp.struct
 class correctionData_3:
@@ -108,6 +116,10 @@ class correctionData_3:
     queryB: wp.array(dtype=vector(length=1, dtype=wp.float32))  # type: ignore
     queryGradA: wp.array(dtype=vector(length=3, dtype=wp.float32))  # type: ignore
     queryGradB: wp.array(dtype=matrix(shape=(3,3), dtype=wp.float32)) # type: ignore
+    referenceA: wp.array(dtype=wp.float32)  # type: ignore
+    referenceB: wp.array(dtype=vector(length=3, dtype=wp.float32))  # type: ignore
+    referenceGradA: wp.array(dtype=vector(length=3, dtype=wp.float32))  # type: ignore
+    referenceGradB: wp.array(dtype=matrix(shape=(3,3), dtype=wp.float32)) # type: ignore
 
 from .utils.wp_util import zero_like_warp
 
@@ -160,5 +172,15 @@ def getCRK_i(
         return True, correctionData.queryA[i], correctionData.queryB[i], correctionData.queryGradA[i], correctionData.queryGradB[i]
     else:
         return False, zero_like_warp(correctionData.queryA), zero_like_warp(correctionData.queryB), zero_like_warp(correctionData.queryGradA), zero_like_warp(correctionData.queryGradB)
+
+@wp.func
+def getCRK_j(
+    correctionData: Any, j: wp.int32
+):
+    if correctionData.useCRK:
+        return True, correctionData.referenceA[j], correctionData.referenceB[j], correctionData.referenceGradA[j], correctionData.referenceGradB[j]
+    else:
+        return False, zero_like_warp(correctionData.referenceA), zero_like_warp(correctionData.referenceB), zero_like_warp(correctionData.referenceGradA), zero_like_warp(correctionData.referenceGradB)
+
 
 

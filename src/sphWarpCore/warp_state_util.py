@@ -28,7 +28,7 @@ def parseArguments(
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,
     referenceParticles: Optional[ParticleState] = None,
-    crkState: Optional[CRKState] = None,
+    crkState: Optional[Union[Tuple[CRKState,CRKState], CRKState]] = None,
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
 ):
@@ -123,8 +123,23 @@ def parseArguments(
         queryVolumes_ = getCachedDummyTensor((1,), device=device, dtype=torch.float32)
         referenceVolumes_ = getCachedDummyTensor((1,), device=device, dtype=torch.float32)
 
-    crk_A_, crk_B_, crk_gradA_, crk_gradB_ = (crkState.A, crkState.B, crkState.gradA, crkState.gradB) if useCRK else (\
+    qcrkState, rcrkState = None, None
+    if isinstance(crkState, tuple) and len(crkState) == 2:
+        qcrkState, rcrkState = crkState
+    elif isinstance(crkState, CRKState):
+        qcrkState = crkState
+        rcrkState = crkState
+    else:
+        pass
+
+    qcrk_A_, qcrk_B_, qcrk_gradA_, qcrk_gradB_ = (qcrkState.A, qcrkState.B, qcrkState.gradA, qcrkState.gradB) if useCRK else (\
         getCachedDummyTensor((1,),device= device, dtype = torch.float32), 
+        getCachedDummyTensor((1, dim), device=device, dtype = torch.float32), 
+        getCachedDummyTensor((1, dim), device=device, dtype = torch.float32), 
+        getCachedDummyTensor((1, dim, dim), device=device, dtype = torch.float32)
+    )
+    rcrk_A_, rcrk_B_, rcrk_gradA_, rcrk_gradB_ = (rcrkState.A, rcrkState.B, rcrkState.gradA, rcrkState.gradB) if useCRK else (\
+        getCachedDummyTensor((1,), device=device, dtype = torch.float32), 
         getCachedDummyTensor((1, dim), device=device, dtype = torch.float32), 
         getCachedDummyTensor((1, dim), device=device, dtype = torch.float32), 
         getCachedDummyTensor((1, dim, dim), device=device, dtype = torch.float32)
@@ -218,10 +233,14 @@ def parseArguments(
     correctionState.referenceOmegas = castTorchToWarpAsBuiltins(referenceOmegas_)
     correctionState.queryVolumes = castTorchToWarpAsBuiltins(queryVolumes_) if queryVolumes_ is not None else castTorchToWarpAsBuiltins(getCachedDummyTensor((1,), device=device, dtype = torch.float32))
     correctionState.referenceVolumes = castTorchToWarpAsBuiltins(referenceVolumes_) if referenceVolumes_ is not None else castTorchToWarpAsBuiltins(getCachedDummyTensor((1,), device=device, dtype = torch.float32))
-    correctionState.queryA = castTorchToWarpAsBuiltins(crk_A_)
-    correctionState.queryB = castTorchToWarpAsBuiltins(crk_B_)
-    correctionState.queryGradA = castTorchToWarpAsBuiltins(crk_gradA_)
-    correctionState.queryGradB = castTorchToWarpAsBuiltins(crk_gradB_)
+    correctionState.queryA = castTorchToWarpAsBuiltins(qcrk_A_)
+    correctionState.queryB = castTorchToWarpAsBuiltins(qcrk_B_)
+    correctionState.queryGradA = castTorchToWarpAsBuiltins(qcrk_gradA_)
+    correctionState.queryGradB = castTorchToWarpAsBuiltins(qcrk_gradB_)
+    correctionState.referenceA = castTorchToWarpAsBuiltins(rcrk_A_)
+    correctionState.referenceB = castTorchToWarpAsBuiltins(rcrk_B_)
+    correctionState.referenceGradA = castTorchToWarpAsBuiltins(rcrk_gradA_)
+    correctionState.referenceGradB = castTorchToWarpAsBuiltins(rcrk_gradB_)
 
     # print("Parsed Arguments for computeDeltaShift_Warp:")
     # print("useGradientRenormalization:", useGradientRenormalization)

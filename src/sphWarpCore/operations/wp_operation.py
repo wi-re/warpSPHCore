@@ -42,6 +42,7 @@ def sphOperation_warp(
     laplacianMode: LaplacianScheme = LaplacianScheme.Default,
     operationMode: OperationDirection = OperationDirection.AllToAll,
     positiveDivergence: bool = False,
+    consistentDivergence: bool = False,
     preScatteredQuantities: Optional[torch.Tensor] = None,
     queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,
 
@@ -61,6 +62,7 @@ def sphOperation_warp(
             kernel = kernel, supportMode = supportMode,
             operation = operation, operationMode = operationMode, 
             gradientMode= gradientMode, laplacianMode= laplacianMode, positiveDivergence=positiveDivergence,
+            consistentDivergence= consistentDivergence,
             preScatteredQuantities= preScatteredQuantities, queryKinds= queryKinds, referenceKinds= referenceKinds,
             useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
             useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,
@@ -176,6 +178,7 @@ def sphOperation_warp(
                 operationMode = operationMode, 
                 gradientMode= gradientMode,
                 scatteredQuantities= preScatteredQuantities,
+                consistentDivergence = consistentDivergence,
 
                 useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
                 useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
@@ -240,6 +243,7 @@ def warpOperation(
     crkState: Optional[CRKState] = None,
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
+    consistentDivergence: bool = False,
 ):
     queryPositions = queryParticles.positions
     referencePositions = queryParticles.positions if referenceParticles is None else referenceParticles.positions
@@ -308,5 +312,6 @@ def warpOperation(
         crk_A= crkState.A if crkState is not None else None, crk_B= crkState.B if crkState is not None else None, crk_gradA= crkState.gradA if crkState is not None else None, crk_gradB= crkState.gradB if crkState is not None else None,
 
         useGradientRenormalization= renormalizationState is not None, renormalizationMatrices= renormalizationMatrices,
+        consistentDivergence= consistentDivergence,
     )
 

@@ -43,6 +43,7 @@ def sphOperation_warp_grid(
     laplacianMode: LaplacianScheme = LaplacianScheme.Default,
     operationMode: OperationDirection = OperationDirection.AllToAll,
     positiveDivergence: bool = False,
+    consistentDivergence: bool = False,
     preScatteredQuantities: Optional[torch.Tensor] = None,
     queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,
 
@@ -174,6 +175,7 @@ def sphOperation_warp_grid(
                 operationMode = operationMode, 
                 gradientMode= gradientMode,
                 scatteredQuantities= preScatteredQuantities,
+                consistentDivergence = consistentDivergence,
 
                 useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
                 useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,

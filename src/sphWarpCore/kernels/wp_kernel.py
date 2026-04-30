@@ -295,7 +295,7 @@ def sphKernel(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 14: # SuperSymmetric
+    if mode == 14 or mode == 15: # KernelMeanSymmetric or SuperSymmetric
         return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
     return sphKernel_(xij, hij, kernel)
 
@@ -311,7 +311,7 @@ def sphKernel_ij(
     maxDomain: wp.array(dtype = wp.float32),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
-    if mode == 4: # SuperSymmetric
+    if mode == 14 or mode == 15: # KernelMeanSymmetric or SuperSymmetric
         return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
     return sphKernel_(xij, hij, kernel)
 
@@ -362,8 +362,10 @@ def sphKernelGradient(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 4: # SuperSymmetric
+    if mode == 14: # KernelMeanSymmetric
         return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
+    elif mode == 15: # SuperSymmetric
+        return (sphGradient_(xij,hi,kernel) - sphGradient_(-xij,hj,kernel))
     return sphGradient_(xij, hij, kernel)
 
 
@@ -379,8 +381,10 @@ def sphKernelGradient_ij(
     maxDomain: wp.array(dtype = wp.float32),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
-    if mode == 14: # SuperSymmetric
+    if mode == 14: # KernelMeanSymmetric
         return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
+    if mode == 15: # SuperSymmetric
+        return (sphGradient_(xij,hi,kernel) - sphGradient_(-xij,hj,kernel))
     return sphGradient_(xij, hij, kernel)
 # Torch Version
 # def Kernel_Derivative(kernel: KernelType, x: torch.Tensor, h: torch.Tensor):

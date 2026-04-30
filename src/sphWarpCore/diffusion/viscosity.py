@@ -18,56 +18,87 @@ from ..kernels.wp_kernel import *
 from ..enumTypes import *
 from .util import *
 
+
+@wp.struct
+class DiffusionParameters:
+    c_s: wp.float32 # Speed of sound, used in some formulations to compute the signal velocity
+    C_l: wp.float32 # Linear viscosity coefficient, also referred to as alpha in some formulations
+    C_q: wp.float32 # Quadratic viscosity coefficient, also referred to as beta in some formulations
+    Cu_l: wp.float32 # Linear thermal conductivity coefficient, also referred to as alpha_u in some formulations
+    Cu_q: wp.float32 # Quadratic thermal conductivity coefficient, also referred to as beta_u in some formulations
+    
+    K: wp.float32 # Overall viscosity scaling factor
+    thermalConductivity: wp.float32 # Overall thermal conductivity scaling factor
+    viscosityTerm: wp.int32 # Viscosity formulation to use, e.g. Monaghan1992, Monaghan1997, Cleary1998 etc.
+    thermalConducitiyTerm: wp.int32 # Thermal conductivity formulation to use, e.g. Monaghan1997 thermal conductivity term, Cleary1998 thermal conductivity term etc.
+    scaleBeta: wp.bool # If true then the quadratic viscosity term is scaled by the linear viscosity term, as suggested in some papers to reduce excessive viscosity in certain scenarios. This is only relevant for formulations that use a quadratic term, such as Monaghan1992 and Monaghan1997.
+    monaghanSwitch: wp.bool # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
+    correctXi: wp.bool # Whether to apply the xi correction factor to the viscosity term. This is a correction factor that can be applied to account for errors in the estimation of the velocity divergence and is discussed in some papers such as "Correcting SPH for accurate viscous forces" by Adami et al. 2013.
+    
+
+
 @wp.func
 def computePi_actual(
     x_i: vector(dtype = wp.float32, length=Any), x_j:  vector(dtype = wp.float32, length=Any), # type: ignore
     h_i: wp.float32, h_j: wp.float32, # type: ignore
     m_i: wp.float32, m_j: wp.float32, # type: ignore
     rho_i: wp.float32, rho_j: wp.float32, # type: ignore
+    explicitPressure: wp.bool, P_i: wp.float32, P_j: wp.float32, # type: ignore
     v_i: vector(dtype = wp.float32, length=Any), v_j: vector(dtype = wp.float32, length=Any), # type: ignore
-    domainMin: wp.array(dtype = wp.float32), domainMax: wp.array(dtype = wp.float32), periodicity: wp.array(dtype = wp.bool), # type: ignore
-    dim: wp.int32,
+    
+    domainState: domainData, 
     kernel_int : wp.int32,
+    c_i: wp.float32, c_j: wp.float32,
+    alpha_i: wp.float32, alpha_j: wp.float32,
 
-    c_s: wp.float32, # Speed of sound, used in some formulations to compute the signal velocity
-    C_l: wp.float32, C_q: wp.float32, # Viscosity coefficients also referred to as alpha and beta in some formulations
-    K_: wp.float32, # Overall viscosity scaling factor
-    viscosityTerm: wp.int32, # Viscosity formulation to use, e.g. Monaghan1992, Monaghan1997, Cleary1998 etc.
-    scaleBeta : wp.bool = False, # If true then the quadratic viscosity term is scaled by the linear viscosity term, as suggested in some papers to reduce excessive viscosity in certain scenarios. This is only relevant for formulations that use a quadratic term, such as Monaghan1992 and Monaghan1997.
-    switch : wp.bool = True, # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
-    correctXi : wp.bool = False, # Whether to apply the xi correction factor to the viscosity term. This is a correction factor that can be applied to account for errors in the estimation of the velocity divergence and is discussed in some papers such as "Correcting SPH for accurate viscous forces" by Adami et al. 2013.
+    viscosityParams: DiffusionParameters,
+    # c_s: wp.float32, # Speed of sound, used in some formulations to compute the signal velocity
+    # C_l: wp.float32, C_q: wp.float32, # Viscosity coefficients also referred to as alpha and beta in some formulations
+    # K_: wp.float32, # Overall viscosity scaling factor
+    # viscosityTerm: wp.int32, # Viscosity formulation to use, e.g. Monaghan1992, Monaghan1997, Cleary1998 etc.
+    # scaleBeta : wp.bool = False, # If true then the quadratic viscosity term is scaled by the linear viscosity term, as suggested in some papers to reduce excessive viscosity in certain scenarios. This is only relevant for formulations that use a quadratic term, such as Monaghan1992 and Monaghan1997.
+    # switch : wp.bool = True, # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
+    # correctXi : wp.bool = False, # Whether to apply the xi correction factor to the viscosity term. This is a correction factor that can be applied to account for errors in the estimation of the velocity divergence and is discussed in some papers such as "Correcting SPH for accurate viscous forces" by Adami et al. 2013.
     useJ : wp.bool = False, # Whether to use the properties of the j particle instead of the i particle in the viscosity computation. This can be relevant for certain formulations and scenarios, such as when computing the viscosity force on particle i due to particle j, it might make sense to use the properties of particle j in the computation. This is also related to the use of rho_bar, c_bar and h_bar which are typically computed as averages of the i and j particle properties.
+    thermalConductivity : wp.bool = False, # Whether this viscosity computation is being used for thermal conductivity. This can be relevant for certain formulations that use different coefficients or terms for thermal conductivity compared to momentum viscosity, such as in the case of the Monaghan1997 formulation where the thermal conductivity term has a different form and coefficients compared to the momentum viscosity term.
 ):
     rho_bar = 1.0/2.0 * (rho_i + rho_j)
 
-    c_i = c_s
-    c_j = c_s
-    c_bar = c_s
-    alpha_i = 1.0
-    alpha_j = 1.0 # No viscosity switch here
+    # c_i = viscosityParams.c_s
+    # c_j = viscosityParams.c_s
+    # c_bar = viscosityParams.c_s
+    c_bar = 1.0/2.0 * (c_i + c_j)
+    # alpha_i = 1.0
+    # alpha_j = 1.0 # No viscosity switch here
 
     h_bar = 1.0/2.0 * (h_i + h_j)
 
-    xi = sphKernel_xi(kernel_int, dim) if correctXi else 1.0
+    xi = sphKernel_xi(kernel_int, domainState.dim) if viscosityParams.correctXi else 1.0
 
-    C_l = 1.0/2.0 * (alpha_i + alpha_j) * C_l
-    C_q = 1.0/2.0 * (alpha_i + alpha_j) * C_q
-    if scaleBeta:
+    C_l_ = viscosityParams.C_l if not thermalConductivity else viscosityParams.Cu_l
+    C_q_ = viscosityParams.C_q if not thermalConductivity else viscosityParams.Cu_q
+
+    C_l = 1.0/2.0 * (alpha_i + alpha_j) * C_l_
+    C_q = 1.0/2.0 * (alpha_i + alpha_j) * C_q_
+    if viscosityParams.scaleBeta:
         C_q = C_q * C_l
 
-    x_ij = computeDistanceVec(x_i, x_j, periodicity, domainMin, domainMax)
+    x_ij = computeDistanceVec(x_i, x_j, domainState.periodicity, domainState.domainMin, domainState.domainMax)
     r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
 
     u_ij = v_i - v_j
     ux_ij = wp.dot(u_ij, x_ij)
 
+    viscosityTerm = viscosityParams.viscosityTerm if not thermalConductivity else viscosityParams.thermalConducitiyTerm
+
     mu_ij, scalingFactor = compute_mu_ij(ux_ij, r_ij, h_bar, viscosityTerm, xi)
 
-    if switch and ux_ij > 0:
-        mu_ij = 0.0
+    # if viscosityParams.monaghanSwitch and ux_ij > 0:
+    #     mu_ij = 0.0
 
     v_sig = wp.float32(0.0)
-    K = wp.float32(K_)
+    K = wp.float32(viscosityParams.K)
+
 
     rho, c, h = compute_bars(
         rho_i, rho_j, rho_bar, 
@@ -90,7 +121,7 @@ def computePi_actual(
         # Cleary 1998: The terms are given in (8.8) and (8.9) of Monaghan 2005 and are
         # mu_a = 1/8 alpha_a h_a c_a rho_a
         # Pi_ab = - 16 mu_a mu_b / (rho_a rho_b (mu_a + mu_b)) mu_ij
-        f = 1.0/(2.0*(wp.float32(dim)+2.0)) # Based on estimations based on Monaghan 2005, not given for 1D
+        f = 1.0/(2.0*(wp.float32(domainState.dim)+2.0)) # Based on estimations based on Monaghan 2005, not given for 1D
         mu_i = f * alpha_i * C_l * h_i * c_i * rho_i / xi
         mu_j = f * alpha_j * C_l * h_j * c_j * rho_j / xi
         # 19.8 based on Cleary and Ha 2002
@@ -136,10 +167,10 @@ def computePi_actual(
         # v_sig = C_l * safe_sqrt(wp.abs(P_i - P_j) / (rho_bar + 1e-14 * h))
         # K = 1.0
         # Since we don't have access to the pressures here, we can use an approximation based on the ideal gas law, P = rho * c^2
-        P_i = rho_i * c_i * c_i
-        P_j = rho_j * c_j * c_j
+        P_i_ = rho_i * c_i * c_i if not explicitPressure else P_i
+        P_j_ = rho_j * c_j * c_j if not explicitPressure else P_j
         rho_bar = (rho_i + rho_j) / 2.0
-        v_sig = C_l * safe_sqrt(wp.abs(P_i - P_j) / (rho_bar + 1e-14 * h))
+        v_sig = C_l * safe_sqrt(wp.abs(P_i_ - P_j_) / (rho_bar + 1e-14 * h))
         K = 1.0
     elif viscosityTerm == 10: # Wadsley2008
         v_sig = C_l * wp.abs(mu_ij)
@@ -148,7 +179,11 @@ def computePi_actual(
         v_sig = C_l * c - C_q * mu_ij
         K = 1.0
 
-    val = rho_j * K / rho * v_sig * mu_ij
+    val = rho_j * K / rho * v_sig * scalingFactor #* mu_ij
+
+    if viscosityParams.monaghanSwitch and not thermalConductivity:
+        if ux_ij > 0:
+            val = 0.0
 
     return val
 

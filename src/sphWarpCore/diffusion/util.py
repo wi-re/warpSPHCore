@@ -43,7 +43,7 @@ def compute_mu_ij(
     elif viscosityTerm == 6: # Dukowicz
         return mu_ij, r_ij
     elif viscosityTerm == 7: # Price2012_98
-        return mu_ij, h / xi
+        return mu_ij, r_ij
     elif viscosityTerm == 8: # Price2012
         return mu_ij, r_ij
     elif viscosityTerm == 9: # Price2008
