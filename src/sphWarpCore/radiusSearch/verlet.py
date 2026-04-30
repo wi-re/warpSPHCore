@@ -344,5 +344,5 @@ def filterVerletList(
     return filterVerletList_(
         queryParticles.positions, referenceParticles.positions if referenceParticles is not None else queryParticles.positions, 
         queryParticles.supports, referenceParticles.supports if referenceParticles is not None else queryParticles.supports,
-        domain, adjacency, supportSchemeTomode(supportMode)
+        domain, adjacency, supportMode
     )

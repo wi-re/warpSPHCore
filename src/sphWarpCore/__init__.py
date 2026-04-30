@@ -73,7 +73,7 @@ from .warp_state import (
     getCRK_i
 )
 
-from .warp_state_util import parseArguments
+from .warp_state_util import parseArguments, extractStateInfo, warpWrapper2
 
 from .utils.wp_util import (zero_like_warp,
                             checkDirectionality_i, checkDirectionality_j, getCachedDummyTensor, castTorchToWarpAsBuiltins)
@@ -81,7 +81,7 @@ from .utils.wp_util import (zero_like_warp,
 from .kernels.wp_kernel import eval_kernelScale, computeKernelCRK, computeKernelGradientCRK, sphKernel, sphKernelGradient, eval_k, eval_C_d
 from .mathutil.wp_math import computeDistanceVec, safe_sqrt
 from .kernels.utils import computePairwiseSupport, iPow
-from .utils.wp_autograd import launch_kernel, warpWrapper
+from .utils.wp_autograd import launch_kernel, warpWrapper, StateAwareWarpFunction
 from .mathutil.wp_math import matmul
 
 __version__ = "0.2.3"
@@ -130,6 +130,7 @@ __all__ = [
     'eval_kernelScale', 'computeKernelCRK', 'computeKernelGradientCRK', 'sphKernel', 'sphKernelGradient', 'eval_k', 'eval_C_d',
     'computeDistanceVec', 'safe_sqrt', 'computePairwiseSupport', 'iPow',
     'launch_kernel', 'warpWrapper',
+    'StateAwareWarpFunction', 'extractStateInfo', 'warpWrapper2',
     'matmul'
 
 ]

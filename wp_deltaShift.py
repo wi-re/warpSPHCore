@@ -254,9 +254,15 @@ def computeDeltaShiftWarp(
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
 ):
     with record_function("warpSPH[CRKVolume]"):
-        with record_function("warpSPH[CRKVolume] - Preprocessing"):
-            # Preprocessing and input validation
-            args, device, dim = parseArguments(
+        outputSize  = queryParticles.positions.shape[0]
+        outputDtype = castTorchToWarpAsBuiltins(queryParticles.positions).dtype
+
+        return warpWrapper2(
+            launcher = launch_kernel,
+            kernel   = computeDeltaShift_Kernel,
+            outputSizes  = outputSize,
+            outputDtypes = outputDtype,
+            defaultStateArguments=(
                 queryParticles, operationProperties, domain,
                 queryVolumes, referenceVolumes,
                 adjacency,
@@ -264,18 +270,10 @@ def computeDeltaShiftWarp(
                 crkState,
                 gradHState,
                 renormalizationState,
-            )
-
-            outputSize = queryParticles.positions.shape[0]
-            outputDtype = castTorchToWarpAsBuiltins(queryParticles.positions).dtype
-
-        with record_function("warpSPH[CRKVolume] - Kernel Execution"):
-            warp_result = warpWrapper(
-                launch_kernel, computeDeltaShift_Kernel, outputSize, outputDtype,
-                *args,
-
+            ),
+            additionalArguments=(
                 R, n, CFL, computeMach, c_max,
-                rho0, dx
-            )
+                rho0, dx,
+            ),
+        )
 
-    return warp_result

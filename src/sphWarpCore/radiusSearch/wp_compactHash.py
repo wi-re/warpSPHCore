@@ -978,7 +978,7 @@ def radiusSearchCompactHashMap(
         referenceSupports,
         periodicity,
         domain,
-        supportSchemeTomode(mode),
+        mode,
         hashMapLength,
         returnCompactHashMap
     )

@@ -256,4 +256,392 @@ def parseArguments(
         mode_uint, kernel_int, gradientMode_int, opInt
     ), device, dim
 
-    
+
+# ---------------------------------------------------------------------------
+# State-aware autograd wrapper
+# ---------------------------------------------------------------------------
+
+def extractStateInfo(
+    queryParticles: ParticleState,
+    operationProperties: OperationProperties,
+    domain: DomainDescription,
+    queryVolumes: Optional[torch.Tensor] = None,
+    referenceVolumes: Optional[torch.Tensor] = None,
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None,
+    referenceParticles: Optional[ParticleState] = None,
+    crkState: Optional[Union[Tuple[CRKState, CRKState], CRKState]] = None,
+    gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
+    renormalizationState: Optional[Union[torch.Tensor, RenormalizationState]] = None,
+):
+    """
+    Extract every torch.Tensor embedded in the structured state arguments into a
+    single, deterministically ordered flat list and return a *build_fn* closure
+    that can reconstruct all Warp kernel structs from a parallel list of Warp arrays.
+
+    This is the extraction half of what ``parseArguments`` previously did in one
+    shot; the conversion half is deferred to ``StateAwareWarpFunction.forward`` so
+    that the original torch tensors can be saved for autograd.
+
+    Flat tensor index layout (36 entries):
+        0  qPos          6  qDen         12  rOmega       18  qcrk_gradB
+        1  rPos          7  rDen         13  qVol         19  rcrk_A
+        2  qSup          8  qK           14  rVol         20  rcrk_B
+        3  rSup          9  rK           15  qcrk_A       21  rcrk_gradA
+        4  qMas         10  renormMat    16  qcrk_B       22  rcrk_gradB
+        5  rMas         11  qOmega       17  qcrk_gradA   23  adj_neighborList
+       24  adj_neighborOffsets           30  grid_hashTable
+       25  adj_numNeighbors              31  grid_cellTable
+       26  grid_sortIndex                32  grid_cellOffsets
+       27  grid_qMin                     33  domainMin
+       28  grid_qMax                     34  domainMax
+       29  grid_numCells                 35  periodicity
+
+    Returns:
+        flat_tensors  : List[torch.Tensor]
+        build_fn      : Callable[[List[wp.array]], tuple]  – returns full kernel args
+        device        : torch.device
+        dim           : int
+    """
+    # ------------------------------------------------------------------ #
+    # 1.  Resolve particle fields
+    # ------------------------------------------------------------------ #
+    qPos = queryParticles.positions
+    rPos = qPos if referenceParticles is None else referenceParticles.positions
+    qSup = queryParticles.supports
+    rSup = qSup if referenceParticles is None else referenceParticles.supports
+    qMas = queryParticles.masses
+    rMas = qMas if referenceParticles is None else referenceParticles.masses
+    qDen = queryParticles.densities
+    rDen = qDen if referenceParticles is None else referenceParticles.densities
+
+    device = qPos.device
+    dim    = qPos.shape[1]
+
+    _d1f   = getCachedDummyTensor((1,),          dtype=torch.float32, device=device)
+    _d1i   = getCachedDummyTensor((1,),          dtype=torch.int32,   device=device)
+    _d1Df  = getCachedDummyTensor((1, dim),      dtype=torch.float32, device=device)
+    _d1DDf = getCachedDummyTensor((1, dim, dim), dtype=torch.float32, device=device)
+
+    # Replace None densities with a dummy so the flat list is never sparse
+    if qDen is None:
+        qDen = _d1f
+    if rDen is None:
+        rDen = _d1f
+
+    # Kinds
+    queryKinds    = queryParticles.kinds if hasattr(queryParticles, 'kinds') else None
+    referenceKinds = (
+        queryKinds if referenceParticles is None or not hasattr(referenceParticles, 'kinds')
+        else referenceParticles.kinds
+    )
+    operationMode = operationProperties.operationMode
+    qK, rK = checkKinds(operationMode, device, queryKinds, referenceKinds)
+
+    # ------------------------------------------------------------------ #
+    # 2.  Resolve correction states
+    # ------------------------------------------------------------------ #
+    useGradientRenormalization = renormalizationState is not None
+    useGradHTerms              = gradHState is not None
+    useVolumes                 = queryVolumes is not None or referenceVolumes is not None
+    useCRK                     = crkState is not None
+
+    # Renormalization matrices
+    if useGradientRenormalization:
+        renormMat = (
+            renormalizationState.renormalizationMatrices
+            if isinstance(renormalizationState, RenormalizationState)
+            else renormalizationState
+        )
+    else:
+        renormMat = _d1DDf
+
+    # Grad-h omegas
+    if useGradHTerms:
+        if isinstance(gradHState, GradHState):
+            qOmega, rOmega = gradHState.queryOmegas, gradHState.referenceOmegas
+        elif isinstance(gradHState, tuple) and len(gradHState) == 2:
+            qOmega, rOmega = gradHState
+        elif isinstance(gradHState, torch.Tensor):
+            qOmega = rOmega = gradHState
+        else:
+            raise ValueError(
+                "Invalid gradHState type: {}".format(type(gradHState))
+            )
+        if rOmega is None:
+            rOmega = qOmega
+    else:
+        qOmega = rOmega = _d1f
+
+    # Volumes
+    if useVolumes:
+        qVol = queryVolumes    if queryVolumes    is not None else _d1f
+        rVol = referenceVolumes if referenceVolumes is not None else qVol
+    else:
+        qVol = rVol = _d1f
+
+    # CRK correction terms
+    if useCRK:
+        if isinstance(crkState, tuple) and len(crkState) == 2:
+            qcrkSt, rcrkSt = crkState
+        elif isinstance(crkState, CRKState):
+            qcrkSt = rcrkSt = crkState
+        else:
+            raise ValueError("Invalid crkState type: {}".format(type(crkState)))
+        qcrk_A, qcrk_B, qcrk_gradA, qcrk_gradB = qcrkSt.A, qcrkSt.B, qcrkSt.gradA, qcrkSt.gradB
+        rcrk_A, rcrk_B, rcrk_gradA, rcrk_gradB = rcrkSt.A, rcrkSt.B, rcrkSt.gradA, rcrkSt.gradB
+    else:
+        qcrk_A  = rcrk_A  = _d1f
+        qcrk_B  = rcrk_B  = _d1Df
+        qcrk_gradA  = rcrk_gradA  = _d1Df
+        qcrk_gradB  = rcrk_gradB  = _d1DDf
+
+    # ------------------------------------------------------------------ #
+    # 3.  Domain tensors
+    # ------------------------------------------------------------------ #
+    domainMin  = domain.min
+    domainMax  = domain.max
+    periodicity = domain.periodic
+
+    # ------------------------------------------------------------------ #
+    # 4.  Build / unpack adjacency structure
+    # ------------------------------------------------------------------ #
+    if adjacency is None:
+        adjacency = buildCompactHashMap(
+            qPos, rPos,
+            qSup, rSup,
+            periodicity=domain.periodic,
+            domainDescription=domain,
+            mode=SupportScheme.SuperSymmetric,
+        )
+
+    useAdjacency = not isinstance(adjacency, CompactHashMap)
+
+    if useAdjacency:
+        adj_neighborList    = adjacency.j
+        adj_neighborOffsets = adjacency.edgeOffsets
+        adj_numNeighbors    = adjacency.numNeighbors
+        grid_sortIndex  = getCachedDummyTensor((1,),    dtype=torch.int64,  device=device)
+        grid_qMin       = domainMin
+        grid_qMax       = domainMax
+        grid_hCell      = 0.0
+        grid_numCells   = getCachedDummyTensor((1,),    dtype=torch.int32,  device=device)
+        grid_hashTable  = getCachedDummyTensor((1, 2),  dtype=torch.int32,  device=device)
+        grid_cellTable  = getCachedDummyTensor((1, 3),  dtype=torch.int64,  device=device)
+        grid_numOffsets = 0
+        grid_cellOffsets = getCachedDummyTensor((1, 3), dtype=torch.int32,  device=device)
+    else:
+        adj_neighborList    = getCachedDummyTensor((1,), dtype=torch.int64,  device=device)
+        adj_neighborOffsets = getCachedDummyTensor((1,), dtype=torch.int32,  device=device)
+        adj_numNeighbors    = getCachedDummyTensor((1,), dtype=torch.int32,  device=device)
+        grid_sortIndex   = adjacency.sortIndex
+        grid_qMin        = adjacency.qMin
+        grid_qMax        = adjacency.qMax
+        grid_hCell       = adjacency.hCell
+        grid_numCells    = adjacency.numCells
+        grid_hashTable   = adjacency.hashTable
+        grid_cellTable   = adjacency.sortedCellTable
+        grid_numOffsets  = adjacency.numOffsets
+        grid_cellOffsets = adjacency.cellOffsets
+
+    # ------------------------------------------------------------------ #
+    # 5.  Operation scalars (non-tensor config captured by build_fn)
+    # ------------------------------------------------------------------ #
+    supportMode    = operationProperties.supportMode
+    mode_uint      = supportSchemeToUint(supportMode)
+    kernel_int     = operationProperties.kernel.value
+    gradientMode_int = 0
+    opInt          = wp.int32(operationMode.value)
+
+    cfg = {
+        'dim':                      dim,
+        'useAdjacency':             useAdjacency,
+        'grid_hCell':               grid_hCell,
+        'grid_numOffsets':          grid_numOffsets,
+        'useGradientRenormalization': useGradientRenormalization,
+        'useGradHTerms':            useGradHTerms,
+        'useVolumes':               useVolumes,
+        'useCRK':                   useCRK,
+        'mode_uint':                mode_uint,
+        'kernel_int':               kernel_int,
+        'gradientMode_int':         gradientMode_int,
+        'opInt':                    opInt,
+    }
+
+    # ------------------------------------------------------------------ #
+    # 6.  Assemble flat tensor list (see index layout in docstring)
+    # ------------------------------------------------------------------ #
+    flat_tensors = [
+        # particle fields
+        qPos, rPos, qSup, rSup, qMas, rMas, qDen, rDen,      # 0-7
+        qK, rK,                                                # 8-9
+        # correction
+        renormMat, qOmega, rOmega, qVol, rVol,                # 10-14
+        qcrk_A, qcrk_B, qcrk_gradA, qcrk_gradB,              # 15-18
+        rcrk_A, rcrk_B, rcrk_gradA, rcrk_gradB,              # 19-22
+        # adjacency
+        adj_neighborList, adj_neighborOffsets, adj_numNeighbors,  # 23-25
+        grid_sortIndex, grid_qMin, grid_qMax,                  # 26-28
+        grid_numCells, grid_hashTable, grid_cellTable,         # 29-31
+        grid_cellOffsets,                                      # 32
+        # domain
+        domainMin, domainMax, periodicity,                     # 33-35
+    ]
+
+    # ------------------------------------------------------------------ #
+    # 7.  build_fn: reconstruct Warp structs from a parallel list of arrays
+    # ------------------------------------------------------------------ #
+    def build_fn(wa: list) -> tuple:
+        _dim = cfg['dim']
+
+        # Particle structs
+        qPart = (particleDataSoA_1() if _dim == 1 else
+                 particleDataSoA_2() if _dim == 2 else
+                 particleDataSoA_3())
+        qPart.positions = wa[0]
+        qPart.supports  = wa[2]
+        qPart.masses    = wa[4]
+        qPart.densities = wa[6]
+        qPart.kinds     = wa[8]
+
+        rPart = (particleDataSoA_1() if _dim == 1 else
+                 particleDataSoA_2() if _dim == 2 else
+                 particleDataSoA_3())
+        rPart.positions = wa[1]
+        rPart.supports  = wa[3]
+        rPart.masses    = wa[5]
+        rPart.densities = wa[7]
+        rPart.kinds     = wa[9]
+
+        # Adjacency structs
+        adjState = adjacencyData()
+        adjState.neighborList    = wa[23]
+        adjState.neighborOffsets = wa[24]
+        adjState.numNeighbors    = wa[25]
+
+        gState = gridData()
+        gState.sortIndex   = wa[26]
+        gState.qMin        = wa[27]
+        gState.qMax        = wa[28]
+        gState.hCell       = cfg['grid_hCell']
+        gState.numCells    = wa[29]
+        gState.hashTable   = wa[30]
+        gState.cellTable   = wa[31]
+        gState.D           = _dim
+        gState.numOffsets  = cfg['grid_numOffsets']
+        gState.cellOffsets = wa[32]
+
+        # Domain struct
+        domState = domainData()
+        domState.domainMin  = wa[33]
+        domState.domainMax  = wa[34]
+        domState.periodicity = wa[35]
+        domState.dim        = _dim
+
+        # Correction struct
+        corrState = (correctionData_1() if _dim == 1 else
+                     correctionData_2() if _dim == 2 else
+                     correctionData_3())
+        corrState.useGradientRenormalization = cfg['useGradientRenormalization']
+        corrState.useGradHTerms              = cfg['useGradHTerms']
+        corrState.useVolume                  = cfg['useVolumes']
+        corrState.useCRK                     = cfg['useCRK']
+        corrState.renormalizationMatrices    = wa[10]
+        corrState.queryOmegas                = wa[11]
+        corrState.referenceOmegas            = wa[12]
+        corrState.queryVolumes               = wa[13]
+        corrState.referenceVolumes           = wa[14]
+        corrState.queryA                     = wa[15]
+        corrState.queryB                     = wa[16]
+        corrState.queryGradA                 = wa[17]
+        corrState.queryGradB                 = wa[18]
+        corrState.referenceA                 = wa[19]
+        corrState.referenceB                 = wa[20]
+        corrState.referenceGradA             = wa[21]
+        corrState.referenceGradB             = wa[22]
+
+        return (
+            qPart, rPart, domState,
+            cfg['useAdjacency'], adjState, gState,
+            corrState,
+            cfg['mode_uint'], cfg['kernel_int'],
+            cfg['gradientMode_int'], cfg['opInt'],
+        )
+
+    return flat_tensors, build_fn, device, dim
+
+
+def warpWrapper2(
+    launcher,
+    kernel,
+    outputSizes,
+    outputDtypes,
+    defaultStateArguments: tuple,
+    additionalArguments: tuple = (),
+):
+    """
+    State-aware autograd wrapper for SPH kernels.
+
+    Unlike the flat-tensor ``warpWrapper``, this variant accepts high-level
+    structured state objects (``ParticleState``, ``CRKState``, etc.) directly.
+    It extracts all torch.Tensors from those structures, routes them through
+    ``StateAwareWarpFunction`` so that gradients are properly tracked, and
+    defers all Warp struct assembly to the autograd forward pass.
+
+    Args:
+        launcher:               Kernel launcher, e.g. ``launch_kernel``.
+        kernel:                 The ``wp.kernel`` to execute.
+        outputSizes:            Output shape passed to the launcher.
+        outputDtypes:           Output Warp dtype(s) passed to the launcher.
+        defaultStateArguments:  Tuple in the same order as ``parseArguments``:
+                                    (queryParticles, operationProperties, domain,
+                                     queryVolumes, referenceVolumes, adjacency,
+                                     referenceParticles, crkState,
+                                     gradHState, renormalizationState)
+        additionalArguments:    Extra per-kernel arguments appended after the
+                                standard struct args.  Any ``torch.Tensor`` entries
+                                will be tracked for gradients; plain Python scalars
+                                and ints are forwarded unchanged.
+
+    Returns:
+        torch.Tensor or tuple of torch.Tensor – kernel output(s).
+    """
+    from .utils.wp_autograd import StateAwareWarpFunction
+
+    # --- extract state tensors and the struct-building closure ---
+    flat_state_tensors, state_build_fn, device, dim = extractStateInfo(
+        *defaultStateArguments
+    )
+    n_state = len(flat_state_tensors)
+
+    # --- split additionalArguments into tensors and non-tensors ---
+    add_tensor_pos = []   # (original_index, tensor)
+    add_scalar_map = {}   # original_index -> scalar value
+    for i, arg in enumerate(additionalArguments):
+        if isinstance(arg, torch.Tensor):
+            add_tensor_pos.append((i, arg))
+        else:
+            add_scalar_map[i] = arg
+
+    add_tensors = [t for _, t in add_tensor_pos]
+    n_add       = len(additionalArguments)
+
+    # --- unified flat tensor list (state first, then additional tensors) ---
+    flat_tensors = flat_state_tensors + add_tensors
+
+    # --- build_fn combines struct args + reconstructed additional args ---
+    def build_fn(wa: list) -> tuple:
+        struct_args = state_build_fn(wa[:n_state])
+
+        # Reconstruct additional args preserving original order
+        reconstructed = [None] * n_add
+        for pos, (orig_idx, _) in enumerate(add_tensor_pos):
+            reconstructed[orig_idx] = wa[n_state + pos]
+        for orig_idx, val in add_scalar_map.items():
+            reconstructed[orig_idx] = val
+
+        return struct_args + tuple(reconstructed)
+
+    return StateAwareWarpFunction.apply(
+        build_fn, launcher, kernel, outputSizes, outputDtypes,
+        *flat_tensors,
+    )
