@@ -4,7 +4,7 @@ from warp.types import vector, matrix
 from typing import Any
 import torch
 from ...utils.wp_autograd import *
-from ...radiusSearch.radius_util import convertModeToUint
+
 
 from ...radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ...mathutil.wp_math import *
@@ -175,7 +175,7 @@ def computeSPHGradientMatrix_warpBackend(
     domainMax = domain.max
     periodicity = domain.periodic
 
-    mode_uint = convertModeToUint(mode.name)
+    mode_uint = supportSchemeToUint(mode)
     kernel_int = kernel.value
     gradientMode_int = gradientMode.value
 

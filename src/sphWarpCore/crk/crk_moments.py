@@ -4,7 +4,6 @@ from warp.types import vector, matrix
 from typing import Any
 import torch
 from sphWarpCore.utils.wp_autograd import *
-from sphWarpCore.radiusSearch.radius_util import convertModeToUint
 
 from sphWarpCore.radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from sphWarpCore.mathutil.wp_math import *
@@ -228,7 +227,7 @@ def computeCRKMomentsWarp(
             domainMax = domain.max
             periodicity = domain.periodic
 
-            mode_uint = convertModeToUint(supportMode.name)
+            mode_uint = supportSchemeToUint(supportMode)
             kernel_int = kernel.value
             gradientMode_int = 0
             opInt = wp.int32(operationMode.value)

@@ -4,7 +4,7 @@ from warp.types import vector, matrix
 from typing import Any
 import torch
 from ..utils.wp_autograd import *
-from ..radiusSearch.radius_util import convertModeToUint
+
 
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ..mathutil.wp_math import *
@@ -49,8 +49,9 @@ def computeSPHGradientTensor_Func(
     # Whether to use actual volume (mass/density) or apparent volume for the gradient computation, and the corresponding volumes if needed.
     useVolume: wp.bool, queryVolumes: wp.array(dtype = wp.float32), referenceVolumes: wp.array(dtype = wp.float32), # type: ignore
     # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
-    useCRK: wp.bool, queryA: wp.array(dtype = wp.float32), queryB: wp.array(dtype = vector(length=Any, dtype=wp.float32)), queryGradA: wp.array(dtype=vector(length=Any, dtype=wp.float32)), queryGradB: wp.array(dtype=matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
-    
+    useCRK: wp.bool, 
+    queryA: wp.array(dtype = wp.float32), queryB: wp.array(dtype = vector(length=Any, dtype=wp.float32)), queryGradA: wp.array(dtype=vector(length=Any, dtype=wp.float32)), queryGradB: wp.array(dtype=matrix(shape=(Any, Any), dtype=wp.float32)), # type: ignore
+
     # Dummy value to allow allocation
     outputValue: Any # type: ignore
 ):
@@ -112,10 +113,13 @@ def computeSPHGradientTensor_Func(
         if useGradientRenormalization:
             kernelGradient = matmul(Li, kernelGradient)
         
+        # fqj = (fj * apparentVolume) if gradientMode_int != 2 else (mj * rhoi * fj)
+        # fqi = (fi * apparentVolume) if gradientMode_int != 2 else (mj * rhoi * fi)
+
         if gradientMode_int == 1: # Naive
             out += outerTensorProduct(fj * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == 2: # Symmetric
-            out += outerTensorProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
+            out += outerTensorProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)), kernelGradient, out, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == 3: # Difference
             out += outerTensorProduct((fj - fi) * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == 4: # Summation
@@ -206,7 +210,8 @@ def computeSPHGradient_warpBackend(
             domainMax = domain.max
             periodicity = domain.periodic
 
-            mode_uint = convertModeToUint(mode.name)
+            mode_uint = supportSchemeToUint(mode)
+            # print(f"Mode uint: {mode_uint}")
             kernel_int = kernel.value
             gradientMode_int = gradientMode.value
             opInt = wp.int32(operationMode.value)

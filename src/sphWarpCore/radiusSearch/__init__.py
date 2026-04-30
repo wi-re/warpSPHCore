@@ -2,8 +2,7 @@ from .radius_util import (
     AdjacencyList,
     AdjacencyListWarp,
     DomainDescription,
-    PointCloud,
-    convertModeToUint,
+    PointCloud
 )
 from .radius_naive import (
     radiusNaive,
@@ -26,7 +25,6 @@ __all__ = [
     "AdjacencyListWarp",
     "DomainDescription",
     "PointCloud",
-    "convertModeToUint",
     "radiusNaive",
     "radiusNaiveFixed",
     "radiusSearchCompactHashMap",

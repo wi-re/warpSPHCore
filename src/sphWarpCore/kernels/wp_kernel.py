@@ -295,7 +295,7 @@ def sphKernel(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 4: # SuperSymmetric
+    if mode == 14: # SuperSymmetric
         return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
     return sphKernel_(xij, hij, kernel)
 
@@ -379,7 +379,7 @@ def sphKernelGradient_ij(
     maxDomain: wp.array(dtype = wp.float32),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
-    if mode == 4: # SuperSymmetric
+    if mode == 14: # SuperSymmetric
         return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
     return sphGradient_(xij, hij, kernel)
 # Torch Version
@@ -588,7 +588,7 @@ def sphKernelDkDh(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 4: # SuperSymmetric
+    if mode == 14: # SuperSymmetric
         return (sphKernelDkDh_(xij,hi,kernel) + sphKernelDkDh_(xij,hj,kernel))/2.0
     
     return sphKernelDkDh_(xij, hij, kernel)

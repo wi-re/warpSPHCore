@@ -5,7 +5,7 @@ from typing import Any
 import torch
 
 from ..utils.wp_autograd import *
-from ..radiusSearch.radius_util import convertModeToUint
+
 
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ..radiusSearch.wp_compactHash import CompactHashMap, computeGridSupport, getDomainExtents
@@ -57,7 +57,7 @@ def sphOperation_warp_grid(
             querySupports, referenceSupports,
             periodicity = domain.periodic,
             domainDescription = domain,
-            mode = 'superSymmetric',
+            mode = SupportScheme.SuperSymmetric,
         )
 
 

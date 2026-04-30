@@ -24,7 +24,7 @@ def radiusNaive(x, y, hx, hy, periodic : Optional[torch.Tensor] = None, minDomai
         scatterMatrix = hy.repeat(x.shape[0],1).mT
         adjacencyDense = distanceMatrix <= scatterMatrix
         # supports = scatterMatrix[adjacencyDense]
-    elif mode == 'symmetric':
+    elif mode == 'meanSymmetric':
         symmetricMatrix = (hx + hy[:,None]) / 2
         adjacencyDense = distanceMatrix <= symmetricMatrix
     elif mode == 'superSymmetric':
@@ -32,8 +32,13 @@ def radiusNaive(x, y, hx, hy, periodic : Optional[torch.Tensor] = None, minDomai
         hyMatrix = hy.repeat(x.shape[0],1).mT
         symmetricMatrix = torch.maximum(hxMatrix, hyMatrix)
         adjacencyDense = distanceMatrix <= symmetricMatrix
+    elif mode == 'symmetric':
+        hxMatrix = hx.repeat(y.shape[0],1)
+        hyMatrix = hy.repeat(x.shape[0],1).mT
+        symmetricMatrix = torch.maximum(hxMatrix, hyMatrix)
+        adjacencyDense = distanceMatrix <= symmetricMatrix
     else:
-        raise ValueError('mode must be one of gather, scatter, symmetric, or superSymmetric')
+        raise ValueError('mode must be one of gather, scatter, meanSymmetric, symmetric, or superSymmetric')
         # supports = symmetricMatrix[adjacencyDense]
     
     ii = indexI[adjacencyDense]

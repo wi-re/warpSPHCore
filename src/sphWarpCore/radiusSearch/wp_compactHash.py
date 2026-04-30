@@ -6,24 +6,27 @@ from ..utils.wp_util import *
 
 # Convert Warp arrays back to PyTorch tensors using wp.to_torch() for direct GPU access
 from .radius_util import *
+from ..enumTypes import *
 
-
-def computeGridSupport(supportsX, supportsY, mode_uint):
-    # print("Computing grid support with mode:", mode_uint, "where 1=gather, 2=scatter, 3=symmetric, 4=superSymmetric")
+def computeGridSupport(supportsX, supportsY, scheme: SupportScheme):
     # print(f'SupportsX: {supportsX}')
     # print(f'SupportsY: {supportsY}')
-    if mode_uint == 1:  # gather
+    if scheme == SupportScheme.Gather:  # gather
         return torch.max(supportsX)
-    elif mode_uint == 2:  # scatter
+    elif scheme == SupportScheme.Scatter:  # scatter
         return torch.max(supportsY)
-    elif mode_uint == 3:  # symmetric
+    elif scheme == SupportScheme.MeanSymmetric: # partialSymmetric
+        return torch.max((supportsX + supportsY) / 2)
+    elif scheme == SupportScheme.KernelMeanSymmetric:  # symmetric
         return max(torch.max(supportsX), torch.max(supportsY))
-    elif mode_uint == 4:  # superSymmetric
+    elif scheme == SupportScheme.SuperSymmetric:  # superSymmetric
+        return max(torch.max(supportsX), torch.max(supportsY))
+    elif scheme == SupportScheme.PartialSymmetric:  # partialSymmetric
         return max(torch.max(supportsX), torch.max(supportsY))
     else:
-        raise ValueError('Invalid mode value. Must be 1 (gather), 2 (scatter), 3 (symmetric), or 4 (superSymmetric). Value is {}'.format(mode_uint))
-    
-    
+        raise ValueError('Invalid scheme value. Must be a valid SupportScheme. Value is {}'.format(scheme))
+
+
 def getDomainExtents(y, minDomain: Optional[torch.Tensor], maxDomain: Optional[torch.Tensor]):
     if minDomain is not None and maxDomain is not None:
         return minDomain, maxDomain
@@ -448,13 +451,17 @@ def radiusSearchCountNeighborsCompactHashMap(
                 
                 # Determine threshold based on mode
                 threshold = 0.0
-                if mode_uint == 1:  # gather
+                if mode_uint == 11:  # gather
                     threshold = querySupport
-                elif mode_uint == 2:  # scatter
+                elif mode_uint == 12:  # scatter
                     threshold = neighborSupport
-                elif mode_uint == 3:  # symmetric
+                elif mode_uint == 13:  # symmetric
                     threshold = (querySupport + neighborSupport) / 2.0
-                elif mode_uint == 4:  # superSymmetric
+                elif mode_uint == 14:  # kernelMeanSymmetric
+                    threshold = max(querySupport, neighborSupport)
+                elif mode_uint == 15:  # superSymmetric
+                    threshold = wp.max(querySupport, neighborSupport)
+                elif mode_uint == 16: # partialSymmetric
                     threshold = wp.max(querySupport, neighborSupport)
                 
                 # Count valid neighbors
@@ -595,13 +602,17 @@ def radiusSearchCollectCompactHashMap(
                 
                 # Determine threshold based on mode
                 threshold = 0.0
-                if mode_uint == 1:  # gather
+                if mode_uint == 11:  # gather
                     threshold = querySupport
-                elif mode_uint == 2:  # scatter
+                elif mode_uint == 12:  # scatter
                     threshold = neighborSupport
-                elif mode_uint == 3:  # symmetric
+                elif mode_uint == 13:  # symmetric
                     threshold = (querySupport + neighborSupport) / 2.0
-                elif mode_uint == 4:  # superSymmetric
+                elif mode_uint == 14:  # kernelMeanSymmetric
+                    threshold = max(querySupport, neighborSupport)
+                elif mode_uint == 15:  # superSymmetric
+                    threshold = wp.max(querySupport, neighborSupport)
+                elif mode_uint == 16: # partialSymmetric
                     threshold = wp.max(querySupport, neighborSupport)
                 
                 # Count valid neighbors
@@ -660,20 +671,20 @@ def buildCompactHashMap(
     referenceSupports: torch.Tensor,
     periodicity: torch.Tensor,
     domainDescription: DomainDescription,
-    mode: str = 'gather',
+    mode: SupportScheme = SupportScheme.Gather,
     hashMapLength: int = 4096
 ):
     with record_function("warpNeighborSearch - buildCompactHashMap"):
         with record_function("neighborSearch - preprocess"):
-        
-            mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4}
-            mode_uint = mode_map.get(mode, 0)
-            if mode_uint == 0:
-                raise ValueError(f"Invalid mode: {mode}. Supported modes are: {list(mode_map.keys())}")
+            mode_uint = supportSchemeToUint(mode)
+            # mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4, ''}
+            # mode_uint = mode_map.get(mode, 0)
+            # if mode_uint == 0:
+                # raise ValueError(f"Invalid mode: {mode}. Supported modes are: {list(mode_map.keys())}")
                 
             minDomain = domainDescription.min if domainDescription.min is not None else None
             maxDomain = domainDescription.max if domainDescription.max is not None else None
-            hMax = computeGridSupport(querySupports, referenceSupports, mode_uint)
+            hMax = computeGridSupport(querySupports, referenceSupports, mode)
             minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
 
         with record_function("neighborSearch - sortParticles"):
@@ -748,9 +759,15 @@ def buildCompactHashMap(
             searchRadius = 1
             numOffsets = (2 * searchRadius + 1) ** domainDescription.dim
             offsets = torch.cartesian_prod(*[torch.arange(-searchRadius, searchRadius+1, device = queryPositions.device) for _ in range(domainDescription.dim)]).to(torch.int32)
-            # print('Offsets to iterate over: ', offsets.shape, numOffsets)
+            if len(offsets.shape) == 1:
+                offsets = offsets.unsqueeze(1)
+            # print('Offsets to iterate over: ', offsets.shape, numOffsets, offsets)
             # pad to always have the same dimension for the kernel
-            offsets = torch.cat((offsets, torch.zeros(numOffsets, 3 - domainDescription.dim, dtype=torch.int32, device=offsets.device)), dim = 1)
+            # offsets = torch.cat((offsets, torch.zeros(numOffsets, 3 - domainDescription.dim, dtype=torch.int32, device=offsets.device)), dim = 1)
+            paddedOffsets = torch.zeros((numOffsets, 3), dtype=torch.int32, device=offsets.device)
+            paddedOffsets[:,:offsets.shape[1]] = offsets
+            offsets = paddedOffsets
+            # print('Offsets to iterate over: ', offsets.shape, numOffsets, offsets)
             D = domainDescription.dim
 
         hashMap = CompactHashMap(
@@ -780,13 +797,13 @@ def radiusSearchOnCompactHashMap(
     referenceSupports: torch.Tensor,
     periodicity: torch.Tensor,
     domainDescription: DomainDescription,
-    mode: str = 'gather',
+    mode: SupportScheme = SupportScheme.Gather,
     hashMapLength: int = 4096,
 ):                
     mode_uint = datastructure.mode_uint
     minDomain = domainDescription.min if domainDescription.min is not None else None
     maxDomain = domainDescription.max if domainDescription.max is not None else None
-    hMax = computeGridSupport(querySupports, referenceSupports, mode_uint)
+    hMax = computeGridSupport(querySupports, referenceSupports, mode)
     minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
     # periodicity = domainDescription.periodicity if domainDescription.periodicity is not None else [False] * referencePositions.shape[1]
 
@@ -895,7 +912,7 @@ def radiusSearchCompactHashMap_(
     referenceSupports: torch.Tensor,
     periodicity: torch.Tensor,
     domainDescription: DomainDescription,
-    mode: str = 'gather',
+    mode: SupportScheme = SupportScheme.Gather,
     hashMapLength: int = 4096,
     returnCompactHashMap: bool = False
 ):

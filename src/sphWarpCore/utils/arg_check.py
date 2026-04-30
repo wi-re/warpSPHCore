@@ -5,7 +5,6 @@ from warp.types import vector, matrix
 from typing import Any
 import torch
 from sphWarpCore.utils.wp_autograd import *
-from sphWarpCore.radiusSearch.radius_util import convertModeToUint
 
 from sphWarpCore.radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from sphWarpCore.mathutil.wp_math import *

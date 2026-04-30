@@ -8,7 +8,7 @@ def buildVerletList_(
         queryPositions: torch.Tensor, referencePositions: torch.Tensor,
         querySupports: torch.Tensor, referenceSupports: torch.Tensor,
         domain : DomainDescription, verletScale : float = 1.0, 
-        mode : str = 'symmetric', 
+        mode : SupportScheme = SupportScheme.SuperSymmetric,
         priorNeighborhood : Optional[AdjacencyList] = None, 
         verbose : bool = False):
     with record_function(f"[Neighborhood] {mode}"):
@@ -42,20 +42,26 @@ def buildVerletList_(
                 supportDistance_b = (supports_b - referenceSupports) #/ supports_b
                 maxDistance = distance_a.max() + distance_b.max()
                 minSupport = None
-                if mode == 'symmetric':
+                if mode == SupportScheme.KernelMeanSymmetric:
                     supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
                     minSupport = min(supports_a.min(), supports_b.min())
-                elif mode == 'scatter':
+                elif mode == SupportScheme.Scatter:
                     supportFactor = supportDistance_b.max()
                     minSupport = supports_b.min()
-                elif mode == 'gather':
+                elif mode == SupportScheme.Gather:
                     supportFactor = supportDistance_a.max()
                     minSupport = supports_a.min()
-                elif mode == 'superSymmetric':
+                elif mode == SupportScheme.SuperSymmetric:
+                    supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
+                    minSupport = min(supports_a.min(), supports_b.min())
+                elif mode == SupportScheme.MeanSymmetric:
+                    supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
+                    minSupport = min(supports_a.min(), supports_b.min())
+                elif mode == SupportScheme.PartialSymmetric:
                     supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
                     minSupport = min(supports_a.min(), supports_b.min())
                 else:
-                    raise ValueError('Invalid mode')
+                    raise ValueError(f'Invalid mode: {mode}')
                 
                 hFactor = 1 + supportFactor / minSupport
                 dFactor = 1 + maxDistance / minSupport
@@ -109,7 +115,7 @@ def buildVerletList(
     return buildVerletList_(
         queryParticles.positions, referenceParticles.positions,
         queryParticles.supports, referenceParticles.supports,
-        domain, verletScale, supportSchemeTomode(supportMode), 
+        domain, verletScale, supportMode, 
         priorNeighborhood, verbose
     )
 
@@ -283,7 +289,7 @@ def filterVerletList_(
         castTorchToWarp(querySupports), castTorchToWarp(referenceSupports),
         castTorchToWarp(domain.min), castTorchToWarp(domain.max), castTorchToWarp(domain.periodic),
 
-        convertModeToUint(mode),
+        supportSchemeToUint(mode),
         castTorchToWarp(adjacency.j), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
         castTorchToWarp(edge_count)]
 
@@ -310,7 +316,7 @@ def filterVerletList_(
         castTorchToWarp(querySupports), castTorchToWarp(referenceSupports),
         castTorchToWarp(domain.min), castTorchToWarp(domain.max), castTorchToWarp(domain.periodic),
 
-        convertModeToUint(mode),
+        supportSchemeToUint(mode),
         castTorchToWarp(adjacency.j), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
         edge_offsets_warp, castTorchToWarp(edge_count),
 

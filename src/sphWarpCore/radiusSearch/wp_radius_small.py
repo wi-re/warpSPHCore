@@ -39,9 +39,11 @@ def warp_radius_search_kernel_direct_2(
                 threshold = hx[i]
             elif mode == 2:  # scatter
                 threshold = hy[j]
-            elif mode == 3:  # symmetric
+            elif mode == 5:  # meanSymmetric
                 threshold = (hx[i] + hy[j]) / 2.0
             elif mode == 4:  # superSymmetric
+                threshold = wp.max(hx[i], hy[j])
+            elif mode == 2:  # symmetric
                 threshold = wp.max(hx[i], hy[j])
             
             # Count valid neighbors
@@ -88,9 +90,11 @@ def warp_radius_search_collect_kernel_direct_2(
                 threshold = hx[i]
             elif mode == 2:  # scatter
                 threshold = hy[j]
-            elif mode == 3:  # symmetric
+            elif mode == 5:  # meanSymmetric
                 threshold = (hx[i] + hy[j]) / 2.0
             elif mode == 4:  # superSymmetric
+                threshold = wp.max(hx[i], hy[j])
+            elif mode == 2:  # symmetric
                 threshold = wp.max(hx[i], hy[j])
             
             # Store valid neighbors
@@ -102,8 +106,9 @@ def warp_radius_search_collect_kernel_direct_2(
 
 import numpy as np
 from .radius_util import AdjacencyList
+from ..enumTypes import SupportScheme, supportSchemeToUint
 
-def warp_radius_search_small(queryPositions, referencePositions, supportX, supportsY, periodicity, domainDescription, mode:str = 'gather'):
+def warp_radius_search_small(queryPositions, referencePositions, supportX, supportsY, periodicity, domainDescription, mode:SupportScheme = SupportScheme.Gather) -> AdjacencyList:
     minD = domainDescription.min.cpu()
     maxD = domainDescription.max.cpu()
     
@@ -133,8 +138,9 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
 
     # mode = 'gather'  # Change as needed: 'gather', 'scatter', 'symmetric', 'superSymmetric'
 
-    mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4}
-    mode_uint = mode_map.get(mode, 0)
+    # mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4}
+    # mode_uint = mode_map.get(mode, 0)
+    mode_uint = supportSchemeToUint(mode)
         
     edge_count = wp.zeros(N, dtype=wp.int32, device=x_warp.device)  # Allocate on same device as input data
 

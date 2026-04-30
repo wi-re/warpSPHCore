@@ -11,7 +11,6 @@ from .radiusSearch.wp_compactHash import CompactHashMap, AdjacencyListWarp, buil
 from typing import Tuple, Union, Optional
 
 from .utils.wp_autograd import *
-from .radiusSearch.radius_util import convertModeToUint
 
 from .radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from .mathutil.wp_math import *
@@ -85,7 +84,7 @@ def parseArguments(
     kernel = operationProperties.kernel
     operationMode = operationProperties.operationMode
 
-    mode_uint = convertModeToUint(supportMode.name)
+    mode_uint = supportSchemeToUint(supportMode)
     kernel_int = kernel.value
     gradientMode_int = 0
     opInt = wp.int32(operationMode.value)
@@ -138,7 +137,7 @@ def parseArguments(
             querySupports, referenceSupports,
             periodicity = domain.periodic,
             domainDescription = domain,
-            mode = 'superSymmetric',
+            mode = SupportScheme.SuperSymmetric,
         )
 
     
@@ -187,7 +186,7 @@ def parseArguments(
         gridState.hashTable = castTorchToWarpAsBuiltins(adjacency.hashTable)
         gridState.cellTable = castTorchToWarpAsBuiltins(adjacency.sortedCellTable)
         gridState.D = dim
-        gridState.numOffsets = castTorchToWarpAsBuiltins(adjacency.numOffsets)
+        gridState.numOffsets = adjacency.numOffsets
         gridState.cellOffsets = castTorchToWarpAsBuiltins(adjacency.cellOffsets)
 
     queryParticles = particleDataSoA_1() if dim == 1 else (particleDataSoA_2() if dim == 2 else particleDataSoA_3())

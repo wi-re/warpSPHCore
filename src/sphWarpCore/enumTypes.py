@@ -1,22 +1,39 @@
 from enum import Enum
 
-class SupportScheme(Enum):
-    Gather = 1
-    Scatter = 2
-    Symmetric = 3
-    SuperSymmetric = 4
+# For gradients there are many different variants for the kernel alone. Given a standard difference formulation mj/rhoj (fi - fj) \nabla W_ij
+# We can compute:
+# 1: Gather: mj/rhoj (fi - fj) \nabla W(x_ij, h_i)
+# 2: Scatter: mj/rhoj (fi - fj) \nabla W(x_ij, h_j)
+# 3: (Mean) Symmetric: mj/rhoj (fi - fj) \nabla W(x_ij, (h_i + h_j)/2)
+# 4: Kernel Mean Symmetric: mj/rhoj (fi - fj) 0.5 * (\nabla W(x_ij, h_i) + \nabla W(x_ij, h_j))
+# 5: Super Symmetric: mj/rhoj (fi - fj) 0.5 * (\nabla W(x_ij, h_i) - \nabla W(x_ji, h_j)) # CRK SPH uses this formulation
+# 6: Partial Symmetric: mj/rhoj [(fi \nabla W(x_ij, h_i) + fj \nabla W(x_ij, h_j))] # PESPH uses this
 
-def supportSchemeTomode(scheme: SupportScheme) -> str:
-    if scheme == SupportScheme.Gather:
-        return 'gather'
-    elif scheme == SupportScheme.Scatter:
-        return 'scatter'
-    elif scheme == SupportScheme.Symmetric:
-        return 'symmetric'
-    elif scheme == SupportScheme.SuperSymmetric:
-        return 'superSymmetric'
-    else:
+class SupportScheme(Enum):
+    Gather = 11 # uses hi
+    Scatter = 12 # uses hj
+    MeanSymmetric = 13 # uses (hi + hj) / 2
+    KernelMeanSymmetric = 14 # uses 0.5 * (k(q,hi) + k(q,hj))
+    SuperSymmetric = 15 # uses 0.5 * (k(q,hi) - k(q,hj))
+    PartialSymmetric = 16 # uses fi * k(q,hi) + fj * k(q,hj)
+
+# def supportSchemeTomode(scheme: SupportScheme) -> str:
+#     return scheme.name
+    
+import warp as wp
+def supportSchemeToUint(scheme: SupportScheme) -> wp.uint32:
+    scheme_map = {
+        SupportScheme.Gather: 11,
+        SupportScheme.Scatter: 12,
+        SupportScheme.MeanSymmetric: 13,
+        SupportScheme.KernelMeanSymmetric: 14,
+        SupportScheme.SuperSymmetric: 15,
+        SupportScheme.PartialSymmetric: 16
+    }
+    id = wp.uint32(scheme_map.get(scheme, 0))
+    if id == 0:
         raise ValueError(f"Unsupported support scheme: {scheme}")
+    return id
 
 # @torch.jit.script
 class KernelFunctions(Enum):
