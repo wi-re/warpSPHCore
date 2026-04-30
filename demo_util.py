@@ -58,22 +58,28 @@ from diffSPH.operations import SPHOperation
 
 import time
 def timeFunction(func, *args, **kwargs):
-    begin = torch.cuda.Event(enable_timing=True)
-    end = torch.cuda.Event(enable_timing=True)
-    torch.cuda.synchronize()
+    hasCuda = torch.cuda.is_available()
+    if hasCuda:
+        begin = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize()
     cpuBegin = time.time()
-    begin.record()
+    if hasCuda:
+        begin.record()
     
     result = func(*args, **kwargs)
     
-    end.record()
-    torch.cuda.synchronize()
+    if hasCuda:
+        end.record()
+        torch.cuda.synchronize()
     cpuEnd = time.time()
-    gpuTime = begin.elapsed_time(end)
     cpuTime = cpuEnd - cpuBegin
     
-    return result, gpuTime, cpuTime * 1000
-
+    if hasCuda:
+        gpuTime = begin.elapsed_time(end)
+        return result, gpuTime, cpuTime * 1000
+    else:
+        return result, cpuTime * 1000, cpuTime * 1000
 
 
 # wp.config.verify_autograd_array_access = True
