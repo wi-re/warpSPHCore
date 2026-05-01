@@ -42,6 +42,57 @@ def clearDummyTensorCache() -> None:
     _DUMMY_TENSOR_CACHE.clear()
 
 
+# ---------------------------------------------------------------------------
+# wp.array identity cache
+# ---------------------------------------------------------------------------
+# Keyed by (data_ptr, shape, strides, dtype) so that in-place-updated tensors
+# (positions, densities, …) map to the same wp.array wrapper every call —
+# zero-copy AND zero object allocation on the hot path.
+# Only misses when a new allocation happens (e.g. first call, adjacency rebuild).
+_WARP_ARRAY_CACHE: dict[tuple, "wp.array"] = {}
+_MAX_WARP_ARRAY_CACHE_ENTRIES = 64
+
+
+def _cache_set_bounded(cache: dict, key: tuple, value, max_entries: int) -> None:
+    cache[key] = value
+    while len(cache) > max_entries:
+        cache.pop(next(iter(cache)))
+
+
+def getCachedWarpArray(t: torch.Tensor) -> "wp.array":
+    """Return a cached wp.array view of *t*.
+
+    If the tensor's underlying storage has not changed (same data_ptr, shape,
+    strides and dtype) the previously created wp.array wrapper is reused,
+    avoiding a Python object allocation and a ``wp.from_torch`` call on every
+    kernel launch.
+
+    The cache entry is invalidated automatically when any of those four
+    properties change, which happens whenever a tensor is reallocated (e.g.
+    after an adjacency rebuild).
+    """
+    key = (t.data_ptr(), t.shape, t.stride(), t.dtype)
+    wa = _WARP_ARRAY_CACHE.get(key)
+    if wa is None:
+        tc = t.contiguous()
+        # contiguous() may return a new tensor with a different data_ptr
+        key = (tc.data_ptr(), tc.shape, tc.stride(), tc.dtype)
+        wa = _WARP_ARRAY_CACHE.get(key)
+        if wa is None:
+            wa = castTorchToWarpAsBuiltins(tc)
+            _cache_set_bounded(_WARP_ARRAY_CACHE, key, wa, _MAX_WARP_ARRAY_CACHE_ENTRIES)
+    return wa
+
+
+def clearWarpArrayCache() -> None:
+    """Clear all cached wp.array wrappers.
+
+    Call this whenever tensors are reallocated outside of normal simulation
+    steps (e.g. after resizing particle arrays).
+    """
+    _WARP_ARRAY_CACHE.clear()
+
+
 def getCachedDummyTensor(
     shape,
     *,
@@ -100,12 +151,35 @@ _TORCH_TO_WARP_SCALAR_DTYPE = {
     torch.bool: wp.bool,
 }
 
+# Cache vector/matrix dtype objects to avoid rebuilding Warp type metadata
+# for every tensor conversion call on hot paths.
+_WARP_VECTOR_DTYPE_CACHE: dict[tuple[int, torch.dtype], object] = {}
+_WARP_MATRIX_DTYPE_CACHE: dict[tuple[int, int, torch.dtype], object] = {}
+
 
 def _torch_scalar_to_warp_dtype(dtype: torch.dtype):
     scalar = _TORCH_TO_WARP_SCALAR_DTYPE.get(dtype)
     if scalar is None:
         raise TypeError(f"Unsupported torch dtype for Warp conversion: {dtype}")
     return scalar
+
+
+def _get_warp_vector_dtype(length: int, torch_dtype: torch.dtype):
+    key = (int(length), torch_dtype)
+    cached = _WARP_VECTOR_DTYPE_CACHE.get(key)
+    if cached is None:
+        cached = vector(length=length, dtype=_torch_scalar_to_warp_dtype(torch_dtype))
+        _WARP_VECTOR_DTYPE_CACHE[key] = cached
+    return cached
+
+
+def _get_warp_matrix_dtype(rows: int, cols: int, torch_dtype: torch.dtype):
+    key = (int(rows), int(cols), torch_dtype)
+    cached = _WARP_MATRIX_DTYPE_CACHE.get(key)
+    if cached is None:
+        cached = matrix(shape=(rows, cols), dtype=_torch_scalar_to_warp_dtype(torch_dtype))
+        _WARP_MATRIX_DTYPE_CACHE[key] = cached
+    return cached
 
 def castTorchToWarpAsBuiltins(x_torch):
     """
@@ -114,25 +188,34 @@ def castTorchToWarpAsBuiltins(x_torch):
     This function also performs conversions to builtin warp types, e.g., vec2f for 2D float tensors, vec3i for 3D int tensors, etc.
     
     """
-    x_torch = x_torch.contiguous()
-    scalar_wp = _torch_scalar_to_warp_dtype(x_torch.dtype)
-    
-    if len(x_torch.shape) == 1:
+    if not x_torch.is_contiguous():
+        x_torch = x_torch.contiguous()
+
+    ndim = x_torch.ndim
+
+    if ndim == 1:
         # 1D tensor, return as is with appropriate dtype
         return wp.from_torch(x_torch)
-    elif len(x_torch.shape) == 2:
-        N, D = x_torch.shape
-        return wp.from_torch(x_torch, dtype=vector(length=D, dtype=scalar_wp))
-    elif len(x_torch.shape) == 3:
-        N, M, D = x_torch.shape
-        return wp.from_torch(x_torch, dtype=matrix(shape=(M, D), dtype=scalar_wp))
-    elif len(x_torch.shape) == 4:
+    elif ndim == 2:
+        D = x_torch.shape[1]
+        return wp.from_torch(x_torch, dtype=_get_warp_vector_dtype(D, x_torch.dtype))
+    elif ndim == 3:
+        M = x_torch.shape[1]
+        D = x_torch.shape[2]
+        return wp.from_torch(x_torch, dtype=_get_warp_matrix_dtype(M, D, x_torch.dtype))
+    elif ndim == 4:
         # Warp's kernel type system only handles rank-1 (vector) and rank-2 (matrix).
         # Flatten the trailing three dims into a single vector dimension so the
         # array can be used as a kernel argument type.
-        N, P, M, D = x_torch.shape
-        return wp.from_torch(x_torch.reshape(N, P * M * D).contiguous(),
-                             dtype=vector(length=P * M * D, dtype=scalar_wp))
+        N = x_torch.shape[0]
+        P = x_torch.shape[1]
+        M = x_torch.shape[2]
+        D = x_torch.shape[3]
+        flat = P * M * D
+        reshaped = x_torch.reshape(N, flat)
+        if not reshaped.is_contiguous():
+            reshaped = reshaped.contiguous()
+        return wp.from_torch(reshaped, dtype=_get_warp_vector_dtype(flat, x_torch.dtype))
     
     else:
         print(f"Warning: castTorchToWarpAsBuiltins received tensor with shape {x_torch.shape} which is not 1D, 2D, 3D, or 4D. Returning as a flat array of scalars.")

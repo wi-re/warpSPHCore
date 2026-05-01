@@ -1,7 +1,49 @@
 import torch
 import warp as wp
 from typing import Any, List, Tuple
-from .wp_util import castTorchToWarpAsBuiltins, castWarpToTorch
+from .wp_util import castTorchToWarpAsBuiltins, castWarpToTorch, getCachedWarpArray
+
+# ---------------------------------------------------------------------------
+# Struct-bundle cache: maps a tuple of data_ptrs to (warp_arrays, kernel_args)
+# so that build_fn and all 36 wp.array casts are skipped on steady-state steps.
+# ---------------------------------------------------------------------------
+_KERNEL_ARGS_CACHE: dict[tuple, tuple] = {}
+_WRAPPER_ARGS_CACHE: dict[tuple, tuple] = {}
+
+# data_ptr-based keys can churn in out-of-place update loops (new storage every step).
+# Keep caches bounded to avoid retaining stale tensor-backed wrapper objects forever.
+_MAX_KERNEL_ARGS_CACHE_ENTRIES = 8
+_MAX_WRAPPER_ARGS_CACHE_ENTRIES = 8
+
+
+def _cache_set_bounded(cache: dict, key: tuple, value: tuple, max_entries: int) -> None:
+    cache[key] = value
+    while len(cache) > max_entries:
+        cache.pop(next(iter(cache)))
+
+
+def _to_hashable(value):
+    if isinstance(value, list):
+        return tuple(_to_hashable(v) for v in value)
+    if isinstance(value, tuple):
+        return tuple(_to_hashable(v) for v in value)
+    if isinstance(value, dict):
+        return tuple(sorted((k, _to_hashable(v)) for k, v in value.items()))
+    try:
+        hash(value)
+        return value
+    except TypeError:
+        return repr(value)
+
+
+def clearKernelArgsCache() -> None:
+    """Invalidate the struct-bundle cache.
+
+    Call this whenever particle arrays are reallocated (e.g. particle add/remove)
+    or after an adjacency rebuild that reuses the same Python tensor objects.
+    """
+    _KERNEL_ARGS_CACHE.clear()
+    _WRAPPER_ARGS_CACHE.clear()
 
 
 class WarpFunctionWrapper(torch.autograd.Function):
@@ -25,28 +67,58 @@ class WarpFunctionWrapper(torch.autograd.Function):
         ctx.function = function
         # check if any input requires grad
         ctx.any_requires_grad = any(arg.requires_grad for arg in args if isinstance(arg, torch.Tensor))
-        ctx.save_for_backward(*[arg for arg in args if isinstance(arg, torch.Tensor)])
-        
-        # Convert PyTorch tensors to Warp arrays
-        # IMPORTANT: Detach tensors to prevent Warp from writing gradients back to PyTorch tensors
-        # The wrapper will handle gradient flow through return values only
-        warp_args = []
-        requires_grad_mask = []
-        index = 0
-        for arg in args:
-            if isinstance(arg, torch.Tensor):
-                # Detach to break the link between PyTorch and Warp gradient buffers
-                detached_arg = arg.detach()
-                warp_arg = castTorchToWarpAsBuiltins(detached_arg)
-                warp_arg.requires_grad = arg.requires_grad  # Preserve requires_grad information for the wrapper's backward pass
-                warp_args.append(warp_arg)
-                requires_grad_mask.append(arg.requires_grad)
-                # print(f'Converted input {index:02d} from torch [dtype: {arg.dtype}, device {arg.device}, shape: {arg.shape}, requires_grad: {arg.requires_grad}] to warp array [dtype: {warp_arg.dtype}, device: {warp_arg.device}, shape: {warp_arg.shape}, requires_grad: {warp_arg.requires_grad}]')
-            else:
-                warp_args.append(arg)  # Non-tensor arguments are passed as-is
-                requires_grad_mask.append(False)
-                # print(f'Input {index:02d} is not a Tensor.')
-            index += 1
+
+        tensor_args = [arg for arg in args if isinstance(arg, torch.Tensor)]
+        if ctx.any_requires_grad:
+            ctx.save_for_backward(*tensor_args)
+        else:
+            # Avoid save_for_backward overhead on pure inference/no-grad paths.
+            ctx.save_for_backward()
+
+        # Convert PyTorch tensors to Warp arrays.
+        # In no-grad steady-state, reuse the fully packed argument bundle.
+        warp_args = None
+        requires_grad_mask = None
+
+        if not ctx.any_requires_grad:
+            key_parts = []
+            for arg in args:
+                if isinstance(arg, torch.Tensor):
+                    key_parts.append(("t", arg.data_ptr(), arg.shape, arg.stride(), arg.dtype))
+                else:
+                    key_parts.append(("s", _to_hashable(arg)))
+            cache_key = (function, tuple(key_parts))
+            cached = _WRAPPER_ARGS_CACHE.get(cache_key)
+            if cached is not None:
+                warp_args, requires_grad_mask = cached
+                # Reset tensor requires_grad flags each call for correctness
+                # if the same wrapped array was used in a grad-enabled context.
+                for arg, wa in zip(args, warp_args):
+                    if isinstance(arg, torch.Tensor):
+                        wa.requires_grad = arg.requires_grad
+
+        if warp_args is None:
+            warp_args = []
+            requires_grad_mask = []
+            for arg in args:
+                if isinstance(arg, torch.Tensor):
+                    # Detach to break the link between PyTorch and Warp gradient buffers
+                    detached_arg = arg.detach()
+                    warp_arg = getCachedWarpArray(detached_arg)
+                    warp_arg.requires_grad = arg.requires_grad  # Preserve requires_grad information for backward
+                    warp_args.append(warp_arg)
+                    requires_grad_mask.append(arg.requires_grad)
+                else:
+                    warp_args.append(arg)  # Non-tensor arguments are passed as-is
+                    requires_grad_mask.append(False)
+
+            if not ctx.any_requires_grad:
+                _cache_set_bounded(
+                    _WRAPPER_ARGS_CACHE,
+                    cache_key,
+                    (warp_args, requires_grad_mask),
+                    _MAX_WRAPPER_ARGS_CACHE_ENTRIES,
+                )
                 
         ctx.inputs_warp = warp_args
         ctx.requires_grad_mask = requires_grad_mask
@@ -156,18 +228,57 @@ class StateAwareWarpFunction(torch.autograd.Function):
         ctx.any_requires_grad = any(
             t.requires_grad for t in flat_tensors if isinstance(t, torch.Tensor)
         )
-        ctx.save_for_backward(*flat_tensors)
+        if ctx.any_requires_grad:
+            print(f"Forward pass with gradients required for {sum(1 for t in flat_tensors if isinstance(t, torch.Tensor) and t.requires_grad)} tensors.")
+            ctx.save_for_backward(*flat_tensors)
+        else:
+            
+            # Avoid save_for_backward overhead when gradients are not requested.
+            ctx.save_for_backward()
 
-        # Detach → warp, preserving requires_grad so the tape tracks them
-        warp_arrays = []
-        for t in flat_tensors:
-            wa = castTorchToWarpAsBuiltins(t.detach())
-            wa.requires_grad = t.requires_grad
-            warp_arrays.append(wa)
-        ctx.warp_arrays = warp_arrays
+        # ------------------------------------------------------------------
+        # Hot-path: reuse cached (warp_arrays, kernel_args) when every tensor
+        # has the same underlying storage as the previous call.
+        # The cache key is a tuple of (data_ptr, shape, stride, dtype) for
+        # each tensor, which changes whenever a tensor is reallocated.
+        # We skip the cache when any tensor requires grad so that the Warp
+        # tape always gets fresh array objects it can attach grad buffers to.
+        # ------------------------------------------------------------------
+        cache_key = None
+        if not ctx.any_requires_grad:
+            cache_key = tuple(
+                (t.data_ptr(), t.shape, t.stride(), t.dtype) for t in flat_tensors
+            )
+            cached = _KERNEL_ARGS_CACHE.get(cache_key)
+            if cached is not None:
+                warp_arrays, kernel_args = cached
+                ctx.warp_arrays = warp_arrays
+                ctx.kernel_args_cache_hit = True
+            else:
+                ctx.kernel_args_cache_hit = False
+        else:
+            cached = None
+            ctx.kernel_args_cache_hit = False
 
-        # Reconstruct all kernel args via the caller-supplied closure
-        kernel_args = build_fn(warp_arrays)
+        if not ctx.kernel_args_cache_hit:
+            # Detach → warp, preserving requires_grad so the tape tracks them
+            warp_arrays = []
+            for t in flat_tensors:
+                wa = getCachedWarpArray(t.detach())
+                wa.requires_grad = t.requires_grad
+                warp_arrays.append(wa)
+            ctx.warp_arrays = warp_arrays
+
+            # Reconstruct all kernel args via the caller-supplied closure
+            kernel_args = build_fn(warp_arrays)
+
+            if cache_key is not None:
+                _cache_set_bounded(
+                    _KERNEL_ARGS_CACHE,
+                    cache_key,
+                    (warp_arrays, kernel_args),
+                    _MAX_KERNEL_ARGS_CACHE_ENTRIES,
+                )
 
         if ctx.any_requires_grad:
             tape = wp.Tape()
@@ -219,13 +330,22 @@ from ..warp_state import *
 def launch_kernel(kernel, output_shape, output_dtype, *args):
     with record_function(f"Warp Kernel: {kernel.__name__}"):
         inputs = list(args)
-        requires_grad = any(input.requires_grad for input in inputs if hasattr(input, 'requires_grad'))
-    
+
+        # Single-pass scan to discover grad requirement and target device source.
+        requires_grad = False
+        firstTensorInput = None
+        domainInput = None
+        for input_arg in inputs:
+            if not requires_grad and getattr(input_arg, "requires_grad", False):
+                requires_grad = True
+            if firstTensorInput is None and isinstance(input_arg, wp.array):
+                firstTensorInput = input_arg
+            if domainInput is None and hasattr(input_arg, "domainMin"):
+                domainInput = input_arg
+
         # use the first tensor input to determine the device for the output tensors
-        firstTensorInput = next((input for input in inputs if isinstance(input, wp.array)), None)
         if firstTensorInput is None:
             # one of the arguments could be a domain state that contains the device information
-            domainInput = next((input for input in inputs if hasattr(input, 'domainMin')), None)
             if domainInput is not None:
                 device = domainInput.domainMin.device
             else:
@@ -234,31 +354,33 @@ def launch_kernel(kernel, output_shape, output_dtype, *args):
         else:
             device = firstTensorInput.device
 
-        if isinstance(output_dtype, List) or isinstance(output_dtype, Tuple):
+        if isinstance(output_dtype, (list, tuple)):
             outputs = []
             for i, out_type in enumerate(output_dtype):
-                output = wp.zeros(output_shape[i] if isinstance(output_shape, List) else output_shape, dtype=out_type, device=device)
+                output = wp.zeros(output_shape[i] if isinstance(output_shape, list) else output_shape, dtype=out_type, device=device)
                 output.requires_grad = requires_grad
                 outputs.append(output)
 
-            kernel_dim = output_shape[0] if isinstance(output_shape, List) else output_shape
+            kernel_dim = output_shape[0] if isinstance(output_shape, list) else output_shape
             kernel_dim = kernel_dim if isinstance(kernel_dim, int) else kernel_dim[0]
+            kernel_inputs = inputs + outputs
 
             wp.launch(
                 kernel,
                 dim = kernel_dim,
-                inputs = list(args) + outputs,
+                inputs = kernel_inputs,
                 device = device
             )
             return tuple(outputs)
         
         output = wp.zeros(output_shape, dtype=output_dtype, device=device)
         output.requires_grad = requires_grad
+        kernel_inputs = inputs + [output]
         
         wp.launch(
             kernel,
             dim = output_shape[0] if not isinstance(output_shape, int) else output_shape,
-            inputs = list(args) + [output],
+            inputs = kernel_inputs,
             device = device
         )
     

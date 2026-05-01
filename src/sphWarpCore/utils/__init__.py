@@ -5,11 +5,14 @@ from .wp_util import (
     clearDummyTensorCache,
     getCachedDummyTensor,
     getCachedIdentityMatrices,
+    getCachedWarpArray,
+    clearWarpArrayCache,
 )
 from .wp_autograd import (
     WarpFunctionWrapper,
     warpWrapper,
     launch_kernel,
+    clearKernelArgsCache,
 )
 
 __all__ = [
@@ -19,6 +22,9 @@ __all__ = [
     "clearDummyTensorCache",
     "getCachedDummyTensor",
     "getCachedIdentityMatrices",
+    "getCachedWarpArray",
+    "clearWarpArrayCache",
+    "clearKernelArgsCache",
     "WarpFunctionWrapper",
     "warpWrapper",
     "launch_kernel",
