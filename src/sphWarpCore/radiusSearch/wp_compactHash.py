@@ -140,7 +140,7 @@ def mortonPattern(index: wp.int32) -> wp.uint64:
         bits_00_15 = wp.uint64(0xffff)
         bits_16_31 = wp.uint64(0x0000)
         bits_32_47 = wp.uint64(0x0000)
-        bits_48_63 = wp.uint64(0x1f00)
+        bits_48_63 = wp.uint64(0x001f)
     elif index == 2:
         # generate 0x1f0000ff 0000ff:
         # lower = wp.uint64(0xff0000ff)
@@ -163,7 +163,7 @@ def mortonPattern(index: wp.int32) -> wp.uint64:
         # upper = wp.uint64(0x10c30c30) << wp.uint64(32)
         bits_00_15 = wp.uint64(0x30c3)
         bits_16_31 = wp.uint64(0xc30c)
-        bits_32_47 = wp.uint64(0xc30c)
+        bits_32_47 = wp.uint64(0x0c30)
         bits_48_63 = wp.uint64(0x10c3)
     elif index == 5:
         # generate 0x12492492 49249249
@@ -196,8 +196,27 @@ def computeZOrderIndex64(index: wp.vec3i) -> wp.int64:
     return wp.int64(splitBy3Bits64(x) | (splitBy3Bits64(y) << wp.uint64(1)) | (splitBy3Bits64(z) << wp.uint64(2)))
     
     
+@wp.func
+def getLinearIndex64(
+    cellIndex: wp.vec3i,
+    cellCounts: wp.array(dtype=wp.int32),  # shape [D]
+    D: int,
+) -> wp.int64:
+    # x-major (axis 0 first): x + Nx*y + Nx*Ny*z
+    linearIndex = wp.int64(0)
+    product = wp.int64(1)
+    for d in range(D):
+        linearIndex += wp.int64(cellIndex[d]) * product
+        product = product * wp.int64(cellCounts[d])
+    return linearIndex
+
+
 @wp.kernel
-def indexCells(cellIndices  : wp.array2d(dtype=wp.int32), cellIndxes: wp.array(dtype=wp.int64)):
+def indexCells(
+    cellIndices: wp.array2d(dtype=wp.int32),
+    cellCounts: wp.array(dtype=wp.int32),
+    cellIndxes: wp.array(dtype=wp.int64),
+):
     i = wp.tid()
     numCells = cellIndices.shape[0]
     dim = cellIndices.shape[1]
@@ -209,7 +228,7 @@ def indexCells(cellIndices  : wp.array2d(dtype=wp.int32), cellIndxes: wp.array(d
     for d in range(dim):
         cellIndex[d] = cellIndices[i, d]
         
-    cellIndxes[i] = computeZOrderIndex64(cellIndex)
+    cellIndxes[i] = getLinearIndex64(cellIndex, cellCounts, dim)
     
 
 @torch.jit.script
@@ -263,8 +282,12 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     warp_indices = castTorchToWarp(indices)
     
     out = wp.zeros((indices.shape[0],), dtype=wp.int64, device=warp_indices.device)
+    warp_cell_count = castTorchToWarp(cellCount)
     wp.launch(
-        indexCells, dim = indices.shape[0], inputs = [warp_indices, out], device = warp_indices.device
+        indexCells,
+        dim=indices.shape[0],
+        inputs=[warp_indices, warp_cell_count, out],
+        device=warp_indices.device,
     )
     linearIndices = wp.to_torch(out)
     # linearIndices = linearIndexing(indices, cellCount)
@@ -419,7 +442,7 @@ def radiusSearchCountNeighborsCompactHashMap(
                     currentCellIndex[d] -= numCells[d]
                     
         # linearIndex = getLinearIndex(currentCellIndex, numCells, D)
-        mortonIndex = computeZOrderIndex64(currentCellIndex)
+        linearIndex = getLinearIndex64(currentCellIndex, numCells, D)
         hashValue = wp.int32(hashGridVec3i(currentCellIndex, hashMapLength, D))
         # wp.printf("\tThread %d: Checking cell index (%d, %d, %d) with hash value %d\n", i, currentCellIndex[0], currentCellIndex[1], currentCellIndex[2], hashValue)
         hashEntry = hashTable[hashValue]
@@ -436,7 +459,7 @@ def radiusSearchCountNeighborsCompactHashMap(
             cellStartIndex = wp.int32(cellTable[cellStart + c, 1])
             cellParticleCount = wp.int32(cellTable[cellStart + c, 2])
             
-            if mortonIndex != candidateIndex:
+            if linearIndex != candidateIndex:
                 # wp.printf("\t\tThread %d: Skipping cell with linear index %d as it does not match the current cell index %d\n", i, candidateIndex, linearIndex)
                 continue  # This cell does not match the current cell index
             
@@ -548,7 +571,7 @@ def radiusSearchCollectCompactHashMap(
     # Compute the hash value for the cell index
     # hashValue = hashGridIndex(cellIndex, hashMapLength)
     numOffsets = cellOffsets.shape[0]
-    currentLinearIndex = computeZOrderIndex64(cellIndex)
+    currentLinearIndex = getLinearIndex64(cellIndex, numCells, D)
     
     # getLinearIndex(cellIndex, numCells, D)
     count = wp.int32(0)
@@ -570,7 +593,7 @@ def radiusSearchCollectCompactHashMap(
                     currentCellIndex[d] -= numCells[d]
                     
         # linearIndex = getLinearIndex(currentCellIndex, numCells, D)
-        mortonIndex = computeZOrderIndex64(currentCellIndex)
+        linearIndex = getLinearIndex64(currentCellIndex, numCells, D)
         hashValue = wp.int32(hashGridVec3i(currentCellIndex, hashMapLength, D))
         # wp.printf("\tThread %d: Checking cell index (%d, %d, %d) with hash value %d\n", i, currentCellIndex[0], currentCellIndex[1], currentCellIndex[2], hashValue)
         hashEntry = hashTable[hashValue]
@@ -587,8 +610,8 @@ def radiusSearchCollectCompactHashMap(
             cellStartIndex = wp.int32(cellTable[cellStart + c, 1])
             cellParticleCount = wp.int32(cellTable[cellStart + c, 2])
             
-            if mortonIndex != candidateIndex:
-                # wp.printf("\t\tThread %d: Skipping cell with linear index %d as it does not match the current cell index %d\n", i, candidateIndex, mortonIndex)
+            if linearIndex != candidateIndex:
+                # wp.printf("\t\tThread %d: Skipping cell with linear index %d as it does not match the current cell index %d\n", i, candidateIndex, linearIndex)
                 continue  # This cell does not match the current cell index
             
             # wp.printf("\t\tThread %d: Checking cell with linear index %d containing %d particles\n", i, candidateIndex, cellParticleCount)

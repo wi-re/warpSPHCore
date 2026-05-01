@@ -1,13 +1,13 @@
 
 import warp as wp
 from ..enumTypes import *
-from ..radiusSearch.wp_compactHash import CompactHashMap, computeZOrderIndex64, hashGridVec3i
+from ..radiusSearch.wp_compactHash import CompactHashMap, getLinearIndex64, hashGridVec3i
 from warp.types import vector, matrix
 from typing import Any
 
 @wp.func
 def iterateCell(
-    mortonIndex: wp.int64,
+    linearIndex: wp.int64,
     cellCount: wp.int32, 
                 cellStart: wp.int32, 
                 cellTable: wp.array(dtype=vector(length=3, dtype=wp.int64)) # shape [C,3] with [cellIndex, cellStart, cellCount] # type: ignore
@@ -17,9 +17,9 @@ def iterateCell(
         cellStartIndex = wp.int32(cellTable[cellStart + c][1])
         cellParticleCount = wp.int32(cellTable[cellStart + c][2])
         
-        if mortonIndex != candidateIndex:
-            # wp.printf("\t\tThread %d: Skipping cell with linear index %d as it does not match the current cell index %d\n", i, candidateIndex, mortonIndex)
-            continue  # Keep scanning the hash bucket for a matching morton index
+        if linearIndex != candidateIndex:
+            # wp.printf("\t\tThread %d: Skipping cell with linear index %d as it does not match the current cell index %d\n", i, candidateIndex, linearIndex)
+            continue  # Keep scanning the hash bucket for a matching linear index
         return cellStartIndex, cellParticleCount
     return -1, -1  # No matching cell found
 
@@ -53,7 +53,7 @@ def checkOffset(
     # Compute the hash value for the cell index
     # hashValue = hashGridIndex(cellIndex, hashMapLength)
     numOffsets = cellOffsets.shape[0]
-    currentLinearIndex = computeZOrderIndex64(cellIndex)
+    currentLinearIndex = getLinearIndex64(cellIndex, numCells, D)
     
     # getLinearIndex(cellIndex, numCells, D)
     count = wp.int32(0)
@@ -73,7 +73,7 @@ def checkOffset(
                 currentCellIndex[d] -= numCells[d]
                 
     # linearIndex = getLinearIndex(currentCellIndex, numCells, D)
-    mortonIndex = computeZOrderIndex64(currentCellIndex)
+    linearIndex = getLinearIndex64(currentCellIndex, numCells, D)
     hashValue = wp.int32(hashGridVec3i(currentCellIndex, hashMapLength, D))
     # wp.printf("\tThread %d: Checking cell index (%d, %d, %d) with hash value %d\n", i, currentCellIndex[0], currentCellIndex[1], currentCellIndex[2], hashValue)
     hashEntry = hashTable[hashValue]
@@ -85,4 +85,4 @@ def checkOffset(
     cellStart = hashEntry[0]
     cellCount = hashEntry[1]
     
-    return iterateCell(mortonIndex, cellCount, cellStart, cellTable)
+    return iterateCell(linearIndex, cellCount, cellStart, cellTable)
