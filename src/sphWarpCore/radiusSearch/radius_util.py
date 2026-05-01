@@ -9,6 +9,7 @@ import warp as wp
 # Because of the sorting we can reconstruct i from edgeOffsets and numNeighbors, but we keep it for convenience and to avoid having to reconstruct it every time.
 
 # One unfortunate aspect is that the torch tensors need to be of dtype long to allow indexing within torch. warp could naturally handle int dtypes, consuming less memory, but torch does not allow indexing with int32 tensors, so we need to convert them to int64 (long) tensors, which consume more memory.
+@torch.jit.script
 @dataclass(slots=True)
 class AdjacencyList:
     i: torch.Tensor
@@ -36,7 +37,7 @@ from typing import NamedTuple, Union
 from typing import NamedTuple
 
 from dataclasses import dataclass
-# @torch.jit.script
+@torch.jit.script
 @dataclass(slots=True)
 class DomainDescription:
     """

@@ -4,6 +4,7 @@ from .wp_compactHash import *
 # Verlet lists store not just the required neighbors but also some extra neighbors to avoid rebuilding the neighbor list every step.
 
 
+# @torch.jit.script
 def buildVerletList_(
         queryPositions: torch.Tensor, referencePositions: torch.Tensor,
         querySupports: torch.Tensor, referenceSupports: torch.Tensor,
@@ -11,11 +12,11 @@ def buildVerletList_(
         mode : SupportScheme = SupportScheme.SuperSymmetric,
         priorNeighborhood : Optional[AdjacencyList] = None, 
         verbose : bool = False):
-    with record_function(f"[Neighborhood] {mode}"):
+    with record_function(f"[Verlet] {mode}"):
         if priorNeighborhood is None or (priorNeighborhood is not None and priorNeighborhood.queryPositions is None) or (priorNeighborhood is not None and priorNeighborhood.referencePositions is None):
             if verbose:
                 print('Building neighborhood from scratch [no prior neighborhood]')
-            with record_function(f"[Neighborhood] no prior"):
+            with record_function(f"[Verlet] no prior"):
                 adjacency = radiusSearchCompactHashMap_(
                     queryPositions, referencePositions,
                     querySupports * verletScale, referenceSupports * verletScale,
@@ -25,77 +26,87 @@ def buildVerletList_(
             if queryPositions.shape[0] != priorNeighborhood.queryPositions.shape[0] or referencePositions.shape[0] != priorNeighborhood.referencePositions.shape[0]:
                 if verbose:
                     print('Building neighborhood from scratch [different number of particles]')
-                with record_function(f"[Neighborhood] mismatch"):
+                with record_function(f"[Verlet] mismatch"):
                     adjacency = radiusSearchCompactHashMap_(
                         queryPositions, referencePositions,
                         querySupports * verletScale, referenceSupports * verletScale,
                         domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                     )
             else:
-                # This works because of minimum image conventions!
-                distance_a = torch.linalg.norm(queryPositions - priorNeighborhood.queryPositions, dim = -1)
-                distance_b = torch.linalg.norm(referencePositions - priorNeighborhood.referencePositions, dim = -1)
-                supports_a = priorNeighborhood.querySupports
-                supports_b = priorNeighborhood.referenceSupports
+                with record_function(f"[Verlet] Checking validity of prior neighborhood"):
+                    # This works because of minimum image conventions!
+                    distance_a = torch.linalg.norm(queryPositions - priorNeighborhood.queryPositions, dim = -1)
+                    distance_b = torch.linalg.norm(referencePositions - priorNeighborhood.referencePositions, dim = -1)
+                    supports_a = priorNeighborhood.querySupports
+                    supports_b = priorNeighborhood.referenceSupports
 
-                supportDistance_a = (supports_a - querySupports) #/ supports_a
-                supportDistance_b = (supports_b - referenceSupports) #/ supports_b
-                maxDistance = distance_a.max() + distance_b.max()
-                minSupport = None
-                if mode == SupportScheme.KernelMeanSymmetric:
-                    supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
-                    minSupport = min(supports_a.min(), supports_b.min())
-                elif mode == SupportScheme.Scatter:
-                    supportFactor = supportDistance_b.max()
-                    minSupport = supports_b.min()
-                elif mode == SupportScheme.Gather:
-                    supportFactor = supportDistance_a.max()
-                    minSupport = supports_a.min()
-                elif mode == SupportScheme.SuperSymmetric:
-                    supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
-                    minSupport = min(supports_a.min(), supports_b.min())
-                elif mode == SupportScheme.MeanSymmetric:
-                    supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
-                    minSupport = min(supports_a.min(), supports_b.min())
-                elif mode == SupportScheme.PartialSymmetric:
-                    supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
-                    minSupport = min(supports_a.min(), supports_b.min())
-                else:
-                    raise ValueError(f'Invalid mode: {mode}')
-                
-                hFactor = 1 + supportFactor / minSupport
-                dFactor = 1 + maxDistance / minSupport
+                    # Stored supports in the Verlet adjacency were scaled by `verletScale` during build.
+                    priorQuerySupports = supports_a / verletScale
+                    priorReferenceSupports = supports_b / verletScale
 
-                if verbose:
-                    print(f'Distance a: min: {distance_a.min()}, max: {distance_a.max()}, avg: {distance_a.mean()}')
-                    print(f'Distance b: min: {distance_b.min()}, max: {distance_b.max()}, avg: {distance_b.mean()}')
-                    print(f'Support a: min: {supports_a.min()}, max: {supports_a.max()}, avg: {supports_a.mean()}')
-                    print(f'Support b: min: {supports_b.min()}, max: {supports_b.max()}, avg: {supports_b.mean()}')
-                    print(f'Support Factor: {supportFactor}, Minimum Support: {minSupport}')
-                    print(f'Max Distance: {maxDistance}')
-                    print(f'Distance Factor: {maxDistance / minSupport}')
+                    supportDistance_a = torch.abs(priorQuerySupports - querySupports)
+                    supportDistance_b = torch.abs(priorReferenceSupports - referenceSupports)
+                    maxDistance = distance_a.max() + distance_b.max()
+                    minSupport = None
+                    if mode == SupportScheme.KernelMeanSymmetric:
+                        supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
+                        minSupport = min(torch.min(priorQuerySupports.min(), querySupports.min()), torch.min(priorReferenceSupports.min(), referenceSupports.min()))
+                    elif mode == SupportScheme.Scatter:
+                        supportFactor = supportDistance_b.max()
+                        minSupport = torch.min(priorReferenceSupports.min(), referenceSupports.min())
+                    elif mode == SupportScheme.Gather:
+                        supportFactor = supportDistance_a.max()
+                        minSupport = torch.min(priorQuerySupports.min(), querySupports.min())
+                    elif mode == SupportScheme.SuperSymmetric:
+                        supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
+                        minSupport = min(torch.min(priorQuerySupports.min(), querySupports.min()), torch.min(priorReferenceSupports.min(), referenceSupports.min()))
+                    elif mode == SupportScheme.MeanSymmetric:
+                        supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
+                        minSupport = min(torch.min(priorQuerySupports.min(), querySupports.min()), torch.min(priorReferenceSupports.min(), referenceSupports.min()))
+                    elif mode == SupportScheme.PartialSymmetric:
+                        supportFactor = max(supportDistance_a.max(), supportDistance_b.max())
+                        minSupport = min(torch.min(priorQuerySupports.min(), querySupports.min()), torch.min(priorReferenceSupports.min(), referenceSupports.min()))
+                    else:
+                        raise ValueError(f'Invalid mode: {mode}')
+                    
+                    supportBuffer = (verletScale - 1.0) * minSupport
+                    dFactor = 1 + maxDistance / minSupport
+                    supportInvalid = supportFactor > supportBuffer
+                    distanceInvalid = dFactor > verletScale
 
-
-
-                # print(maxDistance, minSupport * verletScale)
-                if hFactor * dFactor > verletScale:
                     if verbose:
-                # if verbose:
-                        print('Support Factor: ', supportFactor / minSupport, 'Minimum Support: ', minSupport)
-                        print('Distance Factor: ', maxDistance / minSupport)
-                        print('Ratio: ', hFactor * dFactor)
-                        print('Building neighborhood from scratch [distance larger than support]')
-                    with record_function(f"[Neighborhood] verlet"):
-                        adjacency = radiusSearchCompactHashMap_(
-                            queryPositions, referencePositions,
-                            querySupports * verletScale, referenceSupports * verletScale,
-                            domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
-                        )
-                        
-                else:
-                    if verbose:
-                        print('Reusing neighborhood')
-                    adjacency = priorNeighborhood
+                        print(f'Distance a: min: {distance_a.min()}, max: {distance_a.max()}, avg: {distance_a.mean()}')
+                        print(f'Distance b: min: {distance_b.min()}, max: {distance_b.max()}, avg: {distance_b.mean()}')
+                        print(f'Support a (prior): min: {priorQuerySupports.min()}, max: {priorQuerySupports.max()}, avg: {priorQuerySupports.mean()}')
+                        print(f'Support b (prior): min: {priorReferenceSupports.min()}, max: {priorReferenceSupports.max()}, avg: {priorReferenceSupports.mean()}')
+                        print(f'Support a (current): min: {querySupports.min()}, max: {querySupports.max()}, avg: {querySupports.mean()}')
+                        print(f'Support b (current): min: {referenceSupports.min()}, max: {referenceSupports.max()}, avg: {referenceSupports.mean()}')
+                        print(f'Max |Δh|: {supportFactor}, Support buffer: {supportBuffer}, Minimum support: {minSupport}')
+                        print(f'Max Distance: {maxDistance}')
+                        print(f'Distance Factor: {maxDistance / minSupport}')
+                        print(f'Distance Factor Ratio: {dFactor}, Verlet Scale: {verletScale}')
+
+
+
+                    # print(maxDistance, minSupport * verletScale)
+                    if supportInvalid or distanceInvalid:
+                        if verbose:
+                    # if verbose:
+                            print('Support Factor: ', supportFactor / minSupport, 'Minimum Support: ', minSupport)
+                            print('Distance Factor: ', maxDistance / minSupport)
+                            print('Support invalid: ', supportInvalid, '| Distance invalid: ', distanceInvalid)
+                            print('Building neighborhood from scratch [verlet buffer exceeded]')
+                        with record_function(f"[Verlet] Rebuilding Invalid"):
+                            adjacency = radiusSearchCompactHashMap_(
+                                queryPositions, referencePositions,
+                                querySupports * verletScale, referenceSupports * verletScale,
+                                domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                            )
+                            
+                    else:
+                        if verbose:
+                            print('Reusing neighborhood')
+                        adjacency = priorNeighborhood
         return adjacency
     
 from ..state import *
