@@ -245,22 +245,23 @@ class StateAwareWarpFunction(torch.autograd.Function):
         # tape always gets fresh array objects it can attach grad buffers to.
         # ------------------------------------------------------------------
         cache_key = None
-        if not ctx.any_requires_grad:
-            cache_key = tuple(
-                (t.data_ptr(), t.shape, t.stride(), t.dtype) for t in flat_tensors
-            )
-            cached = _KERNEL_ARGS_CACHE.get(cache_key)
-            if cached is not None:
-                warp_arrays, kernel_args = cached
-                ctx.warp_arrays = warp_arrays
-                ctx.kernel_args_cache_hit = True
-            else:
-                ctx.kernel_args_cache_hit = False
-        else:
-            cached = None
-            ctx.kernel_args_cache_hit = False
+        # if not ctx.any_requires_grad:
+        #     cache_key = tuple(
+        #         (t.data_ptr(), t.shape, t.stride(), t.dtype) for t in flat_tensors
+        #     )
+        #     cached = _KERNEL_ARGS_CACHE.get(cache_key)
+        #     if cached is not None:
+        #         warp_arrays, kernel_args = cached
+        #         ctx.warp_arrays = warp_arrays
+        #         ctx.kernel_args_cache_hit = True
+        #     else:
+        #         ctx.kernel_args_cache_hit = False
+        # else:
+        #     cached = None
+        #     ctx.kernel_args_cache_hit = False
 
-        if not ctx.kernel_args_cache_hit:
+        # if not ctx.kernel_args_cache_hit:
+        if True:
             # Detach → warp, preserving requires_grad so the tape tracks them
             warp_arrays = []
             for t in flat_tensors:
@@ -272,13 +273,13 @@ class StateAwareWarpFunction(torch.autograd.Function):
             # Reconstruct all kernel args via the caller-supplied closure
             kernel_args = build_fn(warp_arrays)
 
-            if cache_key is not None:
-                _cache_set_bounded(
-                    _KERNEL_ARGS_CACHE,
-                    cache_key,
-                    (warp_arrays, kernel_args),
-                    _MAX_KERNEL_ARGS_CACHE_ENTRIES,
-                )
+            # if cache_key is not None:
+            #     _cache_set_bounded(
+            #         _KERNEL_ARGS_CACHE,
+            #         cache_key,
+            #         (warp_arrays, kernel_args),
+            #         _MAX_KERNEL_ARGS_CACHE_ENTRIES,
+            #     )
 
         if ctx.any_requires_grad:
             tape = wp.Tape()
@@ -327,7 +328,7 @@ from torch.profiler import record_function
 
 from ..warp_state import *
 
-def launch_kernel(kernel, output_shape, output_dtype, *args):
+def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
     with record_function(f"Warp Kernel: {kernel.__name__}"):
         inputs = list(args)
 
@@ -357,17 +358,19 @@ def launch_kernel(kernel, output_shape, output_dtype, *args):
         if isinstance(output_dtype, (list, tuple)):
             outputs = []
             for i, out_type in enumerate(output_dtype):
-                output = wp.zeros(output_shape[i] if isinstance(output_shape, list) else output_shape, dtype=out_type, device=device)
+                # print(f"Allocating output {i} with shape {output_shape[i] if isinstance(output_shape, list) or isinstance(output_shape, tuple) else output_shape} and dtype {out_type} on device {device}")
+                output = wp.zeros(output_shape[i] if isinstance(output_shape, list) or isinstance(output_shape, tuple) else output_shape, dtype=out_type, device=device)
                 output.requires_grad = requires_grad
                 outputs.append(output)
 
             kernel_dim = output_shape[0] if isinstance(output_shape, list) else output_shape
             kernel_dim = kernel_dim if isinstance(kernel_dim, int) else kernel_dim[0]
+            actual_dim = numThreads if numThreads is not None else kernel_dim
             kernel_inputs = inputs + outputs
 
             wp.launch(
                 kernel,
-                dim = kernel_dim,
+                dim = actual_dim,
                 inputs = kernel_inputs,
                 device = device
             )
@@ -377,9 +380,10 @@ def launch_kernel(kernel, output_shape, output_dtype, *args):
         output.requires_grad = requires_grad
         kernel_inputs = inputs + [output]
         
+        actual_dim = numThreads if numThreads is not None else (output_shape[0] if not isinstance(output_shape, int) else output_shape)
         wp.launch(
             kernel,
-            dim = output_shape[0] if not isinstance(output_shape, int) else output_shape,
+            dim = actual_dim,
             inputs = kernel_inputs,
             device = device
         )

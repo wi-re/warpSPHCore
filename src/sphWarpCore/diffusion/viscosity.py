@@ -37,6 +37,8 @@ class DiffusionParameters:
     
 
 
+# Note this function returns the term multiplied by rhoj!!
+# This is to enable the computation with mj/rhoj as the apparrent volume so the rhoj cancels out for those formulations. This is different from diffSPH which does not multiply by rhoj.
 @wp.func
 def computePi_actual(
     x_i: vector(dtype = wp.float32, length=Any), x_j:  vector(dtype = wp.float32, length=Any), # type: ignore
@@ -131,7 +133,7 @@ def computePi_actual(
         # Monaghan 1992: The term is given in (8.10) of Monaghan 2005 and is
         # mu = h / rho ( alpha c - beta mu_ij)
         # This uses the Monaghan 1992 viscosity term with alpha = 1 and beta = 2
-        v_sig = C_l  - C_q * mu_ij
+        v_sig = C_l * c  - C_q * mu_ij
         K = 1.0
     elif viscosityTerm == 4: # Monaghan1997a
         # Monaghan 1997: The term is given in (8.11) of Monaghan 2005 and is very similar

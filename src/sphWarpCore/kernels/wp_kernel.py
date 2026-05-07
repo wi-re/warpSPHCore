@@ -173,7 +173,7 @@ def eval_C_d(dim: wp.int32, kernel: wp.int32):
     return np.nan
 
 @wp.func
-def eval_kernelScale(dim: wp.int32, kernel: wp.int32):
+def eval_kernelScale(kernel: wp.int32, dim: wp.int32):
     if kernel == 0:
         return wendland2_kernelScale(dim)
     elif kernel == 1:
@@ -384,7 +384,7 @@ def sphKernelGradient_ij(
     if mode == 14: # KernelMeanSymmetric
         return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
     if mode == 15: # SuperSymmetric
-        return (sphGradient_(xij,hi,kernel) - sphGradient_(-xij,hj,kernel))
+        return (sphGradient_(xij,hi,kernel) - sphGradient_(-xij,hj,kernel))/2.0
     return sphGradient_(xij, hij, kernel)
 # Torch Version
 # def Kernel_Derivative(kernel: KernelType, x: torch.Tensor, h: torch.Tensor):

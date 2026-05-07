@@ -596,6 +596,7 @@ def warpWrapper2(
     outputDtypes,
     defaultStateArguments: tuple,
     additionalArguments: tuple = (),
+    numThreads: Optional[int] = None,
 ):
     """
     State-aware autograd wrapper for SPH kernels.
@@ -620,6 +621,9 @@ def warpWrapper2(
                                 standard struct args.  Any ``torch.Tensor`` entries
                                 will be tracked for gradients; plain Python scalars
                                 and ints are forwarded unchanged.
+        numThreads:             Explicit thread count for wp.launch(). If None,
+                                defaults to outputSizes. Use this when the number
+                                of threads should differ from output size.
 
     Returns:
         torch.Tensor or tuple of torch.Tensor – kernel output(s).
@@ -659,6 +663,13 @@ def warpWrapper2(
                 reconstructed[orig_idx] = val
 
             return struct_args + tuple(reconstructed)
+
+        # Wrap launcher to inject numThreads if provided
+        if numThreads is not None:
+            original_launcher = launcher
+            def launcher_with_threads(kernel, output_shape, output_dtype, *args):
+                return original_launcher(kernel, output_shape, output_dtype, *args, numThreads=numThreads)
+            launcher = launcher_with_threads
 
         return StateAwareWarpFunction.apply(
             build_fn, launcher, kernel, outputSizes, outputDtypes,

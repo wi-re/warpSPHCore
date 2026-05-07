@@ -33,23 +33,23 @@ def compute_mu_ij(
     elif viscosityTerm == 1: # MonaghanGingold1983
         return scaled_mu_ij, h / xi
     elif viscosityTerm == 2: # Cleary1998
-        return mu_ij, r_ij
+        return mu_ij, 1.0
     elif viscosityTerm == 3: # Monaghan1992
-        return scaled_mu_ij, h / xi
+        return scaled_mu_ij, 1.0 * scalingFactor
     elif viscosityTerm == 4: # Monaghan1997a
-        return mu_ij, r_ij
+        return mu_ij, 1.0
     elif viscosityTerm == 5: # Monaghan1997b
-        return mu_ij, r_ij
+        return mu_ij, 1.0
     elif viscosityTerm == 6: # Dukowicz
-        return mu_ij, r_ij
+        return mu_ij, 1.0
     elif viscosityTerm == 7: # Price2012_98
-        return mu_ij, r_ij
+        return mu_ij, 1.0
     elif viscosityTerm == 8: # Price2012
-        return mu_ij, r_ij
+        return mu_ij, 1.0
     elif viscosityTerm == 9: # Price2008
-        return mu_ij, r_ij
+        return mu_ij, 1.0
     elif viscosityTerm == 10: # Wadsley2008
-        return mu_ij, r_ij
+        return mu_ij, 1.0
     elif viscosityTerm == 11: # DeltaSPH
         return scaled_mu_ij, h / xi
     else:
