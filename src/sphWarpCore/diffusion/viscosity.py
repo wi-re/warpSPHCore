@@ -18,22 +18,23 @@ from ..kernels.wp_kernel import *
 from ..enumTypes import *
 from .util import *
 
+from dataclasses import dataclass, field
 
 @wp.struct
 class DiffusionParameters:
-    c_s: wp.float32 # Speed of sound, used in some formulations to compute the signal velocity
-    C_l: wp.float32 # Linear viscosity coefficient, also referred to as alpha in some formulations
-    C_q: wp.float32 # Quadratic viscosity coefficient, also referred to as beta in some formulations
-    Cu_l: wp.float32 # Linear thermal conductivity coefficient, also referred to as alpha_u in some formulations
-    Cu_q: wp.float32 # Quadratic thermal conductivity coefficient, also referred to as beta_u in some formulations
+    c_s: wp.float32 = field(default=1.0) # Speed of sound, used in some formulations to compute the signal velocity
+    C_l: wp.float32 = field(default=1.0) # Linear viscosity coefficient, also referred to as alpha in some formulations
+    C_q: wp.float32 = field(default=2.0) # Quadratic viscosity coefficient, also referred to as beta in some formulations
+    Cu_l: wp.float32 = field(default=1.0) # Linear thermal conductivity coefficient, also referred to as alpha_u in some formulations
+    Cu_q: wp.float32 = field(default=2.0) # Quadratic thermal conductivity coefficient, also referred to as beta_u in some formulations
     
-    K: wp.float32 # Overall viscosity scaling factor
-    thermalConductivity: wp.float32 # Overall thermal conductivity scaling factor
-    viscosityTerm: wp.int32 # Viscosity formulation to use, e.g. Monaghan1992, Monaghan1997, Cleary1998 etc.
-    thermalConducitiyTerm: wp.int32 # Thermal conductivity formulation to use, e.g. Monaghan1997 thermal conductivity term, Cleary1998 thermal conductivity term etc.
-    scaleBeta: wp.bool # If true then the quadratic viscosity term is scaled by the linear viscosity term, as suggested in some papers to reduce excessive viscosity in certain scenarios. This is only relevant for formulations that use a quadratic term, such as Monaghan1992 and Monaghan1997.
-    monaghanSwitch: wp.bool # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
-    correctXi: wp.bool # Whether to apply the xi correction factor to the viscosity term. This is a correction factor that can be applied to account for errors in the estimation of the velocity divergence and is discussed in some papers such as "Correcting SPH for accurate viscous forces" by Adami et al. 2013.
+    K: wp.float32 = field(default=1.0) # Overall viscosity scaling factor
+    thermalConductivity: wp.float32 = field(default=0.5) # Overall thermal conductivity scaling factor
+    viscosityTerm: wp.int32 = field(default=ViscosityTerms.Price2012_98.value) # Viscosity formulation to use, e.g. Monaghan1992, Monaghan1997, Cleary1998 etc.
+    thermalConducitiyTerm: wp.int32 = field(default=ViscosityTerms.Price2012_98.value) # Thermal conductivity formulation to use, e.g. Monaghan1997 thermal conductivity term, Cleary1998 thermal conductivity term etc.
+    scaleBeta: wp.bool = field(default=False) # If true then the quadratic viscosity term is scaled by the linear viscosity term, as suggested in some papers to reduce excessive viscosity in certain scenarios. This is only relevant for formulations that use a quadratic term, such as Monaghan1992 and Monaghan1997.
+    monaghanSwitch: wp.bool = field(default=True) # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
+    correctXi: wp.bool = field(default=True) # Whether to apply the xi correction factor to the viscosity term. This is a correction factor that can be applied to account for errors in the estimation of the velocity divergence and is discussed in some papers such as "Correcting SPH for accurate viscous forces" by Adami et al. 2013.
     
 
 
