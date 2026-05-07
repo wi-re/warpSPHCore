@@ -5,11 +5,11 @@ from ..enumTypes import *
 
 @wp.func
 def computePairwiseSupport(hx: wp.float32, hy: wp.float32, mode: wp.uint32):
-    if mode == 11: # gather
+    if mode == wp.static(SupportScheme.Gather.value): # gather
         return hx
-    elif mode == 12: # scatter
+    elif mode == wp.static(SupportScheme.Scatter.value): # scatter
         return hy
-    elif mode == 13: # meanSymmetric
+    elif mode == wp.static(SupportScheme.MeanSymmetric.value): # meanSymmetric
         return (hx + hy) / 2.0
     else:
         return wp.max(hx, hy)

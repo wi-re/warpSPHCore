@@ -232,13 +232,13 @@ def computeSPHLaplacianTensor_grid_Func(
             
         q_ij = type(fi)(0.0)
 
-        if gradientMode_int == 1: # Naive
+        if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
             q_ij = fj * apparentVolume
-        elif gradientMode_int == 2: # Symmetric
+        elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
             q_ij = mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2))
-        elif gradientMode_int == 3: # Difference
+        elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
             q_ij = (fj - fi) * apparentVolume
-        elif gradientMode_int == 4: # Summation
+        elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation
             q_ij = (fj + fi) * apparentVolume
 
         h_ij = computePairwiseSupport(hi, hj, mode_uint)
@@ -250,13 +250,13 @@ def computeSPHLaplacianTensor_grid_Func(
 
         laplacian_contribution = type(outputValue)(0.0)
 
-        if laplacianMode_int == 1: # Naive
+        if laplacianMode_int == wp.static(LaplacianScheme.Naive.value): # Naive
             laplacian_contribution = q_ij * sphKernelLaplacian(xi, referencePositions[j], hi, referenceSupports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
-        elif laplacianMode_int == 2: # Brookshaw
+        elif laplacianMode_int == wp.static(LaplacianScheme.Brookshaw.value): # Brookshaw
             laplacian_contribution = -2.0 * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
-        elif laplacianMode_int == 3: # Dot
+        elif laplacianMode_int == wp.static(LaplacianScheme.Dot.value): # Dot
             laplacian_contribution = computeLaplacianDot2(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
-        elif laplacianMode_int == 4: # Default
+        elif laplacianMode_int == wp.static(LaplacianScheme.Default.value): # Default
             laplacian_contribution = computeDotLaplacian(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
 
         if positiveDivergence:

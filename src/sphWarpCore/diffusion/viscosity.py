@@ -108,7 +108,7 @@ def computePi_actual(
         h_i, h_j, h_bar, 
         viscosityTerm, useJ)
 
-    if viscosityTerm == 1: # MonaghanGingold1983
+    if viscosityTerm == wp.static(ViscosityTerms.MonaghanGingold1983.value): # MonaghanGingold1983
         # Monaghan and Gingold 1983: The terms are given in (8.3) and (8.4)  of Monaghan 2005 and are
         # Pi_ab = -nu ( v_ab \cdot r_ab) / (r_ab^2 + epsilon^2 h_ab^2)
         # nu = alpha h_bar c_bar / rho_bar
@@ -119,7 +119,7 @@ def computePi_actual(
         # K = 1
         v_sig = c
         K = 1.0
-    elif viscosityTerm == 2: # Cleary1998
+    elif viscosityTerm == wp.static(ViscosityTerms.Cleary1998.value): # Cleary1998
         # Cleary 1998: The terms are given in (8.8) and (8.9) of Monaghan 2005 and are
         # mu_a = 1/8 alpha_a h_a c_a rho_a
         # Pi_ab = - 16 mu_a mu_b / (rho_a rho_b (mu_a + mu_b)) mu_ij
@@ -129,13 +129,13 @@ def computePi_actual(
         # 19.8 based on Cleary and Ha 2002
         v_sig = 19.8 * mu_i * mu_j / (rho_i * rho_j * (mu_i + mu_j)) / (r_ij + 1e-14 * h)
         K = 1.0
-    elif viscosityTerm == 3: # Monaghan1992         
+    elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1992.value): # Monaghan1992         
         # Monaghan 1992: The term is given in (8.10) of Monaghan 2005 and is
         # mu = h / rho ( alpha c - beta mu_ij)
         # This uses the Monaghan 1992 viscosity term with alpha = 1 and beta = 2
         v_sig = C_l * c  - C_q * mu_ij
         K = 1.0
-    elif viscosityTerm == 4: # Monaghan1997a
+    elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1997a.value): # Monaghan1997a
         # Monaghan 1997: The term is given in (8.11) of Monaghan 2005 and is very similar
         # to the Monaghan1992 term but uses the Monaghan1997 viscosity term. denoted as j
         # in the 1997 paper and has a strange wording in 2005 of using 1.0/2.0 instead of 1 for K
@@ -143,25 +143,25 @@ def computePi_actual(
         # c_bar term with alpha = 1 and beta = 4! This is also eq 3.7 in Monaghan1997
         v_sig = C_l * c - C_q * mu_ij
         K = 1.0
-    elif viscosityTerm == 5: # Monaghan1997b
+    elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1997b.value): # Monaghan1997b
         # Note that the C_q here is not the usual quadratic coefficient. For lim C_q -> 0 the term collapses to c_i + c_j, i.e., 2 c_bar. This is equivalent to C_l = 2 and C_q = 1 in the 1997a formulation. 
         # For this formulation as C_q increases the viscosity increases, however, for large C_q this term becomes quickly unstable. In the paper the statement is 'where beta [this is our C_q] is a parameter that could be determined by numerical experiments' with no specific suggestion of value.
         # Based on Monaghan 1997 eq 4.7:
         v_sig = safe_sqrt(c_i*c_i + C_q * mu_ij*mu_ij) + safe_sqrt(c_j*c_j + C_q * mu_ij*mu_ij) - mu_ij
         K = 1.0
-    elif viscosityTerm == 6: # Dukowicz
+    elif viscosityTerm == wp.static(ViscosityTerms.Dukowicz.value): # Dukowicz
         # The term is given in (4.8) of Monaghan 1997 and is simply the 1997a term with a 3/4 factor
         v_sig = C_l * c - 3.0/4.0 * C_q * mu_ij
         K = 1.0
-    elif viscosityTerm == 7: # Price2012_98
+    elif viscosityTerm == wp.static(ViscosityTerms.Price2012_98.value): # Price2012_98
         # This term is identical to Monaghan 1992, equation 98 in Price 2012
         v_sig = C_l * c - C_q * mu_ij
         K = 1.0
-    elif viscosityTerm == 8: # Price2012
+    elif viscosityTerm == wp.static(ViscosityTerms.Price2012.value): # Price2012
         # Based on equation 103
         v_sig = C_l * c - C_q / 2.0 * mu_ij
         K = 1.0
-    elif viscosityTerm == 9: # Price2008
+    elif viscosityTerm == wp.static(ViscosityTerms.Price2008.value): # Price2008
         # This formulation and the next are only mentioned in the Price 2012 after equation 103, no explicit equation numbers
         # P_i = queryPressures[i]
         # P_j = referencePressures[j]
@@ -174,10 +174,10 @@ def computePi_actual(
         rho_bar = (rho_i + rho_j) / 2.0
         v_sig = C_l * safe_sqrt(wp.abs(P_i_ - P_j_) / (rho_bar + 1e-14 * h))
         K = 1.0
-    elif viscosityTerm == 10: # Wadsley2008
+    elif viscosityTerm == wp.static(ViscosityTerms.Wadsley2008.value): # Wadsley2008
         v_sig = C_l * wp.abs(mu_ij)
         K = 1.0
-    elif viscosityTerm == 11 or viscosityTerm == 0: # DeltaSPH / Default
+    elif viscosityTerm == wp.static(ViscosityTerms.DeltaSPH.value) or viscosityTerm == wp.static(ViscosityTerms.Default.value): # DeltaSPH / Default
         v_sig = C_l * c - C_q * mu_ij
         K = 1.0
 

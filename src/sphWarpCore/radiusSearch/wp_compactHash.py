@@ -474,17 +474,17 @@ def radiusSearchCountNeighborsCompactHashMap(
                 
                 # Determine threshold based on mode
                 threshold = 0.0
-                if mode_uint == 11:  # gather
+                if mode_uint == wp.static(SupportScheme.Gather.value):  # gather
                     threshold = querySupport
-                elif mode_uint == 12:  # scatter
+                elif mode_uint == wp.static(SupportScheme.Scatter.value):  # scatter
                     threshold = neighborSupport
-                elif mode_uint == 13:  # symmetric
+                elif mode_uint == wp.static(SupportScheme.MeanSymmetric.value):  # meanSymmetric
                     threshold = (querySupport + neighborSupport) / 2.0
-                elif mode_uint == 14:  # kernelMeanSymmetric
+                elif mode_uint == wp.static(SupportScheme.KernelMeanSymmetric.value):  # kernelMeanSymmetric
                     threshold = max(querySupport, neighborSupport)
-                elif mode_uint == 15:  # superSymmetric
+                elif mode_uint == wp.static(SupportScheme.SuperSymmetric.value):  # superSymmetric
                     threshold = wp.max(querySupport, neighborSupport)
-                elif mode_uint == 16: # partialSymmetric
+                elif mode_uint == wp.static(SupportScheme.PartialSymmetric.value):  # partialSymmetric
                     threshold = wp.max(querySupport, neighborSupport)
                 
                 # Count valid neighbors
@@ -625,17 +625,17 @@ def radiusSearchCollectCompactHashMap(
                 
                 # Determine threshold based on mode
                 threshold = 0.0
-                if mode_uint == 11:  # gather
+                if mode_uint == wp.static(SupportScheme.Gather.value):  # gather
                     threshold = querySupport
-                elif mode_uint == 12:  # scatter
+                elif mode_uint == wp.static(SupportScheme.Scatter.value):  # scatter
                     threshold = neighborSupport
-                elif mode_uint == 13:  # symmetric
+                elif mode_uint == wp.static(SupportScheme.MeanSymmetric.value):  # meanSymmetric
                     threshold = (querySupport + neighborSupport) / 2.0
-                elif mode_uint == 14:  # kernelMeanSymmetric
+                elif mode_uint == wp.static(SupportScheme.KernelMeanSymmetric.value):  # kernelMeanSymmetric
                     threshold = max(querySupport, neighborSupport)
-                elif mode_uint == 15:  # superSymmetric
+                elif mode_uint == wp.static(SupportScheme.SuperSymmetric.value):  # superSymmetric
                     threshold = wp.max(querySupport, neighborSupport)
-                elif mode_uint == 16: # partialSymmetric
+                elif mode_uint == wp.static(SupportScheme.PartialSymmetric.value):  # partialSymmetric
                     threshold = wp.max(querySupport, neighborSupport)
                 
                 # Count valid neighbors

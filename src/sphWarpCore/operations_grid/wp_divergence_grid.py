@@ -187,13 +187,13 @@ def computeSPHDivergenceTensor_grid_Func(
         if useGradientRenormalization:
             kernelGradient = matmul(Li, kernelGradient)
             
-        if gradientMode_int == 1: # Naive
+        if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
             out += divergenceProduct(fj * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
-        elif gradientMode_int == 2: # Symmetric
+        elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
             out += divergenceProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
-        elif gradientMode_int == 3: # Difference
+        elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
             out += divergenceProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
-        elif gradientMode_int == 4: # Summation
+        elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation
             out += divergenceProduct((fj + fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
             
     return out

@@ -28,29 +28,29 @@ def compute_mu_ij(
     scalingFactor = h / xi / (r_ij + 1e-14 * h)
     scaled_mu_ij = mu_ij * scalingFactor
     
-    if viscosityTerm == 0: # Default to Monaghan1992
+    if viscosityTerm == wp.static(ViscosityTerms.Default.value): # Default to Monaghan1992
         return scaled_mu_ij, h / xi
-    elif viscosityTerm == 1: # MonaghanGingold1983
+    elif viscosityTerm == wp.static(ViscosityTerms.MonaghanGingold1983.value): # MonaghanGingold1983
         return scaled_mu_ij, h / xi
-    elif viscosityTerm == 2: # Cleary1998
+    elif viscosityTerm == wp.static(ViscosityTerms.Cleary1998.value): # Cleary1998
         return mu_ij, 1.0
-    elif viscosityTerm == 3: # Monaghan1992
+    elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1992.value): # Monaghan1992
         return scaled_mu_ij, 1.0 * scalingFactor
-    elif viscosityTerm == 4: # Monaghan1997a
+    elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1997a.value): # Monaghan1997a
         return mu_ij, 1.0
-    elif viscosityTerm == 5: # Monaghan1997b
+    elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1997b.value): # Monaghan1997b
         return mu_ij, 1.0
-    elif viscosityTerm == 6: # Dukowicz
+    elif viscosityTerm == wp.static(ViscosityTerms.Dukowicz.value): # Dukowicz
         return mu_ij, 1.0
-    elif viscosityTerm == 7: # Price2012_98
+    elif viscosityTerm == wp.static(ViscosityTerms.Price2012_98.value): # Price2012_98
         return mu_ij, 1.0
-    elif viscosityTerm == 8: # Price2012
+    elif viscosityTerm == wp.static(ViscosityTerms.Price2012.value): # Price2012
         return mu_ij, 1.0
-    elif viscosityTerm == 9: # Price2008
+    elif viscosityTerm == wp.static(ViscosityTerms.Price2008.value): # Price2008
         return mu_ij, 1.0
-    elif viscosityTerm == 10: # Wadsley2008
+    elif viscosityTerm == wp.static(ViscosityTerms.Wadsley2008.value): # Wadsley2008
         return mu_ij, 1.0
-    elif viscosityTerm == 11: # DeltaSPH
+    elif viscosityTerm == wp.static(ViscosityTerms.DeltaSPH.value): # DeltaSPH
         return scaled_mu_ij, h / xi
     else:
         return scaled_mu_ij, h / xi
@@ -66,51 +66,51 @@ def compute_bars(
     use_c_bar = wp.bool(False)
     use_h_bar = wp.bool(False)
 
-    if viscosityTerm == 0:
+    if viscosityTerm == wp.static(ViscosityTerms.Default.value): # Default
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 1: # MonaghanGingold1983
+    elif viscosityTerm == wp.static(ViscosityTerms.MonaghanGingold1983.value): # MonaghanGingold1983
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 2: # Cleary1998
+    elif viscosityTerm == wp.static(ViscosityTerms.Cleary1998.value): # Cleary1998
         use_rho_bar = False
         use_c_bar = False
         use_h_bar = False
-    elif viscosityTerm == 3: # Monaghan1992
+    elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1992.value): # Monaghan1992
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 4: # Monaghan1997a
+    elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1997a.value): # Monaghan1997a
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 5: # Monaghan1997b
+    elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1997b.value): # Monaghan1997b
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 6: # Dukowicz
+    elif viscosityTerm == wp.static(ViscosityTerms.Dukowicz.value): # Dukowicz
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 7: # Price2012_98
+    elif viscosityTerm == wp.static(ViscosityTerms.Price2012_98.value): # Price2012_98
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 8: # Price2012    
+    elif viscosityTerm == wp.static(ViscosityTerms.Price2012.value): # Price2012
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 9: # Price2008
+    elif viscosityTerm == wp.static(ViscosityTerms.Price2008.value): # Price2008
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 10: # Wadsley2008
+    elif viscosityTerm == wp.static(ViscosityTerms.Wadsley2008.value): # Wadsley2008
         use_rho_bar = True
         use_c_bar = True
         use_h_bar = True
-    elif viscosityTerm == 11: # DeltaSPH
+    elif viscosityTerm == wp.static(ViscosityTerms.DeltaSPH.value): # DeltaSPH
         use_rho_bar = False
         use_c_bar = True
         use_h_bar = True

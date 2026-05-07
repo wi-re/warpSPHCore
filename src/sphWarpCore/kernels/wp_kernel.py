@@ -34,197 +34,197 @@ from .kernelFunctions.cohesionKernel import *
 
 @wp.func
 def eval_k(q: wp.float32, dim: wp.int32, kernel: wp.int32):
-    if kernel == 0:
+    if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_k(q, dim)
-    elif kernel == 1:
+    elif kernel == wp.static(KernelFunctions.Wendland4.value):
         return wendland4_k(q, dim)
-    elif kernel == 2:
+    elif kernel == wp.static(KernelFunctions.Wendland6.value):
         return wendland6_k(q, dim)
-    elif kernel == 10:
+    elif kernel == wp.static(KernelFunctions.CubicSpline.value):
         return cubicSpline_k(q, dim)
-    elif kernel == 11:
+    elif kernel == wp.static(KernelFunctions.QuarticSpline.value):
         return quarticSpline_k(q, dim)
-    elif kernel == 12:
+    elif kernel == wp.static(KernelFunctions.QuinticSpline.value):
         return quinticSpline_k(q, dim)
-    elif kernel == 13:
+    elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_k(q, dim)
-    elif kernel == 20:
+    elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_k(q, dim)
-    elif kernel == 21:
+    elif kernel == wp.static(KernelFunctions.Spiky.value):
         return spiky_k(q, dim)
-    elif kernel == 30:
+    elif kernel == wp.static(KernelFunctions.ViscosityKernel.value):
         return viscosityKernel_k(q, dim)
-    elif kernel == 31:
+    elif kernel == wp.static(KernelFunctions.AdhesionKernel.value):
         return adhesionKernel_k(q, dim)
-    elif kernel == 32:         
+    elif kernel == wp.static(KernelFunctions.CohesionKernel.value):
         return cohesionKernel_k(q, dim)
     return np.nan
 
 @wp.func
 def eval_dkdq(q: wp.float32, dim: wp.int32, kernel: wp.int32):
-    if kernel == 0:
+    if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_dkdq(q, dim)
-    elif kernel == 1:
+    elif kernel == wp.static(KernelFunctions.Wendland4.value):
         return wendland4_dkdq(q, dim)
-    elif kernel == 2:
+    elif kernel == wp.static(KernelFunctions.Wendland6.value):
         return wendland6_dkdq(q, dim)
-    elif kernel == 10:
+    elif kernel == wp.static(KernelFunctions.CubicSpline.value):
         return cubicSpline_dkdq(q, dim)
-    elif kernel == 11:
+    elif kernel == wp.static(KernelFunctions.QuarticSpline.value):
         return quarticSpline_dkdq(q, dim)
-    elif kernel == 12:
+    elif kernel == wp.static(KernelFunctions.QuinticSpline.value):
         return quinticSpline_dkdq(q, dim)
-    elif kernel == 13:
+    elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_dkdq(q, dim)
-    elif kernel == 20:
+    elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_dkdq(q, dim)
-    elif kernel == 21:
+    elif kernel == wp.static(KernelFunctions.Spiky.value):
         return spiky_dkdq(q, dim)
-    elif kernel == 30:
+    elif kernel == wp.static(KernelFunctions.ViscosityKernel.value):
         return viscosityKernel_dkdq(q, dim)
-    elif kernel == 31:
+    elif kernel == wp.static(KernelFunctions.AdhesionKernel.value):
         return adhesionKernel_dkdq(q, dim)
-    elif kernel == 32:         
+    elif kernel == wp.static(KernelFunctions.CohesionKernel.value):
         return cohesionKernel_dkdq(q, dim)
     return np.nan
 
 @wp.func
 def eval_d2kdq2(q: wp.float32, dim: wp.int32, kernel: wp.int32):
-    if kernel == 0:
+    if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_d2kdq2(q, dim)
-    elif kernel == 1:
+    elif kernel == wp.static(KernelFunctions.Wendland4.value):
         return wendland4_d2kdq2(q, dim)
-    elif kernel == 2:
+    elif kernel == wp.static(KernelFunctions.Wendland6.value):
         return wendland6_d2kdq2(q, dim)
-    elif kernel == 10:
+    elif kernel == wp.static(KernelFunctions.CubicSpline.value):
         return cubicSpline_d2kdq2(q, dim)
-    elif kernel == 11:
+    elif kernel == wp.static(KernelFunctions.QuarticSpline.value):
         return quarticSpline_d2kdq2(q, dim)
-    elif kernel == 12:
+    elif kernel == wp.static(KernelFunctions.QuinticSpline.value):
         return quinticSpline_d2kdq2(q, dim)
-    elif kernel == 13:
+    elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_d2kdq2(q, dim)
-    elif kernel == 20:
+    elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_d2kdq2(q, dim)
-    elif kernel == 21:
+    elif kernel == wp.static(KernelFunctions.Spiky.value):
         return spiky_d2kdq2(q, dim)
-    elif kernel == 30:
+    elif kernel == wp.static(KernelFunctions.ViscosityKernel.value):
         return viscosityKernel_d2kdq2(q, dim)
-    elif kernel == 31:
+    elif kernel == wp.static(KernelFunctions.AdhesionKernel.value):
         return adhesionKernel_d2kdq2(q, dim)
-    elif kernel == 32:         
+    elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_d2kdq2(q, dim)
     return np.nan
 
 @wp.func
 def eval_d3kdq3(q: wp.float32, dim: wp.int32, kernel: wp.int32):
-    if kernel == 0:
+    if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_d3kdq3(q, dim)
-    elif kernel == 1:
+    elif kernel == wp.static(KernelFunctions.Wendland4.value):
         return wendland4_d3kdq3(q, dim)
-    elif kernel == 2:
+    elif kernel == wp.static(KernelFunctions.Wendland6.value):
         return wendland6_d3kdq3(q, dim)
-    elif kernel == 10:
+    elif kernel == wp.static(KernelFunctions.CubicSpline.value):
         return cubicSpline_d3kdq3(q, dim)
-    elif kernel == 11:
+    elif kernel == wp.static(KernelFunctions.QuarticSpline.value):
         return quarticSpline_d3kdq3(q, dim)
-    elif kernel == 12:
+    elif kernel == wp.static(KernelFunctions.QuinticSpline.value):
         return quinticSpline_d3kdq3(q, dim)
-    elif kernel == 13:
+    elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_d3kdq3(q, dim)
-    elif kernel == 20:
+    elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_d3kdq3(q, dim)
-    elif kernel == 21:
+    elif kernel == wp.static(KernelFunctions.Spiky.value):
         return spiky_d3kdq3(q, dim)
-    elif kernel == 30:
+    elif kernel == wp.static(KernelFunctions.ViscosityKernel.value):
         return viscosityKernel_d3kdq3(q, dim)
-    elif kernel == 31:
+    elif kernel == wp.static(KernelFunctions.AdhesionKernel.value):
         return adhesionKernel_d3kdq3(q, dim)
-    elif kernel == 32:         
+    elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_d3kdq3(q, dim)
     return np.nan
 
 @wp.func
 def eval_C_d(dim: wp.int32, kernel: wp.int32):
-    if kernel == 0:
+    if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_C_d(dim)
-    elif kernel == 1:
+    elif kernel == wp.static(KernelFunctions.Wendland4.value):
         return wendland4_C_d(dim)
-    elif kernel == 2:
+    elif kernel == wp.static(KernelFunctions.Wendland6.value):
         return wendland6_C_d(dim)
-    elif kernel == 10:
+    elif kernel == wp.static(KernelFunctions.CubicSpline.value):
         return cubicSpline_C_d(dim)
-    elif kernel == 11:
+    elif kernel == wp.static(KernelFunctions.QuarticSpline.value):
         return quarticSpline_C_d(dim)
-    elif kernel == 12:
+    elif kernel == wp.static(KernelFunctions.QuinticSpline.value):
         return quinticSpline_C_d(dim)
-    elif kernel == 13:
+    elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_C_d(dim)
-    elif kernel == 20:
+    elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_C_d(dim)
-    elif kernel == 21:
+    elif kernel == wp.static(KernelFunctions.Spiky.value):
         return spiky_C_d(dim)
-    elif kernel == 30:
+    elif kernel == wp.static(KernelFunctions.ViscosityKernel.value):
         return viscosityKernel_C_d(dim)
-    elif kernel == 31:
+    elif kernel == wp.static(KernelFunctions.AdhesionKernel.value):
         return adhesionKernel_C_d(dim)
-    elif kernel == 32:         
+    elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_C_d(dim)
     return np.nan
 
 @wp.func
 def eval_kernelScale(kernel: wp.int32, dim: wp.int32):
-    if kernel == 0:
+    if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_kernelScale(dim)
-    elif kernel == 1:
+    elif kernel == wp.static(KernelFunctions.Wendland4.value):
         return wendland4_kernelScale(dim)
-    elif kernel == 2:
+    elif kernel == wp.static(KernelFunctions.Wendland6.value):
         return wendland6_kernelScale(dim)
-    elif kernel == 10:
+    elif kernel == wp.static(KernelFunctions.CubicSpline.value):
         return cubicSpline_kernelScale(dim)
-    elif kernel == 11:
+    elif kernel == wp.static(KernelFunctions.QuarticSpline.value):
         return quarticSpline_kernelScale(dim)
-    elif kernel == 12:
+    elif kernel == wp.static(KernelFunctions.QuinticSpline.value):
         return quinticSpline_kernelScale(dim)
-    elif kernel == 13:
+    elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_kernelScale(dim)
-    elif kernel == 20:
+    elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_kernelScale(dim)
-    elif kernel == 21:
+    elif kernel == wp.static(KernelFunctions.Spiky.value):
         return spiky_kernelScale(dim)
-    elif kernel == 30:
+    elif kernel == wp.static(KernelFunctions.ViscosityKernel.value):
         return viscosityKernel_kernelScale(dim)
-    elif kernel == 31:
+    elif kernel == wp.static(KernelFunctions.AdhesionKernel.value):
         return adhesionKernel_kernelScale(dim)
-    elif kernel == 32:         
+    elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_kernelScale(dim)
     return np.nan
 
 @wp.func
 def eval_packing(kernel: wp.int32):
-    if kernel == 0:
+    if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_packingRatio()
-    elif kernel == 1:
+    elif kernel == wp.static(KernelFunctions.Wendland4.value):
         return wendland4_packingRatio()
-    elif kernel == 2:
+    elif kernel == wp.static(KernelFunctions.Wendland6.value):
         return wendland6_packingRatio()
-    elif kernel == 10:
+    elif kernel == wp.static(KernelFunctions.CubicSpline.value):
         return cubicSpline_packingRatio()
-    elif kernel == 11:
+    elif kernel == wp.static(KernelFunctions.QuarticSpline.value):
         return quarticSpline_packingRatio()
-    elif kernel == 12:
+    elif kernel == wp.static(KernelFunctions.QuinticSpline.value):
         return quinticSpline_packingRatio()
-    elif kernel == 13:
+    elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_packingRatio()
-    elif kernel == 20:
+    elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_packingRatio()
-    elif kernel == 21:
+    elif kernel == wp.static(KernelFunctions.Spiky.value):
         return spiky_packingRatio()
-    elif kernel == 30:
+    elif kernel == wp.static(KernelFunctions.ViscosityKernel.value):
         return viscosityKernel_packingRatio()
-    elif kernel == 31:
+    elif kernel == wp.static(KernelFunctions.AdhesionKernel.value):
         return adhesionKernel_packingRatio()
-    elif kernel == 32:         
+    elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_packingRatio()
     return np.nan
 
@@ -295,7 +295,7 @@ def sphKernel(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 14 or mode == 15: # KernelMeanSymmetric or SuperSymmetric
+    if mode == wp.static(SupportScheme.KernelMeanSymmetric.value) or mode == wp.static(SupportScheme.SuperSymmetric.value): # KernelMeanSymmetric or SuperSymmetric
         return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
     return sphKernel_(xij, hij, kernel)
 
@@ -311,7 +311,7 @@ def sphKernel_ij(
     maxDomain: wp.array(dtype = wp.float32),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
-    if mode == 14 or mode == 15: # KernelMeanSymmetric or SuperSymmetric
+    if mode == wp.static(SupportScheme.KernelMeanSymmetric.value) or mode == wp.static(SupportScheme.SuperSymmetric.value): # KernelMeanSymmetric or SuperSymmetric
         return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
     return sphKernel_(xij, hij, kernel)
 
@@ -362,9 +362,9 @@ def sphKernelGradient(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 14: # KernelMeanSymmetric
+    if mode == wp.static(SupportScheme.KernelMeanSymmetric.value): # KernelMeanSymmetric
         return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
-    elif mode == 15: # SuperSymmetric
+    elif mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
         return (sphGradient_(xij,hi,kernel) - sphGradient_(-xij,hj,kernel))
     return sphGradient_(xij, hij, kernel)
 
@@ -381,9 +381,9 @@ def sphKernelGradient_ij(
     maxDomain: wp.array(dtype = wp.float32),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
-    if mode == 14: # KernelMeanSymmetric
+    if mode == wp.static(SupportScheme.KernelMeanSymmetric.value): # KernelMeanSymmetric
         return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
-    if mode == 15: # SuperSymmetric
+    if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
         return (sphGradient_(xij,hi,kernel) - sphGradient_(-xij,hj,kernel))/2.0
     return sphGradient_(xij, hij, kernel)
 # Torch Version
@@ -417,7 +417,7 @@ def sphKernelDerivative(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 4: # SuperSymmetric
+    if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
         return (sphKernelDerivative_(xij,hi,kernel) + sphKernelDerivative_(xij,hj,kernel))/2.0
     return sphKernelDerivative_(xij, hij, kernel)
     
@@ -484,7 +484,7 @@ def sphKernelHessian(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 4: # SuperSymmetric
+    if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
         return (sphKernelHessian_(xij,hi,kernel) + sphKernelHessian_(xij,hj,kernel))/2.0
     return sphKernelHessian_(xij, hij, kernel)
     
@@ -546,7 +546,7 @@ def sphKernelLaplacian(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 4: # SuperSymmetric
+    if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
         return (sphKernelLaplacian_(xij,hi,kernel) + sphKernelLaplacian_(xij,hj,kernel))/2.0
     
     return sphKernelLaplacian_(xij, hij, kernel)
@@ -592,7 +592,7 @@ def sphKernelDkDh(
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == 14: # SuperSymmetric
+    if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
         return (sphKernelDkDh_(xij,hi,kernel) + sphKernelDkDh_(xij,hj,kernel))/2.0
     
     return sphKernelDkDh_(xij, hij, kernel)
