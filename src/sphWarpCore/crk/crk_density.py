@@ -98,6 +98,7 @@ def computeCRKDensity_Func(
         # termA = scatter_sum(m_i * V_j * W_ij, i, dim = 0, dim_size=particles.positions.shape[0])
         # termB = scatter_sum(V_j * V_j * W_ij, i, dim = 0, dim_size=particles.positions.shape[0])
 
+
         outA += mi * Vj * w_ij
         outB += Vj * Vj * w_ij
 

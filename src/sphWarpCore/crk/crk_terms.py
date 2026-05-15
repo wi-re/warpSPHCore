@@ -15,7 +15,7 @@ def computeCRKTermsWarp(
     
     # print(f'm_2_det: {m_2_det.min():8.3g}, {m_2_det.max():8.3g}, {m_2_det.mean():8.3g} has nan: {torch.isnan(m_2_det).any()} has inf: {torch.isinf(m_2_det).any()}')
     # 
-    is_singular = torch.where(m_2_det < 1e-7, 1.0, 0.0)
+    is_singular = torch.where(m_2_det < 1e-14, 1.0, 0.0)
     # print(f'Number of singular matrices: {is_singular.sum()}')
     #     # Eq. 12.
     # ai = 1.0/(m0 - dot(temp_vec, m1, d))
