@@ -182,6 +182,8 @@ def computePi_actual(
         v_sig = C_l * c - C_q * mu_ij
         K = 1.0
 
+    # rhoTerm = rho_j if not useJ else rho_i
+
     val = rho_j * K / rho * v_sig * scalingFactor #* mu_ij
 
     if viscosityParams.monaghanSwitch and not thermalConductivity:

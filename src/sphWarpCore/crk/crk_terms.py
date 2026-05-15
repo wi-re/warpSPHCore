@@ -11,10 +11,11 @@ def computeCRKTermsWarp(
 
     m_2_det = torch.det(m_2).abs()
     m_2_inv = torch.linalg.pinv(m_2)# if m_2.shape[1] != 2 else pinv2x2(m_2)[0]
+    # m_2_inv = 1/m_2 
     
     # print(f'm_2_det: {m_2_det.min():8.3g}, {m_2_det.max():8.3g}, {m_2_det.mean():8.3g} has nan: {torch.isnan(m_2_det).any()} has inf: {torch.isinf(m_2_det).any()}')
     # 
-    is_singular = torch.where(m_2_det < 1e-10, 1.0, 0.0)
+    is_singular = torch.where(m_2_det < 1e-7, 1.0, 0.0)
     # print(f'Number of singular matrices: {is_singular.sum()}')
     #     # Eq. 12.
     # ai = 1.0/(m0 - dot(temp_vec, m1, d))

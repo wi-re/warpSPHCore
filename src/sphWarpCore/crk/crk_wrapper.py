@@ -35,15 +35,15 @@ def computeCRKFactors_(
     adjacency: AdjacencyListWarp,
     queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,    
 ):
-    if supportMode != SupportScheme.Gather:
-        raise NotImplementedError("Currently only Gather support mode is implemented for CRK factors computation.")
+    # if supportMode != SupportScheme.Gather:
+        # raise NotImplementedError("Currently only Gather support mode is implemented for CRK factors computation.")
         
     apparentArea = computeCRKVolumeWarp(
         queryPositions, referencePositions,
         querySupports, referenceSupports,
         domain = domain, adjacency = adjacency, 
         operationMode = operationMode,
-        kernel = kernel, supportMode = SupportScheme.Gather,
+        kernel = kernel, supportMode = SupportScheme.KernelMeanSymmetric,
         queryKinds = queryKinds, referenceKinds = referenceKinds
     )
 
@@ -55,7 +55,7 @@ def computeCRKFactors_(
         useVolume=True, queryVolumes = apparentArea, referenceVolumes = apparentArea,
         domain = domain, adjacency = adjacency, 
         operationMode = operationMode,
-        kernel =  kernel, supportMode = SupportScheme.Gather,
+        kernel =  kernel, supportMode = supportMode,
         queryKinds = queryKinds, referenceKinds = referenceKinds
     )
 
@@ -72,7 +72,7 @@ def computeCRKFactors_(
         useVolume=True, queryVolumes = apparentArea, referenceVolumes = apparentArea,
         domain = domain, adjacency = adjacency, 
         operationMode = operationMode,
-        kernel = kernel, supportMode = SupportScheme.Gather,
+        kernel = kernel, supportMode = supportMode,
         useCRK=True, crk_A = A, crk_B = B, crk_gradA = gradA, crk_gradB = gradB,
         queryKinds = queryKinds, referenceKinds = referenceKinds
     )
@@ -104,7 +104,7 @@ def computeCRKFactors(
         adjacency = adjacency,
         
         operationMode = operationMode, kernel = kernel, 
-        supportMode = SupportScheme.Gather, # Currently only Gather support mode is implemented for CRK factors computation.
+        supportMode = SupportScheme.Scatter, # Currently only Gather support mode is implemented for CRK factors computation.
         queryKinds = queryParticles.kinds, referenceKinds = referenceState.kinds
     )
 
