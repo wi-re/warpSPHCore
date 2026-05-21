@@ -6,22 +6,22 @@ from warp.types import vector, matrix
 
 
 @wp.func
-def safe_sqrt(x: float):
+def safe_sqrt(x: scalar_t):
     return wp.sqrt(x)
 @wp.func_grad(safe_sqrt)
-def adj_safe_sqrt(x: float, adj_ret: float):
-    if x > 0.0:
-        wp.adjoint[x] += 1.0 / (2.0 * wp.sqrt(x)) * adj_ret
+def adj_safe_sqrt(x: scalar_t, adj_ret: scalar_t):
+    if x > scalar_t(0.0):
+        wp.adjoint[x] += scalar_t(1.0) / (scalar_t(2.0) * wp.sqrt(x)) * adj_ret
 
 from warp.types import vector
 # warp versions
 
 @wp.func
-def norm_warp(input: vector(dtype=wp.float32, length=Any)):
+def norm_warp(input: vec_t):
     return safe_sqrt(wp.dot(input, input))
 
 @wp.func 
-def norm_grad_warp(input: vector(dtype=wp.float32, length=Any)):
+def norm_grad_warp(input: vec_t):
     length = norm_warp(input)
     float_eps = get_epsilon(length)
     length = wp.max(length, float_eps)
@@ -29,77 +29,77 @@ def norm_grad_warp(input: vector(dtype=wp.float32, length=Any)):
 
 
 @wp.func
-def warp_eye(input: vector(dtype=wp.float32, length=1)):
-    retVal = matrix(shape = (1, 1), dtype=wp.float32)
+def warp_eye(input: vector(dtype=scalar_t, length=1)):
+    retVal = matrix(shape = (1, 1), dtype=scalar_t)
     for i in range(1):
         for j in range(1):
-            retVal[i][j] = 1.0 if i == j else 0.0
+            retVal[i][j] = scalar_t(1.0) if i == j else scalar_t(0.0)
     return retVal
 @wp.func
-def warp_eye(input: vector(dtype=wp.float32, length=2)):
-    retVal = matrix(shape = (2, 2), dtype=wp.float32)
+def warp_eye(input: vector(dtype=scalar_t, length=2)):
+    retVal = matrix(shape = (2, 2), dtype=scalar_t)
     for i in range(2):
         for j in range(2):
-            retVal[i][j] = 1.0 if i == j else 0.0
+            retVal[i][j] = scalar_t(1.0) if i == j else scalar_t(0.0)
     return retVal
 @wp.func
-def warp_eye(input: vector(dtype=wp.float32, length=3)):
-    retVal = matrix(shape = (3, 3), dtype=wp.float32)
+def warp_eye(input: vector(dtype=scalar_t, length=3)):
+    retVal = matrix(shape = (3, 3), dtype=scalar_t)
     for i in range(3):
         for j in range(3):
-            retVal[i][j] = 1.0 if i == j else 0.0
+            retVal[i][j] = scalar_t(1.0) if i == j else scalar_t(0.0)
     return retVal
 
 @wp.func
-def norm_hess_warp(input: vector(dtype=wp.float32, length=Any)):
+def norm_hess_warp(input: vector(dtype=scalar_t, length=Any)):
     eps = get_epsilon(input[0])
     r = norm_warp(input) + eps
 
     outerProd = wp.outer(input, input)
     diagTerm = warp_eye(input) * (iPow(r, 2) + iPow(eps, 3))
 
-    tensor = 1.0/(iPow(r, 3) + iPow(eps, 3)) * (diagTerm - outerProd)
+    tensor = scalar_t(1.0)/(iPow(r, 3) + iPow(eps, 3)) * (diagTerm - outerProd)
 
     return tensor
 
 @wp.func
-def vectorNormalize_warp_1D(input: vector(dtype=wp.float32, length=1)):
+def vectorNormalize_warp_1D(input: vector(dtype=scalar_t, length=1)):
     output = norm_grad_warp(input)
     return output
 @wp.func_grad(vectorNormalize_warp_1D)
-def adj_vectorNormalize_warp_1D(input: vector(dtype=wp.float32, length=1), adj_ret: vector(dtype=wp.float32, length=1)):
+def adj_vectorNormalize_warp_1D(input: vector(dtype=scalar_t, length=1), adj_ret: vector(dtype=scalar_t, length=1)):
     tensor = norm_hess_warp(input)
     # there is no warp einsum, so we have to do this manually
     # output = wp.einsum('...ij, ...j -> ...i', tensor, adj_ret)
-    output = wp.vector(0.0, length = input.length, dtype = input.dtype)
+    output = wp.vector(scalar_t(0.0), length = input.length, dtype = input.dtype)
     for i in range(input.length):
         for j in range(input.length):
             output[i] += tensor[i][j] * adj_ret[j]
     wp.adjoint[input] += output
 
 @wp.func
-def vectorNormalize_warp_2D(input: vector(dtype=wp.float32, length=2)):
+def vectorNormalize_warp_2D(input: vector(dtype=scalar_t, length=2)):
     output = norm_grad_warp(input)
     return output
 @wp.func_grad(vectorNormalize_warp_2D)
-def adj_vectorNormalize_warp_2D(input: vector(dtype=wp.float32, length=2), adj_ret: vector(dtype=wp.float32, length=2)):
+def adj_vectorNormalize_warp_2D(input: vector(dtype=scalar_t, length=2), adj_ret: vector(dtype=scalar_t, length=2)):
     tensor = norm_hess_warp(input)
     # output = wp.einsum('...ij, ...j -> ...i', tensor, adj_ret)
-    output = wp.vector(0.0, length = input.length, dtype = input.dtype)
+    output = wp.vector(scalar_t(0.0), length = input.length, dtype = input.dtype)
     for i in range(input.length):
         for j in range(input.length):
             output[i] += tensor[i][j] * adj_ret[j]
     wp.adjoint[input] += output
     
 @wp.func
-def vectorNormalize_warp_3D(input: vector(dtype=wp.float32, length=3)):
+def vectorNormalize_warp_3D(input: vector(dtype=scalar_t, length=3)):
     output = norm_grad_warp(input)
     return output
 @wp.func_grad(vectorNormalize_warp_3D)
-def adj_vectorNormalize_warp_3D(input: vector(dtype=wp.float32, length=3), adj_ret: vector(dtype=wp.float32, length=3)):
+def adj_vectorNormalize_warp_3D(input: vector(dtype=scalar_t, length=3), adj_ret: vector(dtype=scalar_t, length=3)):
     tensor = norm_hess_warp(input)
     # output = wp.einsum('...ij, ...j -> ...i', tensor, adj_ret)
-    output = wp.vector(0.0, length = input.length, dtype = input.dtype)
+    output = wp.vector(scalar_t(0.0), length = input.length, dtype = input.dtype)
     for i in range(input.length):
         for j in range(input.length):
             output[i] += tensor[i][j] * adj_ret[j]
@@ -107,7 +107,7 @@ def adj_vectorNormalize_warp_3D(input: vector(dtype=wp.float32, length=3), adj_r
     
     
 # @wp.func
-# def vectorNormalize_warp(input: vector(dtype=wp.float32, length=Any)):
+# def vectorNormalize_warp(input: vector(dtype=scalar_t, length=Any)):
 #     dim = wp.int32(input.length)
 #     if dim == 1:
 #         return vectorNormalize_warp_1D(input)
@@ -118,13 +118,13 @@ def adj_vectorNormalize_warp_3D(input: vector(dtype=wp.float32, length=3), adj_r
 #     else:
 #         return vectorNormalize_warp_1D(input) * np.nan
 @wp.func
-def vectorNormalize_warp(input: vector(dtype=wp.float32, length=1)):
+def vectorNormalize_warp(input: vector(dtype=scalar_t, length=1)):
     return vectorNormalize_warp_1D(input)
 @wp.func
-def vectorNormalize_warp(input: vector(dtype=wp.float32, length=2)):
+def vectorNormalize_warp(input: vector(dtype=scalar_t, length=2)):
     return vectorNormalize_warp_2D(input)
 @wp.func
-def vectorNormalize_warp(input: vector(dtype=wp.float32, length=3)):
+def vectorNormalize_warp(input: vector(dtype=scalar_t, length=3)):
     return vectorNormalize_warp_3D(input)
     
     
@@ -137,34 +137,34 @@ def vectorNormalize_warp(input: vector(dtype=wp.float32, length=3)):
 
 # grad_input = torch.einsum('...i, ... -> ...i', vectorNormalize(input + float_eps*0), grad_output)
 @wp.func
-def vectorNorm_warp_1D(input: vector(dtype=wp.float32, length=1)):
+def vectorNorm_warp_1D(input: vector(dtype=scalar_t, length=1)):
     output = norm_warp(input)
     return output
 @wp.func_grad(vectorNorm_warp_1D)
-def adj_vectorNorm_warp(input: vector(dtype=wp.float32, length=1), adj_ret: wp.float32):
+def adj_vectorNorm_warp(input: vector(dtype=scalar_t, length=1), adj_ret: scalar_t):
     normVector = vectorNormalize_warp(input)
     wp.adjoint[input] += normVector * adj_ret
     
 @wp.func
-def vectorNorm_warp_2D(input: vector(dtype=wp.float32, length=2)):
+def vectorNorm_warp_2D(input: vector(dtype=scalar_t, length=2)):
     output = norm_warp(input)
     return output
 @wp.func_grad(vectorNorm_warp_2D)
-def adj_vectorNorm_warp(input: vector(dtype=wp.float32, length=2), adj_ret: wp.float32):
+def adj_vectorNorm_warp(input: vector(dtype=scalar_t, length=2), adj_ret: scalar_t):
     normVector = vectorNormalize_warp(input)
     wp.adjoint[input] += normVector * adj_ret
     
 @wp.func
-def vectorNorm_warp_3D(input: vector(dtype=wp.float32, length=3)):
+def vectorNorm_warp_3D(input: vector(dtype=scalar_t, length=3)):
     output = norm_warp(input)
     return output
 @wp.func_grad(vectorNorm_warp_3D)
-def adj_vectorNorm_warp(input: vector(dtype=wp.float32, length=3), adj_ret: wp.float32):
+def adj_vectorNorm_warp(input: vector(dtype=scalar_t, length=3), adj_ret: scalar_t):
     normVector = vectorNormalize_warp(input)
     wp.adjoint[input] += normVector * adj_ret
     
 # @wp.func
-# def vectorNorm_warp(input: vector(dtype=wp.float32, length=Any)):
+# def vectorNorm_warp(input: vector(dtype=scalar_t, length=Any)):
 #     dim = wp.int32(input.length)
 #     if dim == 1:
 #         return vectorNorm_warp_1D(input)
@@ -175,12 +175,12 @@ def adj_vectorNorm_warp(input: vector(dtype=wp.float32, length=3), adj_ret: wp.f
 #     else:
 #         return vectorNorm_warp_1D(input) * np.nan
 @wp.func
-def vectorNorm_warp(input: vector(dtype=wp.float32, length=1)):
+def vectorNorm_warp(input: vector(dtype=scalar_t, length=1)):
     return vectorNorm_warp_1D(input)
 @wp.func
-def vectorNorm_warp(input: vector(dtype=wp.float32, length=2)):
+def vectorNorm_warp(input: vector(dtype=scalar_t, length=2)):
     return vectorNorm_warp_2D(input)
 @wp.func
-def vectorNorm_warp(input: vector(dtype=wp.float32, length=3)):
+def vectorNorm_warp(input: vector(dtype=scalar_t, length=3)):
     return vectorNorm_warp_3D(input)
     

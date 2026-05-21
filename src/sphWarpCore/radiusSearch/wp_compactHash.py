@@ -1,5 +1,6 @@
 import warp as wp
 import torch 
+from ..types import *
 from typing import Optional
 from ..mathutil.wp_math import *
 from ..utils.wp_util import *
@@ -53,7 +54,7 @@ def compute_h(qMin, qMax, referenceSupport):
     Args:
         qMin (torch.Tensor): The minimum coordinates.
         qMax (torch.Tensor): The maximum coordinates.
-        referenceSupport (float): The reference support value.
+        referenceSupport (scalar_t): The reference support value.
 
     Returns:
         torch.Tensor: The computed smoothing length (h).
@@ -257,7 +258,7 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
 
     Args:
         referenceParticles (torch.Tensor): The reference particles to be sorted.
-        referenceSupport (float): The reference support value.
+        referenceSupport (scalar_t): The reference support value.
         domainMin: The minimum value of the domain.
         domainMax: The maximum value of the domain.
 
@@ -267,12 +268,17 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
         cellCount (torch.Tensor): The number of cells in each dimension.
         domainMin: The minimum value of the domain.
         domainMax: The maximum value of the domain.
-        hCell (float): The computed h value for the cells.
+        hCell (scalar_t): The computed h value for the cells.
     """
     # with record_function("neighborSearch - sortReferenceParticles"): 
     # with record_function("neighborSearch - sortReferenceParticles[index Calculation]"): 
     hCell = compute_h(domainMin, domainMax, referenceSupport)
     qExtent = domainMax - domainMin
+    # print('Domain Min:', domainMin, 'dtype:', domainMin.dtype)
+    # print('Domain Max:', domainMax, 'dtype:', domainMax.dtype)
+    # print('Reference Support:', referenceSupport, 'dtype:', referenceSupport.dtype)
+    # print('Computed hCell:', hCell, 'dtype:', hCell.dtype)
+
     cellCount = torch.ceil(qExtent / (hCell)).to(torch.int32)
     indices = torch.floor((referenceParticles - domainMin) / hCell).to(torch.int32).view(-1, referenceParticles.shape[1])
     
@@ -296,7 +302,7 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     # with record_function("neighborSearch - sortReferenceParticles[resort]"): 
     sortedLinearIndices = linearIndices[sortingIndices]
     return sortedLinearIndices, sortingIndices, \
-            cellCount, domainMin, domainMax, hCell
+            cellCount, domainMin, domainMax, scalar_t(hCell)
             
             
 @wp.func
@@ -368,19 +374,19 @@ def getLinearIndex(
 
 @wp.kernel
 def radiusSearchCountNeighborsCompactHashMap(
-    queryPositions: wp.array2d(dtype=wp.float32),  # shape [N,D]
-    querySupports: wp.array1d(dtype=wp.float32),  # shape [N]
-    sortedPositions: wp.array2d(dtype=wp.float32),  # shape [M,D]
-    sortedSupports: wp.array1d(dtype=wp.float32),  # shape [M]
+    queryPositions: wp.array2d(dtype=scalar_t),  # shape [N,D]
+    querySupports: wp.array1d(dtype=scalar_t),  # shape [N]
+    sortedPositions: wp.array2d(dtype=scalar_t),  # shape [M,D]
+    sortedSupports: wp.array1d(dtype=scalar_t),  # shape [M]
     hashTable: wp.array2d(dtype=wp.int32),  # shape [hashMapLength,2]
     cellTable: wp.array2d(dtype=wp.int64),  # shape [C,3] with [cellIndex, cellStart, cellCount]
-    qMin: wp.array1d(dtype=wp.float32),  # shape [D]
-    hCell: float,
+    qMin: wp.array1d(dtype=scalar_t),  # shape [D]
+    hCell: scalar_t,
     D: int,
     cellOffsets: wp.array2d(dtype=wp.int32),  # shape [numCellOffsets, D]
     numCells: wp.array(dtype=wp.int32),  # shape [D]
-    maxDomain: wp.array(dtype=wp.float32),  # shape [D]
-    minDomain: wp.array(dtype=wp.float32),  # shape [D]
+    maxDomain: wp.array(dtype=scalar_t),  # shape [D]
+    minDomain: wp.array(dtype=scalar_t),  # shape [D]
     periodicity: wp.array(dtype=wp.bool),  # shape [D]
     mode_uint: wp.uint32,  # 0 for gather, 1 for scatter, 2 for symmetric, 3 for superSymmetric
     
@@ -468,18 +474,18 @@ def radiusSearchCountNeighborsCompactHashMap(
             for p in range(wp.int32(cellParticleCount)):
                 neighborIndex = cellStartIndex + p
                 neighborPos = sortedPositions[neighborIndex]
-                neighborSupport = sortedSupports[neighborIndex] if sortedSupports.shape[0] > 0 else 0.0
+                neighborSupport = sortedSupports[neighborIndex] if sortedSupports.shape[0] > 0 else scalar_t(0.0)
                 
                 dist = computeCartesianDistance(queryPos, neighborPos, minDomain, maxDomain, periodicity)
                 
                 # Determine threshold based on mode
-                threshold = 0.0
+                threshold = scalar_t(0.0)
                 if mode_uint == wp.static(SupportScheme.Gather.value):  # gather
                     threshold = querySupport
                 elif mode_uint == wp.static(SupportScheme.Scatter.value):  # scatter
                     threshold = neighborSupport
                 elif mode_uint == wp.static(SupportScheme.MeanSymmetric.value):  # meanSymmetric
-                    threshold = (querySupport + neighborSupport) / 2.0
+                    threshold = (querySupport + neighborSupport) / scalar_t(2.0)
                 elif mode_uint == wp.static(SupportScheme.KernelMeanSymmetric.value):  # kernelMeanSymmetric
                     threshold = max(querySupport, neighborSupport)
                 elif mode_uint == wp.static(SupportScheme.SuperSymmetric.value):  # superSymmetric
@@ -511,19 +517,19 @@ def radiusSearchCountNeighborsCompactHashMap(
     
 @wp.kernel
 def radiusSearchCollectCompactHashMap(
-    queryPositions: wp.array2d(dtype=wp.float32),  # shape [N,D]
-    querySupports: wp.array1d(dtype=wp.float32),  # shape [N]
-    sortedPositions: wp.array2d(dtype=wp.float32),  # shape [M,D]
-    sortedSupports: wp.array1d(dtype=wp.float32),  # shape [M]
+    queryPositions: wp.array2d(dtype=scalar_t),  # shape [N,D]
+    querySupports: wp.array1d(dtype=scalar_t),  # shape [N]
+    sortedPositions: wp.array2d(dtype=scalar_t),  # shape [M,D]
+    sortedSupports: wp.array1d(dtype=scalar_t),  # shape [M]
     hashTable: wp.array2d(dtype=wp.int32),  # shape [hashMapLength,2]
     cellTable: wp.array2d(dtype=wp.int64),  # shape [C,3] with [cellIndex, cellStart, cellCount]
-    qMin: wp.array1d(dtype=wp.float32),  # shape [D]
-    hCell: float,
+    qMin: wp.array1d(dtype=scalar_t),  # shape [D]
+    hCell: scalar_t,
     D: int,
     cellOffsets: wp.array2d(dtype=wp.int32),  # shape [numCellOffsets, D]
     numCells: wp.array(dtype=wp.int32),  # shape [D]
-    maxDomain: wp.array(dtype=wp.float32),  # shape [D]
-    minDomain: wp.array(dtype=wp.float32),  # shape [D]
+    maxDomain: wp.array(dtype=scalar_t),  # shape [D]
+    minDomain: wp.array(dtype=scalar_t),  # shape [D]
     periodicity: wp.array(dtype=wp.bool),  # shape [D]
     mode_uint: wp.uint32,  # 0 for gather, 1 for scatter, 2 for symmetric, 3 for superSymmetric
     
@@ -619,18 +625,18 @@ def radiusSearchCollectCompactHashMap(
             for p in range(wp.int32(cellParticleCount)):
                 neighborIndex = cellStartIndex + p
                 neighborPos = sortedPositions[neighborIndex]
-                neighborSupport = sortedSupports[neighborIndex] if sortedSupports.shape[0] > 0 else 0.0
+                neighborSupport = sortedSupports[neighborIndex] if sortedSupports.shape[0] > 0 else scalar_t(0.0)
                 
                 dist = computeCartesianDistance(queryPos, neighborPos, minDomain, maxDomain, periodicity)
                 
                 # Determine threshold based on mode
-                threshold = 0.0
+                threshold = scalar_t(0.0)
                 if mode_uint == wp.static(SupportScheme.Gather.value):  # gather
                     threshold = querySupport
                 elif mode_uint == wp.static(SupportScheme.Scatter.value):  # scatter
                     threshold = neighborSupport
                 elif mode_uint == wp.static(SupportScheme.MeanSymmetric.value):  # meanSymmetric
-                    threshold = (querySupport + neighborSupport) / 2.0
+                    threshold = (querySupport + neighborSupport) / scalar_t(2.0)
                 elif mode_uint == wp.static(SupportScheme.KernelMeanSymmetric.value):  # kernelMeanSymmetric
                     threshold = max(querySupport, neighborSupport)
                 elif mode_uint == wp.static(SupportScheme.SuperSymmetric.value):  # superSymmetric
@@ -678,7 +684,7 @@ class CompactHashMap:
 
     qMin: torch.Tensor
     qMax: torch.Tensor
-    hCell: float
+    hCell: scalar_t
     numCells: torch.Tensor
     mode_uint: int
     D: int
@@ -731,7 +737,7 @@ def buildCompactHashMap(
 
             # We can now use the cumCell to index into the sortedIndices to get the cell index for each particle
             # We could have reversed the linear indices to get the cell index for each cell, but this is more reliable and avoids inverse computations
-            sortedIndices = torch.floor((sortedPositions - qMin) / hCell).to(torch.int32)
+            sortedIndices = torch.floor((sortedPositions - qMin) / to_numpy(hCell)).to(torch.int32)
             cellGridIndices = sortedIndices[cumCell,:]
             # Cell indices contains the linear indices of the particles in each cell
             # cellCounters contains the number of particles in each cell
@@ -801,7 +807,7 @@ def buildCompactHashMap(
             sortedCellTable=sortedCellTable,
             qMin=qMin,
             qMax=qMax,
-            hCell=hCell.cpu().item(),
+            hCell=hCell,
             numCells=numCells,
             mode_uint=mode_uint,
             D = D,

@@ -5,12 +5,12 @@ from ..utils.wp_util import *
 # Define kernels that work with flattened float32 arrays
 @wp.kernel
 def warp_radius_search_kernel_direct_2(
-    x: wp.array2d(dtype=wp.float32),         # Query points (N*2,) as 1D float32 array
-    y: wp.array2d(dtype=wp.float32),         # Reference points (M*2,) as 1D float32 array
-    hx: wp.array(dtype=wp.float32),        # Query radii (N,)
-    hy: wp.array(dtype=wp.float32),        # Reference radii (M,)
-    min_domain: wp.array(dtype=wp.float32),  # Domain minimum
-    max_domain: wp.array(dtype=wp.float32),  # Domain maximum
+    x: wp.array2d(dtype=scalar_t),         # Query points (N*2,) as 1D float32 array
+    y: wp.array2d(dtype=scalar_t),         # Reference points (M*2,) as 1D float32 array
+    hx: wp.array(dtype=scalar_t),        # Query radii (N,)
+    hy: wp.array(dtype=scalar_t),        # Reference radii (M,)
+    min_domain: wp.array(dtype=scalar_t),  # Domain minimum
+    max_domain: wp.array(dtype=scalar_t),  # Domain maximum
     periodic: wp.array(dtype=wp.bool),     # Periodicity per dimension
     mode: wp.uint32,                       # 0=gather, 1=scatter, 2=symmetric, 3=superSymmetric
     edge_count: wp.array(dtype=wp.int32),  # Output: number of edges (N,)
@@ -55,12 +55,12 @@ def warp_radius_search_kernel_direct_2(
 
 @wp.kernel
 def warp_radius_search_collect_kernel_direct_2(
-    x: wp.array2d(dtype=wp.float32),         # Query points (N*2,)
-    y: wp.array2d(dtype=wp.float32),         # Reference points (M*2,)
-    hx: wp.array(dtype=wp.float32),        # Query radii (N,)
-    hy: wp.array(dtype=wp.float32),        # Reference radii (M,)
-    min_domain: wp.array(dtype=wp.float32),  # Domain minimum
-    max_domain: wp.array(dtype=wp.float32),  # Domain maximum
+    x: wp.array2d(dtype=scalar_t),         # Query points (N*2,)
+    y: wp.array2d(dtype=scalar_t),         # Reference points (M*2,)
+    hx: wp.array(dtype=scalar_t),        # Query radii (N,)
+    hy: wp.array(dtype=scalar_t),        # Reference radii (M,)
+    min_domain: wp.array(dtype=scalar_t),  # Domain minimum
+    max_domain: wp.array(dtype=scalar_t),  # Domain maximum
     periodic: wp.array(dtype=wp.bool),     # Periodicity per dimension
     mode: wp.uint32,                       # 0=gather, 1=scatter, 2=symmetric, 3=superSymmetric
     edge_offsets: wp.array(dtype=wp.int32), # Cumulative edge counts (N,)

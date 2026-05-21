@@ -1,4 +1,5 @@
 import warp as wp
+from ..types import *
 from warp.types import vector, matrix
 # from wp_tensor import tensor
 from typing import Any, Optional
@@ -23,13 +24,13 @@ def computeSPHDensity_grid_Func(
     i : wp.int32, dim: wp.int32, 
 
     # SPH properties for the query set (indexed by i)
-    queryPositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), querySupports: wp.array(dtype = wp.float32), queryMasses: wp.array(dtype = wp.float32), # type: ignore
+    queryPositions: vecArray_t, querySupports: scalarArray_t, queryMasses: scalarArray_t, # type: ignore
 
     # SPH properties for the reference set (indexed by j in the neighbor loop)
-    referencePositions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), referenceSupports : wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), # type: ignore
+    referencePositions : vecArray_t, referenceSupports : scalarArray_t, referenceMasses: scalarArray_t, # type: ignore
     
     # Domain and kernel parameters
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
     mode_uint: wp.uint32, kernel_int: wp.int32, 
     
     # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
@@ -43,14 +44,14 @@ def computeSPHDensity_grid_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return wp.float32(0.0)
+            return scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
     # mi      = queryMasses[i] # Generally not needed
     
     # Initialize the output value
-    out = wp.float32(0.0)
+    out = scalar_t(0.0)
     
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(cellParticleCount):
@@ -69,18 +70,18 @@ def computeSPHDensity_grid_Func(
 
 @wp.kernel
 def computeSPHDensity_grid_Kernel(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)), # type: ignore
-    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32), # type: ignore
-    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),  # type: ignore
+    queryPositions : vecArray_t, referencePositions : vecArray_t, # type: ignore
+    querySupports : scalarArray_t, referenceSupports : scalarArray_t, # type: ignore
+    queryMasses: scalarArray_t, referenceMasses: scalarArray_t,  # type: ignore
     
-    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
+    domainMin : scalarArray_t, domainMax : scalarArray_t, periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32,
     sortIndex : wp.array(dtype = wp.int64), # type: ignore
     
-    qMin: wp.array(dtype=wp.float32),  # shape [D] # type: ignore
-    qMax: wp.array(dtype=wp.float32),  # shape [D] # type: ignore
-    hCell: float,
+    qMin: wp.array(dtype=scalar_t),  # shape [D] # type: ignore
+    qMax: wp.array(dtype=scalar_t),  # shape [D] # type: ignore
+    hCell: scalar_t,
 
     numCells: wp.array(dtype=wp.int32),  # shape [D] # type: ignore
     hashTable: wp.array(dtype=vector(length = 2, dtype = wp.int32)),  # shape [hashMapLength,2] # type: ignore
@@ -97,7 +98,7 @@ def computeSPHDensity_grid_Kernel(
     if i >= queryPositions.shape[0]:
         return
     
-    out_value = wp.float32(0.0)
+    out_value = scalar_t(0.0)
 
     for o in range(numOffsets):
         cellStartIndex, cellParticleCount = checkOffset(

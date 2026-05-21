@@ -2,27 +2,28 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Union
 import torch
+from .types import *
 
 @wp.struct
 class particleDataSoA_1:
-    positions: wp.array(dtype=vector(length=1, dtype = wp.float32)) # type: ignore
-    supports: wp.array(dtype = wp.float32) # type: ignore
-    masses: wp.array(dtype = wp.float32) # type: ignore
-    densities: wp.array(dtype = wp.float32) # type: ignore
+    positions: wp.array(dtype=vector(length=1, dtype = scalar_t)) # type: ignore
+    supports: wp.array(dtype = scalar_t) # type: ignore
+    masses: wp.array(dtype = scalar_t) # type: ignore
+    densities: wp.array(dtype = scalar_t) # type: ignore
     kinds: wp.array(dtype = wp.int32) # type: ignore
 @wp.struct
 class particleDataSoA_2:
-    positions: wp.array(dtype=vector(length=2, dtype = wp.float32)) # type: ignore
-    supports: wp.array(dtype = wp.float32) # type: ignore
-    masses: wp.array(dtype = wp.float32) # type: ignore
-    densities: wp.array(dtype = wp.float32) # type: ignore
+    positions: wp.array(dtype=vector(length=2, dtype = scalar_t)) # type: ignore
+    supports: wp.array(dtype = scalar_t) # type: ignore
+    masses: wp.array(dtype = scalar_t) # type: ignore
+    densities: wp.array(dtype = scalar_t) # type: ignore
     kinds: wp.array(dtype = wp.int32) # type: ignore
 @wp.struct
 class particleDataSoA_3:
-    positions: wp.array(dtype=vector(length=3, dtype = wp.float32)) # type: ignore
-    supports: wp.array(dtype = wp.float32) # type: ignore
-    masses: wp.array(dtype = wp.float32) # type: ignore
-    densities: wp.array(dtype = wp.float32) # type: ignore
+    positions: wp.array(dtype=vector(length=3, dtype = scalar_t)) # type: ignore
+    supports: wp.array(dtype = scalar_t) # type: ignore
+    masses: wp.array(dtype = scalar_t) # type: ignore
+    densities: wp.array(dtype = scalar_t) # type: ignore
     kinds: wp.array(dtype = wp.int32) # type: ignore
 
 @wp.struct
@@ -34,9 +35,9 @@ class adjacencyData:
 @wp.struct
 class gridData:
     sortIndex: wp.array(dtype = wp.int64) # type: ignore
-    qMin: wp.array(dtype = wp.float32) # type: ignore
-    qMax: wp.array(dtype = wp.float32) # type: ignore
-    hCell: float
+    qMin: wp.array(dtype = scalar_t) # type: ignore
+    qMax: wp.array(dtype = scalar_t) # type: ignore
+    hCell: scalar_t
     numCells: wp.array(dtype = wp.int32) # type: ignore
     hashTable: wp.array(dtype = vector(length = 2, dtype = wp.int32)) # type: ignore
     cellTable: wp.array(dtype = vector(length = 3, dtype = wp.int64)) # type: ignore
@@ -46,8 +47,8 @@ class gridData:
     
 @wp.struct
 class domainData:
-    domainMin: wp.array(dtype = wp.float32) # type: ignore
-    domainMax: wp.array(dtype = wp.float32) # type: ignore
+    domainMin: wp.array(dtype = scalar_t) # type: ignore
+    domainMax: wp.array(dtype = scalar_t) # type: ignore
     periodicity: wp.array(dtype = wp.bool) # type: ignore
     dim: wp.int32
 
@@ -64,62 +65,62 @@ def getParticle(
 @wp.struct
 class correctionData_1:
     useGradientRenormalization: wp.bool
-    renormalizationMatrices: wp.array(dtype=matrix(shape=(1,1), dtype=wp.float32)) # type: ignore
+    renormalizationMatrices: wp.array(dtype=matrix(shape=(1,1), dtype=scalar_t)) # type: ignore
     useVolume: wp.bool
-    queryVolumes: wp.array(dtype = wp.float32) # type: ignore
-    referenceVolumes: wp.array(dtype = wp.float32) # type: ignore
+    queryVolumes: wp.array(dtype = scalar_t) # type: ignore
+    referenceVolumes: wp.array(dtype = scalar_t) # type: ignore
     useGradHTerms: wp.bool
-    queryOmegas: wp.array(dtype = wp.float32)  # type: ignore
-    referenceOmegas: wp.array(dtype = wp.float32) # type: ignore
+    queryOmegas: wp.array(dtype = scalar_t)  # type: ignore
+    referenceOmegas: wp.array(dtype = scalar_t) # type: ignore
     useCRK: wp.bool
-    queryA: wp.array(dtype = wp.float32)  # type: ignore
-    queryB: wp.array(dtype=vector(length=1, dtype=wp.float32))  # type: ignore
-    queryGradA: wp.array(dtype = vector(length=1, dtype=wp.float32))  # type: ignore
-    queryGradB: wp.array(dtype=matrix(shape=(1,1), dtype=wp.float32)) # type: ignore
-    referenceA: wp.array(dtype = wp.float32)  # type: ignore
-    referenceB: wp.array(dtype=vector(length=1, dtype=wp.float32))  # type: ignore
-    referenceGradA: wp.array(dtype = vector(length=1, dtype=wp.float32))  # type: ignore
-    referenceGradB: wp.array(dtype=matrix(shape=(1,1), dtype=wp.float32)) # type: ignore
+    queryA: wp.array(dtype = scalar_t)  # type: ignore
+    queryB: wp.array(dtype=vector(length=1, dtype=scalar_t))  # type: ignore
+    queryGradA: wp.array(dtype = vector(length=1, dtype=scalar_t))  # type: ignore
+    queryGradB: wp.array(dtype=matrix(shape=(1,1), dtype=scalar_t)) # type: ignore
+    referenceA: wp.array(dtype = scalar_t)  # type: ignore
+    referenceB: wp.array(dtype=vector(length=1, dtype=scalar_t))  # type: ignore
+    referenceGradA: wp.array(dtype = vector(length=1, dtype=scalar_t))  # type: ignore
+    referenceGradB: wp.array(dtype=matrix(shape=(1,1), dtype=scalar_t)) # type: ignore
 
 @wp.struct
 class correctionData_2:
     useGradientRenormalization: wp.bool
-    renormalizationMatrices: wp.array(dtype=matrix(shape=(2,2), dtype=wp.float32)) # type: ignore
+    renormalizationMatrices: wp.array(dtype=matrix(shape=(2,2), dtype=scalar_t)) # type: ignore
     useVolume: wp.bool
-    queryVolumes: wp.array(dtype = wp.float32) # type: ignore
-    referenceVolumes: wp.array(dtype = wp.float32) # type: ignore
+    queryVolumes: wp.array(dtype = scalar_t) # type: ignore
+    referenceVolumes: wp.array(dtype = scalar_t) # type: ignore
     useGradHTerms: wp.bool
-    queryOmegas: wp.array(dtype = wp.float32) # type: ignore
-    referenceOmegas: wp.array(dtype = wp.float32) # type: ignore
+    queryOmegas: wp.array(dtype = scalar_t) # type: ignore
+    referenceOmegas: wp.array(dtype = scalar_t) # type: ignore
     useCRK: wp.bool
-    queryA: wp.array(dtype = wp.float32)  # type: ignore
-    queryB: wp.array(dtype=vector(length=2, dtype=wp.float32))  # type: ignore
-    queryGradA: wp.array(dtype=vector(length=2, dtype=wp.float32))  # type: ignore
-    queryGradB: wp.array(dtype=matrix(shape=(2,2), dtype=wp.float32)) # type: ignore
-    referenceA: wp.array(dtype = wp.float32)  # type: ignore
-    referenceB: wp.array(dtype=vector(length=2, dtype=wp.float32))  # type: ignore
-    referenceGradA: wp.array(dtype = vector(length=2, dtype=wp.float32))  # type: ignore
-    referenceGradB: wp.array(dtype=matrix(shape=(2,2), dtype=wp.float32)) # type: ignore
+    queryA: wp.array(dtype = scalar_t)  # type: ignore
+    queryB: wp.array(dtype=vector(length=2, dtype=scalar_t))  # type: ignore
+    queryGradA: wp.array(dtype=vector(length=2, dtype=scalar_t))  # type: ignore
+    queryGradB: wp.array(dtype=matrix(shape=(2,2), dtype=scalar_t)) # type: ignore
+    referenceA: wp.array(dtype = scalar_t)  # type: ignore
+    referenceB: wp.array(dtype=vector(length=2, dtype=scalar_t))  # type: ignore
+    referenceGradA: wp.array(dtype = vector(length=2, dtype=scalar_t))  # type: ignore
+    referenceGradB: wp.array(dtype=matrix(shape=(2,2), dtype=scalar_t)) # type: ignore
 
 @wp.struct
 class correctionData_3:
     useGradientRenormalization: wp.bool
-    renormalizationMatrices: wp.array(dtype=matrix(shape=(3,3), dtype=wp.float32)) # type: ignore
+    renormalizationMatrices: wp.array(dtype=matrix(shape=(3,3), dtype=scalar_t)) # type: ignore
     useVolume: wp.bool
-    queryVolumes: wp.array(dtype = wp.float32)  # type: ignore
-    referenceVolumes: wp.array(dtype = wp.float32) # type: ignore
+    queryVolumes: wp.array(dtype = scalar_t)  # type: ignore
+    referenceVolumes: wp.array(dtype = scalar_t) # type: ignore
     useGradHTerms: wp.bool
-    queryOmegas: wp.array(dtype = wp.float32) # type: ignore
-    referenceOmegas: wp.array(dtype = wp.float32) # type: ignore
+    queryOmegas: wp.array(dtype = scalar_t) # type: ignore
+    referenceOmegas: wp.array(dtype = scalar_t) # type: ignore
     useCRK: wp.bool
-    queryA: wp.array(dtype=wp.float32)  # type: ignore
-    queryB: wp.array(dtype=vector(length=1, dtype=wp.float32))  # type: ignore
-    queryGradA: wp.array(dtype=vector(length=3, dtype=wp.float32))  # type: ignore
-    queryGradB: wp.array(dtype=matrix(shape=(3,3), dtype=wp.float32)) # type: ignore
-    referenceA: wp.array(dtype=wp.float32)  # type: ignore
-    referenceB: wp.array(dtype=vector(length=3, dtype=wp.float32))  # type: ignore
-    referenceGradA: wp.array(dtype=vector(length=3, dtype=wp.float32))  # type: ignore
-    referenceGradB: wp.array(dtype=matrix(shape=(3,3), dtype=wp.float32)) # type: ignore
+    queryA: wp.array(dtype=scalar_t)  # type: ignore
+    queryB: wp.array(dtype=vector(length=1, dtype=scalar_t))  # type: ignore
+    queryGradA: wp.array(dtype=vector(length=3, dtype=scalar_t))  # type: ignore
+    queryGradB: wp.array(dtype=matrix(shape=(3,3), dtype=scalar_t)) # type: ignore
+    referenceA: wp.array(dtype=scalar_t)  # type: ignore
+    referenceB: wp.array(dtype=vector(length=3, dtype=scalar_t))  # type: ignore
+    referenceGradA: wp.array(dtype=vector(length=3, dtype=scalar_t))  # type: ignore
+    referenceGradB: wp.array(dtype=matrix(shape=(3,3), dtype=scalar_t)) # type: ignore
 
 from .utils.wp_util import zero_like_warp
 

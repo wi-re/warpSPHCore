@@ -21,6 +21,7 @@ Or import subpackages directly:
 
 from . import radius
 from . import ops
+from .type_config import scalar_t, scalar, dim_t, get_type_config
 
 # Convenience re-exports of the most commonly used symbols
 
@@ -84,11 +85,17 @@ from .kernels.utils import computePairwiseSupport, iPow
 from .utils.wp_autograd import launch_kernel, warpWrapper, StateAwareWarpFunction
 from .mathutil.wp_math import matmul
 
+from .types import scalar_t, vec_t, mat_t, vecArray_t, matArray_t, intArray_t, scalarArray_t
+
 __version__ = "0.2.3"
 
 __all__ = [
     "radius",
     "ops",
+    "scalar_t",
+    "scalar",
+    "dim_t",
+    "get_type_config",
     "AdjacencyList",
     "CompactHashMap",
     "DomainDescription",
@@ -131,6 +138,7 @@ __all__ = [
     'computeDistanceVec', 'safe_sqrt', 'computePairwiseSupport', 'iPow',
     'launch_kernel', 'warpWrapper',
     'StateAwareWarpFunction', 'extractStateInfo', 'warpWrapper2',
-    'matmul'
+    'matmul',
+    'scalar_t', 'vec_t', 'mat_t', 'vecArray_t', 'matArray_t', 'intArray_t', 'scalarArray_t'
 
 ]

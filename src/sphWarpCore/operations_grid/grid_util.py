@@ -1,5 +1,6 @@
 
 import warp as wp
+from ..types import *
 from ..enumTypes import *
 from ..radiusSearch.wp_compactHash import CompactHashMap, getLinearIndex64, hashGridVec3i
 from warp.types import vector, matrix
@@ -25,7 +26,7 @@ def iterateCell(
 
 @wp.func 
 def checkOffset(
-    i: wp.int32, queryPositions: wp.array(dtype=vector(length=Any, dtype = wp.float32)), # shape [N,D] # type: ignore
+    i: wp.int32, queryPositions: vecArray_t, # shape [N,D] # type: ignore
     numCells: wp.array(dtype=wp.int32), D: int,# type: ignore
     
     o: wp.int32,
@@ -34,8 +35,8 @@ def checkOffset(
     hashTable: wp.array(dtype=vector(length = 2, dtype = wp.int32)), # shape [hashMapLength,2] # type: ignore
     cellTable: wp.array(dtype=vector(length = 3, dtype = wp.int64)), # shape [C,3] with [cellIndex, cellStart, cellCount] # type: ignore
 
-    periodicity: wp.array(dtype = wp.bool), qMin: wp.array(dtype = wp.float32), qMax: wp.array(dtype = wp.float32), # type: ignore
-    hCell: float
+    periodicity: wp.array(dtype = wp.bool), qMin: wp.array(dtype = scalar_t), qMax: wp.array(dtype = scalar_t), # type: ignore
+    hCell: scalar_t
 ):
     # pass
     N = queryPositions.shape[0]

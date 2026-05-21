@@ -21,6 +21,8 @@ from .utils.wp_util import castTorchToWarpAsBuiltins, castWarpToTorch
 from .enumTypes import *
 from .utils.arg_check import *
 
+from .types import *
+
 def parseArguments(
     queryParticles: ParticleState,
     operationProperties: OperationProperties,
@@ -101,7 +103,9 @@ def parseArguments(
 
     dim = queryPositions.shape[1]
 
-    renormalizationMatrices_ = renormalizationState.renormalizationMatrices if useGradientRenormalization else getCachedDummyTensor((1, dim, dim), device= device, dtype=torch.float32)
+    torch_t = get_torch_precision()
+
+    renormalizationMatrices_ = renormalizationState.renormalizationMatrices if useGradientRenormalization else getCachedDummyTensor((1, dim, dim), device= device, dtype=torch_t)
     queryOmegas_, referenceOmegas_ = None, None
     if useGradHTerms:
         if isinstance(gradHState, GradHState):
@@ -113,15 +117,15 @@ def parseArguments(
             queryOmegas_ = gradHState
             referenceOmegas_ = gradHState
     else:
-        queryOmegas_ = getCachedDummyTensor((1,), device=device, dtype=torch.float32)
-        referenceOmegas_ = getCachedDummyTensor((1,), device=device, dtype=torch.float32)
+        queryOmegas_ = getCachedDummyTensor((1,), device=device, dtype=torch_t)
+        referenceOmegas_ = getCachedDummyTensor((1,), device=device, dtype=torch_t)
 
     queryVolumes_, referenceVolumes_ = (queryVolumes, referenceVolumes) if useVolumes else (None, None)
     if referenceVolumes_ is None and queryVolumes_ is not None:
         referenceVolumes_ = queryVolumes_
     if not useVolumes:
-        queryVolumes_ = getCachedDummyTensor((1,), device=device, dtype=torch.float32)
-        referenceVolumes_ = getCachedDummyTensor((1,), device=device, dtype=torch.float32)
+        queryVolumes_ = getCachedDummyTensor((1,), device=device, dtype=torch_t)
+        referenceVolumes_ = getCachedDummyTensor((1,), device=device, dtype=torch_t)
 
     qcrkState, rcrkState = None, None
     if isinstance(crkState, tuple) and len(crkState) == 2:
@@ -133,16 +137,16 @@ def parseArguments(
         pass
 
     qcrk_A_, qcrk_B_, qcrk_gradA_, qcrk_gradB_ = (qcrkState.A, qcrkState.B, qcrkState.gradA, qcrkState.gradB) if useCRK else (\
-        getCachedDummyTensor((1,),device= device, dtype = torch.float32), 
-        getCachedDummyTensor((1, dim), device=device, dtype = torch.float32), 
-        getCachedDummyTensor((1, dim), device=device, dtype = torch.float32), 
-        getCachedDummyTensor((1, dim, dim), device=device, dtype = torch.float32)
+        getCachedDummyTensor((1,),device= device, dtype = torch_t), 
+        getCachedDummyTensor((1, dim), device=device, dtype = torch_t), 
+        getCachedDummyTensor((1, dim), device=device, dtype = torch_t), 
+        getCachedDummyTensor((1, dim, dim), device=device, dtype = torch_t)
     )
     rcrk_A_, rcrk_B_, rcrk_gradA_, rcrk_gradB_ = (rcrkState.A, rcrkState.B, rcrkState.gradA, rcrkState.gradB) if useCRK else (\
-        getCachedDummyTensor((1,), device=device, dtype = torch.float32), 
-        getCachedDummyTensor((1, dim), device=device, dtype = torch.float32), 
-        getCachedDummyTensor((1, dim), device=device, dtype = torch.float32), 
-        getCachedDummyTensor((1, dim, dim), device=device, dtype = torch.float32)
+        getCachedDummyTensor((1,), device=device, dtype = torch_t), 
+        getCachedDummyTensor((1, dim), device=device, dtype = torch_t), 
+        getCachedDummyTensor((1, dim), device=device, dtype = torch_t), 
+        getCachedDummyTensor((1, dim, dim), device=device, dtype = torch_t)
     )
 
     adj = None
@@ -231,8 +235,8 @@ def parseArguments(
     correctionState.renormalizationMatrices = castTorchToWarpAsBuiltins(renormalizationMatrices_)
     correctionState.queryOmegas = castTorchToWarpAsBuiltins(queryOmegas_)
     correctionState.referenceOmegas = castTorchToWarpAsBuiltins(referenceOmegas_)
-    correctionState.queryVolumes = castTorchToWarpAsBuiltins(queryVolumes_) if queryVolumes_ is not None else castTorchToWarpAsBuiltins(getCachedDummyTensor((1,), device=device, dtype = torch.float32))
-    correctionState.referenceVolumes = castTorchToWarpAsBuiltins(referenceVolumes_) if referenceVolumes_ is not None else castTorchToWarpAsBuiltins(getCachedDummyTensor((1,), device=device, dtype = torch.float32))
+    correctionState.queryVolumes = castTorchToWarpAsBuiltins(queryVolumes_) if queryVolumes_ is not None else castTorchToWarpAsBuiltins(getCachedDummyTensor((1,), device=device, dtype = torch_t))
+    correctionState.referenceVolumes = castTorchToWarpAsBuiltins(referenceVolumes_) if referenceVolumes_ is not None else castTorchToWarpAsBuiltins(getCachedDummyTensor((1,), device=device, dtype = torch_t))
     correctionState.queryA = castTorchToWarpAsBuiltins(qcrk_A_)
     correctionState.queryB = castTorchToWarpAsBuiltins(qcrk_B_)
     correctionState.queryGradA = castTorchToWarpAsBuiltins(qcrk_gradA_)
@@ -321,10 +325,11 @@ def extractStateInfo(
             device = qPos.device
             dim    = qPos.shape[1]
 
-            _d1f   = getCachedDummyTensor((1,),          dtype=torch.float32, device=device)
+            torch_t = get_torch_precision()
+            _d1f   = getCachedDummyTensor((1,),          dtype=torch_t, device=device)
             _d1i   = getCachedDummyTensor((1,),          dtype=torch.int32,   device=device)
-            _d1Df  = getCachedDummyTensor((1, dim),      dtype=torch.float32, device=device)
-            _d1DDf = getCachedDummyTensor((1, dim, dim), dtype=torch.float32, device=device)
+            _d1Df  = getCachedDummyTensor((1, dim),      dtype=torch_t, device=device)
+            _d1DDf = getCachedDummyTensor((1, dim, dim), dtype=torch_t, device=device)
 
             # Replace None densities with a dummy so the flat list is never sparse
             if qDen is None:

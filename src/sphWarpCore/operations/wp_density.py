@@ -19,13 +19,13 @@ def computeSPHDensity_Func(
     i : wp.int32, dim: wp.int32, 
 
     # SPH properties for the query set (indexed by i)
-    queryPositions: wp.array(dtype=vector(dtype = wp.float32, length=Any)), querySupports: wp.array(dtype = wp.float32), queryMasses: wp.array(dtype = wp.float32), # type: ignore
+    queryPositions: wp.array(dtype=vector(dtype = scalar_t, length=Any)), querySupports: wp.array(dtype = scalar_t), queryMasses: wp.array(dtype = scalar_t), # type: ignore
 
     # SPH properties for the reference set (indexed by j in the neighbor loop)
-    referencePositions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), referenceSupports : wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32), # type: ignore
+    referencePositions : wp.array(dtype=vector(length=Any, dtype = scalar_t)), referenceSupports : wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t), # type: ignore
     
     # Domain and kernel parameters
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
     mode_uint: wp.uint32, kernel_int: wp.int32, 
     
     # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
@@ -39,14 +39,14 @@ def computeSPHDensity_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return wp.float32(0.0)
+            return scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
     # mi      = queryMasses[i] # Generally not needed
     
     # Initialize the output value
-    out = wp.float32(0.0)
+    out = scalar_t(0.0)
     
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
@@ -65,11 +65,11 @@ def computeSPHDensity_Func(
 
 @wp.kernel
 def computeSPHDensity_Kernel(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)), # type: ignore
-    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32), # type: ignore
-    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),  # type: ignore
+    queryPositions : wp.array(dtype = vector(length=Any, dtype=scalar_t)), referencePositions : wp.array(dtype=vector(length=Any, dtype=scalar_t)), # type: ignore
+    querySupports : wp.array(dtype = scalar_t), referenceSupports : wp.array(dtype = scalar_t), # type: ignore
+    queryMasses: wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t),  # type: ignore
     
-    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
+    domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32,
     neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore

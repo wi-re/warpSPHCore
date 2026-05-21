@@ -43,7 +43,7 @@ def computeCRKFactors_(
         querySupports, referenceSupports,
         domain = domain, adjacency = adjacency, 
         operationMode = operationMode,
-        kernel = kernel, supportMode = SupportScheme.KernelMeanSymmetric,
+        kernel = kernel, supportMode = SupportScheme.Scatter,
         queryKinds = queryKinds, referenceKinds = referenceKinds
     )
 

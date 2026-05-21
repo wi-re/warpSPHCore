@@ -1,6 +1,7 @@
 import torch
 import warp as wp
 from typing import Any, List, Tuple
+from ..types import *
 from .wp_util import castTorchToWarpAsBuiltins, castWarpToTorch, getCachedWarpArray
 
 # ---------------------------------------------------------------------------

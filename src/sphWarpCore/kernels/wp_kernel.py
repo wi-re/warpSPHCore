@@ -1,8 +1,10 @@
 from typing import Any
+from ..types import *
 import warp as wp
 import numpy as np
 from .utils import *
 from ..mathutil import computeDistanceVec
+from ..type_config import scalar_t, dim_t
 
 from .kernelFunctions.wendland2 import *
 from .kernelFunctions.wendland4 import *
@@ -33,7 +35,7 @@ from .kernelFunctions.cohesionKernel import *
 
 
 @wp.func
-def eval_k(q: wp.float32, dim: wp.int32, kernel: wp.int32):
+def eval_k(q: scalar_t, dim: wp.int32, kernel: wp.int32):
     if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_k(q, dim)
     elif kernel == wp.static(KernelFunctions.Wendland4.value):
@@ -58,10 +60,10 @@ def eval_k(q: wp.float32, dim: wp.int32, kernel: wp.int32):
         return adhesionKernel_k(q, dim)
     elif kernel == wp.static(KernelFunctions.CohesionKernel.value):
         return cohesionKernel_k(q, dim)
-    return np.nan
+    return scalar_t(np.nan) 
 
 @wp.func
-def eval_dkdq(q: wp.float32, dim: wp.int32, kernel: wp.int32):
+def eval_dkdq(q: scalar_t, dim: wp.int32, kernel: wp.int32):
     if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_dkdq(q, dim)
     elif kernel == wp.static(KernelFunctions.Wendland4.value):
@@ -86,10 +88,10 @@ def eval_dkdq(q: wp.float32, dim: wp.int32, kernel: wp.int32):
         return adhesionKernel_dkdq(q, dim)
     elif kernel == wp.static(KernelFunctions.CohesionKernel.value):
         return cohesionKernel_dkdq(q, dim)
-    return np.nan
+    return scalar_t(np.nan)
 
 @wp.func
-def eval_d2kdq2(q: wp.float32, dim: wp.int32, kernel: wp.int32):
+def eval_d2kdq2(q: scalar_t, dim: wp.int32, kernel: wp.int32):
     if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_d2kdq2(q, dim)
     elif kernel == wp.static(KernelFunctions.Wendland4.value):
@@ -114,10 +116,10 @@ def eval_d2kdq2(q: wp.float32, dim: wp.int32, kernel: wp.int32):
         return adhesionKernel_d2kdq2(q, dim)
     elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_d2kdq2(q, dim)
-    return np.nan
+    return scalar_t(np.nan)
 
 @wp.func
-def eval_d3kdq3(q: wp.float32, dim: wp.int32, kernel: wp.int32):
+def eval_d3kdq3(q: scalar_t, dim: wp.int32, kernel: wp.int32):
     if kernel == wp.static(KernelFunctions.Wendland2.value):
         return wendland2_d3kdq3(q, dim)
     elif kernel == wp.static(KernelFunctions.Wendland4.value):
@@ -142,7 +144,7 @@ def eval_d3kdq3(q: wp.float32, dim: wp.int32, kernel: wp.int32):
         return adhesionKernel_d3kdq3(q, dim)
     elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_d3kdq3(q, dim)
-    return np.nan
+    return scalar_t(np.nan)
 
 @wp.func
 def eval_C_d(dim: wp.int32, kernel: wp.int32):
@@ -170,7 +172,7 @@ def eval_C_d(dim: wp.int32, kernel: wp.int32):
         return adhesionKernel_C_d(dim)
     elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_C_d(dim)
-    return np.nan
+    return scalar_t(np.nan)
 
 @wp.func
 def eval_kernelScale(kernel: wp.int32, dim: wp.int32):
@@ -198,7 +200,7 @@ def eval_kernelScale(kernel: wp.int32, dim: wp.int32):
         return adhesionKernel_kernelScale(dim)
     elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_kernelScale(dim)
-    return np.nan
+    return scalar_t(np.nan)
 
 @wp.func
 def eval_packing(kernel: wp.int32):
@@ -226,7 +228,7 @@ def eval_packing(kernel: wp.int32):
         return adhesionKernel_packingRatio()
     elif kernel == wp.static(KernelFunctions.CohesionKernel.value):         
         return cohesionKernel_packingRatio()
-    return np.nan
+    return scalar_t(np.nan)
 
 
 from .adjoints import *
@@ -240,7 +242,7 @@ from .adjoints import *
 #     return eval_C_d(kernel, dim)
 # def Kernel_N_H(kernel: KernelType, dim: int = 2):
 #     packingRatio = eval_packingRatio(kernel)
-#     fac = 2.0 if dim == 1 else (np.pi if dim == 2 else 4 * np.pi / 3)
+#     fac = scalar_t(2.0) if dim == 1 else (np.pi if dim == 2 else 4 * np.pi / 3)
 #     N = fac * packingRatio**dim * eval_kernelScale(kernel, dim)**dim
 #     return N
 # def Kernel_xi(kernel: KernelType, dim: int = 2):
@@ -254,7 +256,7 @@ def sphKernelC_d(kernel: wp.int32, dim: wp.int32):
 @wp.func
 def sphKernelN_H(kernel: wp.int32, dim: wp.int32):
     packingRatio = eval_packing(kernel)
-    fac = 2.0 if dim == 1 else (np.pi if dim == 2 else 4 * np.pi / 3)
+    fac = scalar_t(2.0) if dim == 1 else (np.pi if dim == 2 else 4 * np.pi / 3)
     N = fac * packingRatio**dim * eval_kernelScale(kernel, dim)**dim
     return N
 @wp.func
@@ -272,47 +274,47 @@ def sphKernel_xi(kernel: wp.int32, dim: wp.int32):
 #     return eval_k(kernel, q, dim) * eval_C_d(kernel, dim) / h**float(dim)
 
 @wp.func
-def sphKernel_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+def sphKernel_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
     dim = wp.int32(x.length)
     r = vectorNorm_warp(x)
     # r = safe_sqrt(wp.dot(x,x))
     q = r / h
-    if q > 1.0:
-        return 0.0
+    if q > scalar_t(1.0):
+        return scalar_t(0.0)
     return eval_k(q, dim, kernel) * eval_C_d(dim, kernel) / iPow(h, dim)
 
 @wp.func
 def sphKernel(
-    xi: vector(dtype=wp.float32, length=Any),
-    xj: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = wp.float32),
-    maxDomain: wp.array(dtype = wp.float32),
+    minDomain: wp.array(dtype = scalar_t),
+    maxDomain: wp.array(dtype = scalar_t),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
     if mode == wp.static(SupportScheme.KernelMeanSymmetric.value) or mode == wp.static(SupportScheme.SuperSymmetric.value): # KernelMeanSymmetric or SuperSymmetric
-        return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
+        return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/scalar(2.0)
     return sphKernel_(xij, hij, kernel)
 
 @wp.func
 def sphKernel_ij(
-    xij: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xij: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = wp.float32),
-    maxDomain: wp.array(dtype = wp.float32),
+    minDomain: wp.array(dtype = scalar_t),
+    maxDomain: wp.array(dtype = scalar_t),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     if mode == wp.static(SupportScheme.KernelMeanSymmetric.value) or mode == wp.static(SupportScheme.SuperSymmetric.value): # KernelMeanSymmetric or SuperSymmetric
-        return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/2.0
+        return (sphKernel_(xij,hi,kernel) + sphKernel_(xij,hj,kernel))/scalar(2.0)
     return sphKernel_(xij, hij, kernel)
 
 
@@ -334,12 +336,12 @@ def sphKernel_ij(
 #     return grad * normalizedKernelTerm.view(-1,1)
 
 @wp.func
-def sphGradient_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+def sphGradient_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
     dim = wp.int32(x.length)
     r = vectorNorm_warp(x)
     q = r / h
-    if q > 1.0:
-        return type(x)(0.0)
+    if q > scalar_t(1.0):
+        return type(x)(scalar_t(0.0))
     grad = vectorNormalize_warp(input = x)
     normalizationTerm = eval_C_d(dim, kernel) / iPow(h, dim + 1)
     kernelTerm = eval_dkdq(q, dim, kernel)
@@ -350,20 +352,20 @@ def sphGradient_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel:
 
 @wp.func
 def sphKernelGradient(
-    xi: vector(dtype=wp.float32, length=Any),
-    xj: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = wp.float32),
-    maxDomain: wp.array(dtype = wp.float32),
+    minDomain: wp.array(dtype = scalar_t),
+    maxDomain: wp.array(dtype = scalar_t),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
     if mode == wp.static(SupportScheme.KernelMeanSymmetric.value): # KernelMeanSymmetric
-        return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
+        return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/scalar_t(2.0)
     elif mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
         return (sphGradient_(xij,hi,kernel) - sphGradient_(-xij,hj,kernel))
     return sphGradient_(xij, hij, kernel)
@@ -371,20 +373,20 @@ def sphKernelGradient(
 
 @wp.func
 def sphKernelGradient_ij(
-    xij: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xij: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = wp.float32),
-    maxDomain: wp.array(dtype = wp.float32),
+    minDomain: wp.array(dtype = scalar_t),
+    maxDomain: wp.array(dtype = scalar_t),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     if mode == wp.static(SupportScheme.KernelMeanSymmetric.value): # KernelMeanSymmetric
-        return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/2.0
+        return (sphGradient_(xij,hi,kernel) + sphGradient_(xij,hj,kernel))/scalar(2.0)
     if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
-        return (sphGradient_(xij,hi,kernel) - sphGradient_(-xij,hj,kernel))/2.0
+        return (sphGradient_(xij,hi,kernel) - sphGradient_(-xij,hj,kernel))/scalar(2.0)
     return sphGradient_(xij, hij, kernel)
 # Torch Version
 # def Kernel_Derivative(kernel: KernelType, x: torch.Tensor, h: torch.Tensor):
@@ -395,30 +397,30 @@ def sphKernelGradient_ij(
 #     return eval_dkdq(kernel, q, dim) * eval_C_d(kernel, dim) / h**(dim + 1)
 
 @wp.func
-def sphKernelDerivative_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+def sphKernelDerivative_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
     dim = wp.int32(x.length)
     r = vectorNorm_warp(x)
     q = r / h
-    if q > 1.0:
-        return 0.0
+    if q > scalar_t(1.0):
+        return scalar_t(0.0)
     return eval_dkdq(q, dim, kernel) * eval_C_d(dim, kernel) / iPow(h, dim + 1)
 
 @wp.func
 def sphKernelDerivative(
-    xi: vector(dtype=wp.float32, length=Any),
-    xj: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = wp.float32),
-    maxDomain: wp.array(dtype = wp.float32),   
+    minDomain: wp.array(dtype = scalar_t),
+    maxDomain: wp.array(dtype = scalar_t),   
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
     if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
-        return (sphKernelDerivative_(xij,hi,kernel) + sphKernelDerivative_(xij,hj,kernel))/2.0
+        return (sphKernelDerivative_(xij,hi,kernel) + sphKernelDerivative_(xij,hj,kernel))/scalar(2.0)
     return sphKernelDerivative_(xij, hij, kernel)
     
 
@@ -450,11 +452,11 @@ def sphKernelDerivative(
 from .adjoints import warp_eye
 
 @wp.func
-def sphKernelHessian_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+def sphKernelHessian_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
     r = vectorNorm_warp(x)
     dim = wp.int32(x.length)
     q = r / h
-    eps = 1e-5
+    eps = scalar_t(1e-5)
     
     k1 = eval_dkdq(q, dim, kernel)   * eval_C_d(dim, kernel) / iPow(h, dim + 1)
     k2 = eval_d2kdq2(q, dim, kernel) * eval_C_d(dim, kernel) / iPow(h, dim + 2)
@@ -463,7 +465,7 @@ def sphKernelHessian_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, ke
     factorA = wp.outer(x, x) / s
     if q < eps:
         for i in range(dim):
-            factorA[i,i] = 1
+            factorA[i,i] = scalar_t(1.0)
     
     factorB = - wp.outer(x,x) /  (iPow(r, 3) + iPow(eps, 3) *iPow(h, 3))
     factorB += warp_eye(x) / (r + iPow(eps, 2) * h)
@@ -472,20 +474,20 @@ def sphKernelHessian_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, ke
     
 @wp.func
 def sphKernelHessian(
-    xi: vector(dtype=wp.float32, length=Any),
-    xj: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = wp.float32),
-    maxDomain: wp.array(dtype = wp.float32),
+    minDomain: wp.array(dtype = scalar_t),
+    maxDomain: wp.array(dtype = scalar_t),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
     if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
-        return (sphKernelHessian_(xij,hi,kernel) + sphKernelHessian_(xij,hj,kernel))/2.0
+        return (sphKernelHessian_(xij,hi,kernel) + sphKernelHessian_(xij,hj,kernel))/scalar_t(2.0)
     return sphKernelHessian_(xij, hij, kernel)
     
 
@@ -511,11 +513,11 @@ def sphKernelHessian(
 #     return laplacian
 
 @wp.func 
-def sphKernelLaplacian_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+def sphKernelLaplacian_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
     dim = wp.int32(x.length)
     r = vectorNorm_warp(x)
     q = r / h
-    eps = 1e-5
+    eps = scalar_t(1e-5)
     r_eps = r + eps * h
     
     k1 = eval_dkdq(q, dim, kernel)   * eval_C_d(dim, kernel) / iPow(h, dim + 1)
@@ -523,31 +525,31 @@ def sphKernelLaplacian_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, 
     
     s = wp.dot(x,x) / iPow(r_eps, 2)
     if q < eps:
-        s = wp.float32(1.0)
+        s = scalar_t(1.0)
     t = - wp.dot(x,x) / iPow(r_eps, 3)
-    t += wp.float32(dim) / r_eps
+    t += scalar_t(dim) / r_eps
     
     laplacian = s * k2 + t * k1
-    if q < eps or q > 1.0:
-        laplacian = wp.float32(0.0)
+    if q < eps or q > scalar_t(1.0):
+        laplacian = scalar_t(0.0)
     return laplacian
 
 @wp.func
 def sphKernelLaplacian(
-    xi: vector(dtype=wp.float32, length=Any),
-    xj: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = wp.float32),
-    maxDomain: wp.array(dtype = wp.float32),
+    minDomain: wp.array(dtype = scalar_t),
+    maxDomain: wp.array(dtype = scalar_t),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
     if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
-        return (sphKernelLaplacian_(xij,hi,kernel) + sphKernelLaplacian_(xij,hj,kernel))/2.0
+        return (sphKernelLaplacian_(xij,hi,kernel) + sphKernelLaplacian_(xij,hj,kernel))/scalar_t(2.0)
     
     return sphKernelLaplacian_(xij, hij, kernel)
 
@@ -566,7 +568,7 @@ def sphKernelLaplacian(
 #     return normConstant * (float(dim) * h * k + r * dkdq)
 
 @wp.func
-def sphKernelDkDh_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kernel: wp.int32):
+def sphKernelDkDh_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
     dim = wp.int32(x.length)
     r = vectorNorm_warp(x)
     q = r/h
@@ -576,83 +578,83 @@ def sphKernelDkDh_(x: vector(dtype=wp.float32, length=Any), h: wp.float32, kerne
     
     normConstant = - eval_C_d(dim, kernel) / iPow(h, dim + 2)
     
-    return normConstant * (wp.float32(dim) * h * k + r * dkdq)
+    return normConstant * (scalar_t(dim) * h * k + r * dkdq)
 
 @wp.func
 def sphKernelDkDh(
-    xi: vector(dtype=wp.float32, length=Any),
-    xj: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = wp.float32),
-    maxDomain: wp.array(dtype = wp.float32),
+    minDomain: wp.array(dtype = scalar_t),
+    maxDomain: wp.array(dtype = scalar_t),
 ):
     hij = computePairwiseSupport(hi, hj, mode)
     xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
     if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
-        return (sphKernelDkDh_(xij,hi,kernel) + sphKernelDkDh_(xij,hj,kernel))/2.0
+        return (sphKernelDkDh_(xij,hi,kernel) + sphKernelDkDh_(xij,hj,kernel))/scalar_t(2.0)
     
     return sphKernelDkDh_(xij, hij, kernel)
     
 
 @wp.func
-def get_dim(v: vector(length=1, dtype = wp.float32)): # type: ignore
+def get_dim(v: vector(length=1, dtype = scalar_t)): # type: ignore
     return 1
 @wp.func
-def get_dim(v: vector(length=2, dtype = wp.float32)): # type: ignore
+def get_dim(v: vector(length=2, dtype = scalar_t)): # type: ignore
     return 2
 @wp.func
-def get_dim(v: vector(length=3, dtype = wp.float32)): # type: ignore
+def get_dim(v: vector(length=3, dtype = scalar_t)): # type: ignore
     return 3
 
 @wp.func
-def get_dim(v: wp.array(dtype = vector(length=1, dtype = wp.float32))): # type: ignore
+def get_dim(v: wp.array(dtype = vector(length=1, dtype = scalar_t))): # type: ignore
     return 1
 @wp.func
-def get_dim(v: wp.array(dtype = vector(length=2, dtype = wp.float32))): # type: ignore
+def get_dim(v: wp.array(dtype = vector(length=2, dtype = scalar_t))): # type: ignore
     return 2
 @wp.func
-def get_dim(v: wp.array(dtype = vector(length=3, dtype = wp.float32))): # type: ignore
+def get_dim(v: wp.array(dtype = vector(length=3, dtype = scalar_t))): # type: ignore
     return 3
 
 @wp.func
-def get_dim(v: matrix(shape=(1,1), dtype = wp.float32)): # type: ignore
+def get_dim(v: matrix(shape=(1,1), dtype = scalar_t)): # type: ignore
     return 1
 @wp.func
-def get_dim(v: matrix(shape=(2,2), dtype = wp.float32)): # type: ignore
+def get_dim(v: matrix(shape=(2,2), dtype = scalar_t)): # type: ignore
     return 2    
 @wp.func
-def get_dim(v: matrix(shape=(3,3), dtype = wp.float32)): # type: ignore
+def get_dim(v: matrix(shape=(3,3), dtype = scalar_t)): # type: ignore
     return 3
 @wp.func
-def get_dim(v: wp.array(dtype = matrix(shape=(1,1), dtype = wp.float32))): # type: ignore
+def get_dim(v: wp.array(dtype = matrix(shape=(1,1), dtype = scalar_t))): # type: ignore
     return 1    
 @wp.func
-def get_dim(v: wp.array(dtype = matrix(shape=(2,2), dtype = wp.float32))): # type: ignore
+def get_dim(v: wp.array(dtype = matrix(shape=(2,2), dtype = scalar_t))): # type: ignore
     return 2
 @wp.func
-def get_dim(v: wp.array(dtype = matrix(shape=(3,3), dtype = wp.float32))): # type: ignore
+def get_dim(v: wp.array(dtype = matrix(shape=(3,3), dtype = scalar_t))): # type: ignore
     return 3
 
 @wp.func
 def correctGradientCRK(
-    W_ij: wp.float32,
-    gradW_ij: vector(length=Any, dtype=wp.float32), # type: ignore
-    x_ij: vector(length=Any, dtype=wp.float32), # type: ignore
-    Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), gradAi: vector(length=Any, dtype=wp.float32), gradBi: matrix(shape=(Any, Any), dtype=wp.float32), # type: ignore
+    W_ij: scalar_t,
+    gradW_ij: vector(length=dim_t, dtype=scalar_t), # type: ignore
+    x_ij: vector(length=dim_t, dtype=scalar_t), # type: ignore
+    Ai: scalar_t, Bi: vector(length=dim_t, dtype=scalar_t), gradAi: vector(length=dim_t, dtype=scalar_t), gradBi: matrix(shape=(dim_t, dim_t), dtype=scalar_t), # type: ignore
     dim: wp.int32
 ):
     
     term1 = (Ai * W_ij) * Bi 
-    term2 = (Ai * (1.0 + wp.dot(Bi, x_ij))) * gradW_ij
-    term3 = ((1.0 + wp.dot(Bi, x_ij)) * W_ij) * gradAi
+    term2 = (Ai * (scalar_t(1.0) + wp.dot(Bi, x_ij))) * gradW_ij
+    term3 = ((scalar_t(1.0) + wp.dot(Bi, x_ij)) * W_ij) * gradAi
 
     factor = Ai * W_ij
     # Compute the dot product of x_ij with each row of gradBi
-    product = type(gradW_ij)(0.0)
+    product = type(gradW_ij)(scalar_t(0.0))
     for row in range(dim):
         for col in range(dim):
             product[row] += x_ij[col] * gradBi[row, col]
@@ -663,17 +665,17 @@ def correctGradientCRK(
 
 @wp.func
 def computeKernelGradientCRK(
-    xi: vector(dtype=wp.float32, length=Any),
-    xj: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodicity: wp.array(dtype = wp.bool),
-    domainMin: wp.array(dtype = wp.float32),
-    domainMax: wp.array(dtype = wp.float32),
+    domainMin: wp.array(dtype = scalar_t),
+    domainMax: wp.array(dtype = scalar_t),
     useCRK: wp.bool,
-    Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32), gradAi: vector(length=Any, dtype=wp.float32), gradBi: matrix(shape=(Any, Any), dtype=wp.float32), # type: ignore
+    Ai: scalar_t, Bi: vector(length=dim_t, dtype=scalar_t), gradAi: vector(length=dim_t, dtype=scalar_t), gradBi: matrix(shape=(dim_t, dim_t), dtype=scalar_t), # type: ignore
 ):
     x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
     kernelGradient = sphKernelGradient_ij(x_ij, hi, hj, kernel, mode, periodicity, domainMin, domainMax)
@@ -690,21 +692,21 @@ def computeKernelGradientCRK(
 
 @wp.func
 def computeKernelCRK(
-    xi: vector(dtype=wp.float32, length=Any),
-    xj: vector(dtype=wp.float32, length=Any),
-    hi: wp.float32,
-    hj: wp.float32,
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
     kernel: wp.int32,
     mode: wp.uint32,
     periodicity: wp.array(dtype = wp.bool),
-    domainMin: wp.array(dtype = wp.float32),
-    domainMax: wp.array(dtype = wp.float32),
+    domainMin: wp.array(dtype = scalar_t),
+    domainMax: wp.array(dtype = scalar_t),
     useCRK: wp.bool,
-    Ai: wp.float32, Bi: vector(length=Any, dtype=wp.float32)
+    Ai: scalar_t, Bi: vector(length=dim_t, dtype=scalar_t)
 ):
     x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
     w_ij = sphKernel_ij(x_ij, hi, hj, kernel, mode, periodicity, domainMin, domainMax)
     if useCRK:
         xij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
-        return Ai * (1.0 + wp.dot(Bi, xij)) * w_ij
+        return Ai * (scalar_t(1.0) + wp.dot(Bi, xij)) * w_ij
     return w_ij
