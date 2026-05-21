@@ -13,18 +13,19 @@ from torch.profiler import profile, record_function, ProfilerActivity
 from sphWarpCore.enumTypes import *
 from sphWarpCore.utils.arg_check import *
 from typing import Optional
+from ..types import *
 
 
 @wp.func
 def get_eye(m: matrix(shape=(Any, Any), dtype=scalar_t)):
-    result = type(m)() * 0.0
+    result = type(m)() * scalar_t(0.0)
     for d in range(get_dim(m)):
-        result[d, d] = 1.0
+        result[d, d] = scalar_t(1.0)
     return result
 
 @wp.func
 def delta(a: wp.int32, b: wp.int32):
-    return 1.0 if a == b else 0.0
+    return scalar_t(1.0) if a == b else scalar_t(0.0)
 
 @wp.func
 def computeCRKMoments_Func(
@@ -84,13 +85,13 @@ def computeCRKMoments_Func(
     # Unpack optional correction terms
     
     # Initialize the output value
-    m_0 = type(output_m_0)(0.0)
-    m_1 = type(output_m_1)(0.0)
-    m_2 = type(output_m_2)() * 0.0
+    m_0 = type(output_m_0)(scalar_t(0.0))
+    m_1 = type(output_m_1)(scalar_t(0.0))
+    m_2 = type(output_m_2)() * scalar_t(0.0)
 
-    dm_0dgamma = type(output_dm_0dgamma)(0.0)
-    dm_1dgamma = type(output_dm_1dgamma)() * 0.0
-    dm_2dgamma = type(output_dm_2dgamma)(0.0) 
+    dm_0dgamma = type(output_dm_0dgamma)(scalar_t(0.0))
+    dm_1dgamma = type(output_dm_1dgamma)() * scalar_t(0.0)
+    dm_2dgamma = type(output_dm_2dgamma)(scalar_t(0.0)) 
 
     eye = get_eye(m_2)
     
@@ -186,12 +187,12 @@ def computeCRKMoments_Kernel(
         useVolume, queryVolumes, referenceVolumes,
         useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
 
-        type(output_m_0[0])(0.0), # Dummy output value to allow allocation, will be overwritten with actual output
-        type(output_m_1[0])(0.0), # Dummy output value to allow allocation, will be overwritten with actual output
-        type(output_m_2[0])(0.0), # Dummy output value to allow allocation, will be overwritten with actual output
-        type(output_dm_0dgamma[0])(0.0), # Dummy output value to allow allocation, will be overwritten with actual output
-        type(output_dm_1dgamma[0])(0.0), # Dummy output value to allow allocation, will be overwritten with actual output
-        type(output_dm_2dgamma[0])(0.0)  # Dummy output value to allow allocation, will be overwritten with actual output
+        type(output_m_0[0])(scalar_t(0.0)), # Dummy output value to allow allocation, will be overwritten with actual output
+        type(output_m_1[0])(scalar_t(0.0)), # Dummy output value to allow allocation, will be overwritten with actual output
+        type(output_m_2[0])(scalar_t(0.0)), # Dummy output value to allow allocation, will be overwritten with actual output
+        type(output_dm_0dgamma[0])(scalar_t(0.0)), # Dummy output value to allow allocation, will be overwritten with actual output
+        type(output_dm_1dgamma[0])(scalar_t(0.0)), # Dummy output value to allow allocation, will be overwritten with actual output
+        type(output_dm_2dgamma[0])(scalar_t(0.0))  # Dummy output value to allow allocation, will be overwritten with actual output
     )
 
     output_m_0[i] = m_0

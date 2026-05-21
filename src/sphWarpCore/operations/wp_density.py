@@ -39,14 +39,14 @@ def computeSPHDensity_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return scalar_t(0.0)
+            return scalar_t(scalar_t(0.0))
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
     # mi      = queryMasses[i] # Generally not needed
     
     # Initialize the output value
-    out = scalar_t(0.0)
+    out = scalar_t(scalar_t(0.0))
     
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):

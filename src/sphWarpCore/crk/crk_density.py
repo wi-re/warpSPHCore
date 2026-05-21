@@ -13,6 +13,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 from sphWarpCore.enumTypes import *
 from sphWarpCore.utils.arg_check import *
 from typing import Optional
+from ..types import *
 
 @wp.func
 def computeCRKDensity_Func(
@@ -59,20 +60,20 @@ def computeCRKDensity_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * 0.0
+            return outputValue * scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
     mi      = queryMasses[i] # Generally not needed
     # Unpack optional correction terms
-    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
-    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
-    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(0.0)
-    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*0.0
+    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
+    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
+    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(scalar_t(0.0))
+    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*scalar_t(0.0)
     
     # Initialize the output value
-    outA     = scalar_t(0.0)
-    outB = scalar_t(0.0)
+    outA     = scalar_t(scalar_t(0.0))
+    outB = scalar_t(scalar_t(0.0))
     
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
@@ -150,7 +151,7 @@ def computeCRKDensity_Kernel(
         useVolume, queryVolumes, referenceVolumes,
         useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
 
-        type(outputValues[i])(0.0)
+        type(outputValues[i])(scalar_t(0.0))
     )
     
 def computeCRKDensityWarp(

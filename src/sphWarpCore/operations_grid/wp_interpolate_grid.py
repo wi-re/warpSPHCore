@@ -49,7 +49,7 @@ def computeSPHInterpolation_grid_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * 0.0
+            return outputValue * scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
@@ -57,11 +57,11 @@ def computeSPHInterpolation_grid_Func(
     rhoi    = queryDensities[i]
     fi      = queryValues[i]
     # Unpack optional correction terms
-    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
-    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
+    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
+    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
     
     # Initialize the output value
-    out     = type(outputValue)(0.0)
+    out     = type(outputValue)(scalar_t(0.0))
     
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(cellParticleCount):
@@ -126,7 +126,7 @@ def computeSPHInterpolation_Kernel(
     if i >= queryPositions.shape[0]:
         return
     
-    out_value = type(outputValues[0])(0.0)
+    out_value = type(outputValues[0])(scalar_t(0.0))
 
     for o in range(numOffsets):
         cellStartIndex, cellParticleCount = checkOffset(
@@ -147,7 +147,7 @@ def computeSPHInterpolation_Kernel(
             opInt, queryKinds, referenceKinds,
             useVolume, queryVolumes, referenceVolumes,
             useCRK, crk_A, crk_B,
-            type(outputValues[0])(0.0)
+            type(outputValues[0])(scalar_t(0.0))
         )
     outputValues[i] = out_value
     

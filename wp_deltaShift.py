@@ -61,7 +61,7 @@ def computeDeltaShift_Func_i(
         j  = wp.int32(offsetArray[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
-                return out * 0.0
+                return out * scalar_t(0.0)
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
@@ -90,13 +90,13 @@ def computeDeltaShift_Func_i(
         #     kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax,
         #     useCRK, Aj, Bj, gradAj, gradBj
         # )
-        # gradw_ij = (gradw_ij - gradw_ji) * 0.5
+        # gradw_ij = (gradw_ij - gradw_ji) * scalar_t(0.5)
         if useGradientRenormalization:
             gradw_ij = matmul(Li, gradw_ij)
 
         ### GENERIC CODE STOPS HERE ###
 
-        dx = wp.pow(mj / rho0, 1.0 / scalar_t(dim))
+        dx = wp.pow(mj / rho0, scalar_t(1.0) / scalar_t(dim))
         
         dx_ = dx / eval_kernelScale(kernel_int, dim)
         
@@ -108,18 +108,18 @@ def computeDeltaShift_Func_i(
         W_0 = eval_k(q, dim, kernel_int) * eval_C_d(dim, kernel_int) / iPow(hij, dim)
         k = w_ij / W_0
 
-        term = (1.0 + R * wp.pow(k, scalar_t(n)))
+        term = (scalar_t(1.0) + R * wp.pow(k, scalar_t(n)))
         densityTerm = mj / (rhoi + rhoj)
 
-        phi_ij = 1.0        
+        phi_ij = scalar_t(1.0)        
         scalarTerm = term * densityTerm * phi_ij
 
         shiftAmount = scalarTerm * gradw_ij
 
-        Ma = scalar_t(0.1)
+        Ma = scalar_t(scalar_t(0.1))
         if computeMach:
             Ma = c_max
-        h2 = (hi / eval_kernelScale(kernel_int, dim) * 2.0)
+        h2 = (hi / eval_kernelScale(kernel_int, dim) * scalar_t(2.0))
         shiftScaling = -CFL * Ma * h2 * h2
         
         out += shiftScaling * shiftAmount
@@ -158,7 +158,7 @@ def computeDeltaShift_Func_Adjacency(
     useVolume, Vi = getVolume_i(correctionData, i)
     useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
 
-    out = type(outputValue)() * 0.0
+    out = type(outputValue)() * scalar_t(0.0)
     for o in range(numOffsets):
         beginIndex = wp.int32(0)
         numIndices = wp.int32(0)
@@ -244,7 +244,7 @@ def computeDeltaShiftWarp(
     CFL: scalar_t, computeMach: bool, c_max: scalar_t,
     rho0: scalar_t, dx: scalar_t, 
 
-    R: scalar_t = 0.25, n: int = 4,
+    R: scalar_t = scalar_t(0.25), n: int = 4,
     
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,

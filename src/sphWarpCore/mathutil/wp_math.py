@@ -244,7 +244,7 @@ def outerTensorProduct(
     dim = wp.int32(2) # hardcoded as this is only implemented for 2D vectors currently.
     
     # the output is stored as a flattened vector, so we need to compute the correct index for accumulation
-    res = type(out)(0.0)
+    res = type(out)(scalar_t(0.0))
     for i in range(flatInputShape): # loop over elements of input tensor
         for j in range(dim): # loop over dimensions of output gradient
             outIndex = j  + i * dim# compute flattened index for output
@@ -260,7 +260,7 @@ def outerTensorProduct(
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32
 ):
     # for 1D vectors the outer product is just a scalar multiplication, so we can skip the indexing logic
-    res = type(out)(0.0)
+    res = type(out)(scalar_t(0.0))
     for i in range(flatInputShape):
         res[i] += vec[0] * tensor[i]
     return res
@@ -295,8 +295,8 @@ def volumeToSupport(volume : float, targetNeighbors : int, dim : int):
 @wp.func
 def volumeToSupport_warp(volume : scalar_t, targetNeighbors : wp.int32, dim : wp.int32):
     if dim == 1:
-        return targetNeighbors * volume / 2.0
+        return targetNeighbors * volume / scalar_t(2.0)
     elif dim == 2:
-        return safe_sqrt(targetNeighbors * volume / np.pi)
+        return safe_sqrt(targetNeighbors * volume / scalar_t(np.pi))
     else:
-        return wp.pow(targetNeighbors * volume / np.pi * 3.0 /4.0, 1.0/3.0)
+        return wp.pow(targetNeighbors * volume / scalar_t(np.pi * 3.0 /4.0), scalar_t(1.0/3.0))

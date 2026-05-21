@@ -372,7 +372,7 @@ from warp import vec2f, vec3f, vec2h, vec3h, vec2d, vec3d
 def zero_like(
     input: Any, # type: ignore
 ):
-    return type(input)() * 0.0
+    return type(input)() * scalar_t(0.0)
 @wp.func
 def zero_like(
     input: wp.float32

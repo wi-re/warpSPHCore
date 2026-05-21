@@ -46,7 +46,7 @@ def curlProduct(
     stride: wp.int32,
     inputElements: wp.int32, outputElements: wp.int32
 ):
-    R = type(output)(0.0)
+    R = type(output)(scalar_t(0.0))
     dim = wp.int32(3) # hardcoded as this is the overload for 3D.
     # stride = wp.int32(outputElements / dim) # this is the number of elements in each dimension of the input tensor fij. So if fij is of shape [d^N] and output is of shape [d^(N-1)] then stride is d^(N-1).
     # // Loop over all possible combinations of the 'trailing' indices
@@ -77,7 +77,7 @@ def curlProduct(
     stride: wp.int32,
     inputElements: wp.int32, outputElements: wp.int32
 ):
-    R = type(output)(0.0)
+    R = type(output)(scalar_t(0.0))
     dim = wp.int32(2) # hardcoded as this is the overload for 2D.
     # stride = wp.int32(outputElements / dim) # this is the number of elements in each dimension of the input tensor fij. So if fij is of shape [d^N] and output is of shape [d^(N-1)] then stride is d^(N-1).
     # // Loop over all possible combinations of the 'trailing' indices
@@ -101,7 +101,7 @@ def curlProduct(
     stride: wp.int32,
     inputElements: wp.int32, outputElements: wp.int32
 ):
-    R = type(output)(0.0)
+    R = type(output)(scalar_t(0.0))
     # in 1D the curl product is just a simple multiplication
     R[0] = 0
     return R
@@ -160,14 +160,14 @@ def computeSPHCurlTensor_grid_Func(
     # Unpack optional correction terms
     if useGradHTerms:
         fi  = queryValues[i] / queryOmegas[i]
-    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*0.0
-    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
-    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
-    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(0.0)
-    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*0.0
+    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*scalar_t(0.0)
+    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
+    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
+    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(scalar_t(0.0))
+    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*scalar_t(0.0)
     
     # Initialize the output value
-    out     = type(outputValue)(0.0)
+    out     = type(outputValue)(scalar_t(0.0))
 
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(cellParticleCount):
@@ -183,7 +183,7 @@ def computeSPHCurlTensor_grid_Func(
         mj = referenceMasses[j]
         rhoj = referenceDensities[j]
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
-        fj = type(fi)(0.0)
+        fj = type(fi)(scalar_t(0.0))
         if preScatteredQuantities:
             if useGradHTerms:
                 fj = referenceValues[jj] / referenceOmegas[j]
@@ -254,7 +254,7 @@ def computeSPHCurlTensor_grid_Kernel(
     if i >= queryPositions.shape[0]:
         return
     
-    out_value = type(outputValues[0])() * 0.0
+    out_value = type(outputValues[0])() * scalar_t(0.0)
 
     for o in range(numOffsets):
         cellStartIndex, cellParticleCount = checkOffset(

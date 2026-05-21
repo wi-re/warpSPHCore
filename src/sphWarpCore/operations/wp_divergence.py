@@ -26,7 +26,7 @@ def divergenceProduct(
     output: vector(dtype = scalar_t, length=Any), # type: ignore
     outputElements: wp.int32, dotMode: wp.bool
 ):
-    res = type(output)(0.0)
+    res = type(output)(scalar_t(0.0))
     # res is now of shape [d^(N-1)] where N is the rank of the original input tensor.
     # we need to do a product between fij which is of shape [d^N] and kernelGradient which is of shape [d] to get an output of shape [d^(N-1)]
     
@@ -50,7 +50,7 @@ def divergenceProduct(
     output: vector(dtype = scalar_t, length=Any), # type: ignore
     outputElements: wp.int32, dotMode: wp.bool
 ):
-    res = type(output)(0.0)
+    res = type(output)(scalar_t(0.0))
     # res is now of shape [d^(N-1)] where N is the rank of the original input tensor.
     # we need to do a product between fij which is of shape [d^N] and kernelGradient which is of shape [d] to get an output of shape [d^(N-1)]
     
@@ -75,7 +75,7 @@ def divergenceProduct(
     output: vector(dtype = scalar_t, length=Any), # type: ignore
     outputElements: wp.int32, dotMode: wp.bool
 ):
-    res = type(output)(0.0)
+    res = type(output)(scalar_t(0.0))
     # in 1D the divergence product is just a simple multiplication
     res[0] = fij[0] * kernelGradient[0]
     return res 
@@ -126,7 +126,7 @@ def computeSPHDivergenceTensor_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * 0.0
+            return outputValue * scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
@@ -136,14 +136,14 @@ def computeSPHDivergenceTensor_Func(
     # Unpack optional correction terms
     if useGradHTerms:
         fi  = queryValues[i] / queryOmegas[i]
-    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*0.0
-    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
-    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
-    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(0.0)
-    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*0.0
+    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*scalar_t(0.0)
+    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
+    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
+    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(scalar_t(0.0))
+    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*scalar_t(0.0)
     
     # Initialize the output value
-    out     = type(outputValue)(0.0)
+    out     = type(outputValue)(scalar_t(0.0))
 
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
@@ -161,7 +161,7 @@ def computeSPHDivergenceTensor_Func(
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
         if consistentDivergence:
             apparentVolume = mj / rhoi if not useVolume else referenceVolumes[j] * rhoj / rhoi
-        fj = type(fi)(0.0)
+        fj = type(fi)(scalar_t(0.0))
         if preScatteredQuantities:
             if useGradHTerms:
                 fj = referenceValues[jj] / referenceOmegas[j]
@@ -243,7 +243,7 @@ def computeSPHDivergenceTensor_Kernel(
 
         consistentDivergence, dotMode,
 
-        type(outputValues[i])(0.0))
+        type(outputValues[i])(scalar_t(0.0)))
     
 from ..enumTypes import *
 

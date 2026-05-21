@@ -165,7 +165,7 @@ def parseArguments(
     if not isinstance(adjacency, CompactHashMap):
         adj = True #, (adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors,
                 #      getCachedDummyTensor((1,), device=device, dtype = torch.int64), 
-                #      domainMin, domainMax, wp.float32(0.0), # periodicity is handled within the kernel, so we can just pass a dummy value here
+                #      domainMin, domainMax, wp.float32(scalar_t(0.0)), # periodicity is handled within the kernel, so we can just pass a dummy value here
                 #      getCachedDummyTensor((1,), device=device, dtype = torch.int32),  # numCells
                 #      getCachedDummyTensor((1, 2), device=device, dtype = torch.int32), # hashTable
                 #      getCachedDummyTensor((1, 3), device=device, dtype = torch.int64), # cellTable
@@ -178,7 +178,7 @@ def parseArguments(
         gridState.sortIndex = castTorchToWarpAsBuiltins(getCachedDummyTensor((1,), device=device, dtype = torch.int64))
         gridState.qMin = castTorchToWarpAsBuiltins(domainMin)
         gridState.qMax = castTorchToWarpAsBuiltins(domainMax)
-        gridState.hCell = 0.0 # not used in adjacency mode
+        gridState.hCell = scalar_t(scalar_t(0.0)) # not used in adjacency mode
         gridState.numCells = castTorchToWarpAsBuiltins(getCachedDummyTensor((1,), device=device, dtype = torch.int32))
         gridState.hashTable = castTorchToWarpAsBuiltins(getCachedDummyTensor((1, 2), device=device, dtype = torch.int32))
         gridState.cellTable = castTorchToWarpAsBuiltins(getCachedDummyTensor((1, 3), device=device, dtype = torch.int64))
@@ -433,7 +433,7 @@ def extractStateInfo(
                 grid_sortIndex  = getCachedDummyTensor((1,),    dtype=torch.int64,  device=device)
                 grid_qMin       = domainMin
                 grid_qMax       = domainMax
-                grid_hCell      = 0.0
+                grid_hCell      = scalar_t(scalar_t(0.0))
                 grid_numCells   = getCachedDummyTensor((1,),    dtype=torch.int32,  device=device)
                 grid_hashTable  = getCachedDummyTensor((1, 2),  dtype=torch.int32,  device=device)
                 grid_cellTable  = getCachedDummyTensor((1, 3),  dtype=torch.int64,  device=device)

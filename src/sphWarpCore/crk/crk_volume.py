@@ -13,6 +13,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 from sphWarpCore.enumTypes import *
 from sphWarpCore.utils.arg_check import *
 from typing import Optional
+from ..types import *
 
 @wp.func
 def computeCRKVolume_Func(
@@ -59,7 +60,7 @@ def computeCRKVolume_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * 0.0
+            return outputValue * scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
@@ -67,7 +68,7 @@ def computeCRKVolume_Func(
     # Unpack optional correction terms
     # Unpack optional correction terms    
     # Initialize the output value
-    out     = type(outputValue)(0.0)
+    out     = type(outputValue)(scalar_t(0.0))
     
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
@@ -87,7 +88,7 @@ def computeCRKVolume_Func(
 
         out += w_ij
 
-    return 1.0 / out
+    return scalar_t(1.0) / out
 
 @wp.kernel
 def computeCRKVolume_Kernel(
@@ -134,7 +135,7 @@ def computeCRKVolume_Kernel(
         useVolume, queryVolumes, referenceVolumes,
         useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
 
-        type(outputValues[i])(0.0)
+        type(outputValues[i])(scalar_t(0.0))
     )
     
 def computeCRKVolumeWarp(

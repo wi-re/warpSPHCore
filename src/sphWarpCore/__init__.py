@@ -21,7 +21,7 @@ Or import subpackages directly:
 
 from . import radius
 from . import ops
-from .type_config import scalar_t, scalar, dim_t, get_type_config
+from .type_config import scalar_t, scalar, dim_t, get_type_config,  get_torch_precision
 
 # Convenience re-exports of the most commonly used symbols
 
@@ -139,6 +139,6 @@ __all__ = [
     'launch_kernel', 'warpWrapper',
     'StateAwareWarpFunction', 'extractStateInfo', 'warpWrapper2',
     'matmul',
-    'scalar_t', 'vec_t', 'mat_t', 'vecArray_t', 'matArray_t', 'intArray_t', 'scalarArray_t'
+    'scalar_t', 'vec_t', 'mat_t', 'vecArray_t', 'matArray_t', 'intArray_t', 'scalarArray_t', 'get_torch_precision'
 
 ]

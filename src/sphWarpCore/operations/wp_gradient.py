@@ -57,7 +57,7 @@ def computeSPHGradientTensor_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * 0.0
+            return outputValue * scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
@@ -67,14 +67,14 @@ def computeSPHGradientTensor_Func(
     # Unpack optional correction terms
     if useGradHTerms:
         fi  = queryValues[i] / queryOmegas[i]
-    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*0.0
-    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
-    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
-    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(0.0)
-    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*0.0
+    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*scalar_t(0.0)
+    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
+    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
+    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(scalar_t(0.0))
+    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*scalar_t(0.0)
     
     # Initialize the output value
-    out     = type(outputValue)(0.0)
+    out     = type(outputValue)(scalar_t(0.0))
 
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
@@ -91,7 +91,7 @@ def computeSPHGradientTensor_Func(
         rhoj = referenceDensities[j]
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
 
-        fj   = type(fi)(0.0)
+        fj   = type(fi)(scalar_t(0.0))
         if preScatteredQuantities:
             if useGradHTerms:
                 fj = referenceValues[jj] / referenceOmegas[j]
@@ -176,7 +176,7 @@ def computeSPHGradientTensor_Kernel(
         useVolume, queryVolumes, referenceVolumes,
         useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
 
-        type(outputValues[i])(0.0)
+        type(outputValues[i])(scalar_t(0.0))
     )
     
 

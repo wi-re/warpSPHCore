@@ -24,9 +24,9 @@ from ..enumTypes import *
 def compute_mu_ij(
     ux_ij: scalar_t, r_ij: scalar_t, h: scalar_t, viscosityTerm: wp.int32, xi: scalar_t
 ):
-    mu_ij = ux_ij / (r_ij + 1e-14 * h) # Always start with this as the base
+    mu_ij = ux_ij / (r_ij + scalar_t(1e-14) * h) # Always start with this as the base
 
-    scalingFactor = h / xi / (r_ij + 1e-14 * h)
+    scalingFactor = h / xi / (r_ij + scalar_t(1e-14) * h)
     scaled_mu_ij = mu_ij * scalingFactor
     
     if viscosityTerm == wp.static(ViscosityTerms.Default.value): # Default to Monaghan1992
@@ -34,23 +34,23 @@ def compute_mu_ij(
     elif viscosityTerm == wp.static(ViscosityTerms.MonaghanGingold1983.value): # MonaghanGingold1983
         return scaled_mu_ij, h / xi
     elif viscosityTerm == wp.static(ViscosityTerms.Cleary1998.value): # Cleary1998
-        return mu_ij, 1.0
+        return mu_ij, scalar_t(1.0)
     elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1992.value): # Monaghan1992
-        return scaled_mu_ij, 1.0 * scalingFactor
+        return scaled_mu_ij, scalar_t(1.0) * scalingFactor
     elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1997a.value): # Monaghan1997a
-        return mu_ij, 1.0
+        return mu_ij, scalar_t(1.0)
     elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1997b.value): # Monaghan1997b
-        return mu_ij, 1.0
+        return mu_ij, scalar_t(1.0)
     elif viscosityTerm == wp.static(ViscosityTerms.Dukowicz.value): # Dukowicz
-        return mu_ij, 1.0
+        return mu_ij, scalar_t(1.0)
     elif viscosityTerm == wp.static(ViscosityTerms.Price2012_98.value): # Price2012_98
-        return mu_ij, 1.0
+        return mu_ij, scalar_t(1.0)
     elif viscosityTerm == wp.static(ViscosityTerms.Price2012.value): # Price2012
-        return mu_ij, 1.0
+        return mu_ij, scalar_t(1.0)
     elif viscosityTerm == wp.static(ViscosityTerms.Price2008.value): # Price2008
-        return mu_ij, 1.0
+        return mu_ij, scalar_t(1.0)
     elif viscosityTerm == wp.static(ViscosityTerms.Wadsley2008.value): # Wadsley2008
-        return mu_ij, 1.0
+        return mu_ij, scalar_t(1.0)
     elif viscosityTerm == wp.static(ViscosityTerms.DeltaSPH.value): # DeltaSPH
         return scaled_mu_ij, h / xi
     else:
@@ -78,7 +78,7 @@ def compute_bars(
     elif viscosityTerm == wp.static(ViscosityTerms.Cleary1998.value): # Cleary1998
         use_rho_bar = False
         use_c_bar = False
-        use_h_bar = False
+        use_h_bar = False   >
     elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1992.value): # Monaghan1992
         use_rho_bar = True
         use_c_bar = True
@@ -120,9 +120,9 @@ def compute_bars(
         use_c_bar = True
         use_h_bar = True
 
-    rho = scalar_t(0.0)
-    c = scalar_t(0.0)
-    h = scalar_t(0.0)
+    rho = scalar_t(scalar_t(0.0))
+    c = scalar_t(scalar_t(0.0))
+    h = scalar_t(scalar_t(0.0))
 
     if use_rho_bar:
         rho = rho_bar

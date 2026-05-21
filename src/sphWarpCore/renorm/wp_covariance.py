@@ -54,21 +54,21 @@ def computeSPHCovariance_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * 0.0
+            return outputValue * scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
     # mi      = queryMasses[i] # Generally not needed
     rhoi    = queryDensities[i]
     # Unpack optional correction terms
-    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*0.0
-    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
-    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
-    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(0.0)
-    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*0.0
+    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*scalar_t(0.0)
+    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
+    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
+    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(scalar_t(0.0))
+    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*scalar_t(0.0)
     
     # Initialize the output value
-    out     = type(outputValue)(0.0)
+    out     = type(outputValue)(scalar_t(0.0))
     
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
@@ -144,7 +144,7 @@ def computeSPHCovariance_Kernel(
         useVolume, queryVolumes, referenceVolumes,
         useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
 
-        type(outputValues[i])(0.0)
+        type(outputValues[i])(scalar_t(0.0))
     )
     
 
@@ -235,7 +235,7 @@ def pinv2x2(M):
         c = M[:,1,0]
         d = M[:,1,1]
 
-        theta = 0.5 * torch.atan2(2 * a * c + 2 * b * d, a**2 + b**2 - c**2 - d**2)
+        theta = scalar_t(0.5) * torch.atan2(2 * a * c + 2 * b * d, a**2 + b**2 - c**2 - d**2)
         cosTheta = torch.cos(theta)
         sinTheta = torch.sin(theta)
         U = torch.zeros_like(M)
@@ -250,7 +250,7 @@ def pinv2x2(M):
         o1 = torch.sqrt((S1 + S2) / 2)
         o2 = torch.sqrt(torch.clamp(S1 - S2, min = 1e-9) / 2)
 
-        phi = 0.5 * torch.atan2(2 * a * b + 2 * c * d, a**2 - b**2 + c**2 - d**2)
+        phi = scalar_t(0.5) * torch.atan2(2 * a * b + 2 * c * d, a**2 - b**2 + c**2 - d**2)
         cosPhi = torch.cos(phi)
         sinPhi = torch.sin(phi)
         s11 = torch.sign((a * cosTheta + c * sinTheta) * cosPhi + ( b * cosTheta + d * sinTheta) * sinPhi)

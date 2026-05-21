@@ -24,7 +24,7 @@ def computeDotLaplacian(
     # dot = wp.vec3f(dotx, doty, dotz)
     fkq = dotx * kernelGradient[0]
 
-    result = type(q_ij)(-2.0 * fkq)
+    result = type(q_ij)(-scalar_t(2.0) * fkq)
     return result
 
 @wp.func
@@ -36,11 +36,11 @@ def computeDotLaplacian(
     dotx = q_ij * n_ij2[0]
     doty = q_ij * n_ij2[1]
 
-    output = type(q_ij)(0.0)
+    output = type(q_ij)(scalar_t(0.0))
     for i in range(inputLength):
         output[i] += dotx[i] * kernelGradient[0] + doty[i] * kernelGradient[1]
 
-    return -2.0 * output
+    return -scalar_t(2.0) * output
 
 @wp.func
 def computeDotLaplacian(
@@ -52,11 +52,11 @@ def computeDotLaplacian(
     doty = q_ij * n_ij2[1]
     dotz = q_ij * n_ij2[2]
 
-    output = type(q_ij)(0.0)
+    output = type(q_ij)(scalar_t(0.0))
     for i in range(inputLength):
         output[i] += dotx[i] * kernelGradient[0] + doty[i] * kernelGradient[1] + dotz[i] * kernelGradient[2]
 
-    return -2.0 * output
+    return -scalar_t(2.0) * output
 
 @wp.func
 def computeLaplacianDot2(
@@ -79,16 +79,16 @@ def computeLaplacianDot2(
     F_ab = wp.dot(n_ij, kernelGradient) / r_eps # this is a scalar
     leading_dim = wp.int32(inputLength // dim) # this is the number of leading dimensions in q_ij before the last dimension of size dim
     
-    output = type(q_ij)(0.0)
+    output = type(q_ij)(scalar_t(0.0))
     for i in range(inputLength):
         # In this case q_ij is some quantity of internal shape [..., dim] so we compute the dot product across the trailing dimension of q_ij and n_ij, and then multiply by n_ij again to get the contribution for each component of the output. This is equivalent to the left term in Price's equation where we have a double dot product between n_ij and q_ij, but we compute it in a way that allows for q_ij to have an arbitrary number of leading dimensions as long as the last dimension has size dim.
         # leftTerm = scalar_t(dim + 2) * q_ij[i] * n_ij[i %dim] * n_ij[i%dim] * F_ab
-        # fkq = -(leftTerm + rightTerm*0.0)
+        # fkq = -(leftTerm + rightTerm*scalar_t(0.0))
         d = i % dim                  # component within trailing dim
         b = i // dim                 # block index over leading dims
         base = b * dim               # start of this block in flattened storage
         
-        proj = scalar_t(0.0)
+        proj = scalar_t(scalar_t(0.0))
         for k in range(dim):
             proj += q_ij[base + k] * n_ij[k]
 
@@ -114,12 +114,12 @@ def positiveDotProduct(
     f_ij: vector(dtype = scalar_t, length=Any), # type: ignore
     dim: wp.int32
 ):
-    dot = scalar_t(0.0)
+    dot = scalar_t(scalar_t(0.0))
     for d in range(dim):
         dot += x_ij[d] * fq_ij[d]
     
-    result = type(f_ij)(0.0)
-    if dot >= 0.0:
+    result = type(f_ij)(scalar_t(0.0))
+    if dot >= scalar_t(0.0):
         for d in range(dim):
             result[d] = f_ij[d]
     return result
@@ -169,7 +169,7 @@ def computeSPHLaplacianTensor_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * 0.0
+            return outputValue * scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
@@ -179,14 +179,14 @@ def computeSPHLaplacianTensor_Func(
     # Unpack optional correction terms
     if useGradHTerms:
         fi  = queryValues[i] / queryOmegas[i]
-    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*0.0
-    Ai      = queryA[i] if useCRK else type(queryA[0])(0.0)
-    Bi      = queryB[i] if useCRK else type(queryB[0])(0.0)
-    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(0.0)
-    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*0.0
+    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*scalar_t(0.0)
+    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
+    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
+    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(scalar_t(0.0))
+    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*scalar_t(0.0)
     
     # Initialize the output value
-    out     = type(outputValue)(0.0)
+    out     = type(outputValue)(scalar_t(0.0))
         
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
@@ -203,7 +203,7 @@ def computeSPHLaplacianTensor_Func(
         mj = referenceMasses[j]
         rhoj = referenceDensities[j]
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
-        fj = type(fi)(0.0)
+        fj = type(fi)(scalar_t(0.0))
         if preScatteredQuantities:
             if useGradHTerms:
                 fj = referenceValues[jj] / referenceOmegas[j]
@@ -226,7 +226,7 @@ def computeSPHLaplacianTensor_Func(
         if useGradientRenormalization:
             kernelGradient = matmul(Li, kernelGradient)
             
-        q_ij = type(fi)(0.0)
+        q_ij = type(fi)(scalar_t(0.0))
 
         if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
             q_ij = fj * apparentVolume
@@ -244,12 +244,12 @@ def computeSPHLaplacianTensor_Func(
         eps = 1e-8
         n_ij = x_ij / (r_ij + eps * h_ij)
 
-        laplacian_contribution = type(outputValue)(0.0)
+        laplacian_contribution = type(outputValue)(scalar_t(0.0))
 
         if laplacianMode_int == wp.static(LaplacianScheme.Naive.value): # Naive
             laplacian_contribution = q_ij * sphKernelLaplacian(xi, referencePositions[j], hi, referenceSupports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax)
         elif laplacianMode_int == wp.static(LaplacianScheme.Brookshaw.value): # Brookshaw
-            laplacian_contribution = -2.0 * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
+            laplacian_contribution = -scalar_t(2.0) * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
         elif laplacianMode_int == wp.static(LaplacianScheme.Dot.value): # Dot
             laplacian_contribution = computeLaplacianDot2(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
         elif laplacianMode_int == wp.static(LaplacianScheme.Default.value): # Default
@@ -311,7 +311,7 @@ def computeSPHLaplacianTensor_Kernel(
         useVolume, queryVolumes, referenceVolumes,
         useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
 
-        type(outputValues[i])(0.0))
+        type(outputValues[i])(scalar_t(0.0)))
     
 from ..enumTypes import *
 
