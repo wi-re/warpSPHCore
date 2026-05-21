@@ -17,7 +17,7 @@ from typing import Optional
 
 @wp.func
 def pseudoInverse1x1(
-    m: matrix(shape = (1, 1), dtype = wp.float32) # type: ignore
+    m: matrix(shape = (1, 1), dtype = scalar_t) # type: ignore
 ):
     if m[0, 0] > 1e-10:
         return wp.mat11f(1.0 / m[0, 0]), wp.vec1f(m[0, 0])
@@ -27,9 +27,9 @@ def pseudoInverse1x1(
 
 @wp.kernel
 def pseudoInverse1x1Kernel(
-    input_matrices: wp.array(dtype = matrix(shape = (1, 1), dtype = wp.float32)), # type: ignore
-    output_matrices: wp.array(dtype = matrix(shape = (1, 1), dtype = wp.float32)), # type: ignore
-    output_evals: wp.array(dtype = vector(length = 1, dtype = wp.float32)), # type: ignore
+    input_matrices: wp.array(dtype = matrix(shape = (1, 1), dtype = scalar_t)), # type: ignore
+    output_matrices: wp.array(dtype = matrix(shape = (1, 1), dtype = scalar_t)), # type: ignore
+    output_evals: wp.array(dtype = vector(length = 1, dtype = scalar_t)), # type: ignore
 ):
     i = wp.tid()
     if i >= input_matrices.shape[0]:

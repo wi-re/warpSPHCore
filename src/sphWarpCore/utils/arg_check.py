@@ -12,6 +12,7 @@ from sphWarpCore.kernels.wp_kernel import *
 from sphWarpCore.utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
 from sphWarpCore.enumTypes import *
 from typing import Optional
+from ..types import *
 
 
 def checkInputRenormalization( dim: int, device: torch.device,
@@ -19,8 +20,9 @@ def checkInputRenormalization( dim: int, device: torch.device,
 ):
     if useGradientRenormalization and renormalizationMatrices is None:
         raise ValueError("Gradient renormalization is enabled but no renormalization matrices were provided.")
+    torch_t = get_torch_precision()
     if not useGradientRenormalization and renormalizationMatrices is None:
-        return getCachedDummyTensor((1, dim, dim), dtype=torch.float32, device= device)
+        return getCachedDummyTensor((1, dim, dim), dtype=torch_t, device= device)
     return renormalizationMatrices
 
 def checkInputGradHTerms( dim: int, device: torch.device,
@@ -28,9 +30,10 @@ def checkInputGradHTerms( dim: int, device: torch.device,
 ):  
     if useGradHTerms and (queryOmegas is None or referenceOmegas is None):
         raise ValueError("Grad-h correction is enabled but query and/or reference omegas were not provided.")
+    torch_t = get_torch_precision()
     if not useGradHTerms and (queryOmegas is None or referenceOmegas is None):
-        dummyQueryOmegas = getCachedDummyTensor((1,), dtype=torch.float32, device=device)
-        dummyReferenceOmegas = getCachedDummyTensor((1,), dtype=torch.float32, device=device)
+        dummyQueryOmegas = getCachedDummyTensor((1,), dtype=torch_t, device=device)
+        dummyReferenceOmegas = getCachedDummyTensor((1,), dtype=torch_t, device=device)
         return dummyQueryOmegas, dummyReferenceOmegas
     return queryOmegas, referenceOmegas
 
@@ -39,9 +42,10 @@ def checkInputVolume( dim: int, device: torch.device,
 ):
     if useVolume and (queryVolumes is None or referenceVolumes is None):
         raise ValueError("Using actual volume is enabled but query and/or reference volumes were not provided.")
+    torch_t = get_torch_precision()
     if not useVolume and (queryVolumes is None or referenceVolumes is None):
-        dummyQueryVolumes = getCachedDummyTensor((1,), dtype=torch.float32, device=device)
-        dummyReferenceVolumes = getCachedDummyTensor((1,), dtype=torch.float32, device=device)
+        dummyQueryVolumes = getCachedDummyTensor((1,), dtype=torch_t, device=device)
+        dummyReferenceVolumes = getCachedDummyTensor((1,), dtype=torch_t, device=device)
         return dummyQueryVolumes, dummyReferenceVolumes
     return queryVolumes, referenceVolumes
 
@@ -50,11 +54,12 @@ def checkInputCRK( dim: int, device: torch.device,
 ):
     if useCRK and (crk_A is None or crk_B is None or crk_gradA is None or crk_gradB is None):
         raise ValueError("Using CRK correction is enabled but CRK correction terms were not fully provided.")
+    torch_t = get_torch_precision()
     if not useCRK and (crk_A is None or crk_B is None or crk_gradA is None or crk_gradB is None):
-        dummy_crk_A = getCachedDummyTensor((1,), dtype=torch.float32, device=device)
-        dummy_crk_B = getCachedDummyTensor((1, dim), dtype=torch.float32, device=device)
-        dummy_crk_gradA = getCachedDummyTensor((1, dim), dtype=torch.float32, device=device)
-        dummy_crk_gradB = getCachedDummyTensor((1, dim, dim), dtype=torch.float32, device=device)
+        dummy_crk_A = getCachedDummyTensor((1,), dtype=torch_t, device=device)
+        dummy_crk_B = getCachedDummyTensor((1, dim), dtype=torch_t, device=device)
+        dummy_crk_gradA = getCachedDummyTensor((1, dim), dtype=torch_t, device=device)
+        dummy_crk_gradB = getCachedDummyTensor((1, dim, dim), dtype=torch_t, device=device)
         return dummy_crk_A, dummy_crk_B, dummy_crk_gradA, dummy_crk_gradB
     return crk_A, crk_B, crk_gradA, crk_gradB
 

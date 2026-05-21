@@ -19,17 +19,18 @@ from ..enumTypes import *
 from .util import *
 
 from dataclasses import dataclass, field
+from ..types import *
 
 @wp.struct
 class DiffusionParameters:
-    c_s: wp.float32 = field(default=1.0) # Speed of sound, used in some formulations to compute the signal velocity
-    C_l: wp.float32 = field(default=1.0) # Linear viscosity coefficient, also referred to as alpha in some formulations
-    C_q: wp.float32 = field(default=2.0) # Quadratic viscosity coefficient, also referred to as beta in some formulations
-    Cu_l: wp.float32 = field(default=1.0) # Linear thermal conductivity coefficient, also referred to as alpha_u in some formulations
-    Cu_q: wp.float32 = field(default=2.0) # Quadratic thermal conductivity coefficient, also referred to as beta_u in some formulations
+    c_s: scalar_t = field(default=1.0) # Speed of sound, used in some formulations to compute the signal velocity
+    C_l: scalar_t = field(default=1.0) # Linear viscosity coefficient, also referred to as alpha in some formulations
+    C_q: scalar_t = field(default=2.0) # Quadratic viscosity coefficient, also referred to as beta in some formulations
+    Cu_l: scalar_t = field(default=1.0) # Linear thermal conductivity coefficient, also referred to as alpha_u in some formulations
+    Cu_q: scalar_t = field(default=2.0) # Quadratic thermal conductivity coefficient, also referred to as beta_u in some formulations
     
-    K: wp.float32 = field(default=1.0) # Overall viscosity scaling factor
-    thermalConductivity: wp.float32 = field(default=0.5) # Overall thermal conductivity scaling factor
+    K: scalar_t = field(default=1.0) # Overall viscosity scaling factor
+    thermalConductivity: scalar_t = field(default=0.5) # Overall thermal conductivity scaling factor
     viscosityTerm: wp.int32 = field(default=ViscosityTerms.Price2012_98.value) # Viscosity formulation to use, e.g. Monaghan1992, Monaghan1997, Cleary1998 etc.
     thermalConducitiyTerm: wp.int32 = field(default=ViscosityTerms.Price2012_98.value) # Thermal conductivity formulation to use, e.g. Monaghan1997 thermal conductivity term, Cleary1998 thermal conductivity term etc.
     scaleBeta: wp.bool = field(default=False) # If true then the quadratic viscosity term is scaled by the linear viscosity term, as suggested in some papers to reduce excessive viscosity in certain scenarios. This is only relevant for formulations that use a quadratic term, such as Monaghan1992 and Monaghan1997.
@@ -42,22 +43,22 @@ class DiffusionParameters:
 # This is to enable the computation with mj/rhoj as the apparrent volume so the rhoj cancels out for those formulations. This is different from diffSPH which does not multiply by rhoj.
 @wp.func
 def computePi_actual(
-    x_i: vector(dtype = wp.float32, length=Any), x_j:  vector(dtype = wp.float32, length=Any), # type: ignore
-    h_i: wp.float32, h_j: wp.float32, # type: ignore
-    m_i: wp.float32, m_j: wp.float32, # type: ignore
-    rho_i: wp.float32, rho_j: wp.float32, # type: ignore
-    explicitPressure: wp.bool, P_i: wp.float32, P_j: wp.float32, # type: ignore
-    v_i: vector(dtype = wp.float32, length=Any), v_j: vector(dtype = wp.float32, length=Any), # type: ignore
+    x_i: vector(dtype = scalar_t, length=Any), x_j:  vector(dtype = scalar_t, length=Any), # type: ignore
+    h_i: scalar_t, h_j: scalar_t, # type: ignore
+    m_i: scalar_t, m_j: scalar_t, # type: ignore
+    rho_i: scalar_t, rho_j: scalar_t, # type: ignore
+    explicitPressure: wp.bool, P_i: scalar_t, P_j: scalar_t, # type: ignore
+    v_i: vector(dtype = scalar_t, length=Any), v_j: vector(dtype = scalar_t, length=Any), # type: ignore
     
     domainState: domainData, 
     kernel_int : wp.int32,
-    c_i: wp.float32, c_j: wp.float32,
-    alpha_i: wp.float32, alpha_j: wp.float32,
+    c_i: scalar_t, c_j: scalar_t,
+    alpha_i: scalar_t, alpha_j: scalar_t,
 
     viscosityParams: DiffusionParameters,
-    # c_s: wp.float32, # Speed of sound, used in some formulations to compute the signal velocity
-    # C_l: wp.float32, C_q: wp.float32, # Viscosity coefficients also referred to as alpha and beta in some formulations
-    # K_: wp.float32, # Overall viscosity scaling factor
+    # c_s: scalar_t, # Speed of sound, used in some formulations to compute the signal velocity
+    # C_l: scalar_t, C_q: scalar_t, # Viscosity coefficients also referred to as alpha and beta in some formulations
+    # K_: scalar_t, # Overall viscosity scaling factor
     # viscosityTerm: wp.int32, # Viscosity formulation to use, e.g. Monaghan1992, Monaghan1997, Cleary1998 etc.
     # scaleBeta : wp.bool = False, # If true then the quadratic viscosity term is scaled by the linear viscosity term, as suggested in some papers to reduce excessive viscosity in certain scenarios. This is only relevant for formulations that use a quadratic term, such as Monaghan1992 and Monaghan1997.
     # switch : wp.bool = True, # Whether to apply the Monaghan switch that turns off viscosity for diverging particles, i.e. particles that are moving away from each other. This is a common technique to reduce excessive viscosity in expanding flows and is used in many formulations such as Monaghan1992 and Monaghan1997.
@@ -99,8 +100,8 @@ def computePi_actual(
     # if viscosityParams.monaghanSwitch and ux_ij > 0:
     #     mu_ij = 0.0
 
-    v_sig = wp.float32(0.0)
-    K = wp.float32(viscosityParams.K)
+    v_sig = scalar_t(0.0)
+    K = scalar_t(viscosityParams.K)
 
 
     rho, c, h = compute_bars(
@@ -124,7 +125,7 @@ def computePi_actual(
         # Cleary 1998: The terms are given in (8.8) and (8.9) of Monaghan 2005 and are
         # mu_a = 1/8 alpha_a h_a c_a rho_a
         # Pi_ab = - 16 mu_a mu_b / (rho_a rho_b (mu_a + mu_b)) mu_ij
-        f = 1.0/(2.0*(wp.float32(domainState.dim)+2.0)) # Based on estimations based on Monaghan 2005, not given for 1D
+        f = 1.0/(2.0*(scalar_t(domainState.dim)+2.0)) # Based on estimations based on Monaghan 2005, not given for 1D
         mu_i = f * alpha_i * C_l * h_i * c_i * rho_i / xi
         mu_j = f * alpha_j * C_l * h_j * c_j * rho_j / xi
         # 19.8 based on Cleary and Ha 2002
@@ -197,11 +198,11 @@ from ..operations.wp_gradient import computeSPHGradientTensor_Func
 
 @wp.func
 def computePiViscosityKernel_Func(   
-    xi: vector(dtype = wp.float32, length=Any), hi : wp.float32, mi: wp.float32, rhoi: wp.float32, fi : vector(dtype = wp.float32, length=Any), # type: ignore
+    xi: vector(dtype = scalar_t, length=Any), hi : scalar_t, mi: scalar_t, rhoi: scalar_t, fi : vector(dtype = scalar_t, length=Any), # type: ignore
     
-    positions : wp.array(dtype=vector(length=Any, dtype = wp.float32)), supports : wp.array(dtype = wp.float32), masses: wp.array(dtype = wp.float32), densities: wp.array(dtype = wp.float32), values: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
+    positions : wp.array(dtype=vector(length=Any, dtype = scalar_t)), supports : wp.array(dtype = scalar_t), masses: wp.array(dtype = scalar_t), densities: wp.array(dtype = scalar_t), values: wp.array(dtype = vector(dtype = scalar_t, length=Any)), # type: ignore
     
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), # type: ignore
+    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
     mode_uint: wp.uint32, kernel_int: wp.int32, 
     
     neighborList: wp.array(dtype = wp.int64), # type: ignore
@@ -209,11 +210,11 @@ def computePiViscosityKernel_Func(
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     
-    outputValue: vector(length=Any, dtype=wp.float32), # type: ignore
+    outputValue: vector(length=Any, dtype=scalar_t), # type: ignore
 
-    c_s: wp.float32,
-    C_l: wp.float32, C_q: wp.float32,
-    K_: wp.float32,
+    c_s: scalar_t,
+    C_l: scalar_t, C_q: scalar_t,
+    K_: scalar_t,
     viscosityTerm: wp.int32,
     scaleBeta: wp.bool,
     switch: wp.bool,
@@ -250,28 +251,28 @@ def computePiViscosityKernel_Func(
 
 @wp.kernel
 def computeViscosityKernel(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=wp.float32)), referencePositions : wp.array(dtype=vector(length=Any, dtype=wp.float32)), # type: ignore
-    querySupports : wp.array(dtype = wp.float32), referenceSupports : wp.array(dtype = wp.float32), # type: ignore
-    queryMasses: wp.array(dtype = wp.float32), referenceMasses: wp.array(dtype = wp.float32),  # type: ignore
-    queryDensities: wp.array(dtype = wp.float32), referenceDensities: wp.array(dtype = wp.float32), # type: ignore
-    queryValues: wp.array(dtype =vector(dtype = wp.float32, length=Any)), referenceValues: wp.array(dtype = vector(dtype = wp.float32, length=Any)), # type: ignore
+    queryPositions : wp.array(dtype = vector(length=Any, dtype=scalar_t)), referencePositions : wp.array(dtype=vector(length=Any, dtype=scalar_t)), # type: ignore
+    querySupports : wp.array(dtype = scalar_t), referenceSupports : wp.array(dtype = scalar_t), # type: ignore
+    queryMasses: wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t),  # type: ignore
+    queryDensities: wp.array(dtype = scalar_t), referenceDensities: wp.array(dtype = scalar_t), # type: ignore
+    queryValues: wp.array(dtype =vector(dtype = scalar_t, length=Any)), referenceValues: wp.array(dtype = vector(dtype = scalar_t, length=Any)), # type: ignore
     
-    domainMin : wp.array(dtype = wp.float32), domainMax : wp.array(dtype = wp.float32), periodicity : wp.array(dtype = wp.bool), # type: ignore
+    domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), periodicity : wp.array(dtype = wp.bool), # type: ignore
     
     mode_uint: wp.uint32, kernel_int : wp.int32,
     neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32),  # type: ignore
     
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     
-    c_s: wp.float32, # Speed of sound, used in some formulations to compute the signal velocity
-    C_l: wp.float32, C_q: wp.float32, # Viscosity coefficients also referred to as alpha and beta in some formulations
-    K_: wp.float32, # Overall viscosity scaling factor
+    c_s: scalar_t, # Speed of sound, used in some formulations to compute the signal velocity
+    C_l: scalar_t, C_q: scalar_t, # Viscosity coefficients also referred to as alpha and beta in some formulations
+    K_: scalar_t, # Overall viscosity scaling factor
     viscosityTerm: wp.int32, # Viscosity formulation to use, e.g. Monaghan1992, Monaghan1997, Cleary1998 etc.
     scaleBeta : wp.bool, # If true then the quadratic viscosity term is scaled by the linear viscosity term
     switch : wp.bool, # Whether to apply the Monaghan switch that turns off viscosity for diverging particles
     correctXi : wp.bool, # Whether to apply the xi correction factor
     useJ : wp.bool, # Whether to use the properties of the j particle instead of the i particle
-    outputValues : wp.array(dtype = vector(length=Any, dtype = wp.float32)), # type: ignore
+    outputValues : wp.array(dtype = vector(length=Any, dtype = scalar_t)), # type: ignore
 ):
                                                                       
     i = wp.tid()
@@ -306,9 +307,9 @@ def computePiViscosity(
     kernel: KernelFunctions,    
     adjacency: AdjacencyListWarp,
     
-    c_s: float,
-    C_l: float, C_q: float,
-    K: float,
+    c_s: scalar_t,
+    C_l: scalar_t, C_q: scalar_t,
+    K: scalar_t,
     viscosityTerm: ViscosityTerms,
     scaleBeta: bool,
     switch: bool,
@@ -338,7 +339,7 @@ def computePiViscosity(
     numDims = len(inputShape)
 
     warp_interpolation = warpWrapper(
-        launch_kernel, computeViscosityKernel, outputSize, vector(length=flatOutputShape, dtype = wp.float32),
+        launch_kernel, computeViscosityKernel, outputSize, vector(length=flatOutputShape, dtype = scalar_t),
         queryPositions, referencePositions,
         querySupports, referenceSupports,
         queryMasses, referenceMasses,

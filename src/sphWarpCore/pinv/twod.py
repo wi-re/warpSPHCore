@@ -17,25 +17,25 @@ from typing import Optional
 
 @wp.func
 def square(
-    x: float
+    x: scalar_t
 ):
     return x * x
 
 @wp.func
 def clamp(
-    x: float, minVal: float, maxVal: float
+    x: scalar_t, minVal: scalar_t, maxVal: scalar_t
 ):
     return max(min(x, maxVal), minVal)
 
 @wp.func
 def sign(
-    x: float
+    x: scalar_t
 ):
     return 1.0 if x > 0 else (-1.0 if x < 0 else 0.0)
 
 @wp.func
 def diag_embed(
-    x: vector(length = 2, dtype = wp.float32), # type: ignore
+    x: vector(length = 2, dtype = scalar_t), # type: ignore
 ):
     out = wp.mat22f() * 0.0
     out[0,0] = x[0]
@@ -44,8 +44,8 @@ def diag_embed(
 
 @wp.func
 def matmul(
-    A: matrix(shape = (2, 2), dtype = wp.float32), # type: ignore
-    B: matrix(shape = (2, 2), dtype = wp.float32), # type: ignore
+    A: matrix(shape = (2, 2), dtype = scalar_t), # type: ignore
+    B: matrix(shape = (2, 2), dtype = scalar_t), # type: ignore
 ):
     out = wp.mat22f() * 0.0
     for i in range(2):
@@ -55,7 +55,7 @@ def matmul(
 
 @wp.func
 def pseudoInverse2x2(
-    M: matrix(shape = (2, 2), dtype = wp.float32) # type: ignore
+    M: matrix(shape = (2, 2), dtype = scalar_t) # type: ignore
 ):
     a = M[0,0]
     b = M[0,1]
@@ -89,8 +89,8 @@ def pseudoInverse2x2(
     V[1,0] = sinPhi * s11
     V[1,1] = cosPhi * s22
 
-    o1_1 = wp.float32(0.0)
-    o2_1 = wp.float32(0.0)
+    o1_1 = scalar_t(0.0)
+    o2_1 = scalar_t(0.0)
 
     if wp.abs(o1) > 1e-5:
         o1_1 = 1.0 / o1
@@ -109,9 +109,9 @@ def pseudoInverse2x2(
 
 @wp.kernel
 def pseudoInverse2x2Kernel(
-    input_matrices: wp.array(dtype = matrix(shape = (2, 2), dtype = wp.float32)), # type: ignore
-    output_matrices: wp.array(dtype = matrix(shape = (2, 2), dtype = wp.float32)), # type: ignore
-    output_evals: wp.array(dtype = vector(length = 2, dtype = wp.float32)), # type: ignore
+    input_matrices: wp.array(dtype = matrix(shape = (2, 2), dtype = scalar_t)), # type: ignore
+    output_matrices: wp.array(dtype = matrix(shape = (2, 2), dtype = scalar_t)), # type: ignore
+    output_evals: wp.array(dtype = vector(length = 2, dtype = scalar_t)), # type: ignore
 ):
     i = wp.tid()
     if i >= input_matrices.shape[0]:

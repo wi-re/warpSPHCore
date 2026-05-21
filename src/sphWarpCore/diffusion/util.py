@@ -3,6 +3,7 @@ import torch
 
 import warp as wp
 from enum import Enum
+from ..types import *
 from ..kernels.wp_kernel import sphKernel_xi
 from ..mathutil import computeDistanceVec, safe_sqrt
 import warp as wp
@@ -21,7 +22,7 @@ from ..enumTypes import *
 
 @wp.func
 def compute_mu_ij(
-    ux_ij: wp.float32, r_ij: wp.float32, h: wp.float32, viscosityTerm: wp.int32, xi: wp.float32
+    ux_ij: scalar_t, r_ij: scalar_t, h: scalar_t, viscosityTerm: wp.int32, xi: scalar_t
 ):
     mu_ij = ux_ij / (r_ij + 1e-14 * h) # Always start with this as the base
 
@@ -57,9 +58,9 @@ def compute_mu_ij(
 
 @wp.func
 def compute_bars(
-    rho_i : wp.float32, rho_j : wp.float32, rho_bar : wp.float32, 
-    c_i : wp.float32, c_j : wp.float32, c_bar : wp.float32,
-    h_i : wp.float32, h_j : wp.float32, h_bar : wp.float32,
+    rho_i : scalar_t, rho_j : scalar_t, rho_bar : scalar_t, 
+    c_i : scalar_t, c_j : scalar_t, c_bar : scalar_t,
+    h_i : scalar_t, h_j : scalar_t, h_bar : scalar_t,
     viscosityTerm: wp.int32, useJ: bool
 ):
     use_rho_bar = wp.bool(False)
@@ -119,9 +120,9 @@ def compute_bars(
         use_c_bar = True
         use_h_bar = True
 
-    rho = wp.float32(0.0)
-    c = wp.float32(0.0)
-    h = wp.float32(0.0)
+    rho = scalar_t(0.0)
+    c = scalar_t(0.0)
+    h = scalar_t(0.0)
 
     if use_rho_bar:
         rho = rho_bar
