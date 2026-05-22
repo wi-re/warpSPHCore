@@ -89,11 +89,16 @@ def computeCRKDensity_Func(
         mj   = referenceMasses[j]
         Vj = referenceVolumes[j]
 
+
+        Aj = queryA[j] if useCRK else type(queryA[0])(scalar_t(0.0))
+        Bj = queryB[j] if useCRK else type(queryB[0])(scalar_t(0.0))
+        xj = referencePositions[j]
+        hj = referenceSupports[j]
         w_ij = computeKernelCRK(
-            xi, referencePositions[j], 
-            hi, referenceSupports[j], 
-            kernel_int, mode_uint, periodicity, domainMin, domainMax,
-            useCRK, Ai, Bi
+            xj, xi, 
+            hj, hi, 
+            kernel_int, wp.uint32(12), periodicity, domainMin, domainMax,
+            useCRK, Aj, Bj
         )
 
         # termA = scatter_sum(m_i * V_j * W_ij, i, dim = 0, dim_size=particles.positions.shape[0])

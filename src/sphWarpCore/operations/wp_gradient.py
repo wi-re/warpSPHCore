@@ -103,6 +103,22 @@ def computeSPHGradientTensor_Func(
             else:
                 fj = referenceValues[j]
 
+        # Fix for scatter based CRK, should be generalized!
+        Aj = queryA[j] if useCRK else type(queryA[0])(scalar_t(0.0))
+        Bj = queryB[j] if useCRK else type(queryB[0])(scalar_t(0.0))
+        gradA_j = queryGradA[j] if useCRK else type(queryGradA[0])(scalar_t(0.0))
+        gradB_j = queryGradB[j] if useCRK else type(queryGradB[0])()*scalar_t(0.0)
+        xj = referencePositions[j]
+        hj = referenceSupports[j]
+
+        # kernelGradient = -computeKernelGradientCRK(
+        #     xj, xi,
+        #     hj, hi,
+        #     kernel_int, wp.uint32(12), # scatter mode for gradW
+        #     periodicity, domainMin, domainMax,
+        #     True, Aj, Bj, gradA_j, gradB_j
+        # )
+
         kernelGradient = computeKernelGradientCRK(
             xi, referencePositions[j], 
             hi, referenceSupports[j],

@@ -72,7 +72,7 @@ def computeCRKFactors_(
         useVolume=True, queryVolumes = apparentArea, referenceVolumes = apparentArea,
         domain = domain, adjacency = adjacency, 
         operationMode = operationMode,
-        kernel = kernel, supportMode = supportMode,
+        kernel = kernel, supportMode = SupportScheme.Scatter,
         useCRK=True, crk_A = A, crk_B = B, crk_gradA = gradA, crk_gradB = gradB,
         queryKinds = queryKinds, referenceKinds = referenceKinds
     )
