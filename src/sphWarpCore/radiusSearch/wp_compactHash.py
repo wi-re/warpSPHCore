@@ -212,6 +212,16 @@ def getLinearIndex64(
     return linearIndex
 
 
+@wp.func
+def clampCellIndex(cellIndex: wp.vec3i, numCells: wp.array(dtype=wp.int32), D: int) -> wp.vec3i:
+    for d in range(D):
+        if cellIndex[d] < 0:
+            cellIndex[d] = 0
+        elif cellIndex[d] >= numCells[d]:
+            cellIndex[d] = numCells[d] - 1
+    return cellIndex
+
+
 @wp.kernel
 def indexCells(
     cellIndices: wp.array2d(dtype=wp.int32),
@@ -425,6 +435,7 @@ def radiusSearchCountNeighborsCompactHashMap(
     cellIndex = wp.vec3i(0, 0, 0, dtype=wp.int32)
     for d in range(D):
         cellIndex[d] = wp.int32(wp.floor((queryPos[d] - qMin[d]) / hCell))
+    cellIndex = clampCellIndex(cellIndex, numCells, D)
     # Compute the hash value for the cell index
     # hashValue = hashGridIndex(cellIndex, hashMapLength)
     numOffsets = cellOffsets.shape[0]
@@ -574,6 +585,7 @@ def radiusSearchCollectCompactHashMap(
     cellIndex = wp.vec3i(0, 0, 0, dtype=wp.int32)
     for d in range(D):
         cellIndex[d] = wp.int32(wp.floor((queryPos[d] - qMin[d]) / hCell))
+    cellIndex = clampCellIndex(cellIndex, numCells, D)
     # Compute the hash value for the cell index
     # hashValue = hashGridIndex(cellIndex, hashMapLength)
     numOffsets = cellOffsets.shape[0]
@@ -738,6 +750,8 @@ def buildCompactHashMap(
             # We can now use the cumCell to index into the sortedIndices to get the cell index for each particle
             # We could have reversed the linear indices to get the cell index for each cell, but this is more reliable and avoids inverse computations
             sortedIndices = torch.floor((sortedPositions - qMin) / to_numpy(hCell)).to(torch.int32)
+            for d in range(sortedIndices.shape[1]):
+                sortedIndices[:, d] = torch.clamp(sortedIndices[:, d], 0, int(numCells[d].item()) - 1)
             cellGridIndices = sortedIndices[cumCell,:]
             # Cell indices contains the linear indices of the particles in each cell
             # cellCounters contains the number of particles in each cell

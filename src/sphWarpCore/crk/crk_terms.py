@@ -46,6 +46,9 @@ def computeCRKTermsWarp(
 
     mask = (num_nbrs < 2) | (is_singular > (0.0))
 
+    if mask.any():
+        print(f"Warning: {mask.sum()} particles have less than 2 neighbors or singular moment matrices. Applying limiter to CRK terms for these particles.")
+
     # if N_NBRS < 2 or is_singular > scalar_t(0.0):
     # d_ai[d_idx] = scalar_t(1.0)
     # for i in range(d):

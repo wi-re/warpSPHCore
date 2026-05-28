@@ -74,6 +74,10 @@ def computeCRKDensity_Func(
     # Initialize the output value
     outA     = scalar_t(scalar_t(0.0))
     outB = scalar_t(scalar_t(0.0))
+
+    wsum = scalar_t(0.0)
+    mDensity = scalar_t(0.0)
+    vol1 = scalar_t(0.0)
     
     # Loop over neighbors to compute the gradient contribution from each neighbor    
     for neighborIndex in range(numNeighs):
@@ -95,18 +99,24 @@ def computeCRKDensity_Func(
         xj = referencePositions[j]
         hj = referenceSupports[j]
         w_ij = computeKernelCRK(
-            xj, xi, 
-            hj, hi, 
+            xi, xj, 
+            hi, hj, 
             kernel_int, wp.uint32(12), periodicity, domainMin, domainMax,
-            useCRK, Aj, Bj
+            False, Ai, Bi
         )
 
         # termA = scatter_sum(m_i * V_j * W_ij, i, dim = 0, dim_size=particles.positions.shape[0])
         # termB = scatter_sum(V_j * V_j * W_ij, i, dim = 0, dim_size=particles.positions.shape[0])
 
 
-        outA += mi * Vj * w_ij
+        outA += mj * Vj * w_ij
         outB += Vj * Vj * w_ij
+
+        wsum += Vj * w_ij
+        mDensity += mj * Vj * w_ij
+        vol1 += Vj * Vj * w_ij
+
+    return mDensity / (vol1)
 
     return outA/outB
 
