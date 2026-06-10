@@ -102,7 +102,7 @@ def computeCRKDensity_Func(
             xi, xj, 
             hi, hj, 
             kernel_int, wp.uint32(12), periodicity, domainMin, domainMax,
-            False, Ai, Bi
+            True, Ai, Bi
         )
 
         # termA = scatter_sum(m_i * V_j * W_ij, i, dim = 0, dim_size=particles.positions.shape[0])

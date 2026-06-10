@@ -81,7 +81,7 @@ def compute_bars(
         use_h_bar = False
     elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1992.value): # Monaghan1992
         use_rho_bar = True
-        use_c_bar = True
+        use_c_bar = False
         use_h_bar = True
     elif viscosityTerm == wp.static(ViscosityTerms.Monaghan1997a.value): # Monaghan1997a
         use_rho_bar = True

@@ -262,6 +262,33 @@ def linearIndexing(cellIndices, cellCounts):
         product = product * cellCounts[i].item()
     return linearIndex
 
+
+def delinearizeIndices(linearIndices: torch.Tensor, cellCounts: torch.Tensor, D: int) -> torch.Tensor:
+    """Recover D-dimensional cell indices from x-major linear indices.
+
+    This keeps hashing and lookup consistent with getLinearIndex64/getLinearIndex.
+    """
+    linear = linearIndices.to(torch.int64).clone()
+    grid = torch.zeros((linear.shape[0], D), dtype=torch.int32, device=linear.device)
+    for d in range(D):
+        cd = int(cellCounts[d].item())
+        grid[:, d] = torch.remainder(linear, cd).to(torch.int32)
+        linear = torch.div(linear, cd, rounding_mode="floor")
+    return grid
+
+
+def hashGridIndicesTorch(cellGridIndices: torch.Tensor, hashMapLength: int) -> torch.Tensor:
+    """CPU/PyTorch reference hash used to validate Warp hash assignment."""
+    D = cellGridIndices.shape[1]
+    if D == 1:
+        return torch.remainder(cellGridIndices[:, 0], hashMapLength).to(torch.int32)
+
+    primes = torch.tensor([73856093, 19349663, 83492791], device=cellGridIndices.device, dtype=torch.int64)
+    hashValue = torch.zeros(cellGridIndices.shape[0], device=cellGridIndices.device, dtype=torch.int64)
+    for d in range(D):
+        hashValue += cellGridIndices[:, d].to(torch.int64) * primes[d]
+    return torch.remainder(hashValue, hashMapLength).to(torch.int32)
+
 def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, domainMax):
     """
     Sorts the reference particles based on their linear indices.
@@ -747,12 +774,9 @@ def buildCompactHashMap(
 
             cumCell = torch.hstack((torch.tensor([0], device = cellIndices.device, dtype=cellCounters.dtype),torch.cumsum(cellCounters,dim=0)))[:-1].to(torch.int32)
 
-            # We can now use the cumCell to index into the sortedIndices to get the cell index for each particle
-            # We could have reversed the linear indices to get the cell index for each cell, but this is more reliable and avoids inverse computations
-            sortedIndices = torch.floor((sortedPositions - qMin) / to_numpy(hCell)).to(torch.int32)
-            for d in range(sortedIndices.shape[1]):
-                sortedIndices[:, d] = torch.clamp(sortedIndices[:, d], 0, int(numCells[d].item()) - 1)
-            cellGridIndices = sortedIndices[cumCell,:]
+            # Derive grid indices directly from linear cell ids to avoid any floating-point
+            # boundary mismatch between build and lookup paths.
+            cellGridIndices = delinearizeIndices(cellIndices, numCells, domainDescription.dim)
             # Cell indices contains the linear indices of the particles in each cell
             # cellCounters contains the number of particles in each cell
             # cumCell contains the cumulative sum of the number of particles in each cell, i.e., the offset into the cell
@@ -772,7 +796,23 @@ def buildCompactHashMap(
             cellGridIndices_warp = castTorchToWarp(cellGridIndices)
             hashedIndices_warp = wp.zeros(cellGridIndices.shape[0], dtype=wp.uint32, device=warpDevice)
             wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice)
+            wp.synchronize()  # ensure hashCells is done before PyTorch reads on its own stream
             hashedIndices = wp.to_torch(hashedIndices_warp).to(torch.int32)
+            referenceHashedIndices = hashGridIndicesTorch(cellGridIndices, hashMapLength)
+            if not torch.equal(hashedIndices, referenceHashedIndices):
+                mismatch = torch.nonzero(hashedIndices != referenceHashedIndices, as_tuple=False).flatten()
+                sample = mismatch[:8]
+                details = []
+                for idx in sample:
+                    i = int(idx.item())
+                    c = cellGridIndices[i].tolist()
+                    got = int(hashedIndices[i].item())
+                    exp = int(referenceHashedIndices[i].item())
+                    details.append(f"cell={c}, got={got}, expected={exp}")
+                raise RuntimeError(
+                    "Warp hash assignment mismatch detected for occupied cells. "
+                    f"mismatches={int(mismatch.numel())}, sample=[" + "; ".join(details) + "]"
+                )
             # print(hashedIndices_warp)
 
             sortedSupports = referenceSupports[sortIndex] if referenceSupports is not None else None
@@ -892,6 +932,8 @@ def radiusSearchOnCompactHashMap(
     with record_function("neighborSearch - allocate neighbors"):
 
 
+        # Synchronize so PyTorch reads the fully-written count results from Warp's stream
+        wp.synchronize()
         # Convert counts to host (only the counts, not the main data)
         edge_count_t = wp.to_torch(edge_count)
         total_edges = torch.sum(edge_count_t).cpu().item()
@@ -899,6 +941,8 @@ def radiusSearchOnCompactHashMap(
         # Compute cumulative offsets
         edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
         edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
+        # Synchronize so the Warp collect kernel reads the fully-written cumsum results from PyTorch's stream
+        torch.cuda.synchronize()
         edge_offsets_warp = wp.from_torch(edge_offsets)
 
         # Allocate output arrays on GPU

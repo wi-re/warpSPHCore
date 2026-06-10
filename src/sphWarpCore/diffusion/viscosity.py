@@ -77,7 +77,8 @@ def computePi_actual(
 
     h_bar = scalar_t(1.0)/scalar_t(2.0) * (h_i + h_j)
 
-    xi = sphKernelScale(kernel_int, domainState.dim) if viscosityParams.correctXi else scalar_t(1.0)
+    # xi = sphKernelScale(kernel_int, domainState.dim) if viscosityParams.correctXi else scalar_t(1.0)
+    xi = sphKernel_xi(kernel_int, domainState.dim) if viscosityParams.correctXi else scalar_t(1.0)
 
     C_l_ = viscosityParams.C_l if not thermalConductivity else viscosityParams.Cu_l
     C_q_ = viscosityParams.C_q if not thermalConductivity else viscosityParams.Cu_q

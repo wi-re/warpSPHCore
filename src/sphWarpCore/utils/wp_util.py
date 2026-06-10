@@ -235,7 +235,7 @@ def castTorchToWarpAsBuiltins(x_torch):
 #     GhostToBoundary = 8
 
 @wp.func
-def checkDirectionality_i(
+def checkDirectionality_j(
     queryKind: wp.int32, opInt: wp.int32
 ):
     if opInt == 0: # No Ghost
@@ -262,7 +262,7 @@ def checkDirectionality_i(
         return False
 
 @wp.func
-def checkDirectionality_j(
+def checkDirectionality_i(
     referenceKind: wp.int32, opInt: wp.int32
 ):
     if opInt == 0: # No Ghost
