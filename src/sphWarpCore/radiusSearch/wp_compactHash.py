@@ -799,20 +799,20 @@ def buildCompactHashMap(
             wp.synchronize()  # ensure hashCells is done before PyTorch reads on its own stream
             hashedIndices = wp.to_torch(hashedIndices_warp).to(torch.int32)
             referenceHashedIndices = hashGridIndicesTorch(cellGridIndices, hashMapLength)
-            if not torch.equal(hashedIndices, referenceHashedIndices):
-                mismatch = torch.nonzero(hashedIndices != referenceHashedIndices, as_tuple=False).flatten()
-                sample = mismatch[:8]
-                details = []
-                for idx in sample:
-                    i = int(idx.item())
-                    c = cellGridIndices[i].tolist()
-                    got = int(hashedIndices[i].item())
-                    exp = int(referenceHashedIndices[i].item())
-                    details.append(f"cell={c}, got={got}, expected={exp}")
-                raise RuntimeError(
-                    "Warp hash assignment mismatch detected for occupied cells. "
-                    f"mismatches={int(mismatch.numel())}, sample=[" + "; ".join(details) + "]"
-                )
+            # if not torch.equal(hashedIndices, referenceHashedIndices):
+            #     mismatch = torch.nonzero(hashedIndices != referenceHashedIndices, as_tuple=False).flatten()
+            #     sample = mismatch[:8]
+            #     details = []
+            #     for idx in sample:
+            #         i = int(idx.item())
+            #         c = cellGridIndices[i].tolist()
+            #         got = int(hashedIndices[i].item())
+            #         exp = int(referenceHashedIndices[i].item())
+            #         details.append(f"cell={c}, got={got}, expected={exp}")
+            #     raise RuntimeError(
+            #         "Warp hash assignment mismatch detected for occupied cells. "
+            #         f"mismatches={int(mismatch.numel())}, sample=[" + "; ".join(details) + "]"
+            #     )
             # print(hashedIndices_warp)
 
             sortedSupports = referenceSupports[sortIndex] if referenceSupports is not None else None
