@@ -103,6 +103,10 @@ class OperationDirection(Enum):
     GhostToBoundary = 8
     AllToGhost = 10
     AllToAll = 9
+    AllToFluid = 11
+    AllToBoundary = 12
+    FluidToAll = 13
+    BoundaryToAll = 14
     
     
 class ParticleType(Enum):
