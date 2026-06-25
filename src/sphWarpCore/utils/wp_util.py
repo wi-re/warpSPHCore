@@ -241,7 +241,7 @@ def checkDirectionality_j(
     if opInt == 0: # No Ghost
         return queryKind != 2
     elif opInt == 9: # All to all
-        return True
+        return queryKind != 2
     elif opInt == 1: # fluid to fluid
         return queryKind == 0
     elif opInt == 2: # fluid to boundary
@@ -258,6 +258,8 @@ def checkDirectionality_j(
         return queryKind == 1
     elif opInt == 8: # ghost to boundary
         return queryKind == 2
+    elif opInt == 10: # all to ghost
+        return queryKind != 2
     else:
         return False
 
@@ -285,6 +287,8 @@ def checkDirectionality_i(
         return referenceKind == 2
     elif opInt == 8: # ghost to boundary
         return referenceKind == 1
+    elif opInt == 10: # all to ghost
+        return referenceKind == 2
     else:
         return False
     

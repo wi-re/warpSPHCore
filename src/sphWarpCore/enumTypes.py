@@ -101,7 +101,9 @@ class OperationDirection(Enum):
     GhostToFluid = 6
     BoundaryToGhost = 7
     GhostToBoundary = 8
+    AllToGhost = 10
     AllToAll = 9
+    
     
 class ParticleType(Enum):
     Fluid = 0

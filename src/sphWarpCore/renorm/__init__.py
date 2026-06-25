@@ -9,9 +9,8 @@
 #     computeSPHInterpolant_warpBackend,
 # )
 
-from .wp_covariance import computeSPHCovariance_warpBackend, computeRenormalizationMatrices
+from .wp_covariance import computeRenormalizationMatrices
 
 __all__ = [
-    "computeSPHCovariance_warpBackend",
     "computeRenormalizationMatrices"
 ]

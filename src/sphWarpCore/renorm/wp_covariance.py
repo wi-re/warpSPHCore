@@ -3,223 +3,199 @@ from warp.types import vector, matrix
 # from wp_tensor import tensor
 from typing import Any
 import torch
+
+from sphWarpCore.operations_grid.grid_util import checkOffset
+from ..state import GradHState, RenormalizationState
 from ..utils.wp_autograd import *
 
 
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
-from ..utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
+from ..utils.wp_util import _get_warp_matrix_dtype, getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
 from torch.profiler import profile, record_function, ProfilerActivity
 
+import warp as wp
+from warp.types import vector, matrix
+from typing import Any
+import torch
+from torch.profiler import profile, record_function, ProfilerActivity
+from typing import Optional, Union, Tuple
+from sphWarpCore import *
+
+
 # For matrices we need to implement the logic manually using outer products, since Warp does not support rank-2 field types natively. The output is stored as a flattened vector and reshaped on the Python side.
+
 @wp.func
-def computeSPHCovariance_Func(
+def computeCovariance_Func_i(
     # General Shape Parameters and indices
-    i : wp.int32, dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    i : wp.int32,  dim: wp.int32, 
 
     # SPH properties for the query set (indexed by i)
-    queryPositions: wp.array(dtype=vector(dtype = scalar_t, length=Any)), querySupports: wp.array(dtype = scalar_t), queryMasses: wp.array(dtype = scalar_t), queryDensities: wp.array(dtype = scalar_t), # type: ignore
+    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, mi: scalar_t, rhoi: scalar_t, # type: ignore
 
     # SPH properties for the reference set (indexed by j in the neighbor loop)
-    referencePositions : wp.array(dtype=vector(length=Any, dtype = scalar_t)), referenceSupports : wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t), referenceDensities: wp.array(dtype = scalar_t), # type: ignore
-    
+    referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
+
     # Domain and kernel parameters
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
+    # periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
+    domainState: domainData,
     mode_uint: wp.uint32, kernel_int: wp.int32, 
     
     # Operation specific parameters
     gradientMode_int: wp.int32, # type: ignore
-    
-    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
-    neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32, 
-    
-    # Indicates if the input quantities have already been scattered to the neighbor level 
-    preScatteredQuantities: wp. bool,
-    
+            
+    beginIndex: wp.int32, # type: ignore
+    numIndices: wp.int32, # type: ignore
+    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+
     # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
-    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+    opInt: wp.int32, ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
 
     # Optional Correction Terms:
     # Gradient renormalization matrices for each query point, used for correcting the kernel gradient based on the local particle distribution.
-    useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
+    useGradientRenormalization: wp.bool, Li: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
+    # Grad-h correction terms for each query and reference point, used for correcting the kernel gradient based on the local particle distribution and smoothing length variations.
+    useGradHTerms: wp.bool, omega_i: scalar_t, referenceOmegas: wp.array(dtype = scalar_t),  # type: ignore
     # Whether to use actual volume (mass/density) or apparent volume for the gradient computation, and the corresponding volumes if needed.
-    useVolume: bool, queryVolumes: wp.array(dtype = scalar_t), referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
+    useVolume: bool, Vi: scalar_t, referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
     # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
-    useCRK: bool, queryA: wp.array(dtype = scalar_t), queryB: wp.array(dtype = vector(length=Any, dtype=scalar_t)), queryGradA: wp.array(dtype=vector(length=Any, dtype=scalar_t)), queryGradB: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
-    
+    useCRK: bool, Ai: scalar_t, Bi: vector(length=Any, dtype=scalar_t), gradAi: vector(length=Any, dtype=scalar_t), gradBi: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
+    correctionData: Any, # correctionData_1 or correctionData_2 or correctionData_3, containing all the optional correction terms and their usage flags
+
     # Dummy value to allow allocation
-    outputValue: vector(length=Any, dtype=scalar_t) # type: ignore
+    outputValue: Any, # type: ignore
 ):
-    if opInt != 0:
-        if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * scalar_t(0.0)
-    # Unpack query point properties
-    xi      = queryPositions[i]
-    hi      = querySupports[i]
-    # mi      = queryMasses[i] # Generally not needed
-    rhoi    = queryDensities[i]
-    # Unpack optional correction terms
-    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*scalar_t(0.0)
-    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
-    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
-    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(scalar_t(0.0))
-    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*scalar_t(0.0)
-    
     # Initialize the output value
-    out     = type(outputValue)(scalar_t(0.0))
-    
-    # Loop over neighbors to compute the gradient contribution from each neighbor    
-    for neighborIndex in range(numNeighs):
-        jj = neighborOffset + neighborIndex
-        j  = wp.int32(neighborList[jj])
+    out     = zero_like_warp(outputValue)
+    # # Loop over neighbors to compute the gradient contribution from each neighbor    
+    for neighborIndex in range(numIndices):
+        jj = beginIndex + neighborIndex
+        j  = wp.int32(offsetArray[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
-                continue
+                return out * scalar_t(0.0)
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
         
-        mj = referenceMasses[j]
-        rhoj = referenceDensities[j]
+        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
 
-        fij = -computeDistanceVec(xi, referencePositions[j], periodicity, domainMin, domainMax)
+        fij = -computeDistanceVec(xi, xj, domainState.periodicity, domainState.domainMin, domainState.domainMax)
         
         kernelGradient = computeKernelGradientCRK(
-            xi, referencePositions[j], 
-            hi, referenceSupports[j],
-            kernel_int, mode_uint, periodicity, domainMin, domainMax,
-            useCRK, Ai, Bi, gradA_i, gradB_i
+            xi, xj, 
+            hi, hj,
+            kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax,
+            useCRK, Ai, Bi, gradAi, gradBi
         )
 
         if useGradientRenormalization:
             kernelGradient = matmul(Li, kernelGradient)        
 
-        grad_f_interpolated += outerTensorProduct(fij * apparentVolume, kernelGradient, grad_f_interpolated, numDims, flatInputShape, flatOutputShape)
+        out += wp.outer(fij * apparentVolume, kernelGradient)
             
-    return grad_f_interpolated
+    return out
+
+
+@wp.func
+def computeCovariance_Func_Adjacency(
+    i : wp.int32, dim: wp.int32, 
+
+    queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
+    referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
+    correctionData: Any, # correctionData_1 or correctionData_2 or correctionData_3, containing all the optional correction terms and their usage flags
+
+    domainState: domainData,
+    useAdjacency: wp.bool,
+    adjacencyState: adjacencyData,
+    gridState: gridData,
+    numOffsets: wp.int32,
+
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, opInt: wp.int32, 
+    
+    outputValue : Any, # type: ignore
+):
+    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    if opInt != 0:
+        if not checkDirectionality_i(ki, opInt):
+            return zero_like_warp(outputValue)
+        
+    useGradientRenormalization, Li = getL_i(correctionData, i)
+    useGradHTerms, omega_i = getGradH_i(correctionData, i)
+    useVolume, Vi = getVolume_i(correctionData, i)
+    useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
+
+    out = type(outputValue)() * scalar_t(0.0)
+    for o in range(numOffsets):
+        beginIndex = wp.int32(0)
+        numIndices = wp.int32(0)
+        if useAdjacency:    
+            beginIndex = adjacencyState.neighborOffsets[i]
+            numIndices = adjacencyState.numNeighbors[i]
+        else:
+            beginIndex, numIndices = checkOffset(
+                i, queryState.positions, gridState.numCells, gridState.D, 
+                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
+                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
+            )
+            if beginIndex < 0:
+                continue
+        
+        out += computeCovariance_Func_i(
+            i, dim, 
+            xi, hi, mi, rhoi,
+            referenceState, domainState,
+            mode_uint, kernel_int, gradientMode_int,
+
+            beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
+            opInt, ki, referenceState.kinds,
+
+            useGradientRenormalization, Li,
+            useGradHTerms, omega_i, correctionData.referenceOmegas,
+            useVolume, Vi , correctionData.referenceVolumes,
+            useCRK, Ai, Bi, gradA_i, gradB_i,
+            correctionData,
+            
+
+            outputValue,
+        )
+    return out
 
 @wp.kernel
-def computeSPHCovariance_Kernel(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=scalar_t)), referencePositions : wp.array(dtype=vector(length=Any, dtype=scalar_t)), # type: ignore
-    querySupports : wp.array(dtype = scalar_t), referenceSupports : wp.array(dtype = scalar_t), # type: ignore
-    queryMasses: wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t),  # type: ignore
-    queryDensities: wp.array(dtype = scalar_t), referenceDensities: wp.array(dtype = scalar_t), # type: ignore
-    
-    domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), periodicity : wp.array(dtype = wp.bool), # type: ignore
-    
-    mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
-    
-    
-    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
-    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+def computeCovariance_Kernel(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
 
-    useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
-    useVolume: wp.bool, queryVolumes: wp.array(dtype = scalar_t), referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
-    useCRK: wp.bool, crk_A: wp.array(dtype = scalar_t), crk_B: wp.array(dtype = vector(length=Any, dtype=scalar_t)), crk_gradA: wp.array(dtype = vector(length=Any, dtype=scalar_t)), crk_gradB: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
     
-    outputValues : wp.array(dtype = vector(length=Any, dtype = scalar_t)) # type: ignore
+    mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32, opInt: wp.int32,
+    # Do not change the parameters above
+    
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = Any) # type: ignore
 ):                                                                                    
     i = wp.tid()
-    if i >= queryPositions.shape[0]:
+    numParticles = queryState.positions.shape[0]
+    if i >= numParticles:
         return
-    
-    outputValues[i] = computeSPHCovariance_Func(
-        i, get_dim(queryPositions), numDims, flatInputShape, flatOutputShape,
 
-        queryPositions, querySupports, queryMasses, queryDensities,
-        referencePositions, referenceSupports, referenceMasses, referenceDensities,
-        
-        periodicity, domainMin, domainMax, 
-        mode_uint, kernel_int, gradientMode_int,
+    outputValues[i] = computeCovariance_Func_Adjacency(
+        i, domainState.dim, 
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        mode_uint, kernel_int, gradientMode_int,  opInt, #queryKinds, referenceKinds,
+        # The parameters above are default parameters and shold not be changed
 
-        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
-        
-        opInt, queryKinds, referenceKinds,
-
-        useGradientRenormalization, queryRenormalizationMatrices, 
-        useVolume, queryVolumes, referenceVolumes,
-        useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
-
-        type(outputValues[i])(scalar_t(0.0))
+        zero_like_warp(outputValues),
     )
-    
-
 
 from ..enumTypes import *
 from typing import Optional
 
-def computeSPHCovariance_warpBackend(
-    queryPositions, referencePositions,
-    querySupports, referenceSupports,
-    queryMasses, referenceMasses,
-    queryDensities, referenceDensities,
-    queryKinds, referenceKinds,
-    domain: DomainDescription,
-    mode: SupportScheme,
-    kernel: KernelFunctions,    
-    operationMode: OperationDirection,
-    adjacency: AdjacencyListWarp,
-    
-    useGradientRenormalization: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
-    useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
-    useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
-):
-    with record_function("warpSPH[Covariance]"):
-        with record_function("warpSPH[Covariance] - Preprocessing"):
-            # Preprocessing and input validation
-            domainMin = domain.min
-            domainMax = domain.max
-            periodicity = domain.periodic
-
-            mode_uint = supportSchemeToUint(mode)
-            kernel_int = kernel.value
-            gradientMode_int = 0
-            opInt = wp.int32(operationMode.value)
-
-            preScatteredQuantities = False # Indicates if the input quantities have already been scattered to the neighbor level (e.g. mass/density products), which can save some redundant computations if they are needed for multiple operations. This can also help with some custom kernels where we want to pre-compute certain quantities at the neighbor level on the Python side and pass them in as additional fields to avoid redundant computations in the kernel. 
-
-            # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-            outputSize = (queryPositions.shape[0])
-
-            inputShape = queryPositions.shape[1:]
-            flatInputShape = 1
-            for dim in inputShape:
-                flatInputShape *= dim
-
-            outputShape = inputShape + (queryPositions.shape[1],) # add an extra dimension for the gradient
-            flatOutputShape = 1
-            for dim in outputShape:
-                flatOutputShape *= dim
-            # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-            numDims = len(inputShape)
-
-            D = queryPositions.shape[1]
-            L = renormalizationMatrices if renormalizationMatrices is not None else getCachedDummyTensor((1, D, D), dtype=torch.scalar_t32, device=queryPositions.device)
-            renormalize = renormalizationMatrices is not None
-
-        with record_function("warpSPH[Covariance] - Kernel Execution"):
-            warp_result = warpWrapper(
-                launch_kernel, computeSPHCovariance_Kernel, outputSize, vector(length=flatOutputShape, dtype = scalar_t),
-                queryPositions, referencePositions,
-                querySupports, referenceSupports,
-                queryMasses, referenceMasses,
-                queryDensities, referenceDensities,
-                domainMin, domainMax, periodicity,
-                mode_uint, kernel_int, gradientMode_int,
-                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, preScatteredQuantities,
-                wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
-                opInt, queryKinds, referenceKinds,
-
-                wp.bool(useGradientRenormalization), renormalizationMatrices,
-                wp.bool(useVolume), queryVolumes, referenceVolumes,
-                wp.bool(useCRK), crk_A, crk_B, crk_gradA, crk_gradB
-            )
-
-    return warp_result.view(queryPositions.shape[0], *outputShape) # reshape back to original shape with new gradient dimension
 
 
 from ..math import outerTensorProduct
@@ -235,7 +211,7 @@ def pinv2x2(M):
         c = M[:,1,0]
         d = M[:,1,1]
 
-        theta = scalar_t(0.5) * torch.atan2(2 * a * c + 2 * b * d, a**2 + b**2 - c**2 - d**2)
+        theta = (0.5) * torch.atan2(2 * a * c + 2 * b * d, a**2 + b**2 - c**2 - d**2)
         cosTheta = torch.cos(theta)
         sinTheta = torch.sin(theta)
         U = torch.zeros_like(M)
@@ -250,7 +226,7 @@ def pinv2x2(M):
         o1 = torch.sqrt((S1 + S2) / 2)
         o2 = torch.sqrt(torch.clamp(S1 - S2, min = 1e-9) / 2)
 
-        phi = scalar_t(0.5) * torch.atan2(2 * a * b + 2 * c * d, a**2 - b**2 + c**2 - d**2)
+        phi = (0.5) * torch.atan2(2 * a * b + 2 * c * d, a**2 - b**2 + c**2 - d**2)
         cosPhi = torch.cos(phi)
         sinPhi = torch.sin(phi)
         s11 = torch.sign((a * cosTheta + c * sinTheta) * cosPhi + ( b * cosTheta + d * sinTheta) * sinPhi)
@@ -281,35 +257,45 @@ def pinv2x2(M):
         inv = torch.matmul(torch.matmul(V, S_1), U.mT)
         return inv, eigVals
 
+from ..warp_state_util import warpWrapper2
 
 def computeRenormalizationMatrices_(
-    queryPositions, referencePositions,
-    querySupports, referenceSupports,
-    queryMasses, referenceMasses,
-    queryDensities, referenceDensities,
-    queryKinds, referenceKinds,
+    queryParticles: ParticleState,
+    operationProperties: OperationProperties,
     domain: DomainDescription,
-    mode: SupportScheme,
-    kernel: KernelFunctions,    
-    operationMode: OperationDirection,
-    adjacency: AdjacencyListWarp,
     
-    useGradientRenormalization: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
-    useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
-    useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
+    queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,
+    referenceParticles: Optional[ParticleState] = None,
+    crkState: Optional[CRKState] = None,
+    gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
+    renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
 ):
-    
-    C = computeSPHCovariance_warpBackend(
-        queryPositions, referencePositions, 
-        querySupports, referenceSupports, 
-        queryMasses, referenceMasses, 
-        queryDensities, referenceDensities, 
-        domain = domain, adjacency = adjacency, 
-        mode = mode, kernel = kernel, renormalizationMatrices = None)
+    outputSize  = queryParticles.positions.shape[0]
+    outputDtype = _get_warp_matrix_dtype(queryParticles.positions.shape[1], queryParticles.positions.shape[1], queryParticles.positions.dtype)
+
+    C = warpWrapper2(
+        launcher = launch_kernel,
+        kernel   = computeCovariance_Kernel,
+        outputSizes  = outputSize,
+        outputDtypes = outputDtype,
+        defaultStateArguments=(
+            queryParticles, operationProperties, domain,
+            queryVolumes, referenceVolumes,
+            adjacency,
+            referenceParticles,
+            crkState,
+            gradHState,
+            renormalizationState,
+        ),
+        additionalArguments=(
+        ),
+    )
 
     num_nbrs = adjacency.numNeighbors
     dtype = C.dtype
 
+    queryPositions = queryParticles.positions
     dim = queryPositions.shape[1]
     dtype = C.dtype
     device = queryPositions.device
@@ -334,31 +320,29 @@ from typing import Union
 from ..radius import CompactHashMap
 
 def computeRenormalizationMatrices(
-  queryParticles: ParticleState,
-  domain: DomainDescription,
-  kernel: KernelFunctions,
-  mode: SupportScheme = SupportScheme.Gather,
-  operationMode: OperationDirection = OperationDirection.AllToAll,
-  adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None,   
-  referenceState: Optional[ParticleState] = None,   
+    queryParticles: ParticleState,
+    operationProperties: OperationProperties,
+    domain: DomainDescription,
+    
+    queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,
+    referenceParticles: Optional[ParticleState] = None,
+    crkState: Optional[CRKState] = None,
+    gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
+    renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
   returnEigVals: bool = True
 ):
-    if referenceState is None:
-        referenceState = queryParticles
-
     if adjacency is None or isinstance(adjacency, CompactHashMap):
         raise NotImplementedError("Adjacency list must be provided for Renormalization matrices computation. Building a compact hash map and using it as adjacency is not currently supported for this operation.")
     
     C, eigVals, L = computeRenormalizationMatrices_(
-        queryParticles.positions, referenceState.positions, 
-        queryParticles.supports, referenceState.supports, 
-        queryParticles.masses, referenceState.masses, 
-        queryParticles.densities, 
-        referenceState.densities, 
-        queryParticles.kinds if queryParticles.kinds is not None else getCachedDummyTensor((queryParticles.masses.shape[0],), dtype=torch.int32, device=queryParticles.masses.device),
-        referenceState.kinds if referenceState.kinds is not None else getCachedDummyTensor((referenceState.masses.shape[0],), dtype=torch.int32, device=referenceState.masses.device),
-         domain = domain, adjacency = adjacency,
-         mode = mode, kernel = kernel, operationMode = operationMode
+        queryParticles, operationProperties, domain,
+        queryVolumes = queryVolumes, referenceVolumes = referenceVolumes,
+        adjacency = adjacency,
+        referenceParticles = referenceParticles,
+        crkState = crkState,
+        gradHState = gradHState,
+        renormalizationState = renormalizationState
     )
 
     if returnEigVals:
