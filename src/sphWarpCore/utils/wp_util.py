@@ -386,7 +386,7 @@ class mat11d(matrix(shape=(1, 1), dtype=wp.float64)):
     pass
 
 from warp import mat22f, mat33f, mat22h, mat33h, mat22d, mat33d
-from warp import vec2f, vec3f, vec2h, vec3h, vec2d, vec3d
+from warp import vec2f, vec3f, vec2h, vec3h, vec2d, vec3d, vec3i, vec2i
 
 @wp.func
 def zero_like(
@@ -449,6 +449,23 @@ def zero_like(
     input: wp.array(dtype=vector(length=3, dtype=wp.float32)) # type: ignore
 ):
     return vec3f(0.0)
+
+@wp.func
+def zero_like(
+    input: wp.array(dtype=vector(length=1, dtype=wp.int32)) # type: ignore
+):
+    return vector(length=1, dtype=wp.int32)(0)
+@wp.func
+def zero_like(
+    input: wp.array(dtype=vector(length=2, dtype=wp.int32)) # type: ignore
+):
+    return vec2i(0)
+@wp.func
+def zero_like(
+    input: wp.array(dtype=vector(length=3, dtype=wp.int32)) # type: ignore
+):
+    return vec3i(0)
+
 
 @wp.func
 def zero_like_warp(
