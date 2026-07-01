@@ -87,7 +87,7 @@ from .mathutil.wp_math import matmul
 
 from .types import scalar_t, vec_t, mat_t, vecArray_t, matArray_t, intArray_t, scalarArray_t
 
-__version__ = "0.3.5"
+__version__ = "0.4.1"
 
 __all__ = [
     "radius",
