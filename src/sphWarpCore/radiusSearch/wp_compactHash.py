@@ -942,7 +942,8 @@ def radiusSearchOnCompactHashMap(
         edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
         edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
         # Synchronize so the Warp collect kernel reads the fully-written cumsum results from PyTorch's stream
-        torch.cuda.synchronize()
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
         edge_offsets_warp = wp.from_torch(edge_offsets)
 
         # Allocate output arrays on GPU
