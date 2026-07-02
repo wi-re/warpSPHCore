@@ -54,6 +54,7 @@ _WARP_ARRAY_CACHE: dict[tuple, "wp.array"] = {}
 _MAX_WARP_ARRAY_CACHE_ENTRIES = 64
 
 
+from torch.profiler import record_function
 def _cache_set_bounded(cache: dict, key: tuple, value, max_entries: int) -> None:
     cache[key] = value
     while len(cache) > max_entries:
@@ -61,6 +62,7 @@ def _cache_set_bounded(cache: dict, key: tuple, value, max_entries: int) -> None
 
 
 def getCachedWarpArray(t: torch.Tensor) -> "wp.array":
+    # with record_function("[warpSPH] - getCachedWarpArray"):
     """Return a cached wp.array view of *t*.
 
     If the tensor's underlying storage has not changed (same data_ptr, shape,
@@ -93,7 +95,6 @@ def clearWarpArrayCache() -> None:
     """
     _WARP_ARRAY_CACHE.clear()
 
-
 def getCachedDummyTensor(
     shape,
     *,
@@ -101,6 +102,7 @@ def getCachedDummyTensor(
     device: torch.device,
     fillValue: float = 0.0,
 ) -> torch.Tensor:
+    # with record_function("[warpSPH] - getCachedDummyTensor"):
     """Return a shared cached tensor for optional kernel arguments.
 
     This avoids allocating new placeholder tensors on every kernel launch.

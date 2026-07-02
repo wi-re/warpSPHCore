@@ -150,15 +150,16 @@ def buildVerletList(
         verbose : bool = False,
         referenceParticles: Optional[ParticleState] = None
 ):
-    if referenceParticles is None:
-        referenceParticles = queryParticles
+    with record_function(f"[warpSPH] - buildVerletList"):
+        if referenceParticles is None:
+            referenceParticles = queryParticles
 
-    return buildVerletList_(
-        queryParticles.positions, referenceParticles.positions,
-        queryParticles.supports, referenceParticles.supports,
-        domain, verletScale, supportMode, 
-        priorNeighborhood, verbose
-    )
+        return buildVerletList_(
+            queryParticles.positions, referenceParticles.positions,
+            queryParticles.supports, referenceParticles.supports,
+            domain, verletScale, supportMode, 
+            priorNeighborhood, verbose
+        )
 
 from sphWarpCore.kernels import computePairwiseSupport
 

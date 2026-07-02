@@ -203,7 +203,9 @@ from ..math import outerTensorProduct
 import torch
 from torch.profiler import record_function
 
-# @torch.jit.script
+
+
+@torch.compile
 def pinv2x2(M):
     with record_function('Pseudo Inverse 2x2'):
         a = M[:,0,0]
@@ -257,6 +259,103 @@ def pinv2x2(M):
         inv = torch.matmul(torch.matmul(V, S_1), U.mT)
         return inv, eigVals
 
+from warp.types import *
+
+@wp.func
+def matmul2(
+    A: matrix(shape=(2,2), dtype=scalar_t),
+    B: matrix(shape=(2,2), dtype=scalar_t)
+):
+    out = zero_like_warp(A)
+    out[0,0] = A[0,0] * B[0,0] + A[0,1] * B[1,0]
+    out[0,1] = A[0,0] * B[0,1] + A[0,1] * B[1,1]
+    out[1,0] = A[1,0] * B[0,0] + A[1,1] * B[1,0]
+    out[1,1] = A[1,0] * B[0,1] + A[1,1] * B[1,1]
+    return out
+
+@wp.kernel
+def pinv2x2_warp(
+    C: wp.array(dtype=matrix(shape=(2,2), dtype=scalar_t)), # type: ignore
+    L: wp.array(dtype=matrix(shape=(2,2), dtype=scalar_t)), # type: ignore
+    EV: wp.array(dtype=vector(length=2, dtype=scalar_t)), # type: ignore
+    num_nbrs: wp.array(dtype=wp.int32)  # type: ignore
+):
+    i = wp.tid()
+    a = C[i][0,0]
+    b = C[i][0,1]
+    c = C[i][1,0]
+    d = C[i][1,1]
+
+    if num_nbrs[i] < 4:
+        L[i][0,0] = 1.0
+        L[i][0,1] = 0.0
+        L[i][1,0] = 0.0
+        L[i][1,1] = 1.0
+        EV[i][0] = 1.0
+        EV[i][1] = 1.0
+        return
+
+    theta = (0.5) * wp.atan2(2.0 * a * c + 2.0 * b * d, a*a + b*b - c*c - d*d)
+    cosTheta = wp.cos(theta)
+    sinTheta = wp.sin(theta)
+    U = zero_like_warp(C)
+    U[0,0] = cosTheta
+    U[0,1] = - sinTheta
+    U[1,0] = sinTheta
+    U[1,1] = cosTheta
+
+    S1 = a*a + b*b + c*c + d*d
+    S2 = wp.sqrt((a*a + b*b - c*c - d*d)**2.0 + 4.0* (a * c + b *d)**2.0)
+
+    o1 = wp.sqrt((S1 + S2) / 2.0)
+    o2 = wp.sqrt(wp.clamp(S1 - S2, low = 1e-9, high = 1e9) / 2.0)
+
+    phi = (0.5) * wp.atan2(2.0 * a * b + 2.0 * c * d, a*a - b*b + c*c - d*d)
+    cosPhi = wp.cos(phi)
+    sinPhi = wp.sin(phi)
+    s11 = wp.sign((a * cosTheta + c * sinTheta) * cosPhi + ( b * cosTheta + d * sinTheta) * sinPhi)
+    s22 = wp.sign((a * sinTheta - c * cosTheta) * sinPhi + (-b * sinTheta + d * cosTheta) * cosPhi)
+
+    V = zero_like_warp(C)
+    V[0,0] = cosPhi * s11
+    V[0,1] = - sinPhi * s22
+    V[1,0] = sinPhi * s11
+    V[1,1] = cosPhi * s22
+
+    eigVals = zero_like_warp(EV)
+    eigVals[0] = o1
+    eigVals[1] = o2 
+
+    EV[i] = eigVals
+    
+
+        # o1_1[torch.abs(eigVals[:,0]) > 1e-7] = 1 / eigVals[torch.abs(eigVals[:,0]) > 1e-7, 0] 
+        # o2_1[torch.abs(eigVals[:,1]) > 1e-7] = 1 / eigVals[torch.abs(eigVals[:,1]) > 1e-7, 1] 
+    o1_1 = 0.0 if wp.abs(eigVals[0]) <= 1e-7 else 1.0 / eigVals[0]
+    o2_1 = 0.0 if wp.abs(eigVals[1]) <= 1e-7 else 1.0 / eigVals[1]
+
+    S_1 = zero_like_warp(C)
+    S_1[0,0] = o1_1
+    S_1[1,1] = o2_1
+
+    L[i] = matmul2(matmul2(V, S_1), wp.transpose(U))
+
+def pinv2x2_warpBackend(
+    C: torch.Tensor,
+    num_nbrs: torch.Tensor
+):
+    mat_warp = castTorchToWarpAsBuiltins(C)
+    inv = torch.empty_like(C)
+    evs = torch.empty((C.shape[0], 2), device = C.device, dtype = C.dtype)
+
+    inv_warp = castTorchToWarpAsBuiltins(inv)
+    evs_warp = castTorchToWarpAsBuiltins(evs)
+    nnbrs = castTorchToWarpAsBuiltins(num_nbrs)
+    wp.launch(kernel=pinv2x2_warp, dim=mat_warp.shape[0], inputs=[mat_warp, inv_warp, evs_warp, nnbrs])
+    return inv, evs
+
+# invs, evs = pinv2x2_warpBackend(randomMat)
+
 from ..warp_state_util import warpWrapper2
 
 def computeRenormalizationMatrices_(
@@ -271,47 +370,53 @@ def computeRenormalizationMatrices_(
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
 ):
-    outputSize  = queryParticles.positions.shape[0]
-    outputDtype = _get_warp_matrix_dtype(queryParticles.positions.shape[1], queryParticles.positions.shape[1], queryParticles.positions.dtype)
+    with record_function("[warpSPH] - Renorm - Compute Covariance"):
+        outputSize  = queryParticles.positions.shape[0]
+        outputDtype = _get_warp_matrix_dtype(queryParticles.positions.shape[1], queryParticles.positions.shape[1], queryParticles.positions.dtype)
 
-    C = warpWrapper2(
-        launcher = launch_kernel,
-        kernel   = computeCovariance_Kernel,
-        outputSizes  = outputSize,
-        outputDtypes = outputDtype,
-        defaultStateArguments=(
-            queryParticles, operationProperties, domain,
-            queryVolumes, referenceVolumes,
-            adjacency,
-            referenceParticles,
-            crkState,
-            gradHState,
-            renormalizationState,
-        ),
-        additionalArguments=(
-        ),
-    )
+        C = warpWrapper2(
+            launcher = launch_kernel,
+            kernel   = computeCovariance_Kernel,
+            outputSizes  = outputSize,
+            outputDtypes = outputDtype,
+            defaultStateArguments=(
+                queryParticles, operationProperties, domain,
+                queryVolumes, referenceVolumes,
+                adjacency,
+                referenceParticles,
+                crkState,
+                gradHState,
+                renormalizationState,
+            ),
+            additionalArguments=(
+            ),
+        )
+    with record_function("[warpSPH] - Renorm - Covariance Postprocess"):
+        num_nbrs = adjacency.numNeighbors
+        dtype = C.dtype
 
-    num_nbrs = adjacency.numNeighbors
-    dtype = C.dtype
+        queryPositions = queryParticles.positions
+        dim = queryPositions.shape[1]
+        dtype = C.dtype
+        device = queryPositions.device
 
-    queryPositions = queryParticles.positions
-    dim = queryPositions.shape[1]
-    dtype = C.dtype
-    device = queryPositions.device
+        # C[num_nbrs < 4,:,:] = torch.eye(dim, dtype = dtype, device = device)[None,:,:]
 
-    C[num_nbrs < 4,:,:] = torch.eye(dim, dtype = dtype, device = device)[None,:,:]
+    with record_function("[warpSPH] - Renorm - Pseudo Inverse"):
+        if queryPositions.shape[1] == 2:
+            L, eigVals = pinv2x2_warpBackend(C, num_nbrs)
+        else:
+            L = torch.linalg.pinv(C)
+            eigVals = torch.linalg.eigvals(C).real
 
-    if queryPositions.shape[1] == 2:
-        L, eigVals = pinv2x2(C)
-    else:
-        L = torch.linalg.pinv(C)
-        eigVals = torch.linalg.eigvals(C).real
+            # print(f"Renormalization matrices computed. C shape: {C.shape}, L shape: {L.shape}, eigVals shape: {eigVals.shape}")
 
-        if queryPositions.shape[1] == 3:
-            eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
-            eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:],[1])
-            eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:],[1])
+            if queryPositions.shape[1] == 3:
+                eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
+                eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:],[1])
+                eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:],[1])
+            elif queryPositions.shape[1] == 2:
+                eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1]) 
 
     return C, eigVals, L
 
@@ -332,20 +437,21 @@ def computeRenormalizationMatrices(
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
   returnEigVals: bool = True
 ):
-    if adjacency is None or isinstance(adjacency, CompactHashMap):
-        raise NotImplementedError("Adjacency list must be provided for Renormalization matrices computation. Building a compact hash map and using it as adjacency is not currently supported for this operation.")
-    
-    C, eigVals, L = computeRenormalizationMatrices_(
-        queryParticles, operationProperties, domain,
-        queryVolumes = queryVolumes, referenceVolumes = referenceVolumes,
-        adjacency = adjacency,
-        referenceParticles = referenceParticles,
-        crkState = crkState,
-        gradHState = gradHState,
-        renormalizationState = renormalizationState
-    )
+    with record_function("[warpSPH] - computeRenormalizationMatrices"):
+        if adjacency is None or isinstance(adjacency, CompactHashMap):
+            raise NotImplementedError("Adjacency list must be provided for Renormalization matrices computation. Building a compact hash map and using it as adjacency is not currently supported for this operation.")
+        
+        C, eigVals, L = computeRenormalizationMatrices_(
+            queryParticles, operationProperties, domain,
+            queryVolumes = queryVolumes, referenceVolumes = referenceVolumes,
+            adjacency = adjacency,
+            referenceParticles = referenceParticles,
+            crkState = crkState,
+            gradHState = gradHState,
+            renormalizationState = renormalizationState
+        )
 
-    if returnEigVals:
-        return C, eigVals, RenormalizationState(renormalizationMatrices = L)
-    else:
-        return RenormalizationState(renormalizationMatrices = L)
+        if returnEigVals:
+            return C, eigVals, RenormalizationState(renormalizationMatrices = L)
+        else:
+            return RenormalizationState(renormalizationMatrices = L)

@@ -593,6 +593,7 @@ def extractStateInfo(
 
     return flat_tensors, build_fn, device, dim
 
+from .utils.wp_autograd import StateAwareWarpFunction
 
 def warpWrapper2(
     launcher,
@@ -633,7 +634,6 @@ def warpWrapper2(
     Returns:
         torch.Tensor or tuple of torch.Tensor – kernel output(s).
     """
-    from .utils.wp_autograd import StateAwareWarpFunction
     with record_function("warpWrapper2 [WW2]"):
         # --- extract state tensors and the struct-building closure ---
         flat_state_tensors, state_build_fn, device, dim = extractStateInfo(
