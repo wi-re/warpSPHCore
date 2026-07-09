@@ -5,6 +5,24 @@ from .wp_compactHash import *
 
 
 @torch.jit.script
+def _minimum_image_delta(
+        current: torch.Tensor,
+        previous: torch.Tensor,
+        periodicity: torch.Tensor,
+        domainMin: torch.Tensor,
+        domainMax: torch.Tensor):
+    delta = current - previous
+    domainSize = domainMax - domainMin
+    for d in range(delta.shape[1]):
+        if bool(periodicity[d].item()):
+            L = domainSize[d]
+            # Shift into [-L/2, L/2) so boundary-crossing motion is measured correctly.
+            delta_d = torch.remainder(delta[:, d] + L / 2, L) - L / 2
+            delta[:, d] = delta_d
+    return delta
+
+
+@torch.jit.script
 def _verlet_validity_metrics(
         queryPositions: torch.Tensor,
         referencePositions: torch.Tensor,
@@ -14,14 +32,19 @@ def _verlet_validity_metrics(
         referenceSupports: torch.Tensor,
         supports_a: torch.Tensor,
         supports_b: torch.Tensor,
+    periodicity: torch.Tensor,
+    domainMin: torch.Tensor,
+    domainMax: torch.Tensor,
         verletScale: float,
         support_case: int):
     # Stored supports in the Verlet adjacency were scaled by `verletScale` during build.
     priorQuerySupports = supports_a / verletScale
     priorReferenceSupports = supports_b / verletScale
 
-    distance_a_max = torch.linalg.vector_norm(queryPositions - priorQueryPositions, dim=-1).amax()
-    distance_b_max = torch.linalg.vector_norm(referencePositions - priorReferencePositions, dim=-1).amax()
+    delta_a = _minimum_image_delta(queryPositions, priorQueryPositions, periodicity, domainMin, domainMax)
+    delta_b = _minimum_image_delta(referencePositions, priorReferencePositions, periodicity, domainMin, domainMax)
+    distance_a_max = torch.linalg.vector_norm(delta_a, dim=-1).amax()
+    distance_b_max = torch.linalg.vector_norm(delta_b, dim=-1).amax()
     maxDistance = distance_a_max + distance_b_max
 
     querySupportDeltaMax = torch.abs(priorQuerySupports - querySupports).amax()
@@ -41,7 +64,9 @@ def _verlet_validity_metrics(
         minSupport = torch.minimum(queryMinSupport, referenceMinSupport)
 
     supportBuffer = (verletScale - 1.0) * minSupport
-    shouldRebuild = torch.maximum(maxDistance, supportFactor) > supportBuffer
+    # Motion and support drift both consume the same Verlet buffer budget.
+    budgetUse = maxDistance + supportFactor
+    shouldRebuild = budgetUse > supportBuffer
     return shouldRebuild, maxDistance, supportFactor, minSupport, supportBuffer
 
 
@@ -94,15 +119,35 @@ def buildVerletList_(
                         referenceSupports,
                         supports_a,
                         supports_b,
+                        domain.periodic,
+                        domain.min,
+                        domain.max,
                         verletScale,
                         support_case,
                     )
                     shouldRebuild = bool(shouldRebuild_t.item())
 
                     if verbose:
-                        # This works because of minimum image conventions!
-                        distance_a = torch.linalg.vector_norm(queryPositions - priorNeighborhood.queryPositions, dim = -1)
-                        distance_b = torch.linalg.vector_norm(referencePositions - priorNeighborhood.referencePositions, dim = -1)
+                        distance_a = torch.linalg.vector_norm(
+                            _minimum_image_delta(
+                                queryPositions,
+                                priorNeighborhood.queryPositions,
+                                domain.periodic,
+                                domain.min,
+                                domain.max,
+                            ),
+                            dim=-1,
+                        )
+                        distance_b = torch.linalg.vector_norm(
+                            _minimum_image_delta(
+                                referencePositions,
+                                priorNeighborhood.referencePositions,
+                                domain.periodic,
+                                domain.min,
+                                domain.max,
+                            ),
+                            dim=-1,
+                        )
                         priorQuerySupports = supports_a / verletScale
                         priorReferenceSupports = supports_b / verletScale
                         print(f'Distance a: min: {distance_a.min()}, max: {distance_a.max()}, avg: {distance_a.mean()}')

@@ -74,7 +74,7 @@ def computeCovariance_Func_i(
         j  = wp.int32(offsetArray[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
-                return out * scalar_t(0.0)
+                continue# out * scalar_t(0.0)
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################

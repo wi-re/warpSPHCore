@@ -6,6 +6,14 @@ from ..radiusSearch.wp_compactHash import CompactHashMap, getLinearIndex64, hash
 from warp.types import vector, matrix
 from typing import Any
 
+
+@wp.func
+def wrapCellComponentPeriodic(cell: wp.int32, numCell: wp.int32) -> wp.int32:
+    # Wrap integer cell indices for periodic domains, even if they are more than one box out-of-range.
+    if numCell <= 0:
+        return wp.int32(0)
+    return cell - wp.int32(wp.floor(scalar_t(cell) / scalar_t(numCell))) * numCell
+
 @wp.func
 def iterateCell(
     linearIndex: wp.int64,
@@ -50,7 +58,16 @@ def checkOffset(
     # Determine the cell index of the query particle
     cellIndex = wp.vec3i(0, 0, 0, dtype=wp.int32)
     for d in range(D):
-        cellIndex[d] = wp.int32(wp.floor((queryPos[d] - qMin[d]) / hCell))
+        rawCell = wp.int32(wp.floor((queryPos[d] - qMin[d]) / hCell))
+        if periodicity[d]:
+            cellIndex[d] = wrapCellComponentPeriodic(rawCell, numCells[d])
+        else:
+            if rawCell < 0:
+                cellIndex[d] = 0
+            elif rawCell >= numCells[d]:
+                cellIndex[d] = numCells[d] - 1
+            else:
+                cellIndex[d] = rawCell
     # Compute the hash value for the cell index
     # hashValue = hashGridIndex(cellIndex, hashMapLength)
     numOffsets = cellOffsets.shape[0]
@@ -66,12 +83,47 @@ def checkOffset(
     for d in range(D):
         currentCellIndex[d] = cellIndex[d] + offset[d]
     # Handle periodic boundaries
+    validCell = wp.bool(True)
     for d in range(D):
         if periodicity[d]:
-            if currentCellIndex[d] < 0:
-                currentCellIndex[d] += numCells[d]
-            elif currentCellIndex[d] >= numCells[d]:
-                currentCellIndex[d] -= numCells[d]
+            currentCellIndex[d] = wrapCellComponentPeriodic(currentCellIndex[d], numCells[d])
+        else:
+            if currentCellIndex[d] < 0 or currentCellIndex[d] >= numCells[d]:
+                validCell = False
+
+    if not validCell:
+        return -1, -1
+
+    # In periodic domains, multiple offsets may map to the same wrapped cell.
+    # Skip duplicates so a cell is processed once per query and offset sweep.
+    duplicateCell = wp.bool(False)
+    for p in range(o):
+        prevOffset = cellOffsets[p]
+        prevCellIndex = wp.vec3i(0, 0, 0, dtype=wp.int32)
+        for d in range(D):
+            prevCellIndex[d] = cellIndex[d] + prevOffset[d]
+
+        prevValid = wp.bool(True)
+        for d in range(D):
+            if periodicity[d]:
+                prevCellIndex[d] = wrapCellComponentPeriodic(prevCellIndex[d], numCells[d])
+            else:
+                if prevCellIndex[d] < 0 or prevCellIndex[d] >= numCells[d]:
+                    prevValid = False
+
+        if not prevValid:
+            continue
+
+        sameCell = wp.bool(True)
+        for d in range(D):
+            if prevCellIndex[d] != currentCellIndex[d]:
+                sameCell = False
+
+        if sameCell:
+            duplicateCell = True
+
+    if duplicateCell:
+        return -1, -1
                 
     # linearIndex = getLinearIndex(currentCellIndex, numCells, D)
     linearIndex = getLinearIndex64(currentCellIndex, numCells, D)

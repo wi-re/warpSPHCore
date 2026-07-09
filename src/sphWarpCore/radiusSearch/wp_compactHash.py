@@ -63,38 +63,17 @@ def compute_h(qMin, qMax, referenceSupport):
     qCells = qExtent / referenceSupport
     qfCells = torch.floor(qCells)
     # numCells = torch.where( qCells - qfCells < 1e-4, qfCells, qfCells+1)
-    numCells = qfCells
+    # Ensure every dimension has at least one cell to avoid inf h and invalid indexing.
+    numCells = torch.clamp(qfCells, min=1)
     h = qExtent / (numCells)
-    # print('Reference support:', referenceSupport)
-    # print('Domain extent:', qExtent)
-
-    # print('Reference Num Cells: ', qCells)
-    # print('Computed Num Cells: ', numCells)
-
-    # print('Reverse Count: ', qExtent / h - numCells)
-
-    # print('Number of cells:', numCells)
-    # print('Smoothing length:', h)
-    # print('Resulting Cells: ', torch.floor(qExtent / h))
 
     if torch.any(qExtent / h - numCells > 0):
-        # print('Warning: Reference support is not a multiple of the domain extent. Consider changing the reference support value.')
         numCells -= 1
+        numCells = torch.clamp(numCells, min=1)
         h = qExtent / numCells
-        # print('New Num Cells: ', numCells)
-        # print('New Smoothing length: ', h)
-
 
     if torch.any(torch.ceil(qExtent / h) > qExtent / h):
         h = h * (1e-4 + 1)
-
-    # print(qfCells, qCells - qfCells)
-
-    # print('Difference of support: ', torch.abs(h - referenceSupport))
-
-    # if torch.any(torch.floor(qExtent / h) != torch.ceil(qExtent / h)):
-    #     print(torch.floor(qExtent / h), torch.ceil(qExtent / h))
-    #     print('Warning: Reference support is not a multiple of the domain extent. Consider changing the reference support value.')
 
     return torch.max(h)
 
@@ -220,6 +199,13 @@ def clampCellIndex(cellIndex: wp.vec3i, numCells: wp.array(dtype=wp.int32), D: i
         elif cellIndex[d] >= numCells[d]:
             cellIndex[d] = numCells[d] - 1
     return cellIndex
+    
+@wp.func
+def wrapCellComponentPeriodic(cell: wp.int32, numCell: wp.int32) -> wp.int32:
+    # Wrap integer cell indices for periodic domains, even if they are more than one box out-of-range.
+    if numCell <= 0:
+        return wp.int32(0)
+    return cell - wp.int32(wp.floor(scalar_t(cell) / scalar_t(numCell))) * numCell
 
 
 @wp.kernel
@@ -318,6 +304,8 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
 
     cellCount = torch.ceil(qExtent / (hCell)).to(torch.int32)
     indices = torch.floor((referenceParticles - domainMin) / hCell).to(torch.int32).view(-1, referenceParticles.shape[1])
+    maxIndex = (cellCount - 1).view(1, -1)
+    indices = torch.minimum(torch.maximum(indices, torch.zeros_like(indices)), maxIndex)
     
     
     # print('Cell count:', cellCount, 'Cell size:', hCell, 'Domain extent:', qExtent)
@@ -461,8 +449,16 @@ def radiusSearchCountNeighborsCompactHashMap(
     # Determine the cell index of the query particle
     cellIndex = wp.vec3i(0, 0, 0, dtype=wp.int32)
     for d in range(D):
-        cellIndex[d] = wp.int32(wp.floor((queryPos[d] - qMin[d]) / hCell))
-    cellIndex = clampCellIndex(cellIndex, numCells, D)
+        rawCell = wp.int32(wp.floor((queryPos[d] - qMin[d]) / hCell))
+        if periodicity[d]:
+            cellIndex[d] = wrapCellComponentPeriodic(rawCell, numCells[d])
+        else:
+            if rawCell < 0:
+                cellIndex[d] = 0
+            elif rawCell >= numCells[d]:
+                cellIndex[d] = numCells[d] - 1
+            else:
+                cellIndex[d] = rawCell
     # Compute the hash value for the cell index
     # hashValue = hashGridIndex(cellIndex, hashMapLength)
     numOffsets = cellOffsets.shape[0]
@@ -478,12 +474,47 @@ def radiusSearchCountNeighborsCompactHashMap(
         for d in range(D):
             currentCellIndex[d] = cellIndex[d] + offset[d]
         # Handle periodic boundaries
+        validCell = wp.bool(True)
         for d in range(D):
             if periodicity[d]:
-                if currentCellIndex[d] < 0:
-                    currentCellIndex[d] += numCells[d]
-                elif currentCellIndex[d] >= numCells[d]:
-                    currentCellIndex[d] -= numCells[d]
+                currentCellIndex[d] = wrapCellComponentPeriodic(currentCellIndex[d], numCells[d])
+            else:
+                if currentCellIndex[d] < 0 or currentCellIndex[d] >= numCells[d]:
+                    validCell = False
+
+        if not validCell:
+            continue
+
+        # In periodic domains, different offsets can wrap to the same cell.
+        # Skip duplicates so a cell contributes at most once per query particle.
+        duplicateCell = wp.bool(False)
+        for p in range(o):
+            prevOffset = cellOffsets[p]
+            prevCellIndex = wp.vec3i(0, 0, 0, dtype=wp.int32)
+            for d in range(D):
+                prevCellIndex[d] = cellIndex[d] + prevOffset[d]
+
+            prevValid = wp.bool(True)
+            for d in range(D):
+                if periodicity[d]:
+                    prevCellIndex[d] = wrapCellComponentPeriodic(prevCellIndex[d], numCells[d])
+                else:
+                    if prevCellIndex[d] < 0 or prevCellIndex[d] >= numCells[d]:
+                        prevValid = False
+
+            if not prevValid:
+                continue
+
+            sameCell = wp.bool(True)
+            for d in range(D):
+                if prevCellIndex[d] != currentCellIndex[d]:
+                    sameCell = False
+
+            if sameCell:
+                duplicateCell = True
+
+        if duplicateCell:
+            continue
                     
         # linearIndex = getLinearIndex(currentCellIndex, numCells, D)
         linearIndex = getLinearIndex64(currentCellIndex, numCells, D)
@@ -611,8 +642,16 @@ def radiusSearchCollectCompactHashMap(
     # Determine the cell index of the query particle
     cellIndex = wp.vec3i(0, 0, 0, dtype=wp.int32)
     for d in range(D):
-        cellIndex[d] = wp.int32(wp.floor((queryPos[d] - qMin[d]) / hCell))
-    cellIndex = clampCellIndex(cellIndex, numCells, D)
+        rawCell = wp.int32(wp.floor((queryPos[d] - qMin[d]) / hCell))
+        if periodicity[d]:
+            cellIndex[d] = wrapCellComponentPeriodic(rawCell, numCells[d])
+        else:
+            if rawCell < 0:
+                cellIndex[d] = 0
+            elif rawCell >= numCells[d]:
+                cellIndex[d] = numCells[d] - 1
+            else:
+                cellIndex[d] = rawCell
     # Compute the hash value for the cell index
     # hashValue = hashGridIndex(cellIndex, hashMapLength)
     numOffsets = cellOffsets.shape[0]
@@ -630,12 +669,47 @@ def radiusSearchCollectCompactHashMap(
         for d in range(D):
             currentCellIndex[d] = cellIndex[d] + offset[d]
         # Handle periodic boundaries
+        validCell = wp.bool(True)
         for d in range(D):
             if periodicity[d]:
-                if currentCellIndex[d] < 0:
-                    currentCellIndex[d] += numCells[d]
-                elif currentCellIndex[d] >= numCells[d]:
-                    currentCellIndex[d] -= numCells[d]
+                currentCellIndex[d] = wrapCellComponentPeriodic(currentCellIndex[d], numCells[d])
+            else:
+                if currentCellIndex[d] < 0 or currentCellIndex[d] >= numCells[d]:
+                    validCell = False
+
+        if not validCell:
+            continue
+
+        # In periodic domains, different offsets can wrap to the same cell.
+        # Skip duplicates so a cell contributes at most once per query particle.
+        duplicateCell = wp.bool(False)
+        for p in range(o):
+            prevOffset = cellOffsets[p]
+            prevCellIndex = wp.vec3i(0, 0, 0, dtype=wp.int32)
+            for d in range(D):
+                prevCellIndex[d] = cellIndex[d] + prevOffset[d]
+
+            prevValid = wp.bool(True)
+            for d in range(D):
+                if periodicity[d]:
+                    prevCellIndex[d] = wrapCellComponentPeriodic(prevCellIndex[d], numCells[d])
+                else:
+                    if prevCellIndex[d] < 0 or prevCellIndex[d] >= numCells[d]:
+                        prevValid = False
+
+            if not prevValid:
+                continue
+
+            sameCell = wp.bool(True)
+            for d in range(D):
+                if prevCellIndex[d] != currentCellIndex[d]:
+                    sameCell = False
+
+            if sameCell:
+                duplicateCell = True
+
+        if duplicateCell:
+            continue
                     
         # linearIndex = getLinearIndex(currentCellIndex, numCells, D)
         linearIndex = getLinearIndex64(currentCellIndex, numCells, D)
@@ -839,7 +913,11 @@ def buildCompactHashMap(
         with record_function("neighborSearch - precomputeOffsets"):
             # we precompute the offset we want to iterate over based on the searchradius parameter
             # in 3D for a search radius of n we will iterate over (2n+1)^3 cells, in 2D we will iterate over (2n+1)^2 cells, and in 1D we will iterate over 2n+1 cells
-            searchRadius = 1
+            hMaxValue = float(hMax.item()) if torch.is_tensor(hMax) else float(hMax)
+            hCellValue = float(hCell.item()) if torch.is_tensor(hCell) else float(hCell)
+            # If hCell is smaller than the interaction support, we must expand the cell stencil.
+            # Small epsilon avoids promoting exactly-1 ratios to radius=2 from FP noise.
+            searchRadius = max(1, int(np.ceil(hMaxValue / max(hCellValue, 1e-12) - 1e-6)))
             numOffsets = (2 * searchRadius + 1) ** domainDescription.dim
             offsets = torch.cartesian_prod(*[torch.arange(-searchRadius, searchRadius+1, device = queryPositions.device) for _ in range(domainDescription.dim)]).to(torch.int32)
             if len(offsets.shape) == 1:
@@ -865,7 +943,7 @@ def buildCompactHashMap(
             numCells=numCells,
             mode_uint=mode_uint,
             D = D,
-            searchRadius = 1,
+            searchRadius = searchRadius,
             numOffsets = numOffsets,
             cellOffsets = offsets
         )
