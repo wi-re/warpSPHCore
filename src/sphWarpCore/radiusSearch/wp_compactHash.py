@@ -275,7 +275,7 @@ def hashGridIndicesTorch(cellGridIndices: torch.Tensor, hashMapLength: int) -> t
         hashValue += cellGridIndices[:, d].to(torch.int64) * primes[d]
     return torch.remainder(hashValue, hashMapLength).to(torch.int32)
 
-def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, domainMax):
+def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, domainMax, periodicity: Optional[torch.Tensor] = None):
     """
     Sorts the reference particles based on their linear indices.
 
@@ -302,7 +302,18 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     # print('Reference Support:', referenceSupport, 'dtype:', referenceSupport.dtype)
     # print('Computed hCell:', hCell, 'dtype:', hCell.dtype)
 
-    cellCount = torch.ceil(qExtent / (hCell)).to(torch.int32)
+    rawCellCount = qExtent / hCell
+    # Periodic axes should not create an extra trailing cell from ceil();
+    # that inserts an empty ghost cell and breaks wrap-around adjacency.
+    eps = torch.tensor(1e-6, dtype=rawCellCount.dtype, device=rawCellCount.device)
+    ceilCounts = torch.ceil(rawCellCount - eps)
+    floorCounts = torch.floor(rawCellCount + eps)
+    if periodicity is not None:
+        periodicMask = periodicity.to(device=rawCellCount.device, dtype=torch.bool)
+        axisCounts = torch.where(periodicMask, floorCounts, ceilCounts)
+    else:
+        axisCounts = ceilCounts
+    cellCount = torch.clamp(axisCounts, min=1).to(torch.int32)
     indices = torch.floor((referenceParticles - domainMin) / hCell).to(torch.int32).view(-1, referenceParticles.shape[1])
     maxIndex = (cellCount - 1).view(1, -1)
     indices = torch.minimum(torch.maximum(indices, torch.zeros_like(indices)), maxIndex)
@@ -830,10 +841,11 @@ def buildCompactHashMap(
             minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
 
         with record_function("neighborSearch - sortParticles"):
+            # print(f'Periodicity: {periodicity}')
             x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))]).mT
             y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
 
-            sortedLinear, sortIndex, numCells, qMin, qMax, hCell = sortReferenceParticles(x, hMax, minD, maxD)
+            sortedLinear, sortIndex, numCells, qMin, qMax, hCell = sortReferenceParticles(x, hMax, minD, maxD, periodicity)
 
 
 
