@@ -89,7 +89,7 @@ from .kernels.wp_kernel import sphKernelScale, sphKernel_xi
 
 from .types import scalar_t, vec_t, mat_t, vecArray_t, matArray_t, intArray_t, scalarArray_t
 
-__version__ = "0.4.1"
+__version__ = "0.4.5"
 
 __all__ = [
     "radius",
