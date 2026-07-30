@@ -797,24 +797,6 @@ from torch.profiler import record_function
 
 # For some operations we want to be able to run the operations directly on the hash map, e.g., to do a particle to grid transfer. In this case we only access the neighborhood once per query set. In this case, it is not worth it to build the full neighbor list as the overhead of building the neighbor list is larger than the cost of just doing the search.
 # For this purpose we want to be able to wrap the hash map information into a datastructure that allows us to do the search directly on the hash map without building the full neighbor list. This is what the CompactHashMap class is for. It contains all the information about the hash map and the cell table, as well as the sorted positions and supports, and allows us to do the search directly on this information without building the full neighbor list.
-@dataclass
-class CompactHashMap:
-    sortedPositions: torch.Tensor
-    sortedSupports: torch.Tensor
-    sortIndex: torch.Tensor
-
-    hashTable: torch.Tensor
-    sortedCellTable: torch.Tensor
-
-    qMin: torch.Tensor
-    qMax: torch.Tensor
-    hCell: scalar_t
-    numCells: torch.Tensor
-    mode_uint: int
-    D: int
-    searchRadius: int
-    numOffsets: int
-    cellOffsets: torch.Tensor
 
 
 def buildCompactHashMap(
@@ -951,7 +933,7 @@ def buildCompactHashMap(
             sortedCellTable=sortedCellTable,
             qMin=qMin,
             qMax=qMax,
-            hCell=hCell,
+            hCell=hCellValue,
             numCells=numCells,
             mode_uint=mode_uint,
             D = D,
@@ -1009,7 +991,7 @@ def radiusSearchOnCompactHashMap(
             castTorchToWarp(hashTable),
             castTorchToWarp(sortedCellTable),
             castTorchToWarp(qMin),
-            hCell,
+            scalar_t(hCell),
             D,
             castTorchToWarp(offsets),
             castTorchToWarp(numCells),
@@ -1078,7 +1060,8 @@ def radiusSearchOnCompactHashMap(
             queryPositions = queryPositions,
             referencePositions = referencePositions,
             querySupports = querySupports,
-            referenceSupports = referenceSupports
+            referenceSupports = referenceSupports,
+            hashMap = datastructure
         )
     return adjacencyCH
     
