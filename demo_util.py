@@ -1,12 +1,12 @@
-import diffSPH
-from diffSPH.sampling import ParticleSet
-from diffSPH.schemes.states.common import BasicState
-from diffSPH.modules.density import computeDensity
-from diffSPH.neighborhood import PointCloud, DomainDescription, buildNeighborhood, filterNeighborhood, coo_to_csrsc, coo_to_csr
-from diffSPH.kernels import *
-from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
-from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
-from diffSPH.operations import SPHOperation
+# import diffSPH
+# from diffSPH.sampling import ParticleSet
+# from diffSPH.schemes.states.common import BasicState
+# from diffSPH.modules.density import computeDensity
+# from diffSPH.neighborhood import PointCloud, DomainDescription, buildNeighborhood, filterNeighborhood, coo_to_csrsc, coo_to_csr
+# from diffSPH.kernels import *
+# from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
+# from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
+# from diffSPH.operations import SPHOperation
 from sphWarpCore.util import getNextPrime, generateNeighborTestData
 
     
@@ -30,31 +30,31 @@ from sphWarpCore.ops import *
 import matplotlib.pyplot as plt
 from sphWarpCore.ops import sphOperation_warp
 from sphWarpCore.enumTypes import *
-import diffSPH
-from diffSPH.sampling import ParticleSet
-from diffSPH.schemes.states.common import BasicState
-from diffSPH.modules.density import computeDensity
-from diffSPH.neighborhood import PointCloud, DomainDescription, buildNeighborhood, filterNeighborhood, coo_to_csrsc, coo_to_csr
-from diffSPH.kernels import *
-from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
-from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
-from diffSPH.operations import SPHOperation
+# import diffSPH
+# from diffSPH.sampling import ParticleSet
+# from diffSPH.schemes.states.common import BasicState
+# from diffSPH.modules.density import computeDensity
+# from diffSPH.neighborhood import PointCloud, DomainDescription, buildNeighborhood, filterNeighborhood, coo_to_csrsc, coo_to_csr
+# from diffSPH.kernels import *
+# from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
+# from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
+# from diffSPH.operations import SPHOperation
 from sphWarpCore.ops import sphOperation_warp
 from sphWarpCore.enumTypes import *
-from sphWarpCore.sph import computeSPHCovariance_warpBackend
-from diffSPH.math import pinv2x2
-from diffSPH.modules.renorm import computeCovarianceMatrices
-from diffSPH.operations import KernelCorrectionScheme
-from diffSPH.modules.adaptiveSmoothing import *
-import diffSPH
-from diffSPH.sampling import ParticleSet
-from diffSPH.schemes.states.common import BasicState
-from diffSPH.modules.density import computeDensity
-from diffSPH.neighborhood import PointCloud, DomainDescription, buildNeighborhood, filterNeighborhood, coo_to_csrsc, coo_to_csr
-from diffSPH.kernels import *
-from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
-from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
-from diffSPH.operations import SPHOperation
+# from sphWarpCore.sph import computeSPHCovariance_warpBackend
+# from diffSPH.math import pinv2x2
+# from diffSPH.modules.renorm import computeCovarianceMatrices
+# from diffSPH.operations import KernelCorrectionScheme
+# from diffSPH.modules.adaptiveSmoothing import *
+# import diffSPH
+# from diffSPH.sampling import ParticleSet
+# from diffSPH.schemes.states.common import BasicState
+# from diffSPH.modules.density import computeDensity
+# from diffSPH.neighborhood import PointCloud, DomainDescription, buildNeighborhood, filterNeighborhood, coo_to_csrsc, coo_to_csr
+# from diffSPH.kernels import *
+# from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
+# from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
+# from diffSPH.operations import SPHOperation
 
 import time
 def timeFunction(func, *args, **kwargs):
@@ -266,30 +266,30 @@ class PlotSet(NamedTuple):
     kinds: torch.Tensor
 
 
-from diffSPH.plotting import visualizeParticles
+# from diffSPH.plotting import visualizeParticles
 
 
 
-def plotToAxis(fig, axis, particleState, quantity, title, cmap, domain, markerSize = 1, gridVisualization = False, gridResolution = 128, mask = None):
-    return visualizeParticles(
-        fig, axis,
-        particleState if mask is None else ParticleState(
-            positions = particleState.positions[mask] if particleState.positions is not None else None,
-            supports = particleState.supports[mask] if particleState.supports is not None else None,
-            masses = particleState.masses[mask] if particleState.masses is not None else None,
-            densities = particleState.densities[mask] if particleState.densities is not None else None,
-            kinds = particleState.kinds[mask] if particleState.kinds is not None else None
-        ),
-        quantity = quantity[mask] if mask is not None else quantity,
-        kernel = KernelType.Wendland2,
-        domain = domain,
+# def plotToAxis(fig, axis, particleState, quantity, title, cmap, domain, markerSize = 1, gridVisualization = False, gridResolution = 128, mask = None):
+#     return visualizeParticles(
+#         fig, axis,
+#         particleState if mask is None else ParticleState(
+#             positions = particleState.positions[mask] if particleState.positions is not None else None,
+#             supports = particleState.supports[mask] if particleState.supports is not None else None,
+#             masses = particleState.masses[mask] if particleState.masses is not None else None,
+#             densities = particleState.densities[mask] if particleState.densities is not None else None,
+#             kinds = particleState.kinds[mask] if particleState.kinds is not None else None
+#         ),
+#         quantity = quantity[mask] if mask is not None else quantity,
+#         kernel = KernelType.Wendland2,
+#         domain = domain,
 
-        cmap = cmap,
-        markerSize = markerSize,
-        gridVisualization = gridVisualization,
-        gridResolution = gridResolution,
+#         cmap = cmap,
+#         markerSize = markerSize,
+#         gridVisualization = gridVisualization,
+#         gridResolution = gridResolution,
 
-        streamLines = False,
-        plotDomain = True,
-        title = title,
-    )
+#         streamLines = False,
+#         plotDomain = True,
+#         title = title,
+#     )

@@ -327,12 +327,15 @@ def pinv2x2_warp(
     eigVals[1] = o2 
 
     EV[i] = eigVals
-    
 
-        # o1_1[torch.abs(eigVals[:,0]) > 1e-7] = 1 / eigVals[torch.abs(eigVals[:,0]) > 1e-7, 0] 
-        # o2_1[torch.abs(eigVals[:,1]) > 1e-7] = 1 / eigVals[torch.abs(eigVals[:,1]) > 1e-7, 1] 
-    o1_1 = 0.0 if wp.abs(eigVals[0]) <= 1e-7 else 1.0 / eigVals[0]
-    o2_1 = 0.0 if wp.abs(eigVals[1]) <= 1e-7 else 1.0 / eigVals[1]
+    # o1 >= o2 by construction above. Zeroing based on a fixed absolute epsilon lets thin/anisotropic
+    # neighborhoods (e.g. free-surface fingers, near-collinear particle rows) through with a tiny but
+    # nonzero o2, which then gets inverted into a huge amplification factor. Use a cutoff relative to
+    # the largest eigenvalue instead, matching the rcond convention torch.linalg.pinv uses for the 3D path.
+    rcond = scalar_t(1.0e-6)
+    threshold = rcond * o1
+    o1_1 = 0.0 if o1 <= scalar_t(1.0e-12) else 1.0 / o1
+    o2_1 = 0.0 if o2 <= threshold else 1.0 / o2
 
     S_1 = zero_like_warp(C)
     S_1[0,0] = o1_1
@@ -400,13 +403,23 @@ def computeRenormalizationMatrices_(
         dtype = C.dtype
         device = queryPositions.device
 
-        # C[num_nbrs < 4,:,:] = torch.eye(dim, dtype = dtype, device = device)[None,:,:]
+        # Too few neighbors to trust the covariance matrix (e.g. free-surface fingers, isolated
+        # particles): fall back to the identity so the pseudo-inverse doesn't amplify noise. The
+        # 2D path re-checks this internally in pinv2x2_warp; applying it here as well covers 3D+.
+        lowNbrMask = num_nbrs < dim + 2
+        if torch.any(lowNbrMask):
+            C = C.clone()
+            C[lowNbrMask, :, :] = torch.eye(dim, dtype = dtype, device = device)[None, :, :]
 
     with record_function("[warpSPH] - Renorm - Pseudo Inverse"):
         if queryPositions.shape[1] == 2:
             L, eigVals = pinv2x2_warpBackend(C, num_nbrs)
         else:
-            L = torch.linalg.pinv(C)
+            # rcond matches the relative eigenvalue cutoff used in the 2D path (pinv2x2_warp):
+            # zero out directions that are near-singular relative to the dominant eigenvalue,
+            # rather than only truly-zero ones, so anisotropic/thin neighborhoods don't produce
+            # huge inverted eigenvalues.
+            L = torch.linalg.pinv(C, rtol=1e-6)
             eigVals = torch.linalg.eigvals(C).real
 
             # print(f"Renormalization matrices computed. C shape: {C.shape}, L shape: {L.shape}, eigVals shape: {eigVals.shape}")
