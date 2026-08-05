@@ -119,7 +119,7 @@ def computeSPHGradientTensor_grid_Func(
         if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
             out += outerTensorProduct(fj * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
-            out += outerTensorProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
+            out += outerTensorProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)), kernelGradient, out, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
             out += outerTensorProduct((fj - fi) * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
         elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation

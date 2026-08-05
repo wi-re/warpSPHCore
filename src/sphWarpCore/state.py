@@ -27,6 +27,8 @@ class OperationProperties:
     supportMode: SupportScheme = SupportScheme.Gather
     operationMode: OperationDirection = OperationDirection.AllToAll
 
+    divergenceDotMode: bool = False
+
 @dataclass
 class CRKState:
     A: torch.Tensor # shape [N]

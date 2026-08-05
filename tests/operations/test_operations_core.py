@@ -90,24 +90,13 @@ def test_curl_linear_vector_matches_analytic_constant(particle_case):
     vec = linear_vector_field(particle_case, a=2.0, b=-1.0, c=4.0, d=3.0)
     expected = torch.full((vec.shape[0],), 4.0 - (-1.0), device=vec.device, dtype=vec.dtype)
 
-    try:
-        curl = op(
-            particle_case,
-            WarpOperation.Curl,
-            query_values=vec,
-            reference_values=vec,
-            gradient_mode=GradientScheme.Difference,
-        )
-    except Exception as exc:
-        msg = str(exc)
-        if (
-            "non-void function" in msg
-            or "CPU kernel build failed" in msg
-            or "cuda_kernel_forward_smem_bytes" in msg
-            or "named symbol not found" in msg
-        ):
-            pytest.xfail("Known Warp curl kernel compile/metadata failure in current environment")
-        raise
+    curl = op(
+        particle_case,
+        WarpOperation.Curl,
+        query_values=vec,
+        reference_values=vec,
+        gradient_mode=GradientScheme.Difference,
+    )
 
     curl = curl.view(-1)
     mask = interior_mask(particle_case)

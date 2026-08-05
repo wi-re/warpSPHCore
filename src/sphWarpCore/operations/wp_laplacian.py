@@ -228,14 +228,34 @@ def computeSPHLaplacianTensor_Func(
             
         q_ij = type(fi)(scalar_t(0.0))
 
+        # The Brookshaw/Dot/Default laplacian schemes below all take the form
+        # Sum_j K_ij * q_ij where K_ij = -2*(kernelGradient . n_ij)/r_ij. This
+        # is only a consistent estimator of the Laplacian if q_ij vanishes
+        # identically whenever f is spatially constant (fi == fj everywhere) --
+        # otherwise the sum picks up an uncancelled O(1/h^2) residual from the
+        # kernel's own second-moment scaling that grows without bound as the
+        # resolution increases (confirmed empirically: the residual scales as
+        # 1/h^2, i.e. it roughly quadruples every time h halves). Difference's
+        # q_ij = (fj - fi) * V_j satisfies this by construction. The other
+        # three GradientScheme variants were defined for the Gradient/
+        # Divergence/Curl operators, where this constraint doesn't apply, and
+        # reusing them here unmodified (or merely sign-flipped) inherits that
+        # same divergent residual. Naive and Summation are simply Difference
+        # with the (fj - fi) differencing replaced by fj and (fj + fi)
+        # respectively; substituting fi for fj in each (the value the term
+        # must reduce to for a constant field) and subtracting that self-term
+        # collapses both back to exactly Difference's form. Symmetric's own
+        # weighting is density-asymmetric, so the same self-term subtraction
+        # instead yields a distinct (but equally consistent) density-weighted
+        # variant of the same (fj - fi) family.
         if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
-            q_ij = fj * apparentVolume
+            q_ij = (fj - fi) * apparentVolume
         elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
-            q_ij = mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2))
+            q_ij = (fj - fi) * mj * rhoi / iPow(rhoj, 2)
         elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
             q_ij = (fj - fi) * apparentVolume
         elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation
-            q_ij = (fj + fi) * apparentVolume
+            q_ij = (fj - fi) * apparentVolume
 
         h_ij = computePairwiseSupport(hi, hj, mode_uint)
         x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)

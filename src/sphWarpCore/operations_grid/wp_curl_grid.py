@@ -150,7 +150,7 @@ def computeSPHCurlTensor_grid_Func(
 ):
     if opInt != 0:
         if not checkDirectionality_i(queryKinds[i], opInt):
-            return
+            return outputValue * scalar_t(0.0)
     # Unpack query point properties
     xi      = queryPositions[i]
     hi      = querySupports[i]
@@ -208,7 +208,7 @@ def computeSPHCurlTensor_grid_Func(
         if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
             out += curlProduct(fj * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
         elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
-            out += curlProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
+            out += curlProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)), kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
         elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
             out += curlProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, wp.int32(flatOutputShape/dim), flatInputShape, flatOutputShape)
         elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation

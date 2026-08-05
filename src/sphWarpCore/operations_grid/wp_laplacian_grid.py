@@ -232,14 +232,20 @@ def computeSPHLaplacianTensor_grid_Func(
             
         q_ij = type(fi)(scalar_t(0.0))
 
+        # See wp_laplacian.py::computeSPHLaplacianTensor_Func for the derivation:
+        # the Brookshaw/Dot/Default laplacian schemes require q_ij to vanish for a
+        # spatially constant field, or the sum picks up an O(1/h^2) residual that
+        # diverges with resolution. Naive and Summation collapse to Difference's
+        # (fj - fi) * V_j once corrected; Symmetric's density-asymmetric weighting
+        # yields a distinct but equally consistent (fj - fi) variant.
         if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
-            q_ij = fj * apparentVolume
+            q_ij = (fj - fi) * apparentVolume
         elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
-            q_ij = mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2))
+            q_ij = (fj - fi) * mj * rhoi / iPow(rhoj, 2)
         elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
             q_ij = (fj - fi) * apparentVolume
         elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation
-            q_ij = (fj + fi) * apparentVolume
+            q_ij = (fj - fi) * apparentVolume
 
         h_ij = computePairwiseSupport(hi, hj, mode_uint)
         x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)

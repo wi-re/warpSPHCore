@@ -207,56 +207,40 @@ from torch.profiler import record_function
 
 @torch.compile
 def pinv2x2(M):
+    # Symmetric closed-form eigendecomposition -- see pinv2x2_warp below (the actual production
+    # path) for the derivation and why the general 2x2-SVD formula this used to use is unstable for
+    # near-isotropic covariance matrices. This function is currently unused (computeRenormalizationMatrices_
+    # calls pinv2x2_warpBackend instead) but kept fixed in step with it since it operates on the same
+    # symmetric covariance matrices.
     with record_function('Pseudo Inverse 2x2'):
         a = M[:,0,0]
-        b = M[:,0,1]
-        c = M[:,1,0]
+        b = 0.5 * (M[:,0,1] + M[:,1,0])
         d = M[:,1,1]
 
-        theta = (0.5) * torch.atan2(2 * a * c + 2 * b * d, a**2 + b**2 - c**2 - d**2)
+        theta = 0.5 * torch.atan2(2 * b, a - d)
         cosTheta = torch.cos(theta)
         sinTheta = torch.sin(theta)
-        U = torch.zeros_like(M)
-        U[:,0,0] = cosTheta
-        U[:,0,1] = - sinTheta
-        U[:,1,0] = sinTheta
-        U[:,1,1] = cosTheta
+        v1 = torch.stack([cosTheta, sinTheta], -1)
+        v2 = torch.stack([-sinTheta, cosTheta], -1)
 
-        S1 = a**2 + b**2 + c**2 + d**2
-        S2 = torch.sqrt((a**2 + b**2 - c**2 - d**2)**2 + 4* (a * c + b *d)**2)
+        lam1 = a * cosTheta**2 + 2 * b * cosTheta * sinTheta + d * sinTheta**2
+        lam2 = (a + d) - lam1
 
-        o1 = torch.sqrt((S1 + S2) / 2)
-        o2 = torch.sqrt(torch.clamp(S1 - S2, min = 1e-9) / 2)
+        swap = lam2.abs() > lam1.abs()
+        big = torch.where(swap, lam2, lam1)
+        small = torch.where(swap, lam1, lam2)
+        bigV = torch.where(swap.unsqueeze(-1), v2, v1)
+        smallV = torch.where(swap.unsqueeze(-1), v1, v2)
 
-        phi = (0.5) * torch.atan2(2 * a * b + 2 * c * d, a**2 - b**2 + c**2 - d**2)
-        cosPhi = torch.cos(phi)
-        sinPhi = torch.sin(phi)
-        s11 = torch.sign((a * cosTheta + c * sinTheta) * cosPhi + ( b * cosTheta + d * sinTheta) * sinPhi)
-        s22 = torch.sign((a * sinTheta - c * cosTheta) * sinPhi + (-b * sinTheta + d * cosTheta) * cosPhi)
+        eigVals = torch.stack([big, small], -1)
 
-        # s11 = torch.sign(o1)
-        # s22 = torch.sign(o2)
+        rcond = 1e-6
+        threshold = rcond * big.abs()
+        big_inv = torch.where(big.abs() > 1e-12, 1 / big, torch.zeros_like(big))
+        small_inv = torch.where(small.abs() > threshold, 1 / small, torch.zeros_like(small))
 
-        V = torch.zeros_like(M)
-        V[:,0,0] = cosPhi * s11
-        V[:,0,1] = - sinPhi * s22
-        V[:,1,0] = sinPhi * s11
-        V[:,1,1] = cosPhi * s22
-
-        eigVals = torch.vstack((o1, o2)).mT
-        eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
-
-        # S = torch.diag_embed(eigVals, dim1 = 2, dim2 = 1)
-
-        o1_1 = torch.zeros_like(o1)
-        o2_1 = torch.zeros_like(o2)
-
-        o1_1[torch.abs(eigVals[:,0]) > 1e-7] = 1 / eigVals[torch.abs(eigVals[:,0]) > 1e-7, 0] 
-        o2_1[torch.abs(eigVals[:,1]) > 1e-7] = 1 / eigVals[torch.abs(eigVals[:,1]) > 1e-7, 1] 
-        o = torch.vstack((o1_1, o2_1))
-        S_1 = torch.diag_embed(o.mT, dim1 = 2, dim2 = 1)
-        
-        inv = torch.matmul(torch.matmul(V, S_1), U.mT)
+        inv = big_inv[:, None, None] * torch.einsum('ni,nj->nij', bigV, bigV) \
+            + small_inv[:, None, None] * torch.einsum('ni,nj->nij', smallV, smallV)
         return inv, eigVals
 
 from warp.types import *
@@ -282,8 +266,11 @@ def pinv2x2_warp(
 ):
     i = wp.tid()
     a = C[i][0,0]
-    b = C[i][0,1]
-    c = C[i][1,0]
+    # C is a sum of V_j * x_ij (x) gradW_ij; for any isotropic kernel gradW_ij is parallel to x_ij,
+    # so C is symmetric by construction (a sum of symmetric x_ij (x) x_ij terms). b/c below can still
+    # differ at the floating-point-noise level depending on neighbor summation order -- symmetrize
+    # rather than treat that noise as signal.
+    b = 0.5 * (C[i][0,1] + C[i][1,0])
     d = C[i][1,1]
 
     if num_nbrs[i] < 4:
@@ -295,53 +282,60 @@ def pinv2x2_warp(
         EV[i][1] = 1.0
         return
 
-    theta = (0.5) * wp.atan2(2.0 * a * c + 2.0 * b * d, a*a + b*b - c*c - d*d)
+    # Closed-form symmetric 2x2 eigendecomposition: a single atan2 call. This replaces a general (and
+    # for a symmetric input, unnecessary) 2x2 SVD that computed U's rotation angle and V's rotation
+    # angle from two SEPARATE atan2 expressions. For a near-isotropic C (a~=d, b~=c~=0 -- the common
+    # case for a locally regular/well-resolved particle neighborhood) both of those expressions'
+    # denominators round to ~0, and because the two expressions round differently at the float-noise
+    # level, the two angles could land on unrelated values instead of the (here) required theta==phi,
+    # producing an inverse that was spuriously rotated by tens of degrees instead of staying diagonal
+    # -- reproduced directly against production covariance matrices, see warpier_core.md. A symmetric
+    # matrix only has one rotation angle in the first place, so computing it once removes the
+    # possibility of the two desyncing.
+    theta = (0.5) * wp.atan2(2.0 * b, a - d)
     cosTheta = wp.cos(theta)
     sinTheta = wp.sin(theta)
-    U = zero_like_warp(C)
-    U[0,0] = cosTheta
-    U[0,1] = - sinTheta
-    U[1,0] = sinTheta
-    U[1,1] = cosTheta
 
-    S1 = a*a + b*b + c*c + d*d
-    S2 = wp.sqrt((a*a + b*b - c*c - d*d)**2.0 + 4.0* (a * c + b *d)**2.0)
+    v1x = cosTheta
+    v1y = sinTheta
+    v2x = -sinTheta
+    v2y = cosTheta
 
-    o1 = wp.sqrt((S1 + S2) / 2.0)
-    o2 = wp.sqrt(wp.clamp(S1 - S2, low = 1e-9, high = 1e9) / 2.0)
+    lam1 = a * v1x * v1x + 2.0 * b * v1x * v1y + d * v1y * v1y
+    lam2 = (a + d) - lam1
 
-    phi = (0.5) * wp.atan2(2.0 * a * b + 2.0 * c * d, a*a - b*b + c*c - d*d)
-    cosPhi = wp.cos(phi)
-    sinPhi = wp.sin(phi)
-    s11 = wp.sign((a * cosTheta + c * sinTheta) * cosPhi + ( b * cosTheta + d * sinTheta) * sinPhi)
-    s22 = wp.sign((a * sinTheta - c * cosTheta) * sinPhi + (-b * sinTheta + d * cosTheta) * cosPhi)
+    # order by magnitude, largest first, matching the "o1 >= o2" convention the rest of this function
+    # (and its callers) assume. Eigenvalues are signed here, unlike the old singular-value convention.
+    bigX = v1x
+    bigY = v1y
+    big = lam1
+    smallX = v2x
+    smallY = v2y
+    small = lam2
+    if wp.abs(lam2) > wp.abs(lam1):
+        bigX = v2x
+        bigY = v2y
+        big = lam2
+        smallX = v1x
+        smallY = v1y
+        small = lam1
 
-    V = zero_like_warp(C)
-    V[0,0] = cosPhi * s11
-    V[0,1] = - sinPhi * s22
-    V[1,0] = sinPhi * s11
-    V[1,1] = cosPhi * s22
+    EV[i][0] = big
+    EV[i][1] = small
 
-    eigVals = zero_like_warp(EV)
-    eigVals[0] = o1
-    eigVals[1] = o2 
-
-    EV[i] = eigVals
-
-    # o1 >= o2 by construction above. Zeroing based on a fixed absolute epsilon lets thin/anisotropic
-    # neighborhoods (e.g. free-surface fingers, near-collinear particle rows) through with a tiny but
-    # nonzero o2, which then gets inverted into a huge amplification factor. Use a cutoff relative to
-    # the largest eigenvalue instead, matching the rcond convention torch.linalg.pinv uses for the 3D path.
+    # Zeroing based on a fixed absolute epsilon lets thin/anisotropic neighborhoods (e.g. free-surface
+    # fingers, near-collinear particle rows) through with a tiny but nonzero small eigenvalue, which
+    # then gets inverted into a huge amplification factor. Use a cutoff relative to the largest
+    # eigenvalue instead, matching the rcond convention torch.linalg.pinv uses for the 3D path.
     rcond = scalar_t(1.0e-6)
-    threshold = rcond * o1
-    o1_1 = 0.0 if o1 <= scalar_t(1.0e-12) else 1.0 / o1
-    o2_1 = 0.0 if o2 <= threshold else 1.0 / o2
+    threshold = rcond * wp.abs(big)
+    big_inv = 0.0 if wp.abs(big) <= scalar_t(1.0e-12) else 1.0 / big
+    small_inv = 0.0 if wp.abs(small) <= threshold else 1.0 / small
 
-    S_1 = zero_like_warp(C)
-    S_1[0,0] = o1_1
-    S_1[1,1] = o2_1
-
-    L[i] = matmul2(matmul2(V, S_1), wp.transpose(U))
+    L[i][0,0] = big_inv * bigX * bigX + small_inv * smallX * smallX
+    L[i][0,1] = big_inv * bigX * bigY + small_inv * smallX * smallY
+    L[i][1,0] = big_inv * bigY * bigX + small_inv * smallY * smallX
+    L[i][1,1] = big_inv * bigY * bigY + small_inv * smallY * smallY
 
 def pinv2x2_warpBackend(
     C: torch.Tensor,
@@ -354,7 +348,7 @@ def pinv2x2_warpBackend(
     inv_warp = castTorchToWarpAsBuiltins(inv)
     evs_warp = castTorchToWarpAsBuiltins(evs)
     nnbrs = castTorchToWarpAsBuiltins(num_nbrs)
-    wp.launch(kernel=pinv2x2_warp, dim=mat_warp.shape[0], inputs=[mat_warp, inv_warp, evs_warp, nnbrs])
+    wp.launch(kernel=pinv2x2_warp, dim=mat_warp.shape[0], inputs=[mat_warp, inv_warp, evs_warp, nnbrs], device=inv_warp.device)
     return inv, evs
 
 # invs, evs = pinv2x2_warpBackend(randomMat)
@@ -414,6 +408,7 @@ def computeRenormalizationMatrices_(
     with record_function("[warpSPH] - Renorm - Pseudo Inverse"):
         if queryPositions.shape[1] == 2:
             L, eigVals = pinv2x2_warpBackend(C, num_nbrs)
+            # L = torch.linalg.pinv(C)
         else:
             # rcond matches the relative eigenvalue cutoff used in the 2D path (pinv2x2_warp):
             # zero out directions that are near-singular relative to the dominant eigenvalue,

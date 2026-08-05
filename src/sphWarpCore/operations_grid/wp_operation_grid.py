@@ -44,6 +44,7 @@ def sphOperation_warp_grid(
     operationMode: OperationDirection = OperationDirection.AllToAll,
     positiveDivergence: bool = False,
     consistentDivergence: bool = False,
+    divergenceDotMode: bool = False,
     preScatteredQuantities: Optional[torch.Tensor] = None,
     queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,
 
@@ -176,6 +177,7 @@ def sphOperation_warp_grid(
                 gradientMode= gradientMode,
                 scatteredQuantities= preScatteredQuantities,
                 consistentDivergence = consistentDivergence,
+                dotMode = divergenceDotMode,
 
                 useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
                 useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,

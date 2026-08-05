@@ -186,7 +186,7 @@ def computeSPHDivergenceTensor_Func(
         if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
             out += divergenceProduct(fj * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
-            out += divergenceProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
+            out += divergenceProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)), kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
             out += divergenceProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation

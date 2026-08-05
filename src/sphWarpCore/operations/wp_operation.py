@@ -43,6 +43,7 @@ def sphOperation_warp(
     operationMode: OperationDirection = OperationDirection.AllToAll,
     positiveDivergence: bool = False,
     consistentDivergence: bool = False,
+    divergenceDotMode: bool = False,
     preScatteredQuantities: Optional[torch.Tensor] = None,
     queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,
 
@@ -62,7 +63,7 @@ def sphOperation_warp(
             kernel = kernel, supportMode = supportMode,
             operation = operation, operationMode = operationMode, 
             gradientMode= gradientMode, laplacianMode= laplacianMode, positiveDivergence=positiveDivergence,
-            consistentDivergence= consistentDivergence,
+            consistentDivergence= consistentDivergence, divergenceDotMode= divergenceDotMode,
             preScatteredQuantities= preScatteredQuantities, queryKinds= queryKinds, referenceKinds= referenceKinds,
             useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
             useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,
@@ -179,6 +180,7 @@ def sphOperation_warp(
                 gradientMode= gradientMode,
                 scatteredQuantities= preScatteredQuantities,
                 consistentDivergence = consistentDivergence,
+                dotMode = divergenceDotMode,
 
                 useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
                 useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
@@ -298,7 +300,7 @@ def warpOperation(
         domain = domain, adjacency=adjacency,
         operation = operationProperties.operation, supportMode = operationProperties.supportMode,
         kernel = operationProperties.kernel, operationMode = operationProperties.operationMode,
-        gradientMode= operationProperties.gradientMode, laplacianMode= operationProperties.laplacianMode, positiveDivergence= operationProperties.positiveDivergence,
+        gradientMode= operationProperties.gradientMode, laplacianMode= operationProperties.laplacianMode, positiveDivergence= operationProperties.positiveDivergence, divergenceDotMode= operationProperties.divergenceDotMode,
         preScatteredQuantities= preScatteredQuantities, 
         queryKinds= queryKinds, referenceKinds= referenceKinds,
 
