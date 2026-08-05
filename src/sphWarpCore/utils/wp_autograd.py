@@ -112,12 +112,12 @@ class WarpFunctionWrapper(torch.autograd.Function):
         if isinstance(outputs_warp, list):
             for out_warp, grad_out in zip(outputs_warp, grad_outputs):
                 if grad_out is not None:
-                    out_warp.grad = castTorchToWarpAsBuiltins(grad_out.contiguous())
+                    out_warp.grad = castTorchToWarpAsBuiltins(grad_out.contiguous().detach().clone())
                     # print(f'Output Grad [{i:2d}]: {grad_out} [dtype: {grad_out.dtype}, device: {grad_out.device}, shape: {grad_out.shape}]')
                     
         else:
             if grad_outputs[0] is not None:
-                outputs_warp.grad = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous())
+                outputs_warp.grad = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous().detach().clone())
                 # print(f'Output Grad: {grad_outputs[0]} [dtype: {grad_outputs[0].dtype}, device: {grad_outputs[0].device}, shape: {grad_outputs[0].shape}]')
                 
         
@@ -135,7 +135,7 @@ class WarpFunctionWrapper(torch.autograd.Function):
             else:
                 input_grads.append(None)
                 # print(f'Input {i:02d} did not require grad')
-        ctx.tape.zero() # Clear any accumulated gradients in the tape to avoid affecting future computations
+        ctx.tape.zero()  # Clear any accumulated gradients in the tape to avoid affecting future computations
         # ctx.tape.reset()  # Clear the tape to free memory
                 
         # print("Backward pass completed. Returning gradients for inputs.")
@@ -231,10 +231,10 @@ class StateAwareWarpFunction(torch.autograd.Function):
         if isinstance(output_warp, (list, tuple)):
             for out, grad in zip(output_warp, grad_outputs):
                 if grad is not None:
-                    out.grad = castTorchToWarpAsBuiltins(grad.contiguous())
+                    out.grad = castTorchToWarpAsBuiltins(grad.contiguous().detach().clone())
         else:
             if grad_outputs[0] is not None:
-                output_warp.grad = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous())
+                output_warp.grad = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous().detach().clone())
 
         ctx.tape.backward()
 
