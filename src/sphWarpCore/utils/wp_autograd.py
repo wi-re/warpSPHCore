@@ -104,26 +104,36 @@ class WarpFunctionWrapper(torch.autograd.Function):
         """
         if not ctx.any_requires_grad:
             return (None,) * (len(ctx.inputs_warp) + 1)  # +1 for the function argument
-        
+
         outputs_warp = ctx.outputs_warp
         inputs_warp = ctx.inputs_warp
-        outIndex = 0
-        # Set output gradients
+
+        # Seed output gradients via Tape.backward(grads=...) rather than
+        # assigning array.grad directly. wp.from_torch() is zero-copy, so a
+        # direct `out_warp.grad = wp.from_torch(grad_out)` makes the incoming
+        # torch tensor itself the live output-adjoint buffer; Warp's reverse
+        # pass consumes output adjoints by reading *and zeroing* them, which
+        # then mutates that torch tensor in place. Any caller that reuses the
+        # same grad_outputs tensor object across separate backward() calls
+        # (e.g. a preallocated gradient-seed buffer) would see a correct
+        # gradient on the first call and silently zero on every call after,
+        # since the tensor was zeroed out from under it. Tape.backward(grads=...)
+        # instead copies values into each array's own persistent .grad buffer
+        # (array.grad.assign(seed)) rather than aliasing the seed itself, so
+        # the caller's tensor is never mutated. Confirmed upstream (warp-lang
+        # issue tracker) as the intended pattern; see warpier_core.md.
+        grads = {}
         if isinstance(outputs_warp, list):
             for out_warp, grad_out in zip(outputs_warp, grad_outputs):
                 if grad_out is not None:
-                    out_warp.grad = castTorchToWarpAsBuiltins(grad_out.contiguous().detach().clone())
-                    # print(f'Output Grad [{i:2d}]: {grad_out} [dtype: {grad_out.dtype}, device: {grad_out.device}, shape: {grad_out.shape}]')
-                    
+                    grads[out_warp] = castTorchToWarpAsBuiltins(grad_out.contiguous())
         else:
             if grad_outputs[0] is not None:
-                outputs_warp.grad = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous().detach().clone())
-                # print(f'Output Grad: {grad_outputs[0]} [dtype: {grad_outputs[0].dtype}, device: {grad_outputs[0].device}, shape: {grad_outputs[0].shape}]')
-                
-        
+                grads[outputs_warp] = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous())
+
         # Use the saved tape to compute gradients with respect to inputs
-        ctx.tape.backward()
-        
+        ctx.tape.backward(grads=grads)
+
         # Retrieve gradients for inputs from the tape
         input_grads = []
         for i, (arg, requires_grad) in enumerate(zip(ctx.inputs_warp, ctx.requires_grad_mask)):
@@ -227,16 +237,20 @@ class StateAwareWarpFunction(torch.autograd.Function):
         if not ctx.any_requires_grad:
             return (None,) * N + (None,) * n_tensors
 
+        # See WarpFunctionWrapper.backward's comment above for why this
+        # seeds gradients via Tape.backward(grads=...) instead of assigning
+        # array.grad directly.
         output_warp = ctx.output_warp
+        grads = {}
         if isinstance(output_warp, (list, tuple)):
             for out, grad in zip(output_warp, grad_outputs):
                 if grad is not None:
-                    out.grad = castTorchToWarpAsBuiltins(grad.contiguous().detach().clone())
+                    grads[out] = castTorchToWarpAsBuiltins(grad.contiguous())
         else:
             if grad_outputs[0] is not None:
-                output_warp.grad = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous().detach().clone())
+                grads[output_warp] = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous())
 
-        ctx.tape.backward()
+        ctx.tape.backward(grads=grads)
 
         input_grads = []
         for wa, t in zip(ctx.warp_arrays, ctx.saved_tensors):
