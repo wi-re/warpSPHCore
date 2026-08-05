@@ -540,7 +540,7 @@ def _join_cells(cell_strs: list[str]) -> str:
     return "".join(parts)
 
 
-def print_matrix(device: torch.device, case: Case, results: dict, verbose: bool):
+def print_matrix(device: torch.device, case: Case, results: dict, verbose: bool) -> dict:
     row_label_width = max(len(label) for label in results) + 2
     group_width = CELL_WIDTH * len(CORRECTIONS)
     group_header = " " * row_label_width + GROUP_SEP.join(f"{t:^{group_width}}" for t in TRAVERSALS)
@@ -591,6 +591,8 @@ def print_matrix(device: torch.device, case: Case, results: dict, verbose: bool)
         for label, col, cell in plain_high:
             print(f"  {label} [{col[0]}/{col[1]}] MAE={cell.mae:.4f}")
 
+    return counts
+
 
 # --------------------------------------------------------------------------
 # CLI
@@ -611,6 +613,9 @@ def main():
                               "notebooks' jittered examples.")
     parser.add_argument("--seed", type=int, default=0, help="RNG seed for --jitter (default: 0)")
     parser.add_argument("--verbose", action="store_true", help="also print notes for HIGH-error cells")
+    parser.add_argument("--ci", action="store_true",
+                         help="turn this diagnostic into a gate: exit with a non-zero status if any cell is "
+                              "HIGH, ERR, or NAN (or if a device fatally fails to build), across all devices run.")
     args = parser.parse_args()
 
     wp.init()
@@ -627,6 +632,7 @@ def main():
             sys.exit(1)
         devices = [torch.device(args.device)]
 
+    had_failure = False
     for device in devices:
         try:
             case, results = run_matrix(device, args.nx, args.target_neighbors, args.threshold, args.boundary_band,
@@ -634,8 +640,17 @@ def main():
         except Exception:
             print(f"Fatal error building matrix for device={device}:", file=sys.stderr)
             traceback.print_exc()
+            had_failure = True
             continue
-        print_matrix(device, case, results, args.verbose)
+        counts = print_matrix(device, case, results, args.verbose)
+        if counts["HIGH"] or counts["ERR"] or counts["NAN"]:
+            had_failure = True
+
+    if args.ci and had_failure:
+        print(file=sys.stderr)
+        print("operation_matrix.py --ci: at least one cell was HIGH/ERR/NAN, or a device failed to build.",
+              file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -44,56 +44,40 @@ def clearDummyTensorCache() -> None:
 
 
 # ---------------------------------------------------------------------------
-# wp.array identity cache
+# wp.array identity cache -- REMOVED.
 # ---------------------------------------------------------------------------
-# Keyed by (data_ptr, shape, strides, dtype) so that in-place-updated tensors
-# (positions, densities, …) map to the same wp.array wrapper every call —
-# zero-copy AND zero object allocation on the hot path.
-# Only misses when a new allocation happens (e.g. first call, adjacency rebuild).
-_WARP_ARRAY_CACHE: dict[tuple, "wp.array"] = {}
-_MAX_WARP_ARRAY_CACHE_ENTRIES = 64
+# This used to key a cached wp.array wrapper by (data_ptr, shape, strides,
+# dtype) so that repeated calls on the same underlying tensor storage reused
+# the same wp.array object instead of rebuilding it. The problem: the reused
+# wp.array's .grad buffer is also reused and is never zeroed between unrelated
+# forward/backward calls, so any two calls that happen to share tensor
+# storage (the same leaf tensor called into repeatedly -- true of
+# torch.autograd.gradcheck, and of any training loop that updates parameters
+# in place) silently accumulate gradients from prior calls into the "new"
+# one, making backward non-reentrant and gradients wrong from the second call
+# onward. Found while adding torch.autograd.gradcheck coverage; see
+# warpier_core.md. getCachedWarpArray now always builds a fresh wrapper.
 
 
 from torch.profiler import record_function
-def _cache_set_bounded(cache: dict, key: tuple, value, max_entries: int) -> None:
-    cache[key] = value
-    while len(cache) > max_entries:
-        cache.pop(next(iter(cache)))
 
 
 def getCachedWarpArray(t: torch.Tensor) -> "wp.array":
-    # with record_function("[warpSPH] - getCachedWarpArray"):
-    """Return a cached wp.array view of *t*.
+    """Return a fresh wp.array view of *t*.
 
-    If the tensor's underlying storage has not changed (same data_ptr, shape,
-    strides and dtype) the previously created wp.array wrapper is reused,
-    avoiding a Python object allocation and a ``wp.from_torch`` call on every
-    kernel launch.
-
-    The cache entry is invalidated automatically when any of those four
-    properties change, which happens whenever a tensor is reallocated (e.g.
-    after an adjacency rebuild).
+    No longer caches the wrapper object -- see the module-level note above.
+    Kept under its original name since it is part of the package's public
+    surface and used throughout the operation backends.
     """
-    key = (t.data_ptr(), t.shape, t.stride(), t.dtype)
-    wa = _WARP_ARRAY_CACHE.get(key)
-    if wa is None:
-        tc = t.contiguous()
-        # contiguous() may return a new tensor with a different data_ptr
-        key = (tc.data_ptr(), tc.shape, tc.stride(), tc.dtype)
-        wa = _WARP_ARRAY_CACHE.get(key)
-        if wa is None:
-            wa = castTorchToWarpAsBuiltins(tc)
-            _cache_set_bounded(_WARP_ARRAY_CACHE, key, wa, _MAX_WARP_ARRAY_CACHE_ENTRIES)
-    return wa
+    return castTorchToWarpAsBuiltins(t.contiguous())
 
 
 def clearWarpArrayCache() -> None:
-    """Clear all cached wp.array wrappers.
+    """No-op: the wp.array identity cache has been removed.
 
-    Call this whenever tensors are reallocated outside of normal simulation
-    steps (e.g. after resizing particle arrays).
+    Kept for backward compatibility with existing call sites.
     """
-    _WARP_ARRAY_CACHE.clear()
+    pass
 
 def getCachedDummyTensor(
     shape,

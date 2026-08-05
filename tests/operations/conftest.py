@@ -104,8 +104,17 @@ def op(
     crk_state=None,
     renorm_state=None,
     consistent_divergence=False,
+    traversal="adjacency",
 ):
     particles = case["particles"]
+    if traversal == "adjacency":
+        adjacency = case["adjacency"]
+    elif traversal == "grid":
+        # adjacency=None routes sphOperation_warp -> sphOperation_warp_grid,
+        # building a CompactHashMap on the fly for this call.
+        adjacency = None
+    else:
+        raise ValueError(f"Unknown traversal mode: {traversal!r}")
     return warpOperation(
         particles,
         OperationProperties(
@@ -117,7 +126,7 @@ def op(
             laplacianMode=laplacian_mode,
         ),
         case["domain"],
-        adjacency=case["adjacency"],
+        adjacency=adjacency,
         queryValues=query_values,
         referenceValues=reference_values,
         crkState=crk_state,

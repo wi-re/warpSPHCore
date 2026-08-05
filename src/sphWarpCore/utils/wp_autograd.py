@@ -5,46 +5,22 @@ from ..types import *
 from .wp_util import castTorchToWarpAsBuiltins, castWarpToTorch, getCachedWarpArray
 
 # ---------------------------------------------------------------------------
-# Struct-bundle cache: maps a tuple of data_ptrs to (warp_arrays, kernel_args)
-# so that build_fn and all 36 wp.array casts are skipped on steady-state steps.
-# ---------------------------------------------------------------------------
-_KERNEL_ARGS_CACHE: dict[tuple, tuple] = {}
-_WRAPPER_ARGS_CACHE: dict[tuple, tuple] = {}
-
-# data_ptr-based keys can churn in out-of-place update loops (new storage every step).
-# Keep caches bounded to avoid retaining stale tensor-backed wrapper objects forever.
-_MAX_KERNEL_ARGS_CACHE_ENTRIES = 8
-_MAX_WRAPPER_ARGS_CACHE_ENTRIES = 8
-
-
-def _cache_set_bounded(cache: dict, key: tuple, value: tuple, max_entries: int) -> None:
-    cache[key] = value
-    while len(cache) > max_entries:
-        cache.pop(next(iter(cache)))
-
-
-def _to_hashable(value):
-    if isinstance(value, list):
-        return tuple(_to_hashable(v) for v in value)
-    if isinstance(value, tuple):
-        return tuple(_to_hashable(v) for v in value)
-    if isinstance(value, dict):
-        return tuple(sorted((k, _to_hashable(v)) for k, v in value.items()))
-    try:
-        hash(value)
-        return value
-    except TypeError:
-        return repr(value)
+# The struct-bundle / wrapper-args caches that used to live here (keyed on
+# tensor data_ptr, reusing Warp array wrapper objects -- and their attached
+# .grad buffers -- across unrelated calls) have been removed. They were the
+# same class of live-object-identity caching as getCachedWarpArray's removed
+# cache (see wp_util.py): safe only by accident (gated to the no-grad path
+# here), but the same pattern silently produced wrong, accumulating
+# gradients elsewhere. Removed rather than reasoned about further. See
+# warpier_core.md.
 
 
 def clearKernelArgsCache() -> None:
-    """Invalidate the struct-bundle cache.
+    """No-op: the kernel-args/wrapper-args caches have been removed.
 
-    Call this whenever particle arrays are reallocated (e.g. particle add/remove)
-    or after an adjacency rebuild that reuses the same Python tensor objects.
+    Kept for backward compatibility with existing call sites.
     """
-    _KERNEL_ARGS_CACHE.clear()
-    _WRAPPER_ARGS_CACHE.clear()
+    pass
 
 from torch.profiler import record_function
 
@@ -78,51 +54,23 @@ class WarpFunctionWrapper(torch.autograd.Function):
             # Avoid save_for_backward overhead on pure inference/no-grad paths.
             ctx.save_for_backward()
 
-        # Convert PyTorch tensors to Warp arrays.
-        # In no-grad steady-state, reuse the fully packed argument bundle.
-        warp_args = None
-        requires_grad_mask = None
+        # Convert PyTorch tensors to Warp arrays. Always builds fresh wrapper
+        # objects -- see the module-level note above on why this used to
+        # reuse cached wrapper/array objects and why that was removed.
+        warp_args = []
+        requires_grad_mask = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                # Detach to break the link between PyTorch and Warp gradient buffers
+                detached_arg = arg.detach()
+                warp_arg = getCachedWarpArray(detached_arg)
+                warp_arg.requires_grad = arg.requires_grad  # Preserve requires_grad information for backward
+                warp_args.append(warp_arg)
+                requires_grad_mask.append(arg.requires_grad)
+            else:
+                warp_args.append(arg)  # Non-tensor arguments are passed as-is
+                requires_grad_mask.append(False)
 
-        if not ctx.any_requires_grad:
-            key_parts = []
-            for arg in args:
-                if isinstance(arg, torch.Tensor):
-                    key_parts.append(("t", arg.data_ptr(), arg.shape, arg.stride(), arg.dtype))
-                else:
-                    key_parts.append(("s", _to_hashable(arg)))
-            cache_key = (function, tuple(key_parts))
-            cached = _WRAPPER_ARGS_CACHE.get(cache_key)
-            if cached is not None:
-                warp_args, requires_grad_mask = cached
-                # Reset tensor requires_grad flags each call for correctness
-                # if the same wrapped array was used in a grad-enabled context.
-                for arg, wa in zip(args, warp_args):
-                    if isinstance(arg, torch.Tensor):
-                        wa.requires_grad = arg.requires_grad
-
-        if warp_args is None:
-            warp_args = []
-            requires_grad_mask = []
-            for arg in args:
-                if isinstance(arg, torch.Tensor):
-                    # Detach to break the link between PyTorch and Warp gradient buffers
-                    detached_arg = arg.detach()
-                    warp_arg = getCachedWarpArray(detached_arg)
-                    warp_arg.requires_grad = arg.requires_grad  # Preserve requires_grad information for backward
-                    warp_args.append(warp_arg)
-                    requires_grad_mask.append(arg.requires_grad)
-                else:
-                    warp_args.append(arg)  # Non-tensor arguments are passed as-is
-                    requires_grad_mask.append(False)
-
-            if not ctx.any_requires_grad:
-                _cache_set_bounded(
-                    _WRAPPER_ARGS_CACHE,
-                    cache_key,
-                    (warp_args, requires_grad_mask),
-                    _MAX_WRAPPER_ARGS_CACHE_ENTRIES,
-                )
-                
         ctx.inputs_warp = warp_args
         ctx.requires_grad_mask = requires_grad_mask
         # print(f'Number of warp inputs: {len(warp_args)} | {len(ctx.requires_grad_mask)}, number of inputs: {len(args)}')
@@ -182,11 +130,13 @@ class WarpFunctionWrapper(torch.autograd.Function):
             if requires_grad:
                 grad_warp = inputs_warp[i].grad
                 grad_torch = wp.to_torch(grad_warp)
-                input_grads.append(grad_torch)
+                input_grads.append(grad_torch.clone())
                 # print(f'Input {i:02d} requires grad. Retrieved gradient from Warp and converted to torch tensor with shape {grad_torch.shape}, dtype {grad_torch.dtype}, device {grad_torch.device} -> {grad_warp} | {grad_torch}')
             else:
                 input_grads.append(None)
                 # print(f'Input {i:02d} did not require grad')
+        ctx.tape.zero() # Clear any accumulated gradients in the tape to avoid affecting future computations
+        # ctx.tape.reset()  # Clear the tape to free memory
                 
         # print("Backward pass completed. Returning gradients for inputs.")
         # print(f'Number of inputs: {len(ctx.inputs_warp)}, number of gradients: {len(input_grads)}')
@@ -240,50 +190,19 @@ class StateAwareWarpFunction(torch.autograd.Function):
             # Avoid save_for_backward overhead when gradients are not requested.
             ctx.save_for_backward()
 
-        # ------------------------------------------------------------------
-        # Hot-path: reuse cached (warp_arrays, kernel_args) when every tensor
-        # has the same underlying storage as the previous call.
-        # The cache key is a tuple of (data_ptr, shape, stride, dtype) for
-        # each tensor, which changes whenever a tensor is reallocated.
-        # We skip the cache when any tensor requires grad so that the Warp
-        # tape always gets fresh array objects it can attach grad buffers to.
-        # ------------------------------------------------------------------
-        cache_key = None
-        # if not ctx.any_requires_grad:
-        #     cache_key = tuple(
-        #         (t.data_ptr(), t.shape, t.stride(), t.dtype) for t in flat_tensors
-        #     )
-        #     cached = _KERNEL_ARGS_CACHE.get(cache_key)
-        #     if cached is not None:
-        #         warp_arrays, kernel_args = cached
-        #         ctx.warp_arrays = warp_arrays
-        #         ctx.kernel_args_cache_hit = True
-        #     else:
-        #         ctx.kernel_args_cache_hit = False
-        # else:
-        #     cached = None
-        #     ctx.kernel_args_cache_hit = False
+        # Detach → warp, preserving requires_grad so the tape tracks them.
+        # Always builds fresh wrapper objects -- see the module-level note
+        # above on why a data_ptr-keyed cache used to live here and why it
+        # was removed.
+        warp_arrays = []
+        for t in flat_tensors:
+            wa = getCachedWarpArray(t.detach())
+            wa.requires_grad = t.requires_grad
+            warp_arrays.append(wa)
+        ctx.warp_arrays = warp_arrays
 
-        # if not ctx.kernel_args_cache_hit:
-        if True:
-            # Detach → warp, preserving requires_grad so the tape tracks them
-            warp_arrays = []
-            for t in flat_tensors:
-                wa = getCachedWarpArray(t.detach())
-                wa.requires_grad = t.requires_grad
-                warp_arrays.append(wa)
-            ctx.warp_arrays = warp_arrays
-
-            # Reconstruct all kernel args via the caller-supplied closure
-            kernel_args = build_fn(warp_arrays)
-
-            # if cache_key is not None:
-            #     _cache_set_bounded(
-            #         _KERNEL_ARGS_CACHE,
-            #         cache_key,
-            #         (warp_arrays, kernel_args),
-            #         _MAX_KERNEL_ARGS_CACHE_ENTRIES,
-            #     )
+        # Reconstruct all kernel args via the caller-supplied closure
+        kernel_args = build_fn(warp_arrays)
 
         if ctx.any_requires_grad:
             tape = wp.Tape()
@@ -322,9 +241,10 @@ class StateAwareWarpFunction(torch.autograd.Function):
         input_grads = []
         for wa, t in zip(ctx.warp_arrays, ctx.saved_tensors):
             if t.requires_grad:
-                input_grads.append(wp.to_torch(wa.grad))
+                input_grads.append(wp.to_torch(wa.grad).clone())
             else:
                 input_grads.append(None)
+        ctx.tape.zero()  # Clear any accumulated gradients in the tape to avoid affecting future computations
 
         return (None,) * N + tuple(input_grads)
 
