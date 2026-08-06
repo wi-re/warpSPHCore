@@ -110,8 +110,8 @@ def op(
     if traversal == "adjacency":
         adjacency = case["adjacency"]
     elif traversal == "grid":
-        # adjacency=None routes sphOperation_warp -> sphOperation_warp_grid,
-        # building a CompactHashMap on the fly for this call.
+        # adjacency=None: each operator's unified backend builds its own
+        # CompactHashMap on the fly for this call (see extractStateInfo).
         adjacency = None
     else:
         raise ValueError(f"Unknown traversal mode: {traversal!r}")

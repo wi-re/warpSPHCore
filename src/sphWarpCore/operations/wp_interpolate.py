@@ -1,72 +1,59 @@
 import warp as wp
 from warp.types import vector, matrix
-# from wp_tensor import tensor
-from typing import Any, Optional
+from typing import Any, Optional, Union
 import torch
+from torch.profiler import record_function
+
 from ..utils.wp_autograd import *
 
-
-from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
+from ..radiusSearch.radius_util import AdjacencyList, DomainDescription, PointCloud
+from ..radiusSearch.wp_compactHash import CompactHashMap
+from ..radiusSearch.grid_util import checkOffset
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
-from torch.profiler import profile, record_function, ProfilerActivity
-from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j
+from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j, zero_like_warp, castTorchToWarpAsBuiltins, getCachedDummyTensor
+
+from ..enumTypes import *
+from ..warp_state import (
+    domainData, adjacencyData, gridData,
+    getParticle, getCRK_i,
+)
+from ..warp_state_util import warpWrapper2
+from ..state import ParticleState, OperationProperties, CRKState
+
+# Unified Interpolate kernel: same design as the unified Gradient kernel (see
+# warpier_core.md's "Working Prototype -> Production" section) -- one wp.func/wp.kernel
+# pair drives both neighbor-list and compact-hash-grid traversal, replacing the former
+# split between this file (adjacency-only) and operations_grid/wp_interpolate_grid.py
+# (grid-only, duplicated physics).
 
 
 @wp.func
-def computeSPHInterpolation_Func(
-    # General Shape Parameters and indices
-    i : wp.int32, dim: wp.int32, 
+def computeSPHInterpolation_Func_i(
+    i: wp.int32, dim: wp.int32,
 
-    # SPH properties for the query set (indexed by i)
-    queryPositions: wp.array(dtype=vector(dtype = scalar_t, length=Any)), querySupports: wp.array(dtype = scalar_t), queryMasses: wp.array(dtype = scalar_t), queryDensities: wp.array(dtype = scalar_t), queryValues: wp.array(dtype = Any), # type: ignore
+    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, # type: ignore
 
-    # SPH properties for the reference set (indexed by j in the neighbor loop)
-    referencePositions : wp.array(dtype=vector(length=Any, dtype = scalar_t)), referenceSupports : wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t), referenceDensities: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = Any), # type: ignore
-    
-    # Domain and kernel parameters
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
-    mode_uint: wp.uint32, kernel_int: wp.int32, 
-    
-    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
-    neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32, 
-    
-    # Indicates if the input quantities have already been scattered to the neighbor level 
-    preScatteredQuantities: wp. bool,
-    
-    # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
-    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+    referenceState: Any, # particleDataSoA_1/2/3
 
-    # Optional Correction Terms:
-    # Whether to use actual volume (mass/density) or apparent volume for the gradient computation, and the corresponding volumes if needed.
-    useVolume: wp.bool, queryVolumes: wp.array(dtype = scalar_t), referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
-    # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
-    useCRK: wp.bool, queryA: wp.array(dtype = scalar_t), queryB: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
-    
-    # Dummy value to allow allocation
-    outputValue: Any # type: ignore
+    domainState: domainData,
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32,
+
+    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+
+    opInt: wp.int32, ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+
+    useVolume: wp.bool, referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
+    useCRK: wp.bool, Ai: scalar_t, Bi: vector(length=Any, dtype=scalar_t), # type: ignore
+
+    referenceValues: wp.array(dtype = Any), # type: ignore
+
+    outputValue: Any, # type: ignore
 ):
-    if opInt != 0:
-        if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * scalar_t(0.0)
-    # Unpack query point properties
-    xi      = queryPositions[i]
-    hi      = querySupports[i]
-    # mi      = queryMasses[i] # Generally not needed
-    rhoi    = queryDensities[i]
-    fi      = queryValues[i]
-    # Unpack optional correction terms
-    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
-    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
-    
-    # Initialize the output value
-    out     = type(outputValue)(scalar_t(0.0))
-    
-    # Loop over neighbors to compute the gradient contribution from each neighbor    
-    for neighborIndex in range(numNeighs):
-        jj = neighborOffset + neighborIndex
-        j = wp.int32(neighborList[jj])
+    out = zero_like_warp(outputValue)
+    for neighborIndex in range(numIndices):
+        jj = beginIndex + neighborIndex
+        j = wp.int32(offsetArray[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
                 continue
@@ -74,81 +61,172 @@ def computeSPHInterpolation_Func(
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        # A ternary expression here (`fv = a if cond else b`) compiles fine but
-        # silently produces a zero adjoint for referenceValues -- confirmed via
-        # a minimal warp-lang repro isolating ternary-vs-if/else array reads on
-        # both concrete and generic (Any) dtypes; every other operator in this
-        # codebase already uses the if/else block form for this exact
-        # preScatteredQuantities branch. See warpier_core.md.
-        if preScatteredQuantities:
-            fv = referenceValues[jj]
-        else:
-            fv = referenceValues[j]
+        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
 
-        vj = referenceMasses[j] / referenceDensities[j] if not useVolume else referenceVolumes[j]
+        fv = referenceValues[j]
+        vj = mj / rhoj if not useVolume else referenceVolumes[j]
 
         w_ij = computeKernelCRK(
-            xi, referencePositions[j], 
-            hi, referenceSupports[j], 
-            kernel_int, mode_uint, periodicity, domainMin, domainMax,
+            xi, xj,
+            hi, hj,
+            kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax,
             useCRK, Ai, Bi
         )
 
         out += fv * vj * w_ij
-            
+
+    return out
+
+
+@wp.func
+def computeSPHInterpolation_Func_Adjacency(
+    i: wp.int32, dim: wp.int32,
+
+    queryState: Any, referenceState: Any, correctionData: Any,
+
+    domainState: domainData,
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
+
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+
+    referenceValues: Any, # type: ignore
+
+    outputValue: Any, # type: ignore
+):
+    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    if opInt != 0:
+        if not checkDirectionality_i(ki, opInt):
+            return zero_like_warp(outputValue)
+
+    useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
+    useVolume = correctionData.useVolume
+
+    out = zero_like_warp(outputValue)
+    for o in range(numOffsets):
+        beginIndex = wp.int32(0)
+        numIndices = wp.int32(0)
+        if useAdjacency:
+            beginIndex = adjacencyState.neighborOffsets[i]
+            numIndices = adjacencyState.numNeighbors[i]
+        else:
+            beginIndex, numIndices = checkOffset(
+                i, queryState.positions, gridState.numCells, gridState.D,
+                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
+                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
+            )
+            if beginIndex < 0:
+                continue
+
+        out += computeSPHInterpolation_Func_i(
+            i, dim,
+            xi, hi,
+            referenceState, domainState,
+            mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int,
+
+            beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
+            opInt, ki, referenceState.kinds,
+
+            useVolume, correctionData.referenceVolumes,
+            useCRK, Ai, Bi,
+
+            referenceValues,
+
+            outputValue,
+        )
     return out
 
 
 @wp.kernel
 def computeSPHInterpolation_Kernel(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=scalar_t)), referencePositions : wp.array(dtype=vector(length=Any, dtype=scalar_t)), # type: ignore
-    querySupports : wp.array(dtype = scalar_t), referenceSupports : wp.array(dtype = scalar_t), # type: ignore
-    queryMasses: wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t),  # type: ignore
-    queryDensities: wp.array(dtype = scalar_t), referenceDensities: wp.array(dtype = scalar_t), # type: ignore
-    queryValues: wp.array(dtype = Any), referenceValues: wp.array(dtype = Any), # type: ignore
-    
-    domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), periodicity : wp.array(dtype = wp.bool), # type: ignore
-    
-    mode_uint: wp.uint32, kernel_int : wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
-    
-    preScatteredQuantities: wp.bool,  
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
 
-    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
-    
-    useVolume: wp.bool, queryVolumes: wp.array(dtype = scalar_t), referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
-    useCRK: wp.bool, crk_A: wp.array(dtype = scalar_t), crk_B: wp.array(dtype = vector(length=Any, dtype=scalar_t)), # type: ignore
-    
-    outputValues : wp.array(dtype = Any) # type: ignore
-):                                                                                    
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
+
+    referenceValues: Any, # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = Any) # type: ignore
+):
     i = wp.tid()
-    if i >= queryPositions.shape[0]:
+    numParticles = queryState.positions.shape[0]
+    if i >= numParticles:
         return
-    
-    outputValues[i] = computeSPHInterpolation_Func(
-        i, get_dim(queryPositions), 
 
-        queryPositions, querySupports, queryMasses, queryDensities, queryValues,
-        referencePositions, referenceSupports, referenceMasses, referenceDensities, referenceValues,
+    outputValues[i] = computeSPHInterpolation_Func_Adjacency(
+        i, domainState.dim,
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int, opInt,
+        referenceValues,
 
-        periodicity, domainMin, domainMax, 
-        mode_uint, kernel_int,
-
-        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
-        
-        preScatteredQuantities,
-        
-        opInt, queryKinds, referenceKinds,
-        
-        useVolume, queryVolumes, referenceVolumes,
-        useCRK, crk_A, crk_B,
-
-        outputValues[i]
+        zero_like_warp(outputValues[i]),
     )
-    
-    
 
-from ..enumTypes import *
+
+def _computeSPHInterpolant_stateBackend(
+    queryParticles: ParticleState,
+    referenceParticles: ParticleState,
+    domain: DomainDescription,
+    mode: SupportScheme,
+    kernel: KernelFunctions,
+    operationMode: OperationDirection,
+    adjacency, # AdjacencyList | CompactHashMap | None
+    referenceValues: torch.Tensor,
+    queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    crkState: Optional[CRKState] = None,
+):
+    with record_function("warpSPH[Interpolation]"):
+        with record_function("warpSPH[Interpolation] - Preprocessing"):
+            # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
+            # For higher-rank inputs (e.g. shape (n, p, m, d)) flatten the field dims to
+            # a single vector dimension, interpolate, then restore the original shape.
+            field_shape = referenceValues.shape[1:]
+            needs_flatten = referenceValues.dim() > 3
+            if needs_flatten:
+                flat_len = referenceValues[0].numel()
+                referenceValues = referenceValues.reshape(referenceValues.shape[0], flat_len).contiguous()
+
+            outputSize = queryParticles.positions.shape[0]
+            outputDtype = castTorchToWarpAsBuiltins(referenceValues).dtype
+
+            operationProperties = OperationProperties(
+                kernel=kernel,
+                operation=WarpOperation.Interpolate,
+                supportMode=mode,
+                operationMode=operationMode,
+            )
+
+        with record_function("warpSPH[Interpolation] - Kernel Execution"):
+            result = warpWrapper2(
+                launcher=launch_kernel,
+                kernel=computeSPHInterpolation_Kernel,
+                outputSizes=outputSize,
+                outputDtypes=outputDtype,
+                defaultStateArguments=(
+                    queryParticles, operationProperties, domain,
+                    queryVolumes, referenceVolumes,
+                    adjacency,
+                    referenceParticles,
+                    crkState,
+                    None,
+                    None,
+                ),
+                additionalArguments=(
+                    referenceValues,
+                ),
+            )
+
+        if needs_flatten:
+            result = result.reshape(result.shape[0], *field_shape)
+
+    return result
+
 
 def computeSPHInterpolant_warpBackend(
     queryPositions, referencePositions,
@@ -159,73 +237,45 @@ def computeSPHInterpolant_warpBackend(
     queryKinds, referenceKinds,
     domain: DomainDescription,
     mode: SupportScheme,
-    kernel: KernelFunctions,    
+    kernel: KernelFunctions,
     operationMode: OperationDirection,
-    adjacency,
+    adjacency: Optional[Union[AdjacencyList, CompactHashMap]],
     scatteredQuantities: Optional[torch.Tensor] = None,
     useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None,
 ):
-    with record_function("warpSPH[Interpolation]"):
-        with record_function("warpSPH[Interpolation] - Preprocessing"):
-            domainMin = domain.min
-            domainMax = domain.max
-            periodicity = domain.periodic
+    """Public entry point kept for ``sphOperation_warp``: same flat-tensor signature as
+    before, now a thin adapter over the unified state-based kernel above. Interpolate's
+    output only depends on referenceValues (not queryValues -- there is no "difference
+    from self" term the way Gradient has), matching the pre-migration kernel.
+    """
+    if scatteredQuantities is not None:
+        raise NotImplementedError(
+            "Pre-scattered quantities are no longer supported by the Interpolate operator: "
+            "no caller in this repo relies on them (same rationale as Gradient's migration -- "
+            "see warpier_core.md). Pass referenceValues instead."
+        )
+    if referenceValues is None:
+        raise ValueError("referenceValues must be provided for the interpolation computation.")
 
-            preScatteredQuantities = False
-            if queryValues is None and referenceValues is None:
-                if scatteredQuantities is None:
-                    raise ValueError("If queryValues and referenceValues are not provided, then pre-scattered quantities must be provided for the interpolation computation.")
-                preScatteredQuantities = True
-                qV = scatteredQuantities
-                rV = scatteredQuantities
-            else:
-                qV = queryValues
-                rV = referenceValues
+    queryParticles = ParticleState(positions=queryPositions, supports=querySupports, masses=queryMasses, densities=queryDensities, kinds=queryKinds)
+    referenceParticles = ParticleState(positions=referencePositions, supports=referenceSupports, masses=referenceMasses, densities=referenceDensities, kinds=referenceKinds)
 
-            # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-            # For higher-rank inputs (e.g. shape (n, p, m, d)) we flatten the field
-            # dimensions to a single vector dimension, interpolate, then restore the
-            # original shape.  Rank <= 3 inputs (scalar / vector / matrix per particle)
-            # pass through unchanged.
-            field_shape = qV.shape[1:]   # all dims after the particle batch dim
-            needs_flatten = qV.dim() > 3
-            if needs_flatten:
-                flat_len = qV[0].numel()
-                qV = qV.reshape(qV.shape[0], flat_len).contiguous()
-                rV = rV.reshape(rV.shape[0], flat_len).contiguous()
+    if useCRK:
+        # CRKState requires gradA/gradB (shapes [N,D]/[N,D,D]), but Interpolate never
+        # reads correctionData.queryGradA/queryGradB -- only Ai/Bi. Fill correctly-shaped
+        # dummies rather than reusing crk_B (wrong shape for gradB) or leaving them unset.
+        dim = queryPositions.shape[1]
+        dummy_gradA = getCachedDummyTensor((1, dim), device=crk_A.device, dtype=crk_A.dtype)
+        dummy_gradB = getCachedDummyTensor((1, dim, dim), device=crk_A.device, dtype=crk_A.dtype)
+        crkState = CRKState(A=crk_A, B=crk_B, gradA=dummy_gradA, gradB=dummy_gradB)
+    else:
+        crkState = None
 
-            
-            modeUint = wp.uint32(mode.value)
-            kernelInt = wp.int32(kernel.value)
-            outputShape = qV.shape[0]
-            opInt = wp.int32(operationMode.value)
-            
-            wpValues = castTorchToWarpAsBuiltins(qV)
-        with record_function("warpSPH[Interpolation] - Kernel Launch"):
-
-            warp_interpolation = warpWrapper(
-                launch_kernel, computeSPHInterpolation_Kernel, outputShape, wpValues.dtype, 
-                queryPositions, referencePositions,
-                querySupports, referenceSupports,
-                queryMasses, referenceMasses,
-                queryDensities, referenceDensities,
-                qV, rV,
-                
-                domainMin, domainMax, periodicity,
-                modeUint,
-                kernelInt,
-                
-                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
-                opInt, queryKinds, referenceKinds,
-
-                wp.bool(useVolume), queryVolumes, referenceVolumes,
-                wp.bool(useCRK), crk_A, crk_B,
-            )
-
-            if needs_flatten:
-                warp_interpolation = warp_interpolation.reshape(
-                    warp_interpolation.shape[0], *field_shape
-                )
-
-    return warp_interpolation
+    return _computeSPHInterpolant_stateBackend(
+        queryParticles, referenceParticles, domain, mode, kernel, operationMode,
+        adjacency, referenceValues,
+        queryVolumes=queryVolumes if useVolume else None,
+        referenceVolumes=referenceVolumes if useVolume else None,
+        crkState=crkState,
+    )

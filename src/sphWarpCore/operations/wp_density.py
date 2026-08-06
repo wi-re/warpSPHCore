@@ -1,57 +1,56 @@
 import warp as wp
 from warp.types import vector, matrix
-# from wp_tensor import tensor
-from typing import Any, Optional
+from typing import Any, Optional, Union
 import torch
+from torch.profiler import record_function
+
 from ..utils.wp_autograd import *
 
-
-from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
+from ..radiusSearch.radius_util import AdjacencyList, DomainDescription, PointCloud
+from ..radiusSearch.wp_compactHash import CompactHashMap
+from ..radiusSearch.grid_util import checkOffset
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
-from torch.profiler import profile, record_function, ProfilerActivity
-from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j
+from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j, zero_like_warp, castTorchToWarpAsBuiltins
+
+from ..enumTypes import *
+from ..warp_state import (
+    domainData, adjacencyData, gridData,
+    getParticle,
+)
+from ..warp_state_util import warpWrapper2
+from ..state import ParticleState, OperationProperties
+
+# Unified Density kernel: same design as the unified Gradient/Interpolate kernels (see
+# warpier_core.md's "Working Prototype -> Production" section) -- one wp.func/wp.kernel
+# pair drives both neighbor-list and compact-hash-grid traversal, replacing the former
+# split between this file (adjacency-only) and operations_grid/wp_density_grid.py
+# (grid-only, duplicated physics). Density is the simplest operator in the family: no
+# queryValues/referenceValues, no correction paths (CRK/volume/grad-h/renorm) -- it just
+# sums reference masses weighted by the kernel.
 
 
 @wp.func
-def computeSPHDensity_Func(
-    # General Shape Parameters and indices
-    i : wp.int32, dim: wp.int32, 
+def computeSPHDensity_Func_i(
+    i: wp.int32, dim: wp.int32,
 
-    # SPH properties for the query set (indexed by i)
-    queryPositions: wp.array(dtype=vector(dtype = scalar_t, length=Any)), querySupports: wp.array(dtype = scalar_t), queryMasses: wp.array(dtype = scalar_t), # type: ignore
+    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, # type: ignore
 
-    # SPH properties for the reference set (indexed by j in the neighbor loop)
-    referencePositions : wp.array(dtype=vector(length=Any, dtype = scalar_t)), referenceSupports : wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t), # type: ignore
-    
-    # Domain and kernel parameters
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
-    mode_uint: wp.uint32, kernel_int: wp.int32, 
-    
-    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
-    neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32, 
-        
-    # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
-    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+    referenceState: Any, # particleDataSoA_1/2/3
 
-    # Optional Correction Terms:
+    domainState: domainData,
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32,
+
+    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+
+    opInt: wp.int32, ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+
+    outputValue: Any, # type: ignore
 ):
-    if opInt != 0:
-        if not checkDirectionality_i(queryKinds[i], opInt):
-            return scalar_t(scalar_t(0.0))
-    # Unpack query point properties
-    xi      = queryPositions[i]
-    hi      = querySupports[i]
-    # mi      = queryMasses[i] # Generally not needed
-    
-    # Initialize the output value
-    out = scalar_t(scalar_t(0.0))
-    
-    # Loop over neighbors to compute the gradient contribution from each neighbor    
-    for neighborIndex in range(numNeighs):
-        jj = neighborOffset + neighborIndex
-        j = wp.int32(neighborList[jj])
+    out = zero_like_warp(outputValue)
+    for neighborIndex in range(numIndices):
+        jj = beginIndex + neighborIndex
+        j = wp.int32(offsetArray[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
                 continue
@@ -59,47 +58,90 @@ def computeSPHDensity_Func(
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        out += referenceMasses[j] * sphKernel(xi, referencePositions[j], hi, referenceSupports[j], kernel_int, mode_uint, periodicity, domainMin, domainMax) 
-            
+        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
+
+        out += mj * sphKernel(xi, xj, hi, hj, kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax)
+
     return out
+
+
+@wp.func
+def computeSPHDensity_Func_Adjacency(
+    i: wp.int32, dim: wp.int32,
+
+    queryState: Any, referenceState: Any, correctionData: Any,
+
+    domainState: domainData,
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
+
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+
+    outputValue: Any, # type: ignore
+):
+    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    if opInt != 0:
+        if not checkDirectionality_i(ki, opInt):
+            return zero_like_warp(outputValue)
+
+    out = zero_like_warp(outputValue)
+    for o in range(numOffsets):
+        beginIndex = wp.int32(0)
+        numIndices = wp.int32(0)
+        if useAdjacency:
+            beginIndex = adjacencyState.neighborOffsets[i]
+            numIndices = adjacencyState.numNeighbors[i]
+        else:
+            beginIndex, numIndices = checkOffset(
+                i, queryState.positions, gridState.numCells, gridState.D,
+                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
+                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
+            )
+            if beginIndex < 0:
+                continue
+
+        out += computeSPHDensity_Func_i(
+            i, dim,
+            xi, hi,
+            referenceState, domainState,
+            mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int,
+
+            beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
+            opInt, ki, referenceState.kinds,
+
+            outputValue,
+        )
+    return out
+
 
 @wp.kernel
 def computeSPHDensity_Kernel(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=scalar_t)), referencePositions : wp.array(dtype=vector(length=Any, dtype=scalar_t)), # type: ignore
-    querySupports : wp.array(dtype = scalar_t), referenceSupports : wp.array(dtype = scalar_t), # type: ignore
-    queryMasses: wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t),  # type: ignore
-    
-    domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), periodicity : wp.array(dtype = wp.bool), # type: ignore
-    
-    mode_uint: wp.uint32, kernel_int : wp.int32,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
-    
-    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
-    
-    outputValues : wp.array(dtype = Any) # type: ignore
-):                                                                                    
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = Any) # type: ignore
+):
     i = wp.tid()
-    if i >= queryPositions.shape[0]:
+    numParticles = queryState.positions.shape[0]
+    if i >= numParticles:
         return
-    
-    outputValues[i] = computeSPHDensity_Func(
-        i, get_dim(queryPositions), 
 
-        queryPositions, querySupports, queryMasses, 
-        referencePositions, referenceSupports, referenceMasses, 
+    outputValues[i] = computeSPHDensity_Func_Adjacency(
+        i, domainState.dim,
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int, opInt,
 
-        periodicity, domainMin, domainMax, 
-        mode_uint, kernel_int,
-
-        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
-        
-        
-        opInt, queryKinds, referenceKinds,
+        zero_like_warp(outputValues[i]),
     )
-    
-    
 
-from ..enumTypes import *
 
 def computeSPHDensity_warpBackend(
     queryPositions, referencePositions,
@@ -108,35 +150,46 @@ def computeSPHDensity_warpBackend(
     queryKinds, referenceKinds,
     domain: DomainDescription,
     mode: SupportScheme,
-    kernel: KernelFunctions,    
+    kernel: KernelFunctions,
     operationMode: OperationDirection,
-    adjacency,
+    adjacency: Optional[Union[AdjacencyList, CompactHashMap]],
 ):
+    """Public entry point kept for ``sphOperation_warp``: same flat-tensor signature as
+    before, now a thin adapter over the unified state-based kernel above. Handles
+    adjacency-list, compact-hash-grid, and ``adjacency=None`` traversal alike -- see
+    ``extractStateInfo`` in ``warp_state_util.py`` for the dispatch.
+    """
+    queryParticles = ParticleState(positions=queryPositions, supports=querySupports, masses=queryMasses, densities=None, kinds=queryKinds)
+    referenceParticles = ParticleState(positions=referencePositions, supports=referenceSupports, masses=referenceMasses, densities=None, kinds=referenceKinds)
+
     with record_function("warpSPH[Density]"):
         with record_function("warpSPH[Density] - Preprocessing"):
-            domainMin = domain.min
-            domainMax = domain.max
-            periodicity = domain.periodic
+            outputSize = queryPositions.shape[0]
+            outputDtype = castTorchToWarpAsBuiltins(queryMasses).dtype
 
-            modeUint = wp.uint32(mode.value)
-            kernelInt = wp.int32(kernel.value)
-            outputShape = queryPositions.shape[0]
-            opInt = wp.int32(operationMode.value)
-            
-            wpValues = castTorchToWarpAsBuiltins(queryMasses)
-        with record_function("warpSPH[Density] - Kernel Launch"):
-
-            warp_interpolation = warpWrapper(
-                launch_kernel, computeSPHDensity_Kernel, outputShape, wpValues.dtype, 
-                queryPositions, referencePositions,
-                querySupports, referenceSupports,
-                queryMasses, referenceMasses,
-                domainMin, domainMax, periodicity,
-                modeUint,
-                kernelInt,
-                
-                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors,
-                opInt, queryKinds, referenceKinds,
+            operationProperties = OperationProperties(
+                kernel=kernel,
+                operation=WarpOperation.Density,
+                supportMode=mode,
+                operationMode=operationMode,
             )
 
-    return warp_interpolation
+        with record_function("warpSPH[Density] - Kernel Execution"):
+            result = warpWrapper2(
+                launcher=launch_kernel,
+                kernel=computeSPHDensity_Kernel,
+                outputSizes=outputSize,
+                outputDtypes=outputDtype,
+                defaultStateArguments=(
+                    queryParticles, operationProperties, domain,
+                    None, None,
+                    adjacency,
+                    referenceParticles,
+                    None,
+                    None,
+                    None,
+                ),
+                additionalArguments=(),
+            )
+
+    return result

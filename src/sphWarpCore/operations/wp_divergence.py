@@ -1,18 +1,37 @@
 import warp as wp
 from warp.types import vector, matrix
-# from wp_tensor import tensor
-from typing import Any, Optional
+from typing import Any, Optional, Union
 import torch
+from torch.profiler import record_function
+
 from ..utils.wp_autograd import *
 
-
-from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
+from ..radiusSearch.radius_util import AdjacencyList, DomainDescription, PointCloud
+from ..radiusSearch.wp_compactHash import CompactHashMap
+from ..radiusSearch.grid_util import checkOffset
 from ..mathutil.wp_math import *
 from ..kernels.wp_kernel import *
-from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j
-from torch.profiler import profile, record_function, ProfilerActivity
+from ..utils.wp_util import (
+    checkDirectionality_i, checkDirectionality_j,
+    zero_like_warp, _get_warp_vector_dtype,
+)
 
-# In dot mode we compute torch.einsum('nd..., nd -> n...', q, k) 
+from ..enumTypes import *
+from ..warp_state import (
+    domainData, adjacencyData, gridData,
+    getParticle, getL_i, getGradH_i, getVolume_i, getCRK_i,
+)
+from ..warp_state_util import warpWrapper2
+from ..state import ParticleState, OperationProperties, CRKState, GradHState, RenormalizationState
+
+# Unified Divergence kernel: same design as the unified Gradient/Interpolate/Density
+# kernels (see warpier_core.md's "Working Prototype -> Production" section). Divergence
+# shares essentially all of Gradient's correction-path machinery (CRK, grad-h, volume,
+# renormalization) and differs only in the neighbor-level contraction: `divergenceProduct`
+# (contracts the input's last/first flattened axis against the kernel gradient) in place
+# of Gradient's `outerTensorProduct` (which appends a new axis instead).
+
+# In dot mode we compute torch.einsum('nd..., nd -> n...', q, k)
 # Otherwise we compute torch.einsum('n...d, nd -> n...', q, k)
 # the inputs are the flattened versions of the original tensors, i.e.,
 # if q initially was of shape [n, d, d, d] it is now [n, d^3]
@@ -27,11 +46,8 @@ def divergenceProduct(
     outputElements: wp.int32, dotMode: wp.bool
 ):
     res = type(output)(scalar_t(0.0))
-    # res is now of shape [d^(N-1)] where N is the rank of the original input tensor.
-    # we need to do a product between fij which is of shape [d^N] and kernelGradient which is of shape [d] to get an output of shape [d^(N-1)]
-    
     dim = wp.int32(3) # hardcoded as this is the overload for 3D.
-    
+
     if dotMode:
         for i in range(outputElements):
             for d in range(dim):
@@ -40,7 +56,7 @@ def divergenceProduct(
         for i in range(outputElements):
             for d in range(dim):
                 res[i] += fij[i + d * outputElements] * kernelGradient[d]
-                
+
     return res
 
 @wp.func
@@ -51,12 +67,8 @@ def divergenceProduct(
     outputElements: wp.int32, dotMode: wp.bool
 ):
     res = type(output)(scalar_t(0.0))
-    # res is now of shape [d^(N-1)] where N is the rank of the original input tensor.
-    # we need to do a product between fij which is of shape [d^N] and kernelGradient which is of shape [d] to get an output of shape [d^(N-1)]
-    
     dim = wp.int32(2) # hardcoded as this is the overload for 2D.
-    # wp.printf("divergenceProduct: dim=%d, outputElements=%d, inputElements=%d\n", dim, outputElements, dim * outputElements)
-    
+
     if dotMode:
         for i in range(outputElements):
             for d in range(dim):
@@ -65,7 +77,7 @@ def divergenceProduct(
         for i in range(outputElements):
             for d in range(dim):
                 res[i] += fij[i + d * outputElements] * kernelGradient[d]
-                
+
     return res
 
 @wp.func
@@ -78,111 +90,72 @@ def divergenceProduct(
     res = type(output)(scalar_t(0.0))
     # in 1D the divergence product is just a simple multiplication
     res[0] = fij[0] * kernelGradient[0]
-    return res 
+    return res
+
 
 @wp.func
-def computeSPHDivergenceTensor_Func(
-    # General Shape Parameters and indices
-    i : wp.int32, dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+def computeSPHDivergenceTensor_Func_i(
+    i: wp.int32, dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
 
-    # SPH properties for the query set (indexed by i)
-    queryPositions: wp.array(dtype=vector(dtype = scalar_t, length=Any)), querySupports: wp.array(dtype = scalar_t), queryMasses: wp.array(dtype = scalar_t), queryDensities: wp.array(dtype = scalar_t), queryValues: wp.array(dtype = vector(dtype = scalar_t, length=Any)), # type: ignore
+    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, mi: scalar_t, rhoi: scalar_t, # type: ignore
 
-    # SPH properties for the reference set (indexed by j in the neighbor loop)
-    referencePositions : wp.array(dtype=vector(length=Any, dtype = scalar_t)), referenceSupports : wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t), referenceDensities: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = vector(dtype = scalar_t, length=Any)), # type: ignore
-    
-    # Domain and kernel parameters
-    periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
-    mode_uint: wp.uint32, kernel_int: wp.int32, 
-    
-    # Operation specific parameters
-    gradientMode_int: wp.int32, # type: ignore
-    
-    # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
-    neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32, 
-    
-    # Indicates if the input quantities have already been scattered to the neighbor level 
-    preScatteredQuantities: wp. bool,
-    
-    # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
-    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+    referenceState: Any, # particleDataSoA_1/2/3
 
-    # Optional Correction Terms:
-    # Gradient renormalization matrices for each query point, used for correcting the kernel gradient based on the local particle distribution.
-    useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
-    # Grad-h correction terms for each query and reference point, used for correcting the kernel gradient based on the local particle distribution and smoothing length variations.
-    useGradHTerms: wp.bool, queryOmegas: wp.array(dtype = scalar_t), referenceOmegas: wp.array(dtype = scalar_t),  # type: ignore
-    # Whether to use actual volume (mass/density) or apparent volume for the gradient computation, and the corresponding volumes if needed.
-    useVolume: wp.bool, queryVolumes: wp.array(dtype = scalar_t), referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
-    # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
-    useCRK: wp.bool, queryA: wp.array(dtype = scalar_t), queryB: wp.array(dtype = vector(length=Any, dtype=scalar_t)), queryGradA: wp.array(dtype=vector(length=Any, dtype=scalar_t)), queryGradB: wp.array(dtype=matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
+    domainState: domainData,
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32,
 
-    # kernel specific parameters 
-    consistentDivergence: wp.bool, dotMode: wp.bool, # type: ignore
-    
-    # Dummy value to allow allocation
-    outputValue: vector(length=Any, dtype=scalar_t) # type: ignore
+    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+
+    opInt: wp.int32, ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+
+    useGradientRenormalization: wp.bool, Li: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
+    useGradHTerms: wp.bool, omega_i: scalar_t, referenceOmegas: wp.array(dtype = scalar_t), # type: ignore
+    useVolume: bool, Vi: scalar_t, referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
+    useCRK: bool, Ai: scalar_t, Bi: vector(length=Any, dtype=scalar_t), gradAi: vector(length=Any, dtype=scalar_t), gradBi: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
+    correctionData: Any,
+
+    consistentDivergence: wp.bool,
+
+    fi: Any, referenceValues: wp.array(dtype = Any), # type: ignore
+
+    outputValue: Any, # type: ignore
 ):
-    if opInt != 0:
-        if not checkDirectionality_i(queryKinds[i], opInt):
-            return outputValue * scalar_t(0.0)
-    # Unpack query point properties
-    xi      = queryPositions[i]
-    hi      = querySupports[i]
-    # mi      = queryMasses[i] # Generally not needed
-    rhoi    = queryDensities[i]
-    fi      = queryValues[i]
-    # Unpack optional correction terms
-    if useGradHTerms:
-        fi  = queryValues[i] / queryOmegas[i]
-    Li      = queryRenormalizationMatrices[i] if useGradientRenormalization else type(queryRenormalizationMatrices[0])()*scalar_t(0.0)
-    Ai      = queryA[i] if useCRK else type(queryA[0])(scalar_t(0.0))
-    Bi      = queryB[i] if useCRK else type(queryB[0])(scalar_t(0.0))
-    gradA_i = queryGradA[i] if useCRK else type(queryGradA[0])(scalar_t(0.0))
-    gradB_i = queryGradB[i] if useCRK else type(queryGradB[0])()*scalar_t(0.0)
-    
-    # Initialize the output value
-    out     = type(outputValue)(scalar_t(0.0))
-
-    # Loop over neighbors to compute the gradient contribution from each neighbor    
-    for neighborIndex in range(numNeighs):
-        jj = neighborOffset + neighborIndex
-        j  = wp.int32(neighborList[jj])
+    out = zero_like_warp(outputValue)
+    dotMode = divergenceMode_int != 0
+    for neighborIndex in range(numIndices):
+        jj = beginIndex + neighborIndex
+        j = wp.int32(offsetArray[jj])
         if opInt != 0:
             if not checkDirectionality_j(referenceKinds[j], opInt):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
-                
-        mj = referenceMasses[j]
-        rhoj = referenceDensities[j]
+
+        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
+
         apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
         if consistentDivergence:
             apparentVolume = mj / rhoi if not useVolume else referenceVolumes[j] * rhoj / rhoi
-        fj = type(fi)(scalar_t(0.0))
-        if preScatteredQuantities:
-            if useGradHTerms:
-                fj = referenceValues[jj] / referenceOmegas[j]
-            else:
-                fj = referenceValues[jj]
-        else:
-            if useGradHTerms:
-                fj = referenceValues[j] / referenceOmegas[j]
-            else:
-                fj = referenceValues[j]
-        
+
+        # Explicit if/else, not a ternary: see docs/lessons_learned.md and the note in
+        # computeSPHGradientTensor_Func_i (wp_gradient.py) -- both branches here would
+        # read referenceValues[j], which silently zeroes that array's adjoint if written
+        # as a ternary.
+        fj = referenceValues[j]
+        if useGradHTerms:
+            fj = referenceValues[j] / referenceOmegas[j]
+
         kernelGradient = computeKernelGradientCRK(
-            xi, referencePositions[j], 
-            hi, referenceSupports[j],
-            kernel_int, mode_uint, periodicity, domainMin, domainMax,
-            useCRK, Ai, Bi, gradA_i, gradB_i
+            xi, xj,
+            hi, hj,
+            kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax,
+            useCRK, Ai, Bi, gradAi, gradBi
         )
-        
+
         if useGradientRenormalization:
             kernelGradient = matmul(Li, kernelGradient)
-            
+
         if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
             out += divergenceProduct(fj * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
@@ -191,61 +164,188 @@ def computeSPHDivergenceTensor_Func(
             out += divergenceProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
         elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation
             out += divergenceProduct((fj + fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
-            
+
     return out
+
+
+@wp.func
+def computeSPHDivergenceTensor_Func_Adjacency(
+    i: wp.int32, dim: wp.int32,
+
+    queryState: Any, referenceState: Any, correctionData: Any,
+
+    domainState: domainData,
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
+
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+
+    consistentDivergence: wp.bool,
+
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    queryValue: Any, referenceValues: Any, # type: ignore
+
+    outputValue: Any, # type: ignore
+):
+    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    if opInt != 0:
+        if not checkDirectionality_i(ki, opInt):
+            return zero_like_warp(outputValue)
+
+    useGradientRenormalization, Li = getL_i(correctionData, i)
+    useGradHTerms, omega_i = getGradH_i(correctionData, i)
+    useVolume, Vi = getVolume_i(correctionData, i)
+    useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
+
+    fi = queryValue[i]
+    if useGradHTerms:
+        fi = queryValue[i] / omega_i
+
+    out = zero_like_warp(outputValue)
+    for o in range(numOffsets):
+        beginIndex = wp.int32(0)
+        numIndices = wp.int32(0)
+        if useAdjacency:
+            beginIndex = adjacencyState.neighborOffsets[i]
+            numIndices = adjacencyState.numNeighbors[i]
+        else:
+            beginIndex, numIndices = checkOffset(
+                i, queryState.positions, gridState.numCells, gridState.D,
+                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
+                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
+            )
+            if beginIndex < 0:
+                continue
+
+        out += computeSPHDivergenceTensor_Func_i(
+            i, dim, numDims, flatInputShape, flatOutputShape,
+            xi, hi, mi, rhoi,
+            referenceState, domainState,
+            mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int,
+
+            beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
+            opInt, ki, referenceState.kinds,
+
+            useGradientRenormalization, Li,
+            useGradHTerms, omega_i, correctionData.referenceOmegas,
+            useVolume, Vi, correctionData.referenceVolumes,
+            useCRK, Ai, Bi, gradA_i, gradB_i,
+            correctionData,
+
+            consistentDivergence,
+
+            fi, referenceValues,
+
+            outputValue,
+        )
+    return out
+
 
 @wp.kernel
 def computeSPHDivergenceTensor_Kernel(
-    queryPositions : wp.array(dtype = vector(length=Any, dtype=scalar_t)), referencePositions : wp.array(dtype=vector(length=Any, dtype=scalar_t)), # type: ignore
-    querySupports : wp.array(dtype = scalar_t), referenceSupports : wp.array(dtype = scalar_t), # type: ignore
-    queryMasses: wp.array(dtype = scalar_t), referenceMasses: wp.array(dtype = scalar_t),  # type: ignore
-    queryDensities: wp.array(dtype = scalar_t), referenceDensities: wp.array(dtype = scalar_t), # type: ignore
-    queryValues: wp.array(dtype = vector(dtype = scalar_t, length=Any)), referenceValues: wp.array(dtype = vector(dtype = scalar_t, length=Any)), # type: ignore
-    
-    domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), periodicity : wp.array(dtype = wp.bool), # type: ignore
-    
-    mode_uint: wp.uint32, kernel_int : wp.int32, gradientMode_int: wp.int32, consistentDivergence: wp.bool,
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), preScatteredQuantities: wp.bool, # type: ignore
-    
-    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32, dotMode: wp.bool,
-    opInt: wp.int32, queryKinds : wp.array(dtype = wp.int32), referenceKinds : wp.array(dtype = wp.int32), # type: ignore
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
 
-    useGradientRenormalization: wp.bool, queryRenormalizationMatrices: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)),# type: ignore
-    useGradHTerms: wp.bool, queryOmegas: wp.array(dtype = scalar_t), referenceOmegas: wp.array(dtype = scalar_t),  # type: ignore
-    useVolume: bool, queryVolumes: wp.array(dtype = scalar_t), referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
-    useCRK: bool, crk_A: wp.array(dtype = scalar_t), crk_B: wp.array(dtype = vector(length=Any, dtype=scalar_t)), crk_gradA: wp.array(dtype = vector(length=Any, dtype=scalar_t)), crk_gradB: wp.array(dtype = matrix(shape=(Any, Any), dtype=scalar_t)), # type: ignore
-    
-    outputValues : wp.array(dtype = vector(length = Any, dtype = scalar_t)) # type: ignore
-):                                                                                    
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
+
+    consistentDivergence: wp.bool,
+
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    queryValues: Any, referenceValues: Any, # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = Any) # type: ignore
+):
     i = wp.tid()
-    if i >= queryPositions.shape[0]:
+    numParticles = queryState.positions.shape[0]
+    if i >= numParticles:
         return
-    
-    outputValues[i] = computeSPHDivergenceTensor_Func(
-        i, get_dim(queryPositions), numDims, flatInputShape, flatOutputShape,
 
-        queryPositions, querySupports, queryMasses, queryDensities, queryValues,
-        referencePositions, referenceSupports, referenceMasses, referenceDensities, referenceValues,
-        
-        periodicity, domainMin, domainMax, 
-        mode_uint, kernel_int, gradientMode_int,
+    outputValues[i] = computeSPHDivergenceTensor_Func_Adjacency(
+        i, domainState.dim,
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int, opInt,
+        consistentDivergence,
+        numDims, flatInputShape, flatOutputShape,
+        queryValues, referenceValues,
 
-        neighborList, neighborListRowOffsets[i], numNeighbors[i], 
+        zero_like_warp(outputValues[i]),
+    )
 
-        preScatteredQuantities,
-        
-        opInt, queryKinds, referenceKinds,
 
-        useGradientRenormalization, queryRenormalizationMatrices, 
-        useGradHTerms, queryOmegas, referenceOmegas, 
-        useVolume, queryVolumes, referenceVolumes,
-        useCRK, crk_A, crk_B, crk_gradA, crk_gradB,
+def _computeSPHDivergence_stateBackend(
+    queryParticles: ParticleState,
+    referenceParticles: ParticleState,
+    domain: DomainDescription,
+    mode: SupportScheme,
+    kernel: KernelFunctions,
+    gradientMode: GradientScheme,
+    operationMode: OperationDirection,
+    adjacency, # AdjacencyList | CompactHashMap | None
+    queryValues: torch.Tensor, referenceValues: torch.Tensor,
+    consistentDivergence: bool = False,
+    dotMode: bool = False,
+    queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    crkState: Optional[CRKState] = None,
+    gradHState: Optional[GradHState] = None,
+    renormalizationState: Optional[RenormalizationState] = None,
+):
+    with record_function("warpSPH[Divergence]"):
+        with record_function("warpSPH[Divergence] - Preprocessing"):
+            queryPositions = queryParticles.positions
+            outputSize = queryPositions.shape[0]
 
-        consistentDivergence, dotMode,
+            inputShape = queryValues.shape[1:]
+            flatInputShape = 1
+            for d in inputShape:
+                flatInputShape *= d
 
-        type(outputValues[i])(scalar_t(0.0)))
-    
-from ..enumTypes import *
+            outputShape = inputShape[1:] if dotMode else inputShape[:-1]
+            flatOutputShape = 1
+            for d in outputShape:
+                flatOutputShape *= d
+            numDims = len(inputShape)
+
+            outputDtype = _get_warp_vector_dtype(flatOutputShape, queryValues.dtype)
+
+            operationProperties = OperationProperties(
+                kernel=kernel,
+                operation=WarpOperation.Divergence,
+                gradientMode=gradientMode,
+                supportMode=mode,
+                operationMode=operationMode,
+                divergenceDotMode=dotMode,
+            )
+
+        with record_function("warpSPH[Divergence] - Kernel Execution"):
+            result = warpWrapper2(
+                launcher=launch_kernel,
+                kernel=computeSPHDivergenceTensor_Kernel,
+                outputSizes=outputSize,
+                outputDtypes=outputDtype,
+                defaultStateArguments=(
+                    queryParticles, operationProperties, domain,
+                    queryVolumes, referenceVolumes,
+                    adjacency,
+                    referenceParticles,
+                    crkState,
+                    gradHState,
+                    renormalizationState,
+                ),
+                additionalArguments=(
+                    wp.bool(consistentDivergence),
+                    wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
+                    queryValues.view(-1, flatInputShape), referenceValues.view(-1, flatInputShape),
+                ),
+            )
+
+    return result.view(outputSize, *outputShape)
+
 
 def computeSPHDivergence_warpBackend(
     queryPositions, referencePositions,
@@ -256,74 +356,43 @@ def computeSPHDivergence_warpBackend(
     queryKinds, referenceKinds,
     domain: DomainDescription,
     mode: SupportScheme,
-    kernel: KernelFunctions,    
+    kernel: KernelFunctions,
     gradientMode: GradientScheme,
     operationMode: OperationDirection,
-    adjacency: AdjacencyListWarp,
+    adjacency: Optional[Union[AdjacencyList, CompactHashMap]],
     consistentDivergence: bool = False,
     dotMode: bool = False, # if true compute the divergence based on torch.einsum('nd..., nd -> n...', q, k) instead of the normal div torch.einsum('n...d, nd -> n...', q, k)
     scatteredQuantities: Optional[torch.Tensor] = None,
-    
+
     useGradientRenormalization: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
     useGradHTerms: bool = False, queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
     useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
 ):
-    with record_function("warpSPH[Divergence]"):
-        with record_function("warpSPH[Divergence] - Preprocessing"):
-            domainMin = domain.min
-            domainMax = domain.max
-            periodicity = domain.periodic
+    """Public entry point kept for ``sphOperation_warp``: same flat-tensor signature as
+    before, now a thin adapter over the unified state-based kernel above.
+    """
+    if scatteredQuantities is not None:
+        raise NotImplementedError(
+            "Pre-scattered quantities are no longer supported by the Divergence operator: "
+            "no caller in this repo relies on them (same rationale as Gradient/Interpolate's "
+            "migration -- see warpier_core.md). Pass queryValues/referenceValues instead."
+        )
+    if queryValues is None or referenceValues is None:
+        raise ValueError("queryValues and referenceValues must be provided for the divergence computation.")
 
-            mode_uint = supportSchemeToUint(mode)
-            kernel_int = kernel.value
-            gradientMode_int = gradientMode.value
-            opInt = wp.int32(operationMode.value)
+    queryParticles = ParticleState(positions=queryPositions, supports=querySupports, masses=queryMasses, densities=queryDensities, kinds=queryKinds)
+    referenceParticles = ParticleState(positions=referencePositions, supports=referenceSupports, masses=referenceMasses, densities=referenceDensities, kinds=referenceKinds)
 
-            preScatteredQuantities = False
-            if queryValues is None and referenceValues is None:
-                if scatteredQuantities is None:
-                    raise ValueError("If queryValues and referenceValues are not provided, then pre-scattered quantities must be provided for the divergence computation.")
-                preScatteredQuantities = True
-                qV = scatteredQuantities
-                rV = scatteredQuantities
-            else:
-                qV = queryValues
-                rV = referenceValues
+    gradHState = GradHState(queryOmegas=queryOmegas, referenceOmegas=referenceOmegas) if useGradHTerms else None
+    renormalizationState = RenormalizationState(renormalizationMatrices=renormalizationMatrices) if useGradientRenormalization else None
+    crkState = CRKState(A=crk_A, B=crk_B, gradA=crk_gradA, gradB=crk_gradB) if useCRK else None
 
-            # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
-            outputSize = (queryPositions.shape[0])
-
-            inputShape = qV.shape[1:]
-            flatInputShape = 1
-            for dim in inputShape:
-                flatInputShape *= dim
-                
-            outputShape = inputShape[1:] if dotMode else inputShape[:-1]
-            flatOutputShape = 1
-            for dim in outputShape:
-                flatOutputShape *= dim
-            numDims = len(inputShape)
-            
-    # print(f"computeSPHDivergenceTensor_warpBackend: inputShape={inputShape}, flatInputShape={flatInputShape}, outputShape={outputShape}, flatOutputShape={flatOutputShape}, numDims={numDims}")
-        with record_function("warpSPH[Divergence] - Kernel Execution"):
-            warp_result = warpWrapper(
-                launch_kernel, computeSPHDivergenceTensor_Kernel, outputSize, vector(length=flatOutputShape, dtype = scalar_t),
-                queryPositions, referencePositions,
-                querySupports, referenceSupports,
-                queryMasses, referenceMasses,
-                queryDensities, referenceDensities,
-                qV.view(-1, flatInputShape), rV.view(-1, flatInputShape),
-                domainMin, domainMax, periodicity,
-                mode_uint, kernel_int, gradientMode_int, wp.bool(consistentDivergence),
-                adjacency.j, adjacency.edgeOffsets, adjacency.numNeighbors, wp.bool(preScatteredQuantities),
-                wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), wp.bool(dotMode),
-                opInt, queryKinds, referenceKinds,
-                
-                wp.bool(useGradientRenormalization), renormalizationMatrices,
-                wp.bool(useGradHTerms), queryOmegas, referenceOmegas,                
-                wp.bool(useVolume), queryVolumes, referenceVolumes,
-                wp.bool(useCRK), crk_A, crk_B, crk_gradA, crk_gradB
-            )
-
-    return warp_result.view(queryPositions.shape[0], *outputShape) # reshape back to original shape with new gradient dimension
+    return _computeSPHDivergence_stateBackend(
+        queryParticles, referenceParticles, domain, mode, kernel, gradientMode, operationMode,
+        adjacency, queryValues, referenceValues,
+        consistentDivergence=consistentDivergence, dotMode=dotMode,
+        queryVolumes=queryVolumes if useVolume else None,
+        referenceVolumes=referenceVolumes if useVolume else None,
+        crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,
+    )

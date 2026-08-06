@@ -23,7 +23,6 @@ from .wp_density import computeSPHDensity_warpBackend
 from ..enumTypes import *
 from typing import Optional
 from torch.profiler import profile, record_function, ProfilerActivity
-from ..operations_grid import sphOperation_warp_grid
 
 from ..utils.wp_util import getCachedDummyTensor
 
@@ -52,30 +51,19 @@ def sphOperation_warp(
     useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
 ):
-    if adjacency is None or isinstance(adjacency, CompactHashMap):
-        return sphOperation_warp_grid(
-            queryPositions, referencePositions,
-            querySupports, referenceSupports,
-            queryMasses, referenceMasses,
-            queryDensities, referenceDensities,
-            queryValues, referenceValues,
-            domain = domain, datastructure=adjacency, 
-            kernel = kernel, supportMode = supportMode,
-            operation = operation, operationMode = operationMode, 
-            gradientMode= gradientMode, laplacianMode= laplacianMode, positiveDivergence=positiveDivergence,
-            consistentDivergence= consistentDivergence, divergenceDotMode= divergenceDotMode,
-            preScatteredQuantities= preScatteredQuantities, queryKinds= queryKinds, referenceKinds= referenceKinds,
-            useGradientRenormalization= useGradientRenormalization, renormalizationMatrices= renormalizationMatrices,
-            useGradHTerms= useGradHTerms, queryOmegas= queryOmegas, referenceOmegas= referenceOmegas,
-            useVolume= useVolume, queryVolumes= queryVolumes, referenceVolumes= referenceVolumes,
-            useCRK= useCRK, crk_A= crk_A, crk_B= crk_B, crk_gradA= crk_gradA, crk_gradB= crk_gradB,
-        )
+    # Every operator now handles adjacency-list, compact-hash-grid, and adjacency=None
+    # traversal itself (see extractStateInfo / warp_state_util.py), so this function no
+    # longer needs to dispatch to a separate operations_grid backend based on adjacency
+    # type -- see warpier_core.md's "Working Prototype -> Production" section for the
+    # migration history (operations_grid/ has been removed entirely).
     if operationMode != OperationDirection.AllToAll and (queryKinds is None or referenceKinds is None):
         raise ValueError("Query and reference kinds must be provided for non AllToAll operation modes. Operation mode: {}, queryKinds is None: {}, referenceKinds is None: {}".format(operationMode, queryKinds is None, referenceKinds is None))
     if operationMode == OperationDirection.AllToAll and (queryKinds is None):
-        queryKinds = adjacency.numNeighbors # This is safe to do as the kinds are never checked in this case
+        # adjacency can be None (grid traversal built lazily inside the backend), so it
+        # can't always be relied on as a dummy source.
+        queryKinds = adjacency.numNeighbors if adjacency is not None else getCachedDummyTensor((1,), dtype=torch.int32, device=queryPositions.device) # This is safe to do as the kinds are never checked in this case
     if operationMode == OperationDirection.AllToAll and (referenceKinds is None):
-        referenceKinds = adjacency.numNeighbors # This is safe to do as the kinds are never checked in this case
+        referenceKinds = adjacency.numNeighbors if adjacency is not None else getCachedDummyTensor((1,), dtype=torch.int32, device=queryPositions.device) # This is safe to do as the kinds are never checked in this case
 
     if useGradientRenormalization and renormalizationMatrices is None:
         raise ValueError("Renormalization matrices must be provided if useGradientRenormalization is True.")

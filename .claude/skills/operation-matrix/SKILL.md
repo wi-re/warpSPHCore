@@ -73,6 +73,27 @@ a change that touches kernel math broadly (a shared `@wp.func`, a traversal
 path, a correction-path change), not for routine per-edit iteration; use
 `--quick` for that instead.
 
+**Running `--full` in the background: don't watch for it with `pgrep -f` on
+the sweep's own command line.** Since it takes several minutes, the natural
+move is to background it and poll for completion -- but a poll/monitor loop
+whose own command string happens to contain
+`run_operation_matrix_sweep.sh --full` (e.g. `until ! pgrep -f
+"run_operation_matrix_sweep.sh --full"; do sleep 5; done`) matches *itself*
+in the process table and never sees "not running," even long after the
+real sweep finished. This isn't hypothetical: it happened while migrating
+the Gradient operator (see `warpier_core.md`) -- the sweep had completed
+and printed its final summary minutes earlier while the watch loop kept
+reporting "still running." Prefer, in order:
+
+1. Launch it with the `Bash` tool's `run_in_background: true` (not a raw
+   `nohup ... &`) -- the harness tracks that task by ID and delivers a
+   completion notification on its own, with no polling loop to get wrong.
+2. If you do need a custom wait/monitor command, key off something that
+   can't self-match: the captured PID (`kill -0 "$PID"` on the PID from
+   `$!`, or `wait "$PID"` in the same shell) or the sweep's own terminal
+   output line, `grep -q "Full sweep complete\." <output file>` -- not a
+   `pgrep -f` pattern that echoes the command you just ran.
+
 **Jitter above 0.01 is diagnostic-only, not gated, on purpose.** The
 `--jitter 0.3` pass at the end of `--full` is expected to print real `HIGH`
 cells -- sound MAE thresholds for heavier jitter (0.15-0.3, the range that

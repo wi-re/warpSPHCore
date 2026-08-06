@@ -194,8 +194,6 @@ def computePi_actual(
 
     return val
 
-from ..operations.wp_gradient import computeSPHGradientTensor_Func
-
 
 @wp.func
 def computePiViscosityKernel_Func(   

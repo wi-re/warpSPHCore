@@ -4,7 +4,7 @@ from warp.types import vector, matrix
 from typing import Any
 import torch
 
-from sphWarpCore.operations_grid.grid_util import checkOffset
+from sphWarpCore.radiusSearch.grid_util import checkOffset
 from sphWarpCore.state import GradHState, RenormalizationState
 from sphWarpCore.utils.wp_autograd import *
 
@@ -229,7 +229,10 @@ def computeGradient_Kernel(
         numDims, flatInputShape, flatOutputShape,
         queryValues, referenceValues,
 
-        zero_like_warp(outputValues),
+        # zero_like_warp on the array itself only has overloads for output
+        # lengths 1-3 (wp_util.py) and silently breaks for longer flattened
+        # outputs (vector/matrix-valued fields). Index into the array instead.
+        zero_like_warp(outputValues[i]),
     )
 
 from sphWarpCore.enumTypes import *
@@ -323,5 +326,5 @@ def computeGradient(
                     wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
                     queryValues.view(-1, flatInputShape), referenceValues.view(-1, flatInputShape),
                 ),
-            )
+            ).view(queryPositions.shape[0], *outputShape)
 

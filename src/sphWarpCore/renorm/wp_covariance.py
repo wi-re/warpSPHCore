@@ -4,7 +4,7 @@ from warp.types import vector, matrix
 from typing import Any
 import torch
 
-from sphWarpCore.operations_grid.grid_util import checkOffset
+from sphWarpCore.radiusSearch.grid_util import checkOffset
 from ..state import GradHState, RenormalizationState
 from ..utils.wp_autograd import *
 

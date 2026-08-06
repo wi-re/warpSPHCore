@@ -1,10 +1,11 @@
-"""Grid-dispatch coverage (adjacency=None -> sphOperation_warp_grid).
+"""Grid-dispatch coverage (adjacency=None -> compact-hash-grid traversal).
 
 Mirrors test_operations_core.py's base-path cases but forces the grid
-traversal instead of a precomputed AdjacencyListWarp. Per warpier_core.md,
-sphOperation_warp already routes adjacency=None to the grid backend for
-every operator -- this file only adds the missing test cases, no product
-code changes are required to unlock it.
+traversal instead of a precomputed AdjacencyList. Per warpier_core.md, every
+operator's unified backend now resolves adjacency=None into its own
+compact-hash grid internally (via extractStateInfo) rather than dispatching
+to a separate operations_grid backend -- this file only adds the missing
+test cases, no product code changes are required to unlock it.
 """
 
 import pytest
