@@ -56,11 +56,18 @@ def computeCRKTermsWarp(
     #     d_bi[d * d_idx + i] = scalar_t(0.0)
     #     for j in range(d):
     #         d_gradbi[d2 * d_idx + d * i + j] = scalar_t(0.0)
-    A[mask] = (1.0)
-    for i in range(nu):
-        gradA[mask, i] = (0.0)
-        B[mask, i] = (0.0)
-        for j in range(nu):
-            gradB[mask, i, j] = (0.0)
+    # A = torch.where(mask.view(-1,1), (1.0), A)
+    # gradA = torch.where(mask.view(-1,1).repeat(1, nu), (0.0), gradA)
+    # B = torch.where(mask.view(-1,1).repeat(1, nu), (0.0), B)
+    # gradB = torch.where(mask.view(-1,1,1).repeat(1, nu, nu), (0.0), gradB)
+
+    mask_n = mask
+    mask_nu = mask.view(-1, 1)
+    mask_nuu = mask.view(-1, 1, 1)
+
+    A = torch.where(mask_n, torch.ones_like(A), A)
+    gradA = torch.where(mask_nu, torch.zeros_like(gradA), gradA)
+    B = torch.where(mask_nu, torch.zeros_like(B), B)
+    gradB = torch.where(mask_nuu, torch.zeros_like(gradB), gradB)
             
     return A, B, gradA, gradB
