@@ -19,9 +19,9 @@ from ..crk import computeKernelCRK, computeKernelGradientCRK
 
 # Unified Interpolate kernel: same design as the unified Gradient kernel (see
 # warpier_core.md's "Working Prototype -> Production" section) -- one wp.func/wp.kernel
-# pair drives both neighbor-list and compact-hash-grid traversal, replacing the former
-# split between this file (adjacency-only) and operations_grid/wp_interpolate_grid.py
-# (grid-only, duplicated physics).
+# pair drives both neighbor-list and compact-hash-grid traversal. This replaced a former
+# split between an adjacency-only kernel in this file and a separate grid-only kernel
+# with duplicated physics in the now-deleted operations_grid/ package.
 
 
 @wp.func

@@ -190,15 +190,39 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
 
 ## Architectural facts still true (open capability gaps, not yet closed)
 
-* **CRK and renormalization corrections only work with a precomputed
-  adjacency list.** `computeCRKFactors` and `computeRenormalizationMatrices`
-  both raise `NotImplementedError` when handed `adjacency=None` or a raw
-  `CompactHashMap`, even though every base operator dispatch
-  (`sphOperation_warp`) happily builds a grid datastructure on the fly for
-  the operation itself. Grid-mode traversal cannot currently be combined
-  with CRK or renormalization at all — a real capability gap, not a
-  performance one. This is Phase 6's ("Consolidate Traversal and Close
-  Capability Gaps") target, not yet started.
+* **CLOSED (2026-08-06):** ~~CRK and renormalization corrections only work
+  with a precomputed adjacency list~~ — both now run under grid-mode
+  traversal (`adjacency=None` or an explicit `CompactHashMap`), not just an
+  explicit `AdjacencyList`. `computeCRKFactors`'s `NotImplementedError` was
+  removed when CRK was ported to the dual-path kernel style (see
+  warpier_core.md's "Landing CRK's dual-path rework"). Renormalization's
+  guard turned out to already be dead code — `computeRenormalizationMatrices_`
+  has read its neighbor count from Covariance's own per-particle kernel
+  output (`covarianceReturnNumNeighbors=True`), not `adjacency.numNeighbors`,
+  since the very first restructure commit, so the capability was live but
+  untested; `scripts/gradcheck_renorm_native.py` now covers it (forward
+  parity + gradcheck across all three traversal inputs). Finding that gap
+  also surfaced two independent bugs, now fixed: `pinv/wp_pinv1x1.py`
+  referenced `wp.mat11f`/`wp.vec1f` (don't exist on the `warp` module —
+  only as sphWarpCore's own precision-specific subclasses in
+  `math/wp_vec1.py`) and hardcoded the float32 variant regardless of
+  `SPHWARPCORE_PRECISION`; and `WarpFunctionWrapper.backward`
+  (`autograd/stateLessWarpFunction.py`) only checked `isinstance(outputs_warp,
+  list)` when seeding gradients for a multi-output warp function, not
+  `(list, tuple)` — `launch_kernel` returns a tuple for multi-output, so any
+  `warpWrapper`-wrapped (not `warpWrapperStateaware`-wrapped) multi-output
+  function's backward pass was unreachable. See warpier_core.md's
+  "Renormalization Grid-Mode Coverage" note for the full story.
+
+* **Still open:** `checkKinds` (`autograd/arg_check.py`) substitutes a
+  length-1 dummy tensor for `queryKinds`/`referenceKinds` when they're
+  `None`, even under `OperationDirection.AllToAll` — but `checkDirectionality_j`
+  genuinely indexes that array by neighbor index under AllToAll rather than
+  trivially passing, so `ParticleState(kinds=None)` under AllToAll is an
+  out-of-bounds read, not a real no-op. Every fixture in this repo's test
+  suite sets `kinds` explicitly, so nothing here exercises it. Found while
+  landing CRK (see warpier_core.md's "Landing CRK's dual-path rework"); not
+  fixed, out of scope for that migration.
 
 * **`LaplacianScheme.Dot` does not support scalar fields in domains with
   `dim>1`**, and is guarded with an explicit `ValueError` rather than

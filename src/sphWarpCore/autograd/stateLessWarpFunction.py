@@ -102,7 +102,7 @@ class WarpFunctionWrapper(torch.autograd.Function):
         # the caller's tensor is never mutated. Confirmed upstream (warp-lang
         # issue tracker) as the intended pattern; see warpier_core.md.
         grads = {}
-        if isinstance(outputs_warp, list):
+        if isinstance(outputs_warp, (list, tuple)):
             for out_warp, grad_out in zip(outputs_warp, grad_outputs):
                 if grad_out is not None:
                     grads[out_warp] = castTorchToWarpAsBuiltins(grad_out.contiguous())

@@ -1,12 +1,16 @@
 """Turns a covariance matrix (wp_covariance.py) into a gradient-renormalization matrix:
-low-neighbor-count fallback to the identity, then a pseudo-inverse (wp_pinv2x2.py for
-2D, torch.linalg.pinv for 3D+). Split out of wp_covariance.py so that file only has to
-contain the covariance computation itself -- this postprocessing is a separate concern
-with its own restriction (see the NotImplementedError below): unlike the covariance
-computation, it still requires an explicit AdjacencyList and does not (yet) support
-grid-mode (CompactHashMap) traversal, since the low-neighbor-count fallback reads
-adjacency.numNeighbors, which CompactHashMap does not expose. See warpier_core.md --
-closing that gap is a follow-on step, not part of the covariance dual-path rework.
+low-neighbor-count fallback to the identity, then a pseudo-inverse (pinv_warp, dispatching
+on dimension -- see pinv/wrapper.py). Split out of wp_covariance.py so that file only has
+to contain the covariance computation itself.
+
+Supports all three traversal inputs (explicit AdjacencyList, explicit CompactHashMap,
+adjacency=None) -- the low-neighbor-count fallback reads its neighbor count from the
+Covariance kernel's own per-particle output (covarianceReturnNumNeighbors=True below,
+computed identically under either traversal mode), not from adjacency.numNeighbors,
+which is the only thing that would have actually required an AdjacencyList. Verified by
+gradcheck_renorm_native.py (forward-value parity + torch.autograd.gradcheck across all
+three traversal inputs) -- see warpier_core.md's "Renormalization Grid-Mode Coverage"
+note for why this needed its own script rather than reusing gradcheck_covariance_native.py.
 """
 
 import torch
@@ -46,7 +50,6 @@ def computeRenormalizationMatrices_(
             covarianceReturnNumNeighbors = True
         )
     with record_function("[warpSPH] - Renorm - Covariance Postprocess"):
-        # num_nbrs = adjacency.numNeighbors
         dtype = C.dtype
 
         queryPositions = queryParticles.positions
@@ -99,9 +102,6 @@ def computeRenormalizationMatrices(
   returnEigVals: bool = True
 ):
     with record_function("[warpSPH] - computeRenormalizationMatrices"):
-        # if adjacency is None or isinstance(adjacency, CompactHashMap):
-            # raise NotImplementedError("Adjacency list must be provided for Renormalization matrices computation. Building a compact hash map and using it as adjacency is not currently supported for this operation.")
-
         C, eigVals, L = computeRenormalizationMatrices_(
             queryParticles, operationProperties, domain,
             queryVolumes = queryVolumes, referenceVolumes = referenceVolumes,

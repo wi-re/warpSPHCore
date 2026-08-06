@@ -24,9 +24,10 @@ from ..crk import computeKernelCRK, computeKernelGradientCRK
 # ("adjacency") and compact-hash-grid traversal. The two only differ in how
 # (beginIndex, numIndices, offsetArray) are produced -- see
 # computeSPHGradientTensor_Func_Adjacency below -- so the per-neighbor physics is
-# written exactly once. This replaces the former split between this file (adjacency-only,
-# flat kernel arguments) and operations_grid/wp_gradient_grid.py (grid-only, duplicated
-# physics). See warpier_core.md's "Working Prototype" section for the design this follows
+# written exactly once. This replaced a former split between an adjacency-only flat-args
+# kernel in this file and a separate grid-only kernel with duplicated physics in the
+# now-deleted operations_grid/ package. See warpier_core.md's "Working Prototype" section
+# for the design this follows
 # (prototyped in the repo-root wp_grad.py / warp_gradient.ipynb).
 #
 # For matrices we need to implement the logic manually using outer products, since Warp
