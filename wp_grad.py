@@ -6,7 +6,7 @@ import torch
 
 from sphWarpCore.radiusSearch.grid_util import checkOffset
 from sphWarpCore.dataTypes import GradHState, RenormalizationState
-from sphWarpCore.util.wp_autograd import *
+from sphWarpCore.autograd import *
 
 
 from sphWarpCore.dataTypes import *
@@ -246,7 +246,7 @@ import torch
 from torch.profiler import record_function
 
 
-from sphWarpCore.warp_state_util import warpWrapper2
+from sphWarpCore.autograd import warpWrapper2
 
 def get_gradient_dtype(
     dim: int,

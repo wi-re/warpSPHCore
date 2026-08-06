@@ -152,7 +152,7 @@ def _computeSPHDensity_stateBackend(
     """Unified state-based Density backend -- see warpier_core.md's "Working Prototype ->
     Production" section. Handles adjacency-list, compact-hash-grid, and
     ``adjacency=None`` traversal alike -- see ``extractStateInfo`` in
-    ``warp_state_util.py`` for the dispatch. Density has no queryValues/referenceValues
+    ``autograd/arg_extract.py`` for the dispatch. Density has no queryValues/referenceValues
     and no correction paths (CRK/volume/grad-h/renorm), so its state footprint is just
     the two particle states.
     """
