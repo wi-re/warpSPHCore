@@ -212,7 +212,7 @@ def computeSPHInterpolant_grid_warpBackend(
                 kernelInt,
                 
                 datastructure.sortIndex,
-                datastructure.qMin, datastructure.qMax, datastructure.hCell,
+                datastructure.qMin, datastructure.qMax, scalar_t(datastructure.hCell),
                 datastructure.numCells, datastructure.hashTable, datastructure.sortedCellTable, D,
                 datastructure.numOffsets, datastructure.cellOffsets,
             

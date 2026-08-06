@@ -17,7 +17,7 @@ from torch.profiler import profile, record_function, ProfilerActivity
 def computeDotLaplacian(
     q_ij: vector(dtype = scalar_t, length=Any), n_ij: vector(dtype = scalar_t, length=Any), kernelGradient: vector(dtype = scalar_t, length=1), r_ij: scalar_t, h_ij: scalar_t, inputLength: wp.int32, dim: wp.int32 # type: ignore
 ):
-    n_ij2 = n_ij / (r_ij + 1e-12 * h_ij)
+    n_ij2 = n_ij / (r_ij + scalar_t(1e-12) * h_ij)
 
     dotx = q_ij * n_ij2[0]
 
@@ -31,7 +31,7 @@ def computeDotLaplacian(
 def computeDotLaplacian(
     q_ij: vector(dtype = scalar_t, length=Any), n_ij: vector(dtype = scalar_t, length=Any), kernelGradient: vector(dtype = scalar_t, length=2), r_ij: scalar_t, h_ij: scalar_t, inputLength: wp.int32, dim: wp.int32 # type: ignore
 ):
-    n_ij2 = n_ij / (r_ij + 1e-12 * h_ij)
+    n_ij2 = n_ij / (r_ij + scalar_t(1e-12) * h_ij)
 
     dotx = q_ij * n_ij2[0]
     doty = q_ij * n_ij2[1]
@@ -46,7 +46,7 @@ def computeDotLaplacian(
 def computeDotLaplacian(
     q_ij: vector(dtype = scalar_t, length=Any), n_ij: vector(dtype = scalar_t, length=Any), kernelGradient: vector(dtype = scalar_t, length=3), r_ij: scalar_t, h_ij: scalar_t, inputLength: wp.int32, dim: wp.int32 # type: ignore
 ):
-    n_ij2 = n_ij / (r_ij + 1e-12 * h_ij)
+    n_ij2 = n_ij / (r_ij + scalar_t(1e-12) * h_ij)
 
     dotx = q_ij * n_ij2[0]
     doty = q_ij * n_ij2[1]
@@ -75,7 +75,7 @@ def computeLaplacianDot2(
 
     # dot = torch.einsum('n...d, nd -> n...d', fq, x_ij / (r_ij + 1e-8 * h_i).view(-1,1)**2)
 
-    r_eps = r_ij + 1e-8 * h_ij
+    r_eps = r_ij + scalar_t(1e-8) * h_ij
     F_ab = wp.dot(n_ij, kernelGradient) / r_eps # this is a scalar
     leading_dim = wp.int32(inputLength // dim) # this is the number of leading dimensions in q_ij before the last dimension of size dim
     
@@ -261,7 +261,7 @@ def computeSPHLaplacianTensor_Func(
         x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
         r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
 
-        eps = 1e-8
+        eps = scalar_t(1e-8)
         n_ij = x_ij / (r_ij + eps * h_ij)
 
         laplacian_contribution = type(outputValue)(scalar_t(0.0))
@@ -389,7 +389,17 @@ def computeSPHLaplacian_warpBackend(
             flatInputShape = 1
             for dim in inputShape:
                 flatInputShape *= dim
-                
+
+            spatialDim = queryPositions.shape[1]
+            if laplacianMode == LaplacianScheme.Dot and spatialDim > 1 and flatInputShape % spatialDim != 0:
+                raise ValueError(
+                    f"LaplacianScheme.Dot's computeLaplacianDot2 assumes the field's flattened size is a multiple "
+                    f"of the spatial dimension ({spatialDim}) -- it indexes q_ij[block*dim + k] for k in range(dim), "
+                    f"which reads out of bounds for a field whose flattened size ({flatInputShape}) isn't a multiple "
+                    f"of dim. A plain scalar field (flatInputShape=1) in a {spatialDim}D domain hits this. Use "
+                    f"LaplacianScheme.Naive, Brookshaw, or Default for scalar fields instead."
+                )
+
             # For the output shape we keep the same shape as the input as the laplacian of a scalar field is still a scalar field, and the laplacian of a vector field is still a vector field. We just need to make sure to flatten the inner dimensions for the warp kernel.
             outputShape = inputShape
 

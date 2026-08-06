@@ -347,7 +347,7 @@ def computeSPHDivergence_grid_warpBackend(
                 domainMin, domainMax, periodicity,
                 mode_uint, kernel_int, gradientMode_int, wp.bool(consistentDivergence),
                 datastructure.sortIndex,
-                datastructure.qMin, datastructure.qMax, datastructure.hCell,
+                datastructure.qMin, datastructure.qMax, scalar_t(datastructure.hCell),
                 datastructure.numCells, datastructure.hashTable, datastructure.sortedCellTable, D,
                 datastructure.numOffsets, datastructure.cellOffsets,
                 wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape), wp.bool(dotMode),

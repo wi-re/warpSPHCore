@@ -1119,7 +1119,7 @@ def radiusSearchCompactHashMap(
     referencePositions = referenceParticles.positions
     querySupports = queryParticles.supports if queryParticles.supports is not None else torch.zeros(queryParticles.positions.shape[0], device=queryParticles.positions.device)
     referenceSupports = referenceParticles.supports if referenceParticles.supports is not None else torch.zeros(referenceParticles.positions.shape[0], device=referenceParticles.positions.device)
-    periodicity = torch.tensor(domain.periodic if domain.periodic is not None else [False] * queryParticles.positions.shape[1], device=queryParticles.positions.device)
+    periodicity = torch.tensor(domain.periodic if domain.periodic is not None else [False] * queryParticles.positions.shape[1], device=queryParticles.positions.device) if not isinstance(domain.periodic, torch.Tensor) else domain.periodic.clone().to(queryParticles.positions.device)
 
     if hashMapLengthMode == HashMapLengthMode.Fixed:
         hashMapLength = fixedHashMapLength

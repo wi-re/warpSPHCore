@@ -74,7 +74,16 @@ def computeSPHInterpolation_Func(
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        fv = referenceValues[jj] if preScatteredQuantities else referenceValues[j]
+        # A ternary expression here (`fv = a if cond else b`) compiles fine but
+        # silently produces a zero adjoint for referenceValues -- confirmed via
+        # a minimal warp-lang repro isolating ternary-vs-if/else array reads on
+        # both concrete and generic (Any) dtypes; every other operator in this
+        # codebase already uses the if/else block form for this exact
+        # preScatteredQuantities branch. See warpier_core.md.
+        if preScatteredQuantities:
+            fv = referenceValues[jj]
+        else:
+            fv = referenceValues[j]
 
         vj = referenceMasses[j] / referenceDensities[j] if not useVolume else referenceVolumes[j]
 

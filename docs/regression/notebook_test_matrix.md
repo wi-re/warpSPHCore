@@ -24,11 +24,14 @@ This document defines the initial mapping from root notebooks to the Phase-0 reg
   * divergence of linear vector field vs analytic constant
 * `warp_laplacian.ipynb` -> `tests/operations/test_operations_core.py`
   * linear scalar laplacian near zero
-* `warp_grid.ipynb` ->
-  * currently covered indirectly via `sphOperation_warp` dispatch with compact-hash data
-  * explicit grid-only direct tests to be added in a follow-up file
-* `warp_crk.ipynb` and `warp_crk_test.ipynb` -> `tests/operations/test_operations_crk_analytic.py`
+* `warp_curl.ipynb` -> `tests/operations/test_operations_core.py`
+  * vector-field curl vs. analytic reference (ported to the current API, ports/passes as of 2026-08-05)
+* `warp_renorm.ipynb` -> `tests/operations/test_operations_crk_analytic.py`
+  * renormalization-corrected gradient checks (ported to the current API, passes as of 2026-08-05)
+* `old/warp_grid.ipynb` -> **not a porting gap** (clarified 2026-08-06): grid dispatch is just `adjacency=None` on the same operator calls every root notebook already makes, not a distinct example -> `tests/operations/test_grid_modes.py` (landed) mirrors the base-path cases with `traversal="grid"` for direct coverage.
+* `old/warp_crk.ipynb` and `old/warp_crk_test.ipynb` -> **not a porting gap** (clarified 2026-08-06): CRK checks were folded directly into the relevant operator notebooks (interpolate, gradient, etc.) instead of being split into standalone CRK notebooks -> `tests/operations/test_operations_crk_analytic.py`
   * CRK-assisted gradient analytic checks and baseline comparison
+* `warp_profile.ipynb` (root, current API, benchmarking only) -> not part of the regression suite by design; see `warpier_core.md`'s Notebook Corpus Status.
 
 ## Current Phase-0 Scope
 

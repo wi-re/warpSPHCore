@@ -290,7 +290,28 @@ def volumeToSupport(volume : float, targetNeighbors : int, dim : int):
     else:
         # N_h = 4/3 \pi h^3 / v -> h = \sqrt[3]{N_h * v / \pi * 3/4}
         return torch.pow(targetNeighbors * volume / np.pi * 3 /4, 1/3)
-    
+
+
+def n_h_to_nH(n_h: float, dim: int) -> float:
+    """Converts n_h (particles per smoothing length, per axis -- the
+    resolution knob that actually stays comparable across dimensions) into
+    the target neighbor count N_h expected by volumeToSupport/
+    generateNeighborTestData, using the same volume-ratio convention (a
+    particle "cell" of side 1/n_h has volume (1/n_h)**dim; N_h is how many of
+    those fit inside the support region, vH = 2 for a 1D segment, pi for a 2D
+    disc, 4/3*pi for a 3D ball). A flat, dimension-agnostic target neighbor
+    count (e.g. the same literal "55" for 1D/2D/3D) is not comparable across
+    dimensions -- for a fixed particle spacing, the same N_h implies a wildly
+    different h per dimension, which is why a flat count produces a
+    disproportionately large (or small) support radius outside of the
+    dimension it happened to be tuned for. n_h=4 is a reasonable default
+    resolution across all three dimensions.
+    """
+    spacing = 1.0 / n_h
+    v = spacing ** dim
+    vH = 2.0 if dim == 1 else (np.pi if dim == 2 else (4.0 / 3.0) * np.pi)
+    return vH / v
+
 
 @wp.func
 def volumeToSupport_warp(volume : scalar_t, targetNeighbors : wp.int32, dim : wp.int32):

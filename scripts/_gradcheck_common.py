@@ -69,6 +69,24 @@ def line_case(n: int, xmin: float = -1.0, xmax: float = 1.0, h: float | None = N
     return positions, supports, masses
 
 
+def grid_case_2d(n_per_side: int = 3, spacing: float = 0.4, h: float | None = None):
+    """n_per_side x n_per_side particles on a regular 2D grid centered at the
+    origin. Used by operators that need a genuine 2D domain (Divergence's
+    matrix-field/dotMode paths, Curl) rather than the degenerate 1D case
+    line_case gives -- kept small since gradcheck's numerical Jacobian cost
+    grows with total element count across all differentiable inputs."""
+    coords = torch.linspace(-(n_per_side - 1) / 2 * spacing, (n_per_side - 1) / 2 * spacing, n_per_side, dtype=DTYPE, device=DEVICE)
+    gx, gy = torch.meshgrid(coords, coords, indexing="ij")
+    x = torch.stack([gx.reshape(-1), gy.reshape(-1)], dim=1)
+    positions = x.detach().clone().requires_grad_(True)  # fresh leaf tensor
+    n = positions.shape[0]
+    if h is None:
+        h = max(2.5 * spacing, 1e-3)
+    supports = torch.full((n,), h, dtype=DTYPE, device=DEVICE, requires_grad=True)
+    masses = torch.full((n,), 1.0, dtype=DTYPE, device=DEVICE, requires_grad=True)
+    return positions, supports, masses
+
+
 def build_adjacency(positions: torch.Tensor, supports: torch.Tensor, masses: torch.Tensor, domain: DomainDescription, mode=SupportScheme.Gather):
     """Adjacency is treated as non-differentiable and frozen: built once
     from detached positions and reused across every forward call in a

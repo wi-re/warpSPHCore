@@ -62,7 +62,7 @@ from .enumTypes import (
     LaplacianScheme,
     ParticleType
 )
-from .math import (volumeToSupport)
+from .math import (volumeToSupport, n_h_to_nH)
 
 from .warp_state import (
     adjacencyData,
@@ -124,6 +124,7 @@ __all__ = [
     "WarpOperation",
     "warpOperation",
     "volumeToSupport",
+    "n_h_to_nH",
     "ParticleType",
     "adjacencyData",
     "gridData",

@@ -270,16 +270,16 @@ def pinv2x2_warp(
     # so C is symmetric by construction (a sum of symmetric x_ij (x) x_ij terms). b/c below can still
     # differ at the floating-point-noise level depending on neighbor summation order -- symmetrize
     # rather than treat that noise as signal.
-    b = 0.5 * (C[i][0,1] + C[i][1,0])
+    b = scalar_t(0.5) * (C[i][0,1] + C[i][1,0])
     d = C[i][1,1]
 
     if num_nbrs[i] < 4:
-        L[i][0,0] = 1.0
-        L[i][0,1] = 0.0
-        L[i][1,0] = 0.0
-        L[i][1,1] = 1.0
-        EV[i][0] = 1.0
-        EV[i][1] = 1.0
+        L[i][0,0] = scalar_t(1.0)
+        L[i][0,1] = scalar_t(0.0)
+        L[i][1,0] = scalar_t(0.0)
+        L[i][1,1] = scalar_t(1.0)
+        EV[i][0] = scalar_t(1.0)
+        EV[i][1] = scalar_t(1.0)
         return
 
     # Closed-form symmetric 2x2 eigendecomposition: a single atan2 call. This replaces a general (and
@@ -292,7 +292,7 @@ def pinv2x2_warp(
     # -- reproduced directly against production covariance matrices, see warpier_core.md. A symmetric
     # matrix only has one rotation angle in the first place, so computing it once removes the
     # possibility of the two desyncing.
-    theta = (0.5) * wp.atan2(2.0 * b, a - d)
+    theta = (scalar_t(0.5)) * wp.atan2(scalar_t(2.0) * b, a - d)
     cosTheta = wp.cos(theta)
     sinTheta = wp.sin(theta)
 
@@ -301,7 +301,7 @@ def pinv2x2_warp(
     v2x = -sinTheta
     v2y = cosTheta
 
-    lam1 = a * v1x * v1x + 2.0 * b * v1x * v1y + d * v1y * v1y
+    lam1 = a * v1x * v1x + scalar_t(2.0) * b * v1x * v1y + d * v1y * v1y
     lam2 = (a + d) - lam1
 
     # order by magnitude, largest first, matching the "o1 >= o2" convention the rest of this function
@@ -329,8 +329,8 @@ def pinv2x2_warp(
     # eigenvalue instead, matching the rcond convention torch.linalg.pinv uses for the 3D path.
     rcond = scalar_t(1.0e-6)
     threshold = rcond * wp.abs(big)
-    big_inv = 0.0 if wp.abs(big) <= scalar_t(1.0e-12) else 1.0 / big
-    small_inv = 0.0 if wp.abs(small) <= threshold else 1.0 / small
+    big_inv = scalar_t(0.0) if wp.abs(big) <= scalar_t(1.0e-12) else scalar_t(1.0) / big
+    small_inv = scalar_t(0.0) if wp.abs(small) <= threshold else scalar_t(1.0) / small
 
     L[i][0,0] = big_inv * bigX * bigX + small_inv * smallX * smallX
     L[i][0,1] = big_inv * bigX * bigY + small_inv * smallX * smallY

@@ -12,6 +12,7 @@ from .mathutil.wp_math import (
     minimumImageDistance,
     volumeToSupport,
     volumeToSupport_warp,
+    n_h_to_nH,
     outerTensorProduct
 )
 __all__ = [
@@ -27,6 +28,7 @@ __all__ = [
     "minimumImageDistance",
     "volumeToSupport",
     "volumeToSupport_warp",
+    "n_h_to_nH",
     "outerTensorProduct"
 
 ]

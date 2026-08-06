@@ -114,7 +114,7 @@ class correctionData_3:
     referenceOmegas: wp.array(dtype = scalar_t) # type: ignore
     useCRK: wp.bool
     queryA: wp.array(dtype=scalar_t)  # type: ignore
-    queryB: wp.array(dtype=vector(length=1, dtype=scalar_t))  # type: ignore
+    queryB: wp.array(dtype=vector(length=3, dtype=scalar_t))  # type: ignore
     queryGradA: wp.array(dtype=vector(length=3, dtype=scalar_t))  # type: ignore
     queryGradB: wp.array(dtype=matrix(shape=(3,3), dtype=scalar_t)) # type: ignore
     referenceA: wp.array(dtype=scalar_t)  # type: ignore

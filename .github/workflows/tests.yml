@@ -34,5 +34,22 @@ jobs:
       - name: Run pytest suite
         run: pytest tests/ -v
 
-      - name: Run operation matrix (non-jittered, CI gate)
+      - name: Run operation matrix (2D, float32, non-jittered, CI gate)
         run: python scripts/operation_matrix.py --device cpu --ci --verbose
+
+      - name: Run operation matrix (2D, float64, CI gate)
+        run: python scripts/operation_matrix.py --device cpu --precision float64 --nx 24 --ci --verbose
+
+      - name: Run operation matrix (1D, CI gate)
+        run: python scripts/operation_matrix.py --device cpu --dim 1 --nx 64 --ci --verbose
+
+      - name: Run operation matrix (jittered, CI gate)
+        run: python scripts/operation_matrix.py --device cpu --jitter 0.01 --ci --verbose
+
+      - name: Run operation matrix (3D, CUDA only)
+        run: |
+          if python -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)"; then
+            python scripts/operation_matrix.py --device cuda --dim 3 --nx 8 --ci --verbose
+          else
+            echo "No CUDA device on this runner; skipping the 3D matrix (dim=3 is CPU-prohibitive, see warpier_core.md)."
+          fi

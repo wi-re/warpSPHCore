@@ -104,8 +104,15 @@ def sphOperation_warp_grid(
     periodicity = domain.periodic if domain.periodic is not None else [False] * referencePositions.shape[1]
     minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
 
-    x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))]).mT
-    y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
+    # torch.stack(..., dim=1) rather than torch.vstack(...).mT: for a 1D domain the
+    # vstack+transpose form produces a (n,1) tensor whose stride is a degenerate
+    # (1,n) rather than the canonical (1,1) -- PyTorch's is_contiguous() reports
+    # True regardless (a size-1 axis can't violate contiguity), so the existing
+    # defensive .contiguous() calls downstream are no-ops, and wp.from_torch's
+    # stricter stride check then rejects it. Stacking directly on dim=1 produces
+    # canonical strides for any dimensionality without changing the values.
+    x = torch.stack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))], dim=1)
+    y = torch.stack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))], dim=1)
 
     with record_function(f"warpSPH - Operation"):
         if operation == WarpOperation.Density:

@@ -41,6 +41,13 @@ def curlProduct(
     stride: wp.int32,
     inputElements: wp.int32, outputElements: wp.int32
 ):
+    # This used to `return -R`, per a comment claiming the negation was needed
+    # to match the right-hand rule. Confirmed via operation_matrix.py --dim 3
+    # that this made every 3D curl output the exact negative of the true
+    # (right-hand-rule) curl -- the 2D overload below has no such negation
+    # and is dimensionally consistent with the standard convention, so the
+    # 3D `-R` was the actual bug, not a deliberate convention choice. See
+    # warpier_core.md.
     R = type(output)(scalar_t(0.0))
     dim = wp.int32(3) # hardcoded as this is the overload for 3D.
     # stride = wp.int32(outputElements / dim) # this is the number of elements in each dimension of the input tensor fij. So if fij is of shape [d^N] and output is of shape [d^(N-1)] then stride is d^(N-1).
@@ -62,7 +69,7 @@ def curlProduct(
 
         # // Result index i=2: V0*T1 - V1*T0
         R[2 * stride + s] = V[0] * T[k1] - V[1] * T[k0];
-    return -R # the negative sign is needed to match the right hand rule convention for the curl operator.
+    return R
 # 
 @wp.func
 def curlProduct(
@@ -98,7 +105,7 @@ def curlProduct(
 ):
     R = type(output)(scalar_t(0.0))
     # in 1D the curl product is just a simple multiplication
-    R[0] = 0
+    R[0] = scalar_t(0.0)
     return R
 
 
