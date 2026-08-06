@@ -15,6 +15,9 @@ from .wp_autograd import (
     clearKernelArgsCache,
 )
 
+from .support import volumeToSupport, n_h_to_nH, volumeToSupport_warp, computePairwiseSupport
+
+
 __all__ = [
     "castTorchToWarp",
     "castWarpToTorch",
@@ -28,4 +31,7 @@ __all__ = [
     "WarpFunctionWrapper",
     "warpWrapper",
     "launch_kernel",
+    "volumeToSupport",
+    "n_h_to_nH",
+    "volumeToSupport_warp"
 ]

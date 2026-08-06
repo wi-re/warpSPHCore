@@ -12,7 +12,6 @@ Public API (flat imports):
 Or import subpackages directly:
 
     from sphWarpCore.utils       import ...
-    from sphWarpCore.mathutil    import ...
     from sphWarpCore.kernels     import ...
     from sphWarpCore.radiusSearch import ...
     from sphWarpCore.operations  import ...
@@ -20,7 +19,7 @@ Or import subpackages directly:
 
 
 from . import radius
-from . import ops
+# from . import ops
 from .type_config import scalar_t, scalar, dim_t, get_type_config,  get_torch_precision
 
 # Convenience re-exports of the most commonly used symbols
@@ -38,7 +37,7 @@ from .radius import (
     updateNeighborsVerlet,
     filterVerletList,
 )
-from .ops import (
+from .operations import (
     sphOperation_warp,
     warpOperation
 )
@@ -51,7 +50,8 @@ from .state import (
 )
 
 from .crk.crk_wrapper import computeCRKFactors
-from .renorm.wp_covariance import computeRenormalizationMatrices
+# from .renorm.wp_covariance import computeCovarianceMatrix
+from .renorm import computeRenormalizationMatrices
 
 from .enumTypes import (
     KernelFunctions,
@@ -62,7 +62,7 @@ from .enumTypes import (
     LaplacianScheme,
     ParticleType
 )
-from .math import (volumeToSupport, n_h_to_nH)
+from .utils.support import (volumeToSupport, n_h_to_nH)
 
 from .warp_state import (
     adjacencyData,
@@ -80,10 +80,10 @@ from .utils.wp_util import (zero_like_warp,
                             checkDirectionality_i, checkDirectionality_j, getCachedDummyTensor, castTorchToWarpAsBuiltins)
 
 from .kernels.wp_kernel import eval_kernelScale, computeKernelCRK, computeKernelGradientCRK, sphKernel, sphKernelGradient, eval_k, eval_C_d
-from .mathutil.wp_math import computeDistanceVec, safe_sqrt
+from .math import computeDistanceVec, safe_sqrt
 from .kernels.utils import computePairwiseSupport, iPow
 from .utils.wp_autograd import launch_kernel, warpWrapper, StateAwareWarpFunction
-from .mathutil.wp_math import matmul
+from .math import matmul
 
 from .kernels.wp_kernel import sphKernelScale, sphKernel_xi
 
@@ -93,7 +93,7 @@ __version__ = "0.4.5"
 
 __all__ = [
     "radius",
-    "ops",
+    # "ops",
     "scalar_t",
     "scalar",
     "dim_t",
@@ -110,7 +110,8 @@ __all__ = [
     "updateNeighborsVerlet",
     "filterVerletList",
     "computeCRKFactors",
-    "computeRenormalizationMatrices",    
+    # "computeCovarianceMatrix",
+    "computeRenormalizationMatrices",
     "ParticleState",
     "OperationProperties",
     "CRKState",

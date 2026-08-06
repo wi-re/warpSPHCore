@@ -1,7 +1,7 @@
 import torch
 
-from sphWarpCore.renorm.wp_covariance import pinv2x2
-from sphWarpCore.pinv import pinv2x2 as pinv2x2_warp
+# from sphWarpCore.renorm.wp_pinv2x2 import pinv2x2
+# from sphWarpCore.pinv import pinv2x2 as pinv2x2_warp
 from ..types import *
 
 def computeCRKTermsWarp(

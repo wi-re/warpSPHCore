@@ -665,14 +665,14 @@ def run_matrix(device: torch.device, nx: int, n_h: float, threshold: float, band
         crk_err = None
     except Exception as exc:  # noqa: BLE001
         crk_state = None
-        crk_err = str(exc).strip().splitlines()[0][:160]
+        crk_err = str(exc).strip().splitlines()[0][:1024]
 
     try:
         renorm_state = build_renorm_state(case)
         renorm_err = None
     except Exception as exc:  # noqa: BLE001
         renorm_state = None
-        renorm_err = str(exc).strip().splitlines()[0][:160]
+        renorm_err = str(exc).strip().splitlines()[0][:1024]
 
     rows = build_rows(case, threshold, band_cells)
 

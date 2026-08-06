@@ -35,6 +35,7 @@ GRADCHECK_SCRIPTS = [
     "gradcheck_divergence_native.py",
     "gradcheck_curl_native.py",
     "gradcheck_laplacian_native.py",
+    "gradcheck_covariance_native.py",
 ]
 
 

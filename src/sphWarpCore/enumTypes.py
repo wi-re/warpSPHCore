@@ -69,6 +69,8 @@ class WarpOperation(Enum):
     Curl = 4
     Laplacian = 5
     Density = 6
+    Covariance = 7
+    Custom = 8
 
 
 class HashMapLengthMode(Enum):

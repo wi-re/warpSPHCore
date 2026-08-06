@@ -13,7 +13,7 @@ from typing import Tuple, Union, Optional
 from .utils.wp_autograd import *
 
 from .radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
-from .mathutil.wp_math import *
+from .math import *
 from .kernels.wp_kernel import *
 from .utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
 from .utils.wp_util import castTorchToWarpAsBuiltins, castWarpToTorch

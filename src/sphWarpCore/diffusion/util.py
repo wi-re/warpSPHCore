@@ -5,7 +5,7 @@ import warp as wp
 from enum import Enum
 from ..types import *
 from ..kernels.wp_kernel import sphKernel_xi
-from ..mathutil import computeDistanceVec, safe_sqrt
+from ..math import computeDistanceVec, safe_sqrt
 import warp as wp
 from warp.types import vector, matrix
 # from wp_tensor import tensor
@@ -14,7 +14,7 @@ import torch
 from ..utils.wp_autograd import *
 
 from ..radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
-from ..mathutil.wp_math import *
+from ..math import *
 from ..kernels.wp_kernel import *
 
 from ..enumTypes import *

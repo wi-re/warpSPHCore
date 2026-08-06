@@ -27,6 +27,7 @@ import torch
 from sphWarpCore import ParticleState, radiusSearchCompactHashMap
 from sphWarpCore.enumTypes import KernelFunctions, SupportScheme
 from sphWarpCore.radiusSearch.radius_util import DomainDescription
+from sphWarpCore.radiusSearch.wp_compactHash import buildCompactHashMap
 
 DEVICE = torch.device("cpu")
 DTYPE = torch.float64
@@ -99,6 +100,25 @@ def build_adjacency(positions: torch.Tensor, supports: torch.Tensor, masses: tor
     p = ParticleState(positions=positions.detach(), supports=supports.detach(), masses=masses.detach(), densities=None, kinds=kinds)
     adjacency = radiusSearchCompactHashMap(p, domain, mode=mode)
     return adjacency, kinds
+
+
+def build_grid_adjacency(positions: torch.Tensor, supports: torch.Tensor, masses: torch.Tensor, domain: DomainDescription, mode=SupportScheme.Gather):
+    """Same non-differentiable/frozen contract as build_adjacency, but returns a genuine
+    CompactHashMap (grid traversal, useAdjacency=False) instead of the CSR AdjacencyList
+    radiusSearchCompactHashMap returns by default despite its name -- confusingly, that
+    default return type means every gradcheck_*_native.py script using build_adjacency
+    exercises the neighbor-list traversal branch, not the grid one. Use this helper
+    instead of build_adjacency when a script specifically needs to exercise the grid/
+    compact-hash-map traversal branch (e.g. as a dual-path regression guard)."""
+    kinds = torch.zeros(positions.shape[0], dtype=torch.int32, device=DEVICE)
+    grid = buildCompactHashMap(
+        positions.detach(), positions.detach(),
+        supports.detach(), supports.detach(),
+        periodicity=domain.periodic,
+        domainDescription=domain,
+        mode=mode,
+    )
+    return grid, kinds
 
 
 # --------------------------------------------------------------------------

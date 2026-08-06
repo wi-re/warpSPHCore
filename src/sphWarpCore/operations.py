@@ -1,0 +1,240 @@
+from .radiusSearch.wp_compactHash import CompactHashMap
+import warp as wp
+from warp.types import vector, matrix
+# from wp_tensor import tensor
+from typing import Any, Union
+import torch
+
+from .utils.wp_autograd import *
+
+
+from .radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
+from .math import *
+from .kernels.wp_kernel import *
+
+
+from .coreOperations import *
+from .enumTypes import *
+from typing import Optional
+from torch.profiler import profile, record_function, ProfilerActivity
+
+from .utils.wp_util import getCachedDummyTensor
+from .state import *
+
+# States are the primary path here: `warpOperation` takes semantic state objects and
+# dispatches straight to each operator's `_computeSPHX_stateBackend` -- no flattening to
+# individual tensors and no reassembly back into states in between. `sphOperation_warp`
+# is the flat-tensor "manual" entry point for callers that don't already have state
+# objects on hand; it builds the same ParticleState/OperationProperties/CRKState/
+# GradHState/RenormalizationState objects from its flat arguments and calls
+# `warpOperation`, which does the actual dispatching. See warpier_core.md's call-graph
+# notes for why this replaced the previous warpOperation -> sphOperation_warp ->
+# compute<Op>_warpBackend -> _compute<Op>_stateBackend chain (every hop across that
+# chain used to disassemble state into flat tensors only for the next hop to reassemble
+# it).
+
+
+def warpOperation(
+    queryParticles: ParticleState,
+    operationProperties: OperationProperties,
+    domain: DomainDescription,
+    queryValues : Optional[torch.Tensor] = None, referenceValues : Optional[torch.Tensor] = None,
+    queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,
+    referenceParticles: Optional[ParticleState] = None,
+    preScatteredQuantities: Optional[torch.Tensor] = None,
+    crkState: Optional[CRKState] = None,
+    gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
+    renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
+    consistentDivergence: bool = False,
+    covarianceReturnNumNeighbors: bool = False,
+):
+    if operationProperties.operation == WarpOperation.Custom:
+        raise ValueError("Custom operations are not supported in warpOperation. Please write your own caller.")
+    referenceParticles = referenceParticles if referenceParticles is not None else queryParticles
+    referenceValues = referenceValues if referenceValues is not None else queryValues
+    referenceVolumes = referenceVolumes if referenceVolumes is not None else queryVolumes
+
+    if gradHState is not None and not isinstance(gradHState, GradHState):
+        if isinstance(gradHState, tuple) and len(gradHState) == 2:
+            queryOmegas, referenceOmegas = gradHState
+        elif isinstance(gradHState, torch.Tensor):
+            queryOmegas, referenceOmegas = gradHState, gradHState
+        else:
+            raise ValueError("Invalid type for gradHState: {}. Must be either GradHState, a tuple of two tensors, or a single tensor.".format(type(gradHState)))
+        gradHState = GradHState(queryOmegas=queryOmegas, referenceOmegas=referenceOmegas if referenceOmegas is not None else queryOmegas)
+
+    if renormalizationState is not None and not isinstance(renormalizationState, RenormalizationState):
+        if isinstance(renormalizationState, torch.Tensor):
+            renormalizationState = RenormalizationState(renormalizationMatrices=renormalizationState)
+        else:
+            raise ValueError("Invalid type for renormalizationState: {}. Must be either RenormalizationState or torch.Tensor.".format(type(renormalizationState)))
+
+    operation = operationProperties.operation
+
+    with record_function(f"warpSPH - Operation"):
+        # Density is special-cased first (same ordering as before the call-graph
+        # cleanup): it has no queryValues/referenceValues and no correction paths, so it
+        # shouldn't flow through the queryValues/preScatteredQuantities validation below.
+        if operation == WarpOperation.Density:
+            return _computeSPHDensity_stateBackend(
+                queryParticles, referenceParticles, domain,
+                operationProperties.supportMode, operationProperties.kernel, operationProperties.operationMode,
+                adjacency,
+            )
+        elif operation == WarpOperation.Covariance:
+            return _computeSPHCovariance_stateBackend(
+                queryParticles, operationProperties, domain,
+                queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
+                adjacency=adjacency,
+                referenceParticles=referenceParticles,
+                crkState=crkState,
+                gradHState=gradHState,
+                renormalizationState=renormalizationState,
+                returnNumNeighbors=covarianceReturnNumNeighbors,
+            )
+
+        if queryValues is None and referenceValues is None:
+            if preScatteredQuantities is None:
+                raise ValueError("If queryValues and referenceValues are not provided, then pre-scattered quantities must be provided for the SPH operation.")
+        if queryValues is not None and referenceValues is not None and preScatteredQuantities is not None:
+            raise ValueError("Pre-scattered quantities should not be provided if queryValues and referenceValues are already provided, as they are redundant in this case.")
+        if preScatteredQuantities is not None and operationProperties.gradientMode != GradientScheme.Naive:
+            raise ValueError("Pre-scattered quantities only support the naive scheme as they are meant to provide pre-computed neighbor-level quantities for custom kernels that may not be compatible with the standard gradient schemes. If using pre-scattered quantities, the gradientMode must be set to Naive.")
+        if preScatteredQuantities is not None:
+            raise NotImplementedError(
+                "Pre-scattered quantities are no longer supported by any SPH operator: no "
+                "caller in this repo relies on them and they interacted badly with the "
+                "state-aware autograd bridge. Pass queryValues/referenceValues instead."
+            )
+
+        if crkState is not None and (crkState.gradA is None or crkState.gradB is None) and operation in (WarpOperation.Gradient, WarpOperation.Divergence, WarpOperation.Curl):
+            raise ValueError("CRK gradient correction A and B tensors must be provided if useCRK is True and the operation is Gradient, Divergence, or Curl.")
+
+        if operation == WarpOperation.Interpolate:
+            if referenceValues is None:
+                raise ValueError("referenceValues must be provided for the interpolation computation.")
+            return _computeSPHInterpolant_stateBackend(
+                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.operationMode,
+                adjacency, referenceValues,
+                queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
+                crkState=crkState,
+            )
+        elif operation == WarpOperation.Gradient:
+            if queryValues is None or referenceValues is None:
+                raise ValueError("queryValues and referenceValues must be provided for the gradient computation.")
+            return _computeSPHGradient_stateBackend(
+                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.gradientMode, operationProperties.operationMode,
+                adjacency, queryValues, referenceValues,
+                queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
+                crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,
+            )
+        elif operation == WarpOperation.Divergence:
+            if queryValues is None or referenceValues is None:
+                raise ValueError("queryValues and referenceValues must be provided for the divergence computation.")
+            return _computeSPHDivergence_stateBackend(
+                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.gradientMode, operationProperties.operationMode,
+                adjacency, queryValues, referenceValues,
+                consistentDivergence=consistentDivergence, dotMode=operationProperties.divergenceDotMode,
+                queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
+                crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,
+            )
+        elif operation == WarpOperation.Curl:
+            if queryValues is None or referenceValues is None:
+                raise ValueError("queryValues and referenceValues must be provided for the curl computation.")
+            return _computeSPHCurl_stateBackend(
+                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.gradientMode, operationProperties.operationMode,
+                adjacency, queryValues, referenceValues,
+                queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
+                crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,
+            )
+        elif operation == WarpOperation.Laplacian:
+            if queryValues is None or referenceValues is None:
+                raise ValueError("queryValues and referenceValues must be provided for the laplacian computation.")
+            return _computeSPHLaplacian_stateBackend(
+                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.gradientMode, operationProperties.laplacianMode, operationProperties.positiveDivergence, operationProperties.operationMode,
+                adjacency, queryValues, referenceValues,
+                queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
+                crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,
+            )
+        else:
+            raise ValueError("Unsupported SPH operation: {}".format(operation))
+
+
+def sphOperation_warp(
+    queryPositions, referencePositions,
+    querySupports, referenceSupports,
+    queryMasses, referenceMasses,
+    queryDensities, referenceDensities,
+    queryValues : Optional[torch.Tensor], referenceValues : Optional[torch.Tensor],
+    domain: DomainDescription,
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None, # if none a datastructure is created for EVERY operation!,
+    operation: WarpOperation = WarpOperation.Interpolate,
+    kernel: KernelFunctions = KernelFunctions.Wendland4,
+    supportMode: SupportScheme = SupportScheme.Gather,
+    gradientMode: GradientScheme = GradientScheme.Naive,
+    laplacianMode: LaplacianScheme = LaplacianScheme.Default,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
+    positiveDivergence: bool = False,
+    consistentDivergence: bool = False,
+    divergenceDotMode: bool = False,
+    preScatteredQuantities: Optional[torch.Tensor] = None,
+    queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,
+
+    useGradientRenormalization: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
+    useGradHTerms: bool = False, queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
+    useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None, crk_gradA: Optional[torch.Tensor] = None, crk_gradB: Optional[torch.Tensor] = None
+):
+    """Flat-tensor "manual" entry point. Assembles the same state objects
+    ``warpOperation`` takes (``ParticleState``, ``OperationProperties``, and -- only if
+    the corresponding ``useX`` flag is set -- ``CRKState``/``GradHState``/
+    ``RenormalizationState``) and calls it, rather than re-deriving dispatch logic here.
+    The ``useX`` booleans below are flat-API-only sanity checks: they catch a manual
+    caller setting e.g. ``useCRK=True`` without actually passing ``crk_A``/``crk_B``, a
+    mistake that can't happen through the state-object API since CRK is "on" precisely
+    when a ``CRKState`` is passed.
+    """
+    if operationMode != OperationDirection.AllToAll and (queryKinds is None or referenceKinds is None):
+        raise ValueError("Query and reference kinds must be provided for non AllToAll operation modes. Operation mode: {}, queryKinds is None: {}, referenceKinds is None: {}".format(operationMode, queryKinds is None, referenceKinds is None))
+
+    if useGradientRenormalization and renormalizationMatrices is None:
+        raise ValueError("Renormalization matrices must be provided if useGradientRenormalization is True.")
+    if useGradHTerms and (queryOmegas is None or referenceOmegas is None):
+        raise ValueError("Omegas must be provided if useGradHTerms is True.")
+    if useVolume and (queryVolumes is None or referenceVolumes is None):
+        raise ValueError("Volumes must be provided if useVolume is True.")
+    if useCRK and (crk_A is None or crk_B is None):
+        raise ValueError("CRK correction A and B tensors must be provided if useCRK is True.")
+
+    queryParticles = ParticleState(positions=queryPositions, supports=querySupports, masses=queryMasses, densities=queryDensities, kinds=queryKinds)
+    referenceParticles = ParticleState(positions=referencePositions, supports=referenceSupports, masses=referenceMasses, densities=referenceDensities, kinds=referenceKinds)
+
+    operationProperties = OperationProperties(
+        kernel=kernel,
+        operation=operation,
+        gradientMode=gradientMode,
+        laplacianMode=laplacianMode,
+        positiveDivergence=positiveDivergence,
+        supportMode=supportMode,
+        operationMode=operationMode,
+        divergenceDotMode=divergenceDotMode,
+    )
+
+    crkState = CRKState(A=crk_A, B=crk_B, gradA=crk_gradA, gradB=crk_gradB) if useCRK else None
+    gradHState = GradHState(queryOmegas=queryOmegas, referenceOmegas=referenceOmegas) if useGradHTerms else None
+    renormalizationState = RenormalizationState(renormalizationMatrices=renormalizationMatrices) if useGradientRenormalization else None
+
+    return warpOperation(
+        queryParticles, operationProperties, domain,
+        queryValues=queryValues, referenceValues=referenceValues,
+        queryVolumes=queryVolumes if useVolume else None, referenceVolumes=referenceVolumes if useVolume else None,
+        adjacency=adjacency,
+        referenceParticles=referenceParticles,
+        preScatteredQuantities=preScatteredQuantities,
+        crkState=crkState,
+        gradHState=gradHState,
+        renormalizationState=renormalizationState,
+        consistentDivergence=consistentDivergence,
+    )
+

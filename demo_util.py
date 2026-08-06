@@ -26,9 +26,9 @@ from sphWarpCore.radiusSearch.wp_radius_small import warp_radius_search_small
 from sphWarpCore.radius import *
 from warp.types import vector
 from sphWarpCore.autograd import warpWrapper, WarpFunctionWrapper
-from sphWarpCore.ops import *
+from sphWarpCore.operations import *
 import matplotlib.pyplot as plt
-from sphWarpCore.ops import sphOperation_warp
+# from sphWarpCore.ops import sphOperation_warp
 from sphWarpCore.enumTypes import *
 # import diffSPH
 # from diffSPH.sampling import ParticleSet
@@ -39,7 +39,7 @@ from sphWarpCore.enumTypes import *
 # from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
 # from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
 # from diffSPH.operations import SPHOperation
-from sphWarpCore.ops import sphOperation_warp
+# from sphWarpCore.ops import sphOperation_warp
 from sphWarpCore.enumTypes import *
 # from sphWarpCore.sph import computeSPHCovariance_warpBackend
 # from diffSPH.math import pinv2x2

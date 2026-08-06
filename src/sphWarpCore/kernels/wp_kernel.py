@@ -3,7 +3,7 @@ from ..types import *
 import warp as wp
 import numpy as np
 from .utils import *
-from ..mathutil import computeDistanceVec
+from ..math import computeDistanceVec
 from ..type_config import scalar_t, dim_t
 
 from .kernelFunctions.wendland2 import *
@@ -231,7 +231,7 @@ def eval_packing(kernel: wp.int32):
     return scalar_t(np.nan)
 
 
-from .adjoints import *
+from ..math import *
 
 # Actual Kernel Functionality
 
@@ -449,7 +449,8 @@ def sphKernelDerivative(
 #     hessian = factorA * k2.view(-1,1,1) + factorB * k1.view(-1,1,1)
 #     return hessian
 
-from .adjoints import warp_eye
+from ..math import warp_eye
+from ..utils.support import computePairwiseSupport
 
 @wp.func
 def sphKernelHessian_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
