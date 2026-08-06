@@ -143,29 +143,26 @@ def computeSPHDensity_Kernel(
     )
 
 
-def computeSPHDensity_warpBackend(
-    queryPositions, referencePositions,
-    querySupports, referenceSupports,
-    queryMasses, referenceMasses,
-    queryKinds, referenceKinds,
+def _computeSPHDensity_stateBackend(
+    queryParticles: ParticleState,
+    referenceParticles: ParticleState,
     domain: DomainDescription,
     mode: SupportScheme,
     kernel: KernelFunctions,
     operationMode: OperationDirection,
     adjacency: Optional[Union[AdjacencyList, CompactHashMap]],
 ):
-    """Public entry point kept for ``sphOperation_warp``: same flat-tensor signature as
-    before, now a thin adapter over the unified state-based kernel above. Handles
-    adjacency-list, compact-hash-grid, and ``adjacency=None`` traversal alike -- see
-    ``extractStateInfo`` in ``warp_state_util.py`` for the dispatch.
+    """Unified state-based Density backend -- see warpier_core.md's "Working Prototype ->
+    Production" section. Handles adjacency-list, compact-hash-grid, and
+    ``adjacency=None`` traversal alike -- see ``extractStateInfo`` in
+    ``warp_state_util.py`` for the dispatch. Density has no queryValues/referenceValues
+    and no correction paths (CRK/volume/grad-h/renorm), so its state footprint is just
+    the two particle states.
     """
-    queryParticles = ParticleState(positions=queryPositions, supports=querySupports, masses=queryMasses, densities=None, kinds=queryKinds)
-    referenceParticles = ParticleState(positions=referencePositions, supports=referenceSupports, masses=referenceMasses, densities=None, kinds=referenceKinds)
-
     with record_function("warpSPH[Density]"):
         with record_function("warpSPH[Density] - Preprocessing"):
-            outputSize = queryPositions.shape[0]
-            outputDtype = castTorchToWarpAsBuiltins(queryMasses).dtype
+            outputSize = queryParticles.positions.shape[0]
+            outputDtype = castTorchToWarpAsBuiltins(queryParticles.masses).dtype
 
             operationProperties = OperationProperties(
                 kernel=kernel,

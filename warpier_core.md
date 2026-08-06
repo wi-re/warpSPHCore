@@ -39,20 +39,20 @@ All operation-relevant notebooks are ported and accounted for in root (`warp_den
 
 ## Gaps Against the Target
 
-* `warpOperation` still routes through `sphOperation_warp`, so legacy internals remain dominant.
-* Most operators still launch via flat tensor argument wrappers (`warpWrapper`) instead of structured wrappers.
-* State objects remain torch-native and do not yet own synchronized torch+warp field representations.
-* Adjacency and grid execution paths are still largely duplicated across operation families — **except Gradient, Interpolate, and Density**, migrated to a single unified kernel/backend each, see "Working Prototype → Production" below. Divergence, Curl, Laplacian still have the old split.
-* CRK and renormalization corrections cannot run on grid-mode traversal at all for the still-unmigrated operators (a real capability gap, not a performance one) — see `docs/lessons_learned.md`'s "Architectural facts still true" for specifics. This is Phase 6's target. Gradient and Interpolate no longer have this gap (Density never had it — it has no correction paths at all): their `correctionData` struct threads CRK (and, for Gradient, renorm) through the grid branch for free, which is the template for closing this gap operator-by-operator.
-* `LaplacianScheme.Dot` does not support scalar fields in `dim>1` domains — guarded with a `ValueError`, not fixed. See `docs/lessons_learned.md`.
+* ~~`warpOperation` still routes through `sphOperation_warp`~~ — **done, and inverted**. `warpOperation` now dispatches directly from state objects to each operator's `_computeSPHX_stateBackend`; `sphOperation_warp` (the flat-tensor "manual" entry point) assembles the same state objects and calls `warpOperation` instead of the other way around. See "States as the Primary Path" below.
+* All six operators (Density, Interpolate, Gradient, Divergence, Curl, Laplacian) now launch via the structured `warpWrapper2` wrapper; the flat `warpWrapper` path and the `operations_grid/` package it served are gone entirely. See "Working Prototype → Production" below.
+* State objects remain torch-native and do not yet own synchronized torch+warp field representations (Phase 3, `Field` abstraction — still not started).
+* ~~Adjacency and grid execution paths are still largely duplicated across operation families~~ — **done**. Every operator's traversal now lives in one `_Func_Adjacency`/`wp.kernel` pair that branches on `useAdjacency` at runtime; `operations_grid/` has been deleted.
+* ~~CRK and renormalization corrections cannot run on grid-mode traversal~~ — **done for all six operators**. Every operator's `correctionData` struct threads CRK (and, where applicable, grad-h/renorm) through the grid branch for free, since there is only one branch-per-traversal-mode kernel now, not a separate grid kernel that never got the correction paths wired in.
+* `LaplacianScheme.Dot` does not support scalar fields in `dim>1` domains — guarded with a `ValueError`, not fixed. See `docs/lessons_learned.md`. (Unrelated to the traversal-unification work above; still open.)
 
 ## Largest Remaining Change
 
-The key migration step is introducing a `Field` abstraction that carries both torch and warp representations with synchronization ownership, while preserving legacy fallback conversion paths for compatibility.
+Phase 1 (structured kernel ABI) and Phase 5 (traversal consolidation) are now done for every operator — see "Working Prototype → Production" below. What's left is Phase 2/3/4: state objects are still torch-native dataclasses (`ParticleState` et al.), not a `Field` abstraction that owns synchronized torch+warp representations with dirty-tracking, and there's still real per-call Python-side struct construction (`extractStateInfo`) rather than cached/reused state. The key remaining migration step is introducing that `Field` abstraction, while preserving legacy fallback conversion paths for compatibility. Forward-mode AD (Phase 6/7) still hasn't been started — but it now has a much smaller surface to extend, since there is exactly one kernel per operator to add tangent-carrying arguments to, not two.
 
-## Working Prototype → Production: Unified Kernel + Traversal for Gradient (and now Interpolate, Density)
+## Working Prototype → Production: Unified Kernel + Traversal — DONE for all six operators
 
-`wp_grad.py` (repo root) started as a from-scratch prototype reimplementation of the Gradient operator, exercised against the production `warpOperation` path via `warp_gradient.ipynb`. **That prototype has since landed in production**: `src/sphWarpCore/operations/wp_gradient.py` now contains the unified kernel, `operations_grid/wp_gradient_grid.py` is deleted, and `sphOperation_warp` routes Gradient through the single backend regardless of traversal mode (adjacency list, compact-hash grid, or `adjacency=None`). **Interpolate and Density have since been migrated the same way** (`operations/wp_interpolate.py`, `operations/wp_density.py`; `operations_grid/wp_interpolate_grid.py` and `operations_grid/wp_density_grid.py` both deleted) — see "Landing Interpolate in production" and "Landing Density in production" below for what differed each time. This section records how the prototype works and what changed on the way to production, so the same recipe — and the same pitfalls — carry over to Divergence and Curl and Laplacian, the three operators still left.
+`wp_grad.py` (repo root) started as a from-scratch prototype reimplementation of the Gradient operator, exercised against the production `warpOperation` path via `warp_gradient.ipynb`. **That prototype has since landed in production, and the same recipe has now been applied to every operator**: Density, Interpolate, Gradient, Divergence, Curl, and Laplacian each have exactly one unified kernel (`operations/wp_<op>.py`) handling both traversal modes. `operations_grid/` — the entire package, all six `wp_<op>_grid.py` files plus `wp_operation_grid.py` and `sphOperation_warp_grid` — has been deleted; `sphOperation_warp` (`operations/wp_operation.py`) is now a single dispatcher with no adjacency-type branch at all. See "Landing Interpolate", "Landing Density", and "Landing Divergence, Curl, and Laplacian" below for what differed operator-to-operator, and "Collapsing `sphOperation_warp`" for how the top-level dispatcher itself simplified once the last operator was exempted.
 
 ### What's new here vs. what already existed
 
@@ -72,7 +72,7 @@ Interface-wise `computeGradient(...)` takes the same arguments as `warpOperation
 
 ### Migration recipe (pivoting an existing operator to this style)
 
-For each of Divergence, Curl, Laplacian (Interpolate and Density are already done, see below):
+This recipe was applied to all six operators; kept here for reference the next time a new SPH operator is added, or if this pattern needs to be reapplied after a larger refactor:
 
 1. Take the existing `compute<Op>Tensor_Func` from `operations/wp_<op>.py` and rewrite its signature to consume `referenceState: Any` (a `particleDataSoA_D`), `domainState: domainData`, and `correctionData: Any` instead of the current flat `wp.array` parameter list, pulling per-neighbor values via `getParticle(referenceState, j)` and per-query correction terms via `getL_i`/`getGradH_i`/`getVolume_i`/`getCRK_i` at the call site rather than as separate flat args. The physics body does not change — compare `computeGradient_Func_i` (`wp_grad.py:29`) with `computeSPHGradientTensor_Func` (`operations/wp_gradient.py:17`) for a worked diff.
 2. Wrap it in a `compute<Op>_Func_Adjacency` that resolves query-point state once, then loops `for o in range(numOffsets)` picking `(beginIndex, numIndices, offsetArray)` from `adjacencyState` or from `checkOffset(...)` against `gridState` depending on `useAdjacency` — copy `computeGradient_Func_Adjacency` (`wp_grad.py:128`) verbatim except for the inner call. `numOffsets` is `1` when `useAdjacency` and `gridState.numOffsets` otherwise (see `computeGradient_Kernel`, `wp_grad.py:226`).
@@ -116,6 +116,42 @@ One structural note carried over from Interpolate: `sphOperation_warp` and `sphO
 
 Validation: all 63 pytest cases pass, both `scripts/gradcheck_density.py` (closed-form self-term check) and `scripts/gradcheck_density_native.py` pass, and `scripts/run_operation_matrix_sweep.sh --full` is clean.
 
+### Landing Divergence, Curl, and Laplacian in production: the rest of the Gradient family
+
+These three share nearly all of Gradient's correction-path machinery (CRK, grad-h, volume, renormalization) and its `computeKernelGradientCRK`-based per-neighbor loop; each differs from Gradient only in how the per-neighbor term is *contracted* into the output, and in a couple of operator-specific scalars that don't fit the fixed 14-argument struct prefix (`queryState, referenceState, domainState, useAdjacency, adjacencyState, gridState, correctionData, mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int, opInt`) that `extractStateInfo`/`warpWrapper2` always build:
+
+* **Divergence** uses `divergenceProduct` (contracts the input's last/first axis against the kernel gradient) instead of Gradient's `outerTensorProduct` (which appends a new axis). `dotMode` reuses the canonical ABI's `divergenceMode_int` slot directly (`OperationProperties.divergenceDotMode` already flows through `extractStateInfo` into that field — no new plumbing needed), but `consistentDivergence` has no home in the canonical struct (it's a `sphOperation_warp`-level kwarg, not an `OperationProperties` field), so it travels as an extra `wp.bool` in `warpWrapper2`'s `additionalArguments`, the same mechanism Gradient already uses for `queryValues`/`referenceValues`.
+* **Curl** uses `curlProduct` (Levi-Civita / cross-product contraction, with separate 1D/2D/3D overloads) and has Curl-specific output-shape logic (full input shape in 3D, one axis dropped in 2D, always scalar in 1D) in place of Gradient's "append a spatial axis" rule. No extra non-struct scalars needed. While copying `curlProduct` over, also found and dropped `getStride` — a dead helper defined in both the old adjacency and grid files but never actually called from either.
+* **Laplacian** is the one case where `positiveDivergence_int` (already in the canonical struct prefix, but ignored/pass-through-only in Gradient/Divergence/Curl) is genuinely read and used. Its per-neighbor term (`q_ij`, reusing `GradientScheme` to pick a differencing form — see the long comment in `computeSPHLaplacianTensor_Func_i` on why all four schemes collapse to a `(fj - fi)`-based difference here specifically) is combined with the kernel gradient via `computeDotLaplacian`/`computeLaplacianDot2`/a direct kernel-Laplacian evaluation, selected by `laplacianMode_int` (also already in the struct prefix). No extra non-struct scalars needed either. `LaplacianScheme.Dot`'s existing scalar-field-in-`dim>1` guard (`docs/lessons_learned.md`) was preserved verbatim in the new `_computeSPHLaplacian_stateBackend`.
+
+The now-familiar ternary-adjoint-zeroing pattern (`fj = referenceValues[j] / referenceOmegas[j] if useGradHTerms else referenceValues[j]`) was avoided from the start in all three by writing the explicit `if/else` form directly, rather than being caught by gradcheck after the fact as it was for Gradient.
+
+Validation: all 63 pytest cases pass for each operator's migration individually and cumulatively, `gradcheck_divergence_native.py`/`gradcheck_curl_native.py`/`gradcheck_laplacian_native.py` all pass standalone, and a final `scripts/run_operation_matrix_sweep.sh --full` run after all three (and the `sphOperation_warp` collapse below) landed together is clean — all 20 gated configurations `HIGH=0 ERR=0 NAN=0`, with adjacency/grid MAE identical per scheme/correction combination for every operator (e.g. `Divergence[Naive] [adjacency/base]` and `[grid/base]` both `MAE=0.7625`).
+
+### Collapsing `sphOperation_warp`: `operations_grid/` deleted entirely
+
+Once Laplacian — the last operator still using the old split — was migrated, `sphOperation_warp`'s top-level branch (`if operation not in (...) and (adjacency is None or isinstance(adjacency, CompactHashMap)): return sphOperation_warp_grid(...)`) had every `WarpOperation` value in its exemption tuple, making the branch permanently unreachable: no operation could ever take it. Rather than leave a dead branch (and a dead `operations_grid` package behind it) in place, both were removed:
+
+* The redirect branch and the `from ..operations_grid import sphOperation_warp_grid` import were deleted from `operations/wp_operation.py`. `sphOperation_warp` now goes straight from argument validation/defaulting to the per-operation dispatch (`if operation == WarpOperation.Density: ... elif operation == WarpOperation.Interpolate: ...` etc.) for every operator, with `adjacency=None` and grid-vs-list traversal handled inside each operator's own backend via `extractStateInfo`, exactly as documented above for each operator individually.
+* `operations_grid/wp_laplacian_grid.py`, `operations_grid/wp_operation_grid.py`, and `operations_grid/__init__.py` were deleted, along with the directory itself — nothing in the codebase imports `operations_grid` anymore (confirmed by grep; the only remaining references are historical comments explaining *why* the old split existed, in the operator files and two test docstrings, which were reworded to stop describing a dispatch path that no longer exists).
+* Two now-dead `sphOperation_warp_grid`-only kwargs (`consistentDivergence`, `divergenceDotMode`) were dropped from the (now-deleted) `sphOperation_warp_grid` signature and from `sphOperation_warp`'s internal call to it — moot now that the whole function is gone, but recorded here since it was a small independent cleanup made in passing.
+
+This is Phase 1 and Phase 5 fully realized for the SPH operator layer: one structured kernel ABI, one traversal-branching kernel per operator, no adjacency-type-based dispatch tree left anywhere in `sphOperation_warp`.
+
+### States as the Primary Path: `warpOperation` dispatches directly, `sphOperation_warp` adapts
+
+Collapsing `sphOperation_warp` (above) removed the adjacency-type dispatch tree, but left a different piece of redundancy in the call graph: every call, including the common case of a caller who already has `ParticleState`/`OperationProperties` objects in hand, still went `warpOperation` (state objects) → disassembles into ~25 flat positional/keyword tensors → `sphOperation_warp` (flat) → dispatches to `compute<Op>_warpBackend` (flat) → reassembles the exact same tensors back into `ParticleState`/`CRKState`/`GradHState`/`RenormalizationState` → `_compute<Op>_stateBackend` (state objects) → `warpWrapper2`. Two full disassemble/reassemble round trips per call, on the path every operator call actually takes.
+
+This has been inverted so states are the primary path, matching the target architecture's framing (state objects "independent of the storage backend... differentiation mode... traversal method"):
+
+* `warpOperation` (`operations/wp_operation.py`) now does the dispatching itself: it takes `queryParticles`/`referenceParticles`/`crkState`/`gradHState`/`renormalizationState`/`operationProperties` as before, normalizes `gradHState`/`renormalizationState` if given as a bare tensor or tuple (unchanged from before), runs the same validation that used to live in `sphOperation_warp` (queryValues/referenceValues presence, the preScatteredQuantities combo checks, the CRK-gradA/gradB-required-for-Gradient/Divergence/Curl check — now checked as `crkState.gradA is None` rather than a separate `crk_gradA` flat arg), and calls the appropriate `_computeSPHX_stateBackend` directly. No flattening, no reassembly.
+* `sphOperation_warp` is now the thin adapter: it keeps its exact pre-existing flat-tensor signature (so no caller-visible break), does flat-API-only sanity checks that can't occur through the state API by construction (e.g. `useCRK=True` but `crk_A=None` — structurally impossible if you're building a `CRKState` object instead of independent flags-plus-tensors), builds `ParticleState`/`OperationProperties`/`CRKState`/`GradHState`/`RenormalizationState` from its flat arguments, and calls `warpOperation`. It no longer dispatches per-operation itself — that's `warpOperation`'s job now, exercised by both entry points.
+* The five `compute<Op>_warpBackend` flat-tensor adapter functions (Interpolate/Gradient/Divergence/Curl/Laplacian; Density's equivalent was folded directly into its `_stateBackend`) are deleted entirely — nothing called them except `sphOperation_warp`'s old per-operation dispatch, and that dispatch is gone. Every operator file now exposes exactly one public backend, `_computeSPHX_stateBackend`, taking state objects.
+* One real (non-mechanical) piece of logic had to move, not just get deleted: Interpolate's CRK dummy-`gradA`/`gradB` fill (`CRKState` requires `gradA`/`gradB` even though Interpolate never reads them — see "Landing Interpolate" above). This used to live in the now-deleted `computeSPHInterpolant_warpBackend`, reached from both entry points because both funneled through it. It now lives directly in `_computeSPHInterpolant_stateBackend` (`operations/wp_interpolate.py`), gated on `crkState.gradA is None or crkState.gradB is None` rather than always overwriting — so a caller who *does* supply real `gradA`/`gradB` on a shared `CRKState` (e.g. reusing one `CRKState` across an Interpolate call and a Gradient call) now gets those real tensors passed through instead of unconditionally discarded, which is harmless either way since Interpolate's kernel never reads them, but is the more honest behavior for a state-first API.
+* A handful of `sphOperation_warp`-level dummy-tensor fills (`renormalizationMatrices`, `queryOmegas`/`referenceOmegas`, `queryVolumes`/`referenceVolumes`, `crk_A`/`crk_B`/`crk_gradA`/`crk_gradB` all defaulting to `getCachedDummyTensor(...)` when `None`) were dropped rather than carried over: tracing them showed every one was immediately discarded a few lines later by each `compute<Op>_warpBackend`'s own `X if useX else None` before ever reaching a state object, i.e. they were dead code left over from an earlier fully-flat design, not load-bearing. Likewise the `queryKinds`/`referenceKinds` AllToAll-dummy fallback that used to run inside `sphOperation_warp` is gone — `checkKinds` (`utils/arg_check.py`, called from `extractStateInfo`) already does the identical `None` → dummy substitution, so `ParticleState.kinds=None` now flows through cleanly without a redundant fill upstream.
+
+Validation: all 63 pytest cases pass, all seven gradcheck scripts (`tests/operations/test_gradcheck_scripts.py`) pass, and `scripts/run_operation_matrix_sweep.sh --quick` is clean (`OK=258, HIGH=0, ERR=0, NAN=0`).
+
 ---
 
 # Phase 0 - Build Regression Ground Truth From Notebooks (First Step)
@@ -147,6 +183,10 @@ Create a reproducible regression suite and documentation baseline before refacto
 ---
 
 # Phase 1 – Standardize Kernel Interfaces
+
+## Status: Done
+
+Every SPH operator (Density, Interpolate, Gradient, Divergence, Curl, Laplacian) now exposes exactly the kernel ABI described below — see "Working Prototype → Production" in the Repository Reality Check section for how this landed operator-by-operator.
 
 ## Goal
 
@@ -286,6 +326,10 @@ The focus is on removing mechanical Python-side boilerplate.
 
 # Phase 5 – Consolidate Traversal Abstractions
 
+## Status: Done
+
+Every operator's `_Func_Adjacency` now branches on `useAdjacency` at runtime between the CSR neighbor-list case and the compact-hash grid-cell case (via `checkOffset`, moved to `radiusSearch/grid_util.py` for exactly this sharing); `operations_grid/` — the duplicated-per-operator grid implementation this phase was meant to eliminate — has been deleted entirely. See "Working Prototype → Production" in the Repository Reality Check section.
+
 ## Goal
 
 Ensure every operator performs neighborhood traversal through the same abstraction.
@@ -420,21 +464,13 @@ Keep public APIs torch-compatible while wrapping lazily under the hood.
 
 Consolidate duplicated state extraction/default logic into a single authoritative path that builds all kernel structs and scalar config.
 
-## Step 4 - Migrate Density End-to-End First
+## Step 4/5 - Migrate All Six Operators — Done (actual order differed from plan)
 
-Use density as the first production migration template:
+Done, but Gradient was the first production migration template, not Density as originally planned — it has the most correction paths (CRK, grad-h, renormalization, volume) to prove out, so migrating it first validated the recipe against the hardest case rather than the easiest. Order actually used: Gradient, Interpolate, Density, Divergence, Curl, Laplacian. Each move went from a flat-wrapper adjacency-only kernel plus a separate flat-wrapper grid-only kernel to one structured-wrapper kernel handling both traversal modes, validated against the Phase 0 baselines (pytest + gradcheck + operation-matrix) at each step — see "Working Prototype → Production" in the Repository Reality Check section for the per-operator details and bugs found. "Maintain legacy shim compatibility" held throughout: each operator's flat-tensor `compute<Op>_warpBackend` function kept its exact pre-migration signature, so `sphOperation_warp`'s call sites needed no changes beyond the dispatch-branch condition.
 
-* move launch path from flat wrapper to structured wrapper
-* maintain legacy shim compatibility
-* validate parity against Phase 0 baselines
+## Step 6 - Consolidate Traversal and Close Capability Gaps — Done
 
-## Step 5 - Migrate Remaining Core Operators
-
-Migrate interpolate, gradient, divergence, curl, and laplacian one-by-one using the same structured ABI and parity gates.
-
-## Step 6 - Consolidate Traversal and Close Capability Gaps
-
-Reduce adjacency/grid duplication in orchestration and add missing compact-hash support where currently blocked (especially CRK/renormalization paths).
+Adjacency/grid duplication in orchestration is gone (`operations_grid/` deleted, `sphOperation_warp` is a single dispatcher with no adjacency-type branch). CRK/renormalization now run on grid-mode traversal for every operator that supports them, for free — the unified `correctionData` struct is threaded through both traversal branches identically, so there was no separate "grid CRK support" to add.
 
 ## Step 7 - Extend Fields for Forward-Mode AD
 

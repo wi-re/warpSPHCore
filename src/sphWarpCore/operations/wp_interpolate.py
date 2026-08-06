@@ -181,6 +181,18 @@ def _computeSPHInterpolant_stateBackend(
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
 ):
+    if crkState is not None and (crkState.gradA is None or crkState.gradB is None):
+        # CRKState requires gradA/gradB (shapes [N,D]/[N,D,D]), but Interpolate never
+        # reads correctionData.queryGradA/queryGradB -- only Ai/Bi. Fill correctly-shaped
+        # dummies rather than leaving them unset -- extractStateInfo accesses
+        # crkState.gradA/.gradB unconditionally whenever a CRKState is provided, and
+        # reusing e.g. crkState.B as a stand-in would be a shape mismatch ([N,D] where
+        # gradB needs [N,D,D]).
+        dim = queryParticles.positions.shape[1]
+        dummy_gradA = getCachedDummyTensor((1, dim), device=crkState.A.device, dtype=crkState.A.dtype)
+        dummy_gradB = getCachedDummyTensor((1, dim, dim), device=crkState.A.device, dtype=crkState.A.dtype)
+        crkState = CRKState(A=crkState.A, B=crkState.B, gradA=dummy_gradA, gradB=dummy_gradB)
+
     with record_function("warpSPH[Interpolation]"):
         with record_function("warpSPH[Interpolation] - Preprocessing"):
             # Warp kernels only support rank-1 (vector) and rank-2 (matrix) field types.
@@ -226,56 +238,3 @@ def _computeSPHInterpolant_stateBackend(
             result = result.reshape(result.shape[0], *field_shape)
 
     return result
-
-
-def computeSPHInterpolant_warpBackend(
-    queryPositions, referencePositions,
-    querySupports, referenceSupports,
-    queryMasses, referenceMasses,
-    queryDensities, referenceDensities,
-    queryValues, referenceValues,
-    queryKinds, referenceKinds,
-    domain: DomainDescription,
-    mode: SupportScheme,
-    kernel: KernelFunctions,
-    operationMode: OperationDirection,
-    adjacency: Optional[Union[AdjacencyList, CompactHashMap]],
-    scatteredQuantities: Optional[torch.Tensor] = None,
-    useVolume: bool = False, queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
-    useCRK: bool = False, crk_A: Optional[torch.Tensor] = None, crk_B: Optional[torch.Tensor] = None,
-):
-    """Public entry point kept for ``sphOperation_warp``: same flat-tensor signature as
-    before, now a thin adapter over the unified state-based kernel above. Interpolate's
-    output only depends on referenceValues (not queryValues -- there is no "difference
-    from self" term the way Gradient has), matching the pre-migration kernel.
-    """
-    if scatteredQuantities is not None:
-        raise NotImplementedError(
-            "Pre-scattered quantities are no longer supported by the Interpolate operator: "
-            "no caller in this repo relies on them (same rationale as Gradient's migration -- "
-            "see warpier_core.md). Pass referenceValues instead."
-        )
-    if referenceValues is None:
-        raise ValueError("referenceValues must be provided for the interpolation computation.")
-
-    queryParticles = ParticleState(positions=queryPositions, supports=querySupports, masses=queryMasses, densities=queryDensities, kinds=queryKinds)
-    referenceParticles = ParticleState(positions=referencePositions, supports=referenceSupports, masses=referenceMasses, densities=referenceDensities, kinds=referenceKinds)
-
-    if useCRK:
-        # CRKState requires gradA/gradB (shapes [N,D]/[N,D,D]), but Interpolate never
-        # reads correctionData.queryGradA/queryGradB -- only Ai/Bi. Fill correctly-shaped
-        # dummies rather than reusing crk_B (wrong shape for gradB) or leaving them unset.
-        dim = queryPositions.shape[1]
-        dummy_gradA = getCachedDummyTensor((1, dim), device=crk_A.device, dtype=crk_A.dtype)
-        dummy_gradB = getCachedDummyTensor((1, dim, dim), device=crk_A.device, dtype=crk_A.dtype)
-        crkState = CRKState(A=crk_A, B=crk_B, gradA=dummy_gradA, gradB=dummy_gradB)
-    else:
-        crkState = None
-
-    return _computeSPHInterpolant_stateBackend(
-        queryParticles, referenceParticles, domain, mode, kernel, operationMode,
-        adjacency, referenceValues,
-        queryVolumes=queryVolumes if useVolume else None,
-        referenceVolumes=referenceVolumes if useVolume else None,
-        crkState=crkState,
-    )
