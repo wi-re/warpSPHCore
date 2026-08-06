@@ -3,15 +3,15 @@ from warp.types import vector, matrix
 # from wp_tensor import tensor
 from typing import Any
 import torch
-from sphWarpCore.util.wp_autograd import *
+from sphWarpCore.autograd import *
 
 from ..dataTypes import *
 from sphWarpCore.math import *
 from sphWarpCore.kernels import *
-from sphWarpCore.util.wp_util import getCachedDummyTensor
+from sphWarpCore.autograd.cache import getCachedDummyTensor
 from torch.profiler import profile, record_function, ProfilerActivity
 from sphWarpCore.enumTypes import *
-from sphWarpCore.util.arg_check import *
+from sphWarpCore.autograd.arg_check import *
 from typing import Optional
 
 

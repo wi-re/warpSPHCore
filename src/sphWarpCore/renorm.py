@@ -18,7 +18,7 @@ from .enumTypes import WarpOperation
 from .dataTypes import *
 
 from .operations import warpOperation
-from .pinv import pinv2x2_warpBackend
+from .pinv import pinv2x2_warpBackend, pinv_warp
 
 
 def computeRenormalizationMatrices_(
@@ -63,23 +63,24 @@ def computeRenormalizationMatrices_(
             C[lowNbrMask, :, :] = torch.eye(dim, dtype = dtype, device = device)[None, :, :]
 
     with record_function("[warpSPH] - Renorm - Pseudo Inverse"):
-        if queryPositions.shape[1] == 2:
-            L, eigVals = pinv2x2_warpBackend(C, num_nbrs)
-            # L = torch.linalg.pinv(C)
-        else:
-            # rcond matches the relative eigenvalue cutoff used in the 2D path (pinv2x2_warp):
-            # zero out directions that are near-singular relative to the dominant eigenvalue,
-            # rather than only truly-zero ones, so anisotropic/thin neighborhoods don't produce
-            # huge inverted eigenvalues.
-            L = torch.linalg.pinv(C, rtol=1e-6)
-            eigVals = torch.linalg.eigvals(C).real
+        L, eigVals = pinv_warp(C, num_nbrs)
+        # if queryPositions.shape[1] == 2:
+        #     L, eigVals = pinv2x2_warpBackend(C, num_nbrs)
+        #     # L = torch.linalg.pinv(C)
+        # else:
+        #     # rcond matches the relative eigenvalue cutoff used in the 2D path (pinv2x2_warp):
+        #     # zero out directions that are near-singular relative to the dominant eigenvalue,
+        #     # rather than only truly-zero ones, so anisotropic/thin neighborhoods don't produce
+        #     # huge inverted eigenvalues.
+        #     L = torch.linalg.pinv(C, rtol=1e-6)
+        #     eigVals = torch.linalg.eigvals(C).real
 
-            if queryPositions.shape[1] == 3:
-                eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
-                eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:],[1])
-                eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:],[1])
-            elif queryPositions.shape[1] == 2:
-                eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
+        #     if queryPositions.shape[1] == 3:
+        #         eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
+        #         eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,1]),:],[1])
+        #         eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,2]) > torch.abs(eigVals[:,0]),:],[1])
+        #     elif queryPositions.shape[1] == 2:
+        #         eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:] = torch.flip(eigVals[torch.abs(eigVals[:,1]) > torch.abs(eigVals[:,0]),:],[1])
 
     return C, eigVals, L
 

@@ -3,19 +3,6 @@ import torch
 from ..types import *
 
 
-# Reusable cache for tiny default tensors passed to kernels as optional dummy args.
-# Keyed by tensor role + shape + dtype + device to avoid per-call allocations.
-_DUMMY_TENSOR_CACHE: dict[tuple, torch.Tensor] = {}
-
-
-def clearDummyTensorCache() -> None:
-    """Clear all cached dummy tensors.
-
-    Useful when explicitly reclaiming memory across long-lived sessions.
-    """
-    _DUMMY_TENSOR_CACHE.clear()
-
-
 # ---------------------------------------------------------------------------
 # wp.array identity cache -- REMOVED.
 # ---------------------------------------------------------------------------
@@ -34,66 +21,6 @@ def clearDummyTensorCache() -> None:
 
 from torch.profiler import record_function
 from .cast import castTorchToWarpAsBuiltins, castWarpToTorch
-
-
-def getCachedWarpArray(t: torch.Tensor) -> "wp.array":
-    """Return a fresh wp.array view of *t*.
-
-    No longer caches the wrapper object -- see the module-level note above.
-    Kept under its original name since it is part of the package's public
-    surface and used throughout the operation backends.
-    """
-    return castTorchToWarpAsBuiltins(t.contiguous())
-
-
-def clearWarpArrayCache() -> None:
-    """No-op: the wp.array identity cache has been removed.
-
-    Kept for backward compatibility with existing call sites.
-    """
-    pass
-
-def getCachedDummyTensor(
-    shape,
-    *,
-    dtype: torch.dtype,
-    device: torch.device,
-    fillValue: float = 0.0,
-) -> torch.Tensor:
-    # with record_function("[warpSPH] - getCachedDummyTensor"):
-    """Return a shared cached tensor for optional kernel arguments.
-
-    This avoids allocating new placeholder tensors on every kernel launch.
-    """
-    normalized_shape = tuple(int(s) for s in shape)
-    key = ("dummy", normalized_shape, str(dtype), str(device), float(fillValue))
-
-    tensor = _DUMMY_TENSOR_CACHE.get(key)
-    if tensor is None:
-        tensor = torch.full(normalized_shape, fillValue, dtype=dtype, device=device).contiguous()
-        _DUMMY_TENSOR_CACHE[key] = tensor
-
-    return tensor
-
-
-def getCachedIdentityMatrices(
-    dim: int,
-    *,
-    dtype: torch.dtype,
-    device: torch.device,
-) -> torch.Tensor:
-    """Return a shared cached tensor with shape (1, dim, dim) containing I."""
-    if dim <= 0:
-        raise ValueError(f"dim must be > 0, got {dim}")
-
-    key = ("identity", int(dim), str(dtype), str(device))
-    tensor = _DUMMY_TENSOR_CACHE.get(key)
-    if tensor is None:
-        tensor = torch.eye(dim, dtype=dtype, device=device).unsqueeze(0).contiguous()
-        _DUMMY_TENSOR_CACHE[key] = tensor
-
-    return tensor
-
 
 
 # from wp_tensor import tensor

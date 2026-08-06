@@ -4,12 +4,12 @@ from warp.types import vector, matrix
 # from wp_tensor import tensor
 from typing import Any
 import torch
-from sphWarpCore.util.wp_autograd import *
+# from .wp_autograd import *
 
 from sphWarpCore.dataTypes import *
 from sphWarpCore.math import *
 from sphWarpCore.kernels import *
-from sphWarpCore.util.wp_util import getCachedDummyTensor
+from .cache import getCachedDummyTensor
 from sphWarpCore.util import *
 from sphWarpCore.enumTypes import *
 from typing import Optional

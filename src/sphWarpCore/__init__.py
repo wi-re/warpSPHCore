@@ -24,7 +24,7 @@ from .type_config import scalar_t, scalar, dim_t, get_type_config,  get_torch_pr
 
 # Convenience re-exports of the most commonly used symbols
 
-from .autograd import WarpFunctionWrapper
+# from .autograd import WarpFunctionWrapper
 from .radiusSearch import *
 
 from .operations import (
@@ -37,7 +37,7 @@ from .renorm import computeRenormalizationMatrices
 
 from .enumTypes import *
 
-from .warp_state_util import parseArguments, extractStateInfo, warpWrapper2
+# from .warp_state_util import parseArguments, extractStateInfo, warpWrapper2
 
 from .kernels import *
 
@@ -45,6 +45,7 @@ from .math import computeDistanceVec, safe_sqrt
 from .util import *
 from .math import *
 from .dataTypes import *
+from .pinv import pinv_warp
 
 
 from .types import scalar_t, vec_t, mat_t, vecArray_t, matArray_t, intArray_t, scalarArray_t
@@ -73,19 +74,20 @@ __all__ = [
     # "getL_i", "getVolume_i", "getVolume_j",
     # "getGradH_i", "getGradH_j",
     # "getCRK_i",
-    "parseArguments",
+    # "parseArguments",
     # 'zero_like_warp',
     # 'checkDirectionality_i', 'checkDirectionality_j', 
     # 'getCachedDummyTensor',
     # 'castTorchToWarpAsBuiltins',
     'computeKernelCRK', 'computeKernelGradientCRK', 'sphKernel', 'sphKernelGradient',
     # 'computeDistanceVec', 'safe_sqrt', 'computePairwiseSupport', 'iPow',
-    'launch_kernel', 'warpWrapper',
-    'StateAwareWarpFunction', 'extractStateInfo', 'warpWrapper2',
+    # 'launch_kernel', 'warpWrapper',
+    # 'StateAwareWarpFunction', 'extractStateInfo', 'warpWrapper2',
     # 'matmul',
     'scalar_t', 'vec_t', 'mat_t', 'vecArray_t', 'matArray_t', 'intArray_t', 'scalarArray_t', 'get_torch_precision',
     # 'sphKernelScale', 'sphKernel_xi',
-    # 'checkOffset'
+    # 'checkOffset',
+    'pinv_warp'
 ]
 
 __all__.extend(kernels.__all__)
@@ -95,4 +97,6 @@ __all__.extend(enumTypes.__all__)
 __all__.extend(dataTypes.__all__)
 __all__.extend(radiusSearch.__all__)
 __all__.extend(util.__all__)
+from .autograd import *
+__all__.extend(autograd.__all__)
 

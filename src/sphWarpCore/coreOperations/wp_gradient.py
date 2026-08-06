@@ -4,7 +4,8 @@ from typing import Any, Optional, Union
 import torch
 from torch.profiler import record_function
 
-from ..util.wp_autograd import *
+from ..types import *
+from ..autograd import *
 
 from ..dataTypes import *
 from ..radiusSearch.wp_compactHash import CompactHashMap
@@ -15,7 +16,7 @@ from ..util import *
 from torch.profiler import profile, record_function, ProfilerActivity
 
 from ..enumTypes import *
-from ..warp_state_util import warpWrapper2
+from ..autograd import *
 
 from ..crk import computeKernelCRK, computeKernelGradientCRK
 

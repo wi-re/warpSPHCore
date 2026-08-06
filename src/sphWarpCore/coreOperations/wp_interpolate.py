@@ -4,7 +4,8 @@ from typing import Any, Optional, Union
 import torch
 from torch.profiler import record_function
 
-from ..util.wp_autograd import *
+from ..types import *
+from ..autograd import *
 
 from ..dataTypes import *
 from ..radiusSearch.wp_compactHash import CompactHashMap
@@ -13,7 +14,7 @@ from ..math import *
 from ..kernels import *
 from ..util import *
 from ..enumTypes import *
-from ..warp_state_util import warpWrapper2
+from ..autograd import *
 from ..crk import computeKernelCRK, computeKernelGradientCRK
 
 # Unified Interpolate kernel: same design as the unified Gradient kernel (see
