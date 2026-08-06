@@ -26,7 +26,7 @@ import torch
 
 from sphWarpCore import ParticleState, radiusSearchCompactHashMap
 from sphWarpCore.enumTypes import KernelFunctions, SupportScheme
-from sphWarpCore.radiusSearch.radius_util import DomainDescription
+from sphWarpCore.dataTypes import DomainDescription
 from sphWarpCore.radiusSearch.wp_compactHash import buildCompactHashMap
 
 DEVICE = torch.device("cpu")

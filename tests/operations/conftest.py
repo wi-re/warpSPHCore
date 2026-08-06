@@ -20,7 +20,7 @@ from sphWarpCore.enumTypes import (
     WarpOperation,
 )
 from sphWarpCore.renorm import computeRenormalizationMatrices
-from sphWarpCore.state import RenormalizationState
+from sphWarpCore.dataTypes import RenormalizationState
 from sphWarpCore.util import generateNeighborTestData
 
 

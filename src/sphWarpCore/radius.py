@@ -1,11 +1,4 @@
 """Radius / neighbor-search routines."""
-# from .radiusSearch.radius_util import (
-    # AdjacencyList,
-    # AdjacencyListWarp,
-    # DomainDescription,
-    # PointCloud,
-    # convertModeToUint,
-# )
 from .radiusSearch.radius_naive import (
     radiusNaive,
     radiusNaiveFixed,
@@ -25,14 +18,8 @@ from .radiusSearch.wp_radius_small import (
 )
 
 from .radiusSearch.verlet import buildVerletList, updateNeighborsVerlet, filterVerletList
-# from ..enumTypes import SupportScheme, supportSchemeToUint
 
 __all__ = [
-    # "AdjacencyList",
-    # "AdjacencyListWarp",
-    # "DomainDescription",
-    # "PointCloud",
-    # "convertModeToUint",
     "radiusNaive",
     "radiusNaiveFixed",
     "radiusSearchCompactHashMap",

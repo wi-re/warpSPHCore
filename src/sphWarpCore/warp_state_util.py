@@ -3,10 +3,6 @@ from warp.types import vector, matrix
 from typing import Any, Union
 import torch
 
-# from .warp_state import *
-
-# from sphWarpCore import ParticleState
-# from .state import ParticleState, OperationProperties, GradHState, RenormalizationState, CRKState
 from .radiusSearch.wp_compactHash import CompactHashMap, AdjacencyListWarp, buildCompactHashMap
 from typing import Tuple, Union, Optional
 

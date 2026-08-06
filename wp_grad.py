@@ -5,11 +5,11 @@ from typing import Any
 import torch
 
 from sphWarpCore.radiusSearch.grid_util import checkOffset
-from sphWarpCore.state import GradHState, RenormalizationState
+from sphWarpCore.dataTypes import GradHState, RenormalizationState
 from sphWarpCore.utils.wp_autograd import *
 
 
-from ..dataTypes import *
+from sphWarpCore.dataTypes import *
 from sphWarpCore.math import *
 from sphWarpCore.kernels import *
 from sphWarpCore.utils.wp_util import _get_warp_matrix_dtype, _get_warp_vector_dtype, getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j

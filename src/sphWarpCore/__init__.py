@@ -6,7 +6,8 @@ Public API (flat imports):
     from sphWarpCore.util       import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins
     from sphWarpCore.autograd   import warpWrapper, WarpFunctionWrapper
     from sphWarpCore.math       import computeDistance, minimumImageDistance, ...
-    from sphWarpCore.radius     import radiusSearchCompactHashMap, radiusNaive, AdjacencyList, ...
+    from sphWarpCore.radius     import radiusSearchCompactHashMap, radiusNaive, ...
+    from sphWarpCore.dataTypes  import AdjacencyList, ParticleState, DomainDescription, ...
     from sphWarpCore.operations import sphOperation_warp, warpOperation
 
 Or import subpackages directly:
@@ -25,28 +26,19 @@ from .type_config import scalar_t, scalar, dim_t, get_type_config,  get_torch_pr
 
 from .autograd import WarpFunctionWrapper
 from .radius import (
-    # AdjacencyList,
-    # DomainDescription,
-    # PointCloud,
     radiusSearchCompactHashMap,
-    # CompactHashMap,
-    
+
     buildCompactHashMap,
     buildVerletList,
     updateNeighborsVerlet,
     filterVerletList,
 )
+from .radiusSearch.grid_util import checkOffset
+
 from .operations import (
     sphOperation_warp,
     warpOperation
 )
-# from .state import (
-#     ParticleState,
-#     OperationProperties,
-#     CRKState,
-#     GradHState,
-#     RenormalizationState
-# )
 
 from .crk import *
 from .renorm import computeRenormalizationMatrices
@@ -54,20 +46,16 @@ from .renorm import computeRenormalizationMatrices
 from .enumTypes import *
 from .utils.support import (volumeToSupport, n_h_to_nH)
 
-# from .warp_state import (
-#     adjacencyData,
-#     gridData,
-#     domainData,
-#     getParticle,
-#     getL_i, getVolume_i, getVolume_j,
-#     getGradH_i, getGradH_j,
-#     getCRK_i
-# )
-
 from .warp_state_util import parseArguments, extractStateInfo, warpWrapper2
 
 from .utils.wp_util import (zero_like_warp,
                             checkDirectionality_i, checkDirectionality_j, getCachedDummyTensor, castTorchToWarpAsBuiltins)
+from .utils.stateUtil import (
+    getParticle,
+    getL_i, getVolume_i, getVolume_j,
+    getGradH_i, getGradH_j,
+    getCRK_i
+)
 
 from .kernels import *
 
@@ -84,15 +72,10 @@ __version__ = "0.4.5"
 
 __all__ = [
     "radius",
-    # "ops",
     "scalar_t",
     "scalar",
     "dim_t",
     "get_type_config",
-    # "AdjacencyList",
-    # "CompactHashMap",
-    # "DomainDescription",
-    # "PointCloud",
     "radiusSearchCompactHashMap",
     "sphOperation_warp",
     "WarpFunctionWrapper",
@@ -102,24 +85,9 @@ __all__ = [
     "filterVerletList",
     "computeCRKFactors",
     "computeRenormalizationMatrices",
-    # "ParticleState",
-    # "OperationProperties",
-    # "CRKState",
-    # "GradHState",
-    # "RenormalizationState",
-    # "KernelFunctions",
-    # "SupportScheme",
-    # "OperationDirection",
-    # "GradientScheme",
-    # "LaplacianScheme",
-    # "WarpOperation",
     "warpOperation",
     "volumeToSupport",
     "n_h_to_nH",
-    # "ParticleType",
-    # "adjacencyData",
-    # "gridData",
-    # "domainData",
     "getParticle",
     "getL_i", "getVolume_i", "getVolume_j",
     "getGradH_i", "getGradH_j",
@@ -134,7 +102,8 @@ __all__ = [
     'StateAwareWarpFunction', 'extractStateInfo', 'warpWrapper2',
     'matmul',
     'scalar_t', 'vec_t', 'mat_t', 'vecArray_t', 'matArray_t', 'intArray_t', 'scalarArray_t', 'get_torch_precision',
-    'sphKernelScale', 'sphKernel_xi'
+    'sphKernelScale', 'sphKernel_xi',
+    'checkOffset'
 ]
 
 __all__.extend(kernels.__all__)
