@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Native torch.autograd.gradcheck against computeCovarianceMatrix -- no workarounds.
+"""Native torch.autograd.gradcheck against Covariance -- no workarounds.
 
-Covariance (src/sphWarpCore/renorm/wp_covariance.py) was the operator the canonical
-structured kernel ABI (queryState/referenceState/domainState/useAdjacency/adjacencyState/
-gridState/correctionData/...) was originally modeled on (see warpier_core.md's "Working
-Prototype -> Production"), and its kernel already branched on useAdjacency internally.
-What it didn't have until this rework was a Python entry point that actually let
-adjacency be None or a CompactHashMap -- computeRenormalizationMatrices (the only
-caller) unconditionally raised NotImplementedError unless given an explicit
-AdjacencyList. computeCovarianceMatrix drops that restriction, so this script checks
-both traversal branches agree and are both differentiable correctly.
+Covariance (src/sphWarpCore/coreOperations/wp_covariance.py) was the operator the
+canonical structured kernel ABI (queryState/referenceState/domainState/useAdjacency/
+adjacencyState/gridState/correctionData/...) was originally modeled on (see
+warpier_core.md's "Working Prototype -> Production"), and its kernel already branched
+on useAdjacency internally. What it didn't have until this rework was a Python entry
+point that actually let adjacency be None or a CompactHashMap --
+computeRenormalizationMatrices (the only caller at the time) unconditionally raised
+NotImplementedError unless given an explicit AdjacencyList. Covariance is now the
+seventh operation dispatched through warpOperation(..., operation=WarpOperation.Covariance,
+...) exactly like Density/Interpolate/Gradient/Divergence/Curl/Laplacian, rather than a
+standalone computeCovarianceMatrix function -- so this script checks both traversal
+branches agree and are both differentiable correctly through that same entry point.
 
 Unlike every other gradcheck_*_native.py script, this one deliberately exercises BOTH
 traversal branches (build_adjacency -> AdjacencyList/useAdjacency=True, and the new
@@ -43,8 +46,7 @@ import warp as wp
 
 from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, build_grid_adjacency, line_case, make_domain, single_particle_case
 from sphWarpCore import OperationProperties, ParticleState, warpOperation
-from sphWarpCore.enumTypes import GradientScheme, OperationDirection, SupportScheme, WarpOperation
-from sphWarpCore.renorm import computeCovarianceMatrix
+from sphWarpCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
 
 
 def compute_densities(positions, supports, masses, kinds, domain, adjacency):
@@ -76,15 +78,14 @@ def run_gradcheck(name: str, positions: torch.Tensor, supports: torch.Tensor, ma
 
     operationProperties = OperationProperties(
         kernel=KERNEL,
-        operation=WarpOperation.Gradient,
+        operation=WarpOperation.Covariance,
         supportMode=SupportScheme.Gather,
         operationMode=OperationDirection.AllToAll,
-        gradientMode=GradientScheme.Difference,
     )
 
     def f(pos, sup, mass, dens):
         p = ParticleState(positions=pos, supports=sup, masses=mass, densities=dens, kinds=kinds)
-        return computeCovarianceMatrix(p, operationProperties, domain, adjacency=adjacency)
+        return warpOperation(p, operationProperties, domain, adjacency=adjacency)
 
     print(f"\n=== {name} ({traversal} traversal): torch.autograd.gradcheck ===")
     inputs = (positions, supports, masses, densities)
@@ -110,16 +111,15 @@ def run_traversal_parity(name: str, positions: torch.Tensor, supports: torch.Ten
 
     operationProperties = OperationProperties(
         kernel=KERNEL,
-        operation=WarpOperation.Gradient,
+        operation=WarpOperation.Covariance,
         supportMode=SupportScheme.Gather,
         operationMode=OperationDirection.AllToAll,
-        gradientMode=GradientScheme.Difference,
     )
     p = ParticleState(positions=positions.detach(), supports=supports.detach(), masses=masses.detach(), densities=densities.detach(), kinds=kinds)
 
-    C_adjacency = computeCovarianceMatrix(p, operationProperties, domain, adjacency=adjacency)
-    C_grid = computeCovarianceMatrix(p, operationProperties, domain, adjacency=grid)
-    C_none = computeCovarianceMatrix(p, operationProperties, domain, adjacency=None)
+    C_adjacency = warpOperation(p, operationProperties, domain, adjacency=adjacency)
+    C_grid = warpOperation(p, operationProperties, domain, adjacency=grid)
+    C_none = warpOperation(p, operationProperties, domain, adjacency=None)
 
     diff_grid = (C_adjacency - C_grid).abs().max().item()
     diff_none = (C_grid - C_none).abs().max().item()

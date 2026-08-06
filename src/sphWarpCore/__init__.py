@@ -3,23 +3,22 @@ sphWarpCore — Smoothed Particle Hydrodynamics core library built on NVIDIA War
 
 Public API (flat imports):
 
-    from sphWarpCore.util   import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins
-    from sphWarpCore.autograd import warpWrapper, WarpFunctionWrapper
-    from sphWarpCore.math   import computeDistance, minimumImageDistance, ...
-    from sphWarpCore.radius import radiusSearchCompactHashMap, radiusNaive, AdjacencyList, ...
-    from sphWarpCore.ops    import computeDensity_warpBackend, computeSPHInterpolant_warpBackend, ...
+    from sphWarpCore.util       import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins
+    from sphWarpCore.autograd   import warpWrapper, WarpFunctionWrapper
+    from sphWarpCore.math       import computeDistance, minimumImageDistance, ...
+    from sphWarpCore.radius     import radiusSearchCompactHashMap, radiusNaive, AdjacencyList, ...
+    from sphWarpCore.operations import sphOperation_warp, warpOperation
 
 Or import subpackages directly:
 
-    from sphWarpCore.utils       import ...
-    from sphWarpCore.kernels     import ...
-    from sphWarpCore.radiusSearch import ...
-    from sphWarpCore.operations  import ...
+    from sphWarpCore.utils          import ...
+    from sphWarpCore.kernels        import ...
+    from sphWarpCore.radiusSearch   import ...
+    from sphWarpCore.coreOperations import ...
 """
 
 
 from . import radius
-# from . import ops
 from .type_config import scalar_t, scalar, dim_t, get_type_config,  get_torch_precision
 
 # Convenience re-exports of the most commonly used symbols
@@ -49,8 +48,7 @@ from .state import (
     RenormalizationState
 )
 
-from .crk.crk_wrapper import computeCRKFactors
-# from .renorm.wp_covariance import computeCovarianceMatrix
+from .crk import *
 from .renorm import computeRenormalizationMatrices
 
 from .enumTypes import (
@@ -79,13 +77,13 @@ from .warp_state_util import parseArguments, extractStateInfo, warpWrapper2
 from .utils.wp_util import (zero_like_warp,
                             checkDirectionality_i, checkDirectionality_j, getCachedDummyTensor, castTorchToWarpAsBuiltins)
 
-from .kernels.wp_kernel import eval_kernelScale, computeKernelCRK, computeKernelGradientCRK, sphKernel, sphKernelGradient, eval_k, eval_C_d
+from .kernels import *
+
 from .math import computeDistanceVec, safe_sqrt
 from .utils import computePairwiseSupport
 from .utils.wp_autograd import launch_kernel, warpWrapper, StateAwareWarpFunction
-from .math import matmul, iPow
+from .math import *
 
-from .kernels.wp_kernel import sphKernelScale, sphKernel_xi
 
 from .types import scalar_t, vec_t, mat_t, vecArray_t, matArray_t, intArray_t, scalarArray_t
 
@@ -110,7 +108,6 @@ __all__ = [
     "updateNeighborsVerlet",
     "filterVerletList",
     "computeCRKFactors",
-    # "computeCovarianceMatrix",
     "computeRenormalizationMatrices",
     "ParticleState",
     "OperationProperties",
@@ -146,3 +143,7 @@ __all__ = [
     'scalar_t', 'vec_t', 'mat_t', 'vecArray_t', 'matArray_t', 'intArray_t', 'scalarArray_t', 'get_torch_precision',
     'sphKernelScale', 'sphKernel_xi'
 ]
+
+__all__.extend(kernels.__all__)
+__all__.extend(math.__all__)
+__all__.extend(crk.__all__)

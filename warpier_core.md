@@ -26,6 +26,27 @@ This section captures current implementation status relative to the target archi
 
 Detailed bug-fix narratives that used to live in this section (AD-bridge reentrancy, grid-path float64/1D bugs, curl's compile failure, renormalization instabilities, the gradcheck rollout, CI wiring) have been distilled into forward-looking rules in [`docs/lessons_learned.md`](docs/lessons_learned.md) and trimmed out of here to keep this plan focused and short. Read that file before touching kernel code, the AD bridge, or CI/test tooling again — it captures the *why*, not just the *what*. Git history (commits around 2026-08-05 to 2026-08-06) has the original investigation narrative if ever needed.
 
+## Module Layout After the Repository Restructuring (2026-08-06)
+
+The narrative sections below ("Working Prototype → Production", "Landing Gradient/Interpolate/Density/...", "Collapsing `sphOperation_warp`", "States as the Primary Path", "Landing Covariance's dual-path rework") were written against the file layout as it existed *at the time each piece of work landed*, one to two commits before `73432b6` ("refactor repo into a clearer structure") reorganized the package. That narrative — the recipe, the bugs found, the reasoning — is still accurate and worth reading; only the file paths it cites are now stale. Read paths in those sections through this table:
+
+| Path as written below | Current path |
+| --- | --- |
+| `operations/wp_operation.py` (`warpOperation`, `sphOperation_warp`) | `operations.py` (top-level module, not a package) |
+| `operations/wp_<op>.py` (Density/Interpolate/Gradient/Divergence/Curl/Laplacian kernels) | `coreOperations/wp_<op>.py` |
+| `operations/__init__.py` | gone — `operations.py` is a flat module |
+| `operations_grid/` (all `wp_<op>_grid.py`, `wp_operation_grid.py`, `__init__.py`) | still gone — this was already deleted before the restructuring; unaffected |
+| `renorm/wp_covariance.py` | `coreOperations/wp_covariance.py` — and see the note at the end of "Landing Covariance's dual-path rework" below: covariance's Python entry point changed shape again, not just location |
+| `renorm/wp_pinv2x2.py` | `pinv/wp_pinv2x2.py` |
+| `renorm/wp_renormalization.py`, `renorm/__init__.py` | folded into a single top-level `renorm.py` (`computeRenormalizationMatrices_`/`computeRenormalizationMatrices`) — `renorm` is a flat module, not a package, same as `operations.py` |
+| `pinv/oned.py` | `pinv/wp_pinv1x1.py` |
+| `pinv/twod.py` | deleted, superseded by `pinv/wp_pinv2x2.py` |
+| `mathutil/__init__.py`, `mathutil/wp_math.py`, top-level `math.py` | `math/` package (`wp_distance.py`, `wp_eps.py`, `wp_eye.py`, `wp_matmul.py`, `wp_norm.py`, `wp_normalize.py`, `wp_outerTensorProduct.py`, `wp_pow.py`, `wp_sqrt.py`) |
+| `kernels/adjoints.py` | `math/wp_normalize.py` |
+| top-level `ops.py` | deleted (unused) |
+
+`operations_grid/grid_util.py` → `radiusSearch/grid_util.py` (noted inline below) predates this restructuring and is unaffected. `warp_state.py`, `warp_state_util.py`, `utils/`, `kernels/`, `crk/`, `radiusSearch/`, `diffusion/`, `state.py`, `radius.py`, `type_config.py`, `types.py`, `util.py`, `autograd.py`, and `enumTypes.py` all kept their existing top-level/package paths through this restructuring.
+
 ## Notebook Corpus Status
 
 All operation-relevant notebooks are ported and accounted for in root (`warp_density`, `warp_interpolate`, `warp_gradient`, `warp_divergence`, `warp_laplacian`, `warp_curl`, `warp_renorm`, `warp_custom`, `warp_profile`). Grid dispatch and CRK checks don't need their own notebooks — see `docs/lessons_learned.md`'s "Notebook/documentation conventions". `docs/regression/notebook_test_matrix.md` has the notebook-to-test mapping.
@@ -35,7 +56,7 @@ All operation-relevant notebooks are ported and accounted for in root (`warp_den
 * A high-level semantic interface exists through `warpOperation` and state objects (`ParticleState`, `OperationProperties`).
 * State-aware autograd infrastructure exists (`extractStateInfo`, `warpWrapper2`, `StateAwareWarpFunction`).
 * Conversion hot paths use caching for non-differentiable data (dummy tensors, dtype caches). Differentiable Warp-array caching (`getCachedWarpArray` and its `wp_autograd.py` mirrors) was deliberately removed, not fixed — see `docs/lessons_learned.md` for why that class of caching is unsafe here.
-* A structured kernel ABI is demonstrated by renormalization covariance (`renorm/wp_covariance.py`) using state structs rather than fully flattened arguments — now dual-path (grid + adjacency) and gradchecked like the six migrated operators; see "Landing Covariance's dual-path rework" below. The pseudo-inverse (`renorm/wp_pinv2x2.py`) and the covariance-to-renormalization-matrix postprocessing (`renorm/wp_renormalization.py`) are separate files now, not folded into the covariance kernel file.
+* A structured kernel ABI is demonstrated by every operator, Covariance included: Covariance is now the seventh operation dispatched through `warpOperation`/`operations.py` (`operationProperties.operation = WarpOperation.Covariance`), exactly like Density/Interpolate/Gradient/Divergence/Curl/Laplacian — not a standalone `computeCovarianceMatrix` function anymore (see the update at the end of "Landing Covariance's dual-path rework" below). Its kernel is `coreOperations/wp_covariance.py`, dual-path (grid + adjacency) and gradchecked (`scripts/gradcheck_covariance_native.py`) the same as the six migrated operators. The pseudo-inverse (`pinv/wp_pinv2x2.py`) and the covariance-to-renormalization-matrix postprocessing (top-level `renorm.py`) remain separate from the covariance kernel file.
 
 ## Gaps Against the Target
 
@@ -170,6 +191,13 @@ Splitting the file three ways (asked for separately from the dual-path fix, done
 `renorm/__init__.py` and the top-level `sphWarpCore/__init__.py` both now export `computeCovarianceMatrix` alongside `computeRenormalizationMatrices`; `crk/crk_terms.py`'s dead `pinv2x2` import and `warp_renorm.ipynb`'s import cell were repointed to `wp_pinv2x2.py`.
 
 Validation: all 64 pytest cases pass (the pre-existing 63 plus `gradcheck_covariance_native.py`, now registered in `GRADCHECK_SCRIPTS`), and `scripts/run_operation_matrix_sweep.sh --quick` is clean (`OK=258, HIGH=0, ERR=0, NAN=0`) — unchanged from before this rework, since `computeRenormalizationMatrices`'s external behavior didn't change.
+
+**Update (2026-08-06, folded into the "refactor repo into a clearer structure" commit): the standalone `computeCovarianceMatrix` function described above never shipped as such.** By the time this dual-path work actually landed in code, Covariance was taken one step further and folded directly into the same state-primary dispatch pattern the "States as the Primary Path" section above describes for the other six operators, rather than staying a bespoke top-level function:
+
+* The covariance kernel trio (`computeCovariance_Func_i`/`_Func_Adjacency`/`_Kernel`) plus a private `_computeSPHCovariance_stateBackend` now live in `coreOperations/wp_covariance.py`, alongside the other six operators' kernel files (not under `renorm/`, which no longer exists as a package — see the module-layout table above). There is no public `computeCovarianceMatrix` function anymore.
+* `operations.py`'s `warpOperation` dispatches to it directly: `operation == WarpOperation.Covariance` is a top-level `elif` branch, exactly like `WarpOperation.Density`/`Gradient`/etc., taking a `covarianceReturnNumNeighbors` kwarg that maps to `_computeSPHCovariance_stateBackend`'s `returnNumNeighbors`. Callers that used to call `computeCovarianceMatrix(p, operationProperties, domain, adjacency=...)` now call `warpOperation(p, operationProperties, domain, adjacency=..., ...)` with `operationProperties.operation = WarpOperation.Covariance` set — this is what `scripts/gradcheck_covariance_native.py` and `renorm.py`'s `computeRenormalizationMatrices_` both do.
+* `pinv/wp_pinv2x2.py` and top-level `renorm.py` (`computeRenormalizationMatrices_`/`computeRenormalizationMatrices`) are unaffected by this — the split into three files described above still holds, only the covariance file's own public surface changed shape.
+* `sphWarpCore/__init__.py` does **not** re-export a `computeCovarianceMatrix` symbol (the commented-out `# from .renorm.wp_covariance import computeCovarianceMatrix` / `# "computeCovarianceMatrix"` lines left behind by this transition have been removed, not just left commented). Covariance is only reachable through `warpOperation`, same as every other operation — there is deliberately no operator-specific top-level convenience function for it, unlike before.
 
 ---
 

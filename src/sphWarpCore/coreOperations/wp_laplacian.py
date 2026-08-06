@@ -10,7 +10,7 @@ from ..radiusSearch.radius_util import AdjacencyList, DomainDescription, PointCl
 from ..radiusSearch.wp_compactHash import CompactHashMap
 from ..radiusSearch.grid_util import checkOffset
 from ..math import *
-from ..kernels.wp_kernel import *
+from ..kernels import *
 from ..utils.wp_util import (
     checkDirectionality_i, checkDirectionality_j,
     zero_like_warp, _get_warp_vector_dtype,
@@ -23,6 +23,8 @@ from ..warp_state import (
 )
 from ..warp_state_util import warpWrapper2
 from ..state import ParticleState, OperationProperties, CRKState, GradHState, RenormalizationState
+from ..crk import computeKernelCRK, computeKernelGradientCRK
+from ..utils.support import computePairwiseSupport
 
 # Unified Laplacian kernel: same design as the unified Gradient/Divergence/Curl kernels
 # (see warpier_core.md's "Working Prototype -> Production" section). Laplacian shares

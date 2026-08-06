@@ -10,7 +10,7 @@ from .utils.wp_autograd import *
 
 from .radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from .math import *
-from .kernels.wp_kernel import *
+from .kernels import *
 
 
 from .coreOperations import *

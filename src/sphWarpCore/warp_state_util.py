@@ -14,7 +14,7 @@ from .utils.wp_autograd import *
 
 from .radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from .math import *
-from .kernels.wp_kernel import *
+from .kernels import *
 from .utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
 from .utils.wp_util import castTorchToWarpAsBuiltins, castWarpToTorch
 # from torch.profiler import profile, record_function, ProfilerActivity

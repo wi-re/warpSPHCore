@@ -1,10 +1,16 @@
 from warp.types import vector, matrix
+
+from sphWarpCore.math.wp_distance import computeDistanceVec
 from ..math import safe_sqrt
 from typing import Optional, Any, Union, List, Tuple
 import numpy as np
 import warp as wp
 
 import torch
+from ..type_config import scalar_t
+from ..enumTypes import SupportScheme
+from ..math import vectorNorm_warp
+
 @torch.jit.script
 def volumeToSupport(volume : float, targetNeighbors : int, dim : int):
     """
@@ -50,7 +56,6 @@ def n_h_to_nH(n_h: float, dim: int) -> float:
     return vH / v
 
 
-from ..type_config import scalar_t
 @wp.func
 def volumeToSupport_warp(volume : scalar_t, targetNeighbors : wp.int32, dim : wp.int32):
     if dim == 1:
@@ -61,7 +66,6 @@ def volumeToSupport_warp(volume : scalar_t, targetNeighbors : wp.int32, dim : wp
         return wp.pow(targetNeighbors * volume / scalar_t(np.pi * 3.0 /4.0), scalar_t(1.0/3.0))
 
 
-from ..enumTypes import SupportScheme
 
 @wp.func
 def computePairwiseSupport(hx: scalar_t, hy: scalar_t, mode: wp.uint32):
@@ -75,3 +79,14 @@ def computePairwiseSupport(hx: scalar_t, hy: scalar_t, mode: wp.uint32):
         return wp.max(hx, hy)
     
 
+@wp.func
+def isInSupport(
+    xi: vector(dtype=scalar_t, length=3), xj: vector(dtype=scalar_t, length=3), 
+    hi: scalar_t, hj: scalar_t, mode: wp.uint32,
+    periodic: wp.array(dtype = wp.bool), minDomain: wp.array(dtype = scalar_t), maxDomain: wp.array(dtype = scalar_t)
+    ):
+    hij = computePairwiseSupport(hi, hj, mode)
+    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
+    r = vectorNorm_warp(xij)
+    q = r / hij
+    return q <= scalar_t(1.0)

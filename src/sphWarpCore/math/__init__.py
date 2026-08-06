@@ -22,6 +22,7 @@ from .wp_pow import iPow, cpow_warp, bpow_warp
 from .wp_eye import warp_eye
 from .wp_norm import norm_warp, norm_grad_warp, norm_hess_warp
 from .wp_normalize import vectorNormalize_warp_1D, vectorNormalize_warp_2D, vectorNormalize_warp_3D, vectorNorm_warp, vectorNormalize_warp
+from .wp_dim import get_dim
 
 __all__ = [
     "mod_distance",
@@ -53,4 +54,6 @@ __all__ = [
     "vectorNormalize_warp_3D",
     "vectorNorm_warp",
     "vectorNormalize_warp",
+
+    "get_dim",
 ]

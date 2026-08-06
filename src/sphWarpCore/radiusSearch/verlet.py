@@ -206,7 +206,7 @@ def buildVerletList(
             priorNeighborhood, verbose
         )
 
-from sphWarpCore.kernels import computePairwiseSupport
+from sphWarpCore.utils import computePairwiseSupport
 
 @wp.func
 def countNeighborsVerletFunc(

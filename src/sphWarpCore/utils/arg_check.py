@@ -8,7 +8,7 @@ from sphWarpCore.utils.wp_autograd import *
 
 from sphWarpCore.radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
 from sphWarpCore.math import *
-from sphWarpCore.kernels.wp_kernel import *
+from sphWarpCore.kernels import *
 from sphWarpCore.utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
 from sphWarpCore.enumTypes import *
 from typing import Optional

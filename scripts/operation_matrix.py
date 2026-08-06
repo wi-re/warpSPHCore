@@ -465,7 +465,7 @@ def evaluate(
         out = run_op(case, traversal=traversal, **kwargs)
     except Exception as exc:  # noqa: BLE001 - deliberately broad, this is a diagnostic sweep
         msg = str(exc).strip().splitlines()[0] if str(exc).strip() else type(exc).__name__
-        return Cell("ERR", None, msg[:160])
+        return Cell("ERR", None, msg[:1024])
 
     if not torch.isfinite(out).all():
         return Cell("NAN", None, "output contains NaN/Inf")
