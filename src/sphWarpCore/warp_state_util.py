@@ -459,7 +459,11 @@ def extractStateInfo(
             supportMode    = operationProperties.supportMode
             mode_uint      = supportSchemeToUint(supportMode)
             kernel_int     = operationProperties.kernel.value
-            gradientMode_int = 0
+            gradientMode_int = operationProperties.gradientMode.value if operationProperties.gradientMode is not None else 0
+            laplacianMode_int = operationProperties.laplacianMode.value if operationProperties.laplacianMode is not None else 0
+            positiveDivergence = operationProperties.positiveDivergence if operationProperties.positiveDivergence is not None else False
+            divergenceMode = operationProperties.divergenceDotMode if operationProperties.divergenceDotMode is not None else False
+
             opInt          = wp.int32(operationMode.value)
 
             cfg = {
@@ -474,6 +478,9 @@ def extractStateInfo(
                 'mode_uint':                mode_uint,
                 'kernel_int':               kernel_int,
                 'gradientMode_int':         gradientMode_int,
+                'laplacianMode_int':        laplacianMode_int,
+                'positiveDivergence_int':   1 if positiveDivergence else 0,
+                'divergenceMode_int':       1 if divergenceMode else 0,
                 'opInt':                    opInt,
             }
         with record_function("[ESI] 6. assemble flat tensor list"):
@@ -520,6 +527,9 @@ def extractStateInfo(
     _mode_uint                   = cfg['mode_uint']
     _kernel_int                  = cfg['kernel_int']
     _gradientMode_int            = cfg['gradientMode_int']
+    _laplacianMode_int           = cfg['laplacianMode_int']
+    _positiveDivergence_int      = cfg['positiveDivergence_int']
+    _divergenceMode_int          = cfg['divergenceMode_int']
     _opInt                       = cfg['opInt']
 
     def build_fn(wa: list) -> tuple:
@@ -588,7 +598,7 @@ def extractStateInfo(
             _useAdjacency, adjState, gState,
             corrState,
             _mode_uint, _kernel_int,
-            _gradientMode_int, _opInt,
+            _gradientMode_int, _laplacianMode_int, _positiveDivergence_int, _divergenceMode_int, _opInt,
         )
 
     return flat_tensors, build_fn, device, dim
