@@ -5,7 +5,7 @@ import torch
 from ..types import *
 from ..dataTypes import *
 
-from .wp_util import zero_like_warp
+from ..math import zero_like_warp
 
 @wp.func
 def getParticle(

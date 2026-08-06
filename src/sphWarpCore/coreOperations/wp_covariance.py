@@ -4,18 +4,14 @@ from typing import Any, Optional, Union
 import torch
 from torch.profiler import record_function
 
-from ..utils.wp_autograd import *
+from ..util.wp_autograd import *
 
 from ..dataTypes import *
 from ..radiusSearch.wp_compactHash import CompactHashMap
 from ..radiusSearch.grid_util import checkOffset
 from ..math import *
 from ..kernels import *
-from ..utils.wp_util import (
-    getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j,
-    zero_like_warp, _get_warp_matrix_dtype,
-)
-from ..utils import *
+from ..util import *
 
 from ..enumTypes import *
 from ..warp_state_util import warpWrapper2

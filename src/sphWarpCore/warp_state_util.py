@@ -6,16 +6,15 @@ import torch
 from .radiusSearch.wp_compactHash import CompactHashMap, AdjacencyListWarp, buildCompactHashMap
 from typing import Tuple, Union, Optional
 
-from .utils.wp_autograd import *
+from .util.wp_autograd import *
 
 from .dataTypes import *
 from .math import *
 from .kernels import *
-from .utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
-from .utils.wp_util import castTorchToWarpAsBuiltins, castWarpToTorch
+from .util import *
 # from torch.profiler import profile, record_function, ProfilerActivity
 from .enumTypes import *
-from .utils.arg_check import *
+from .util.arg_check import *
 
 from .types import *
 
@@ -599,7 +598,7 @@ def extractStateInfo(
 
     return flat_tensors, build_fn, device, dim
 
-from .utils.wp_autograd import StateAwareWarpFunction
+from .util.wp_autograd import StateAwareWarpFunction
 
 def warpWrapper2(
     launcher,

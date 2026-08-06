@@ -16,7 +16,8 @@ import torch
 from torch.profiler import record_function
 
 from ..type_config import scalar_t
-from ..utils.wp_util import zero_like_warp, castTorchToWarpAsBuiltins
+from ..util import *
+from ..math import *
 
 
 @torch.compile

@@ -5,7 +5,7 @@ from warp.types import vector, matrix
 from typing import Any, Union
 import torch
 
-from .utils.wp_autograd import *
+from .util import *
 
 from .dataTypes import *
 from .math import *
@@ -17,7 +17,6 @@ from .enumTypes import *
 from typing import Optional
 from torch.profiler import profile, record_function, ProfilerActivity
 
-from .utils.wp_util import getCachedDummyTensor
 
 # States are the primary path here: `warpOperation` takes semantic state objects and
 # dispatches straight to each operator's `_computeSPHX_stateBackend` -- no flattening to

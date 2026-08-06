@@ -1,6 +1,6 @@
 import warp as wp
 from ..math import *
-from ..utils.wp_util import *
+from ..util import *
 
 # Define kernels that work with flattened float32 arrays
 @wp.kernel

@@ -1,5 +1,5 @@
 """PyTorch ↔ Warp autograd bridge."""
-from .utils.wp_autograd import (
+from .util.wp_autograd import (
     WarpFunctionWrapper,
     warpWrapper,
     StateAwareWarpFunction,

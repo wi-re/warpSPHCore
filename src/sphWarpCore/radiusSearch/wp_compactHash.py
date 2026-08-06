@@ -3,7 +3,7 @@ import torch
 from ..types import *
 from typing import Optional
 from ..math import *
-from ..utils.wp_util import *
+from ..util import *
 
 # Convert Warp arrays back to PyTorch tensors using wp.to_torch() for direct GPU access
 from ..dataTypes import *

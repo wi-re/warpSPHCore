@@ -2,7 +2,8 @@ import torch
 import warp as wp
 from typing import Any, List, Tuple
 from ..types import *
-from .wp_util import castTorchToWarpAsBuiltins, castWarpToTorch, getCachedWarpArray
+from .cast import castTorchToWarpAsBuiltins, castWarpToTorch
+from .wp_util import getCachedWarpArray
 
 # ---------------------------------------------------------------------------
 # The struct-bundle / wrapper-args caches that used to live here (keyed on

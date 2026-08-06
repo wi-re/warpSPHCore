@@ -8,7 +8,7 @@ import numpy as np
 from ..math import *
 from ..type_config import scalar_t, dim_t
 from .kernelFunctions import *
-from ..utils.support import computePairwiseSupport
+from ..util.support import computePairwiseSupport
 
 
 @wp.func

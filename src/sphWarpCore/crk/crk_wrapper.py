@@ -1,5 +1,5 @@
 
-from ..radius import CompactHashMap
+from ..dataTypes import CompactHashMap
 
 from .crk_density import computeCRKDensityWarp
 from .crk_terms import computeCRKTermsWarp
@@ -10,15 +10,15 @@ from warp.types import vector, matrix
 # from wp_tensor import tensor
 from typing import Any, Union
 import torch
-from sphWarpCore.utils.wp_autograd import *
+from sphWarpCore.util.wp_autograd import *
 
 from ..dataTypes import *
 from sphWarpCore.math import *
 from sphWarpCore.kernels import *
-from sphWarpCore.utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
+from ..util import *
 from torch.profiler import profile, record_function, ProfilerActivity
 from sphWarpCore.enumTypes import *
-from sphWarpCore.utils.arg_check import *
+from sphWarpCore.util.arg_check import *
 from typing import Optional
 
 

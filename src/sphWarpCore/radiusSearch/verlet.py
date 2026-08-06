@@ -1,5 +1,6 @@
 from .wp_compactHash import *
 from ..dataTypes import *
+from typing import Any, Optional
 
 # Verlet lists store not just the required neighbors but also some extra neighbors to avoid rebuilding the neighbor list every step.
 
@@ -206,7 +207,7 @@ def buildVerletList(
             priorNeighborhood, verbose
         )
 
-from sphWarpCore.utils import computePairwiseSupport
+from sphWarpCore.util import computePairwiseSupport
 
 @wp.func
 def countNeighborsVerletFunc(
