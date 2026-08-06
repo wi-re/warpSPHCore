@@ -12,7 +12,7 @@ from typing import Any, Union
 import torch
 from sphWarpCore.utils.wp_autograd import *
 
-from sphWarpCore.radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
+from ..dataTypes import *
 from sphWarpCore.math import *
 from sphWarpCore.kernels import *
 from sphWarpCore.utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
@@ -79,7 +79,7 @@ def computeCRKFactors_(
 
     return apparentArea, crk_density, A, B, gradA, gradB
 
-from ..state import *
+from ..dataTypes import *
 
 def computeCRKFactors(
   queryParticles: ParticleState,

@@ -1,10 +1,10 @@
 from .wp_compactHash import *
-
+from ..dataTypes import *
 
 # Verlet lists store not just the required neighbors but also some extra neighbors to avoid rebuilding the neighbor list every step.
 
 
-@torch.jit.script
+# @torch.jit.script # jit script is deprecated :/
 def _minimum_image_delta(
         current: torch.Tensor,
         previous: torch.Tensor,
@@ -22,7 +22,7 @@ def _minimum_image_delta(
     return delta
 
 
-@torch.jit.script
+# @torch.jit.script # jit script is deprecated :/
 def _verlet_validity_metrics(
         queryPositions: torch.Tensor,
         referencePositions: torch.Tensor,
@@ -184,7 +184,7 @@ def buildVerletList_(
                         adjacency = priorNeighborhood
         return adjacency
     
-from ..state import *
+from ..dataTypes import *
 
 def buildVerletList(
         queryParticles: ParticleState, 

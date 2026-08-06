@@ -105,7 +105,7 @@ def warp_radius_search_collect_kernel_direct_2(
 
 
 import numpy as np
-from .radius_util import AdjacencyList
+from ..dataTypes import AdjacencyList
 from ..enumTypes import SupportScheme, supportSchemeToUint
 
 def warp_radius_search_small(queryPositions, referencePositions, supportX, supportsY, periodicity, domainDescription, mode:SupportScheme = SupportScheme.Gather) -> AdjacencyList:

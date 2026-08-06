@@ -1,16 +1,15 @@
+from .hashMap_t import CompactHashMap
 from dataclasses import dataclass
 import torch
 import warp as wp
+from typing import NamedTuple, Union
+from ..types import *
 
 # A dataclass to hold the adjacency list information, including the indices of the neighbors, the number of neighbors for each query point, and the edge offsets for efficient access.
 # This can be used as a coordinate formate (COO) for the adjacency list, where i and j represent the row and column indices of the neighbors
 # This can also be used as a compressed sparse row (CSR) format, where edgeOffsets can be used to quickly access the neighbors of each query point, and numNeighbors can be used to know how many neighbors each query point has.
 # Notably this cannot be used as a compressed sparse column (CSC) format, since the neighbors are not sorted by the reference points, but rather by the query points.
 # Because of the sorting we can reconstruct i from edgeOffsets and numNeighbors, but we keep it for convenience and to avoid having to reconstruct it every time.
-
-
-from ..type_config import *
-from .hashMap_t import CompactHashMap
 
 # One unfortunate aspect is that the torch tensors need to be of dtype long to allow indexing within torch. warp could naturally handle int dtypes, consuming less memory, but torch does not allow indexing with int32 tensors, so we need to convert them to int64 (long) tensors, which consume more memory.
 # @torch.jit.script
@@ -37,35 +36,25 @@ class AdjacencyListWarp:
     j: wp.array(dtype=wp.int64)
     numNeighbors: wp.array(dtype=wp.int64)
     edgeOffsets: wp.array(dtype=wp.int64)
+
+
+
+@wp.struct
+class adjacencyData:
+    neighborList: wp.array(dtype = wp.int64) # type: ignore
+    neighborOffsets: wp.array(dtype = wp.int32) # type: ignore
+    numNeighbors: wp.array(dtype = wp.int32) # type: ignore
+
+@wp.struct
+class gridData:
+    sortIndex: wp.array(dtype = wp.int64) # type: ignore
+    qMin: wp.array(dtype = scalar_t) # type: ignore
+    qMax: wp.array(dtype = scalar_t) # type: ignore
+    hCell: scalar_t
+    numCells: wp.array(dtype = wp.int32) # type: ignore
+    hashTable: wp.array(dtype = vector(length = 2, dtype = wp.int32)) # type: ignore
+    cellTable: wp.array(dtype = vector(length = 3, dtype = wp.int64)) # type: ignore
+    D: int
+    numOffsets: int
+    cellOffsets: wp.array(dtype = vector(length=3, dtype = wp.int32)) # type: ignore
     
-    
-from typing import NamedTuple, Union
-from typing import NamedTuple
-
-from dataclasses import dataclass
-@torch.jit.script
-@dataclass(slots=True)
-class DomainDescription:
-    """
-    A named tuple containing the minimum and maximum domain values.
-    """
-    min: torch.Tensor
-    max: torch.Tensor
-    periodic: torch.Tensor
-    dim: int
-
-    def __ne__(self, other: 'DomainDescription') -> bool:
-        return not self.__eq__(other)
-    
-# @torch.jit.script
-@dataclass#(slots=True)
-class PointCloud:
-    """
-    A named tuple containing the positions of the particles and the number of particles.
-    """
-    positions: torch.Tensor
-    supports: torch.Tensor
-
-    def __ne__(self, other: 'PointCloud') -> bool:
-        return not self.__eq__(other)
-

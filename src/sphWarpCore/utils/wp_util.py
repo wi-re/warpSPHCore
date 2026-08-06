@@ -302,7 +302,7 @@ def checkDirectionality_Func(
 
 import torch
 from .support import volumeToSupport
-from ..radiusSearch.radius_util import DomainDescription
+from ..dataTypes import DomainDescription
 
 def generateNeighborTestData(nx, targetNumNeighbors, dim, periodic, device):
 

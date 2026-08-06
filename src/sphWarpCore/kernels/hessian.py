@@ -30,6 +30,7 @@ def sphKernelHessian_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kern
     factorB += warp_eye(x) / (r + iPow(eps, 2) * h)
     
     hessian = factorA * k2 + factorB * k1
+    return hessian
     
 @wp.func
 def sphKernelHessian(

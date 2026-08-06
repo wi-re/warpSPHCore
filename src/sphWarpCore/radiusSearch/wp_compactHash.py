@@ -6,7 +6,7 @@ from ..math import *
 from ..utils.wp_util import *
 
 # Convert Warp arrays back to PyTorch tensors using wp.to_torch() for direct GPU access
-from .radius_util import *
+from ..dataTypes import *
 from ..enumTypes import *
 
 def computeGridSupport(supportsX, supportsY, scheme: SupportScheme):
@@ -811,7 +811,7 @@ def buildCompactHashMap(
 ):
     with record_function("warpNeighborSearch - buildCompactHashMap"):
         with record_function("neighborSearch - preprocess"):
-            mode_uint = supportSchemeToUint(mode)
+            mode_uint = wp.uint32(mode.value)
             # mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4, ''}
             # mode_uint = mode_map.get(mode, 0)
             # if mode_uint == 0:
@@ -1103,7 +1103,7 @@ def radiusSearchCompactHashMap_(
         return adjacencyCH if not returnCompactHashMap else (adjacencyCH, datastructure)
 
     
-from ..state import *
+from ..dataTypes import *
 
 def radiusSearchCompactHashMap(
     queryParticles: ParticleState,

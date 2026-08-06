@@ -6,20 +6,16 @@ from torch.profiler import record_function
 
 from ..utils.wp_autograd import *
 
-from ..radiusSearch.radius_util import AdjacencyList, DomainDescription, PointCloud
+from ..dataTypes import *
 from ..radiusSearch.wp_compactHash import CompactHashMap
 from ..radiusSearch.grid_util import checkOffset
 from ..math import *
 from ..kernels import *
 from ..utils.wp_util import checkDirectionality_i, checkDirectionality_j, zero_like_warp, castTorchToWarpAsBuiltins
+from ..utils import *
 
 from ..enumTypes import *
-from ..warp_state import (
-    domainData, adjacencyData, gridData,
-    getParticle,
-)
 from ..warp_state_util import warpWrapper2
-from ..state import ParticleState, OperationProperties
 from ..crk import computeKernelCRK, computeKernelGradientCRK
 
 # Unified Density kernel: same design as the unified Gradient/Interpolate kernels (see

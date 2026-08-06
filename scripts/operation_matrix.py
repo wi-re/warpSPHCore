@@ -105,14 +105,13 @@ def _configure(precision: str) -> None:
     import sphWarpCore
     import sphWarpCore.crk
     import sphWarpCore.enumTypes
-    import sphWarpCore.radiusSearch.radius_util
+    import sphWarpCore.dataTypes
     import sphWarpCore.renorm
-    import sphWarpCore.state
     import sphWarpCore.util
 
     OperationProperties = sphWarpCore.OperationProperties
     ParticleState = sphWarpCore.ParticleState
-    DomainDescription = sphWarpCore.radiusSearch.radius_util.DomainDescription
+    DomainDescription = sphWarpCore.dataTypes.DomainDescription
     radiusSearchCompactHashMap = sphWarpCore.radiusSearchCompactHashMap
     warpOperation = sphWarpCore.warpOperation
     computeCRKFactors = sphWarpCore.crk.computeCRKFactors
@@ -123,8 +122,8 @@ def _configure(precision: str) -> None:
     SupportScheme = sphWarpCore.enumTypes.SupportScheme
     WarpOperation = sphWarpCore.enumTypes.WarpOperation
     computeRenormalizationMatrices = sphWarpCore.renorm.computeRenormalizationMatrices
-    CRKState = sphWarpCore.state.CRKState
-    RenormalizationState = sphWarpCore.state.RenormalizationState
+    CRKState = sphWarpCore.dataTypes.CRKState
+    RenormalizationState = sphWarpCore.dataTypes.RenormalizationState
     generateNeighborTestData = sphWarpCore.util.generateNeighborTestData
     n_h_to_nH = sphWarpCore.n_h_to_nH
 

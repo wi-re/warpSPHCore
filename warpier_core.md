@@ -45,7 +45,33 @@ The narrative sections below ("Working Prototype → Production", "Landing Gradi
 | `kernels/adjoints.py` | `math/wp_normalize.py` |
 | top-level `ops.py` | deleted (unused) |
 
-`operations_grid/grid_util.py` → `radiusSearch/grid_util.py` (noted inline below) predates this restructuring and is unaffected. `warp_state.py`, `warp_state_util.py`, `utils/`, `kernels/`, `crk/`, `radiusSearch/`, `diffusion/`, `state.py`, `radius.py`, `type_config.py`, `types.py`, `util.py`, `autograd.py`, and `enumTypes.py` all kept their existing top-level/package paths through this restructuring.
+`operations_grid/grid_util.py` → `radiusSearch/grid_util.py` (noted inline below) predates this restructuring and is unaffected. `warp_state.py`, `warp_state_util.py`, `utils/`, `kernels/`, `crk/`, `radiusSearch/`, `diffusion/`, `state.py`, `radius.py`, `type_config.py`, `types.py`, `util.py`, `autograd.py`, and `enumTypes.py` all kept their existing top-level/package paths through this restructuring — but see the next section for `kernels/`'s own internal split, which landed one commit later (`a1628a4`, same day) and is not part of the `73432b6` move this table describes.
+
+## Kernel Function Internals Split (2026-08-06, `a1628a4` "Cleanup Kernel Functions")
+
+`kernels/wp_kernel.py` (713 lines, every kernel-shape function plus every kernel-property/derivative wrapper in one file) has been deleted and split by function, not by kernel shape:
+
+| What | Now lives in |
+| --- | --- |
+| `sphKernel`/`sphKernel_ij` | `kernels/kernel.py` |
+| `sphKernelGradient`/`sphKernelGradient_ij` | `kernels/gradient.py` |
+| `sphKernelDerivative`/`sphKernelDerivative_` (new — 1D scalar derivative, not previously a separate entry point) | `kernels/derivative.py` |
+| `sphKernelDkDh` | `kernels/gradH.py` |
+| `sphKernelHessian` | `kernels/hessian.py` |
+| `sphKernelLaplacian` | `kernels/laplacian.py` |
+| `sphKernelScale`/`sphKernelC_d`/`sphKernelN_H`/`sphKernel_xi` | `kernels/properties.py` |
+| `eval_k`/`eval_dkdq`/`eval_d2kdq2`/`eval_d3kdq3`/`eval_C_d`/`eval_kernelScale`/`eval_packing` (the `kernel: wp.int32` dispatch switches over `KernelFunctions`) | `kernels/eval_kernel.py` — deliberately **not** re-exported from `kernels/__init__.py` (commented out there with "should not be used directly"); everything above calls into these instead of duplicating the dispatch |
+| The 11 per-shape implementations (`cubicSpline`, `poly6`, `spiky`, `wendland2/4/6`, `quarticSpline`, `quinticSpline`, `viscosityKernel`, `cohesionKernel`, `adhesionKernel`, `B7`), each exposing `<name>_k/_dkdq/_d2kdq2/_d3kdq3/_C_d/_kernelScale/_packingRatio` | new `kernels/kernelFunctions/` subpackage, one file per shape; `kernels/kernelFunctions/__init__.py` builds each shape's `__all__` entries mechanically from a shared `suffixes` list |
+| `computeKernelCRK`/`computeKernelGradientCRK` | moved out of `kernels/` entirely into `crk/kernel.py` — these are CRK-correction functions (they consume `Ai`/`Bi`/`gradAi`/`gradBi`), not kernel-shape functions, so they moved to sit next to the rest of `crk/` and are now exported from `crk/__init__.py`, not `kernels/__init__.py` |
+| `computePairwiseSupport`, `iPow`, `cpow_warp` | dropped from `kernels/__init__.py`'s exports (kernels/wp_kernel.py used to re-export them as a convenience). `computePairwiseSupport` already lived in `utils/support.py`; `iPow`/`cpow_warp` already lived in `math/`. `radiusSearch/verlet.py`'s import was repointed from `sphWarpCore.kernels` to `sphWarpCore.utils` to match. `kernels/utils.py`, a near-empty import-only shim, was deleted as dead weight. |
+
+New in this pass, not a move: `math/wp_dim.py`'s `get_dim(...)` — a `wp.func` overloaded per vector/matrix length (1/2/3, plain and `wp.array`-wrapped) that returns the dimension as a plain int. `crk/kernel.py`'s `correctGradientCRK` uses it to get `dim` from a vector argument at the call site instead of threading a separate `dim` scalar through every CRK call.
+
+`sphWarpCore/__init__.py`'s import block was rewritten from a hand-maintained explicit symbol list (`from .kernels.wp_kernel import eval_kernelScale, computeKernelCRK, ...`) to `from .kernels import *` / `from .math import *` / `from .crk import *` plus `__all__.extend(kernels.__all__)` (and the same for `math`/`crk`) — so each subpackage's own `__all__` is now the single source of truth for what it re-exports at the top level, rather than a second list to keep in sync by hand. One casualty of that rewrite: `eval_kernelScale`/`eval_k`/`eval_C_d` were dropped from the imports (correctly — they're intentionally not in `kernels.__all__` anymore, see the table above) but three stale references to them were left behind in `__init__.py`'s own hand-written `__all__` list, which broke `from sphWarpCore import *` with `AttributeError: module 'sphWarpCore' has no attribute 'eval_kernelScale'`. Fixed by removing the three stale names from that list; verified with `from sphWarpCore import *`.
+
+Also found and fixed in passing while verifying this split, **pre-existing, not introduced here**: `kernels/hessian.py`'s `sphKernelHessian_` computed `hessian = factorA * k2 + factorB * k1` and never returned it (same in the old `wp_kernel.py`, per git history) — `sphKernelHessian` was unused anywhere in the codebase (confirmed by grep), so nothing had exercised the bug, but it's a real one the moment this function gets wired up. Added the missing `return hessian`.
+
+Validation after this split: all 64 pytest cases pass, all 7 `gradcheck_*_native.py` scripts plus `gradcheck_density.py` pass, and `scripts/run_operation_matrix_sweep.sh --quick` is clean (`OK=258, HIGH=0, ERR=0, NAN=0`).
 
 ## Notebook Corpus Status
 

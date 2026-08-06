@@ -7,7 +7,7 @@
 # import torch
 # from sphWarpCore.utils.wp_autograd import *
 
-# from sphWarpCore.radiusSearch.radius_util import AdjacencyList, AdjacencyListWarp, DomainDescription, PointCloud
+# from ..dataTypes import *
 # from sphWarpCore.kernels import *
 # from sphWarpCore.utils.wp_util import getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j
 # from torch.profiler import profile, record_function, ProfilerActivity

@@ -8,10 +8,9 @@ import warp as wp
 # Notably this cannot be used as a compressed sparse column (CSC) format, since the neighbors are not sorted by the reference points, but rather by the query points.
 # Because of the sorting we can reconstruct i from edgeOffsets and numNeighbors, but we keep it for convenience and to avoid having to reconstruct it every time.
 
-
 from ..type_config import *
 
-@torch.jit.script
+# @torch.jit.script # jit.script is deprecated :/
 @dataclass
 class CompactHashMap:
     sortedPositions: torch.Tensor

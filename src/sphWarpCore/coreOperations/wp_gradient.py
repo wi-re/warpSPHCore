@@ -4,10 +4,9 @@ from typing import Any, Optional, Union
 import torch
 from torch.profiler import record_function
 
-from ..warp_state import *
 from ..utils.wp_autograd import *
 
-from ..radiusSearch.radius_util import AdjacencyList, DomainDescription, PointCloud
+from ..dataTypes import *
 from ..radiusSearch.wp_compactHash import CompactHashMap
 from ..radiusSearch.grid_util import checkOffset
 from ..math import *
@@ -16,11 +15,12 @@ from ..utils.wp_util import (
     getCachedDummyTensor, checkDirectionality_i, checkDirectionality_j,
     zero_like_warp, _get_warp_vector_dtype,
 )
+from ..utils import *
 from torch.profiler import profile, record_function, ProfilerActivity
 
 from ..enumTypes import *
 from ..warp_state_util import warpWrapper2
-from ..state import ParticleState, OperationProperties, CRKState, GradHState, RenormalizationState
+
 from ..crk import computeKernelCRK, computeKernelGradientCRK
 
 # Unified Gradient kernel: a single wp.func/wp.kernel pair drives both neighbor-list

@@ -116,3 +116,17 @@ class ParticleType(Enum):
     Boundary = 1
     Ghost = 2
     Other = 3
+
+
+__all__ = [
+    "SupportScheme",
+    "KernelFunctions",
+    "GradientScheme",
+    "LaplacianScheme",
+    "WarpOperation",    
+    "HashMapLengthMode",
+    "ViscosityTerms",
+    "OperationDirection",
+    "ParticleType",
+    "supportSchemeToUint",
+]

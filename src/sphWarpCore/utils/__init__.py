@@ -35,3 +35,16 @@ __all__ = [
     "n_h_to_nH",
     "volumeToSupport_warp"
 ]
+
+
+from .stateUtil import getParticle, getL_i, getVolume_i, getVolume_j, getGradH_i, getGradH_j, getCRK_i
+
+__all__.extend([
+    "getParticle",
+    "getL_i",
+    "getVolume_i",
+    "getVolume_j",
+    "getGradH_i",
+    "getGradH_j",
+    "getCRK_i"
+])
