@@ -81,9 +81,9 @@ from .utils.wp_util import (zero_like_warp,
 
 from .kernels.wp_kernel import eval_kernelScale, computeKernelCRK, computeKernelGradientCRK, sphKernel, sphKernelGradient, eval_k, eval_C_d
 from .math import computeDistanceVec, safe_sqrt
-from .kernels.utils import computePairwiseSupport, iPow
+from .utils import computePairwiseSupport
 from .utils.wp_autograd import launch_kernel, warpWrapper, StateAwareWarpFunction
-from .math import matmul
+from .math import matmul, iPow
 
 from .kernels.wp_kernel import sphKernelScale, sphKernel_xi
 

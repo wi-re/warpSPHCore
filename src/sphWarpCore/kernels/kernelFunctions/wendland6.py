@@ -1,5 +1,5 @@
 import numpy as np
-from ..utils import cpow_warp, iPow, bpow_warp
+from ...math import cpow_warp, iPow, bpow_warp
 from ...types import *
 from typing import Any
 import warp as wp
