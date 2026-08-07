@@ -9,7 +9,7 @@ from ..type_config import *
 from ..autograd import *
 
 from ..dataTypes import *
-from ..radiusSearch.grid_util import checkOffset
+from ..radiusSearch.grid_util import getIndexRange, checkOffset
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -37,36 +37,24 @@ from ..crk import computeKernelCRK, computeKernelGradientCRK
 
 @wp.func
 def computeCovariance_Func_i(
-    # General Shape Parameters and indices
-    i : wp.int32,  dim: wp.int32,
-
-    # SPH properties for the query set (indexed by i)
-    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, mi: scalar_t, rhoi: scalar_t, # type: ignore
-
+    i: wp.int32, dim: wp.int32,
+    # SPH properties for the query point (indexed by i)
+    iPtcl: Any, # WarpParticle_1/2/3, picked by dimensionality
     # SPH properties for the reference set (indexed by j in the neighbor loop)
-    referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
+    referenceState: Any, # particleDataSoA_1/2/3, picked by dimensionality
 
     # Domain and kernel parameters
     domainState: domainData,
     kernelProperties: kernelState,
 
-    beginIndex: wp.int32, # type: ignore
-    numIndices: wp.int32, # type: ignore
-    offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
+    # neighbor list or the grid's sorted particle index, depending on the caller.
+    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    # Operation Mode for masking certain kinds of interactions, e.g. for directional operations
-    ki : wp.int32, referenceKinds : wp.array(dtype = wp.int32), # type: ignore
-
-    # Optional Correction Terms:
-    # Gradient renormalization matrices for each query point, used for correcting the kernel gradient based on the local particle distribution.
-    useGradientRenormalization: wp.bool, Li: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
-    # Grad-h correction terms for each query and reference point, used for correcting the kernel gradient based on the local particle distribution and smoothing length variations.
-    useGradHTerms: wp.bool, omega_i: scalar_t, referenceOmegas: wp.array(dtype = scalar_t),  # type: ignore
-    # Whether to use actual volume (mass/density) or apparent volume for the gradient computation, and the corresponding volumes if needed.
-    useVolume: bool, Vi: scalar_t, referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
-    # Whether to use CRK kernel correction for the computation, and the corresponding correction terms if needed.
-    useCRK: bool, Ai: scalar_t, Bi: vector(length=Any, dtype=scalar_t), gradAi: vector(length=Any, dtype=scalar_t), gradBi: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
-    correctionData: Any, # correctionData_1 or correctionData_2 or correctionData_3, containing all the optional correction terms and their usage flags
+    # Optional correction terms
+    iCorrectionData: Any, # ParticleCorrectionData_1/2/3, picked by dimensionality
+    correctionData: Any, # correctionData_1/2/3
+    # End of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 
     # Dummy value to allow allocation
     outputValue: Any, # type: ignore
@@ -78,34 +66,34 @@ def computeCovariance_Func_i(
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
         j  = wp.int32(offsetArray[jj])
+        jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
+            if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
-        apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
+        apparentVolume = jPtcl.mass / jPtcl.density if not correctionData.useVolume else correctionData.referenceVolumes[j]
 
-        fij = -computeDistanceVec(xi, xj, domainState)
+        fij = -computeDistanceVec(iPtcl.position, jPtcl.position, domainState)
 
         kernelGradient = computeKernelGradientCRK(
-            xi, xj,
-            hi, hj,
+            iPtcl.position, jPtcl.position,
+            iPtcl.support, jPtcl.support,
             kernelProperties, domainState,
-            useCRK, Ai, Bi, gradAi, gradBi
+            correctionData.useCRK, iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB
         )
 
-        if useGradientRenormalization:
-            kernelGradient = matmul(Li, kernelGradient)
+        if correctionData.useGradientRenormalization:
+            kernelGradient = matmul(iCorrectionData.renormalizationMatrix, kernelGradient)
 
         out += wp.outer(fij * apparentVolume, kernelGradient)
         kernel = computeKernelCRK(
-            xi, xj,
-            hi, hj,
+            iPtcl.position, jPtcl.position,
+            iPtcl.support, jPtcl.support,
             kernelProperties, domainState,
-            useCRK, Ai, Bi
+            correctionData.useCRK, iCorrectionData.A, iCorrectionData.B
         )
         if kernel > 0.0:
             numNeighbors += 1
@@ -115,65 +103,45 @@ def computeCovariance_Func_i(
 
 @wp.func
 def computeCovariance_Func_Adjacency(
-    i : wp.int32, dim: wp.int32,
-
-    queryState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
-    referenceState: Any, # particleDataSoA with the exact type based on the dimensionality, e.g., particleDataSoA_2 for 2D, particleDataSoA_3 for 3D, etc.
-    correctionData: Any, # correctionData_1 or correctionData_2 or correctionData_3, containing all the optional correction terms and their usage flags
-
+    i: wp.int32, dim: wp.int32,
+    # SPH properties for the points and the corrections
+    queryState: Any, referenceState: Any, correctionData: Any,
+    # Domain properties 
     domainState: domainData,
-    useAdjacency: wp.bool,
-    adjacencyState: adjacencyData,
-    gridState: gridData,
-    numOffsets: wp.int32,
-
+    # Adjacency / grid traversal properties
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
+    # Kernel properties, e.g., kernel type, support scheme, gradient scheme, etc.
     kernelProperties: kernelState,
+    # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 
     outputValue : Any, # type: ignore
     outputNeighbors : wp.int32 # type: ignore
 ):
-    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    iPtcl = getParticleData(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-        if not checkDirectionality_i(ki, kernelProperties.operationMode):
-            return zero_like_warp(outputValue), wp.int32(0)
+        if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
+            return zero_like_warp(outputValue), 0
 
-    useGradientRenormalization, Li = getL_i(correctionData, i)
-    useGradHTerms, omega_i = getGradH_i(correctionData, i)
-    useVolume, Vi = getVolume_i(correctionData, i)
-    useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
+    iCorrectionData = getParticleCorrectionData_i(correctionData, i)
 
     out = zero_like_warp(outputValue)
     numNeighbors = wp.int32(0)
 
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
-        numIndices = wp.int32(0)
-        if useAdjacency:
-            beginIndex = adjacencyState.neighborOffsets[i]
-            numIndices = adjacencyState.numNeighbors[i]
-        else:
-            beginIndex, numIndices = checkOffset(
-                i, queryState.positions, gridState.numCells, gridState.D,
-                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
-                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
-            )
-            if beginIndex < 0:
-                continue
+        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
 
         stepC, stepN= computeCovariance_Func_i(
             i, dim,
-            xi, hi, mi, rhoi,
+            iPtcl,
             referenceState, domainState,
             kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            ki, referenceState.kinds,
 
-            useGradientRenormalization, Li,
-            useGradHTerms, omega_i, correctionData.referenceOmegas,
-            useVolume, Vi , correctionData.referenceVolumes,
-            useCRK, Ai, Bi, gradA_i, gradB_i,
-            correctionData,
+            iCorrectionData, correctionData,
+            # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 
 
             outputValue,

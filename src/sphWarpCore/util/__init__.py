@@ -40,7 +40,7 @@ __all__ = [
 ]
 
 
-from .stateUtil import getParticle, getL_i, getVolume_i, getVolume_j, getGradH_i, getGradH_j, getCRK_i, getCRK_j
+from .stateUtil import getParticle, getL_i, getVolume_i, getVolume_j, getGradH_i, getGradH_j, getCRK_i, getCRK_j, getParticleData, getParticleCorrectionData_i, getParticleCorrectionData_j
 
 __all__.extend([
     "getParticle",
@@ -50,7 +50,10 @@ __all__.extend([
     "getGradH_i",
     "getGradH_j",
     "getCRK_i",
-    "getCRK_j"
+    "getCRK_j",
+    "getParticleData",
+    "getParticleCorrectionData_i",
+    "getParticleCorrectionData_j",
 ])
 
 from .directionality import checkDirectionality_i, checkDirectionality_j

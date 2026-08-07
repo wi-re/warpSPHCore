@@ -9,7 +9,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import checkOffset
+from ..radiusSearch.grid_util import getIndexRange, checkOffset
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -117,24 +117,25 @@ def positiveDotProduct(
 
 @wp.func
 def computeSPHLaplacianTensor_Func_i(
-    i: wp.int32, dim: wp.int32, numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    i: wp.int32, dim: wp.int32,
+    # SPH properties for the query point (indexed by i)
+    iPtcl: Any, # WarpParticle_1/2/3, picked by dimensionality
+    # SPH properties for the reference set (indexed by j in the neighbor loop)
+    referenceState: Any, # particleDataSoA_1/2/3, picked by dimensionality
 
-    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, mi: scalar_t, rhoi: scalar_t, # type: ignore
-
-    referenceState: Any, # particleDataSoA_1/2/3
-
+    # Domain and kernel parameters
     domainState: domainData,
     kernelProperties: kernelState,
 
+    # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
+    # neighbor list or the grid's sorted particle index, depending on the caller.
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
-
-    useGradientRenormalization: wp.bool, Li: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
-    useGradHTerms: wp.bool, omega_i: scalar_t, referenceOmegas: wp.array(dtype = scalar_t), # type: ignore
-    useVolume: bool, Vi: scalar_t, referenceVolumes: wp.array(dtype = scalar_t), # type: ignore
-    useCRK: bool, Ai: scalar_t, Bi: vector(length=Any, dtype=scalar_t), gradAi: vector(length=Any, dtype=scalar_t), gradBi: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
-    correctionData: Any,
+    # Optional correction terms
+    iCorrectionData: Any, # ParticleCorrectionData_1/2/3, picked by dimensionality
+    correctionData: Any, # correctionData_1/2/3
+    # End of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
+    flatInputShape: wp.int32, flatOutputShape: wp.int32,
 
     fi: Any, referenceValues: wp.array(dtype = Any), # type: ignore
 
@@ -144,34 +145,34 @@ def computeSPHLaplacianTensor_Func_i(
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
         j = wp.int32(offsetArray[jj])
+        jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
+            if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
+        apparentVolume = jPtcl.mass / jPtcl.density if not correctionData.useVolume else correctionData.referenceVolumes[j]
 
-        apparentVolume = mj / rhoj if not useVolume else referenceVolumes[j]
-
-        # Explicit if/else, not a ternary: see docs/lessons_learned.md and the note in
-        # computeSPHGradientTensor_Func_i (wp_gradient.py) -- both branches here would
-        # read referenceValues[j], which silently zeroes that array's adjoint if written
-        # as a ternary.
-        fj = referenceValues[j]
-        if useGradHTerms:
-            fj = referenceValues[j] / referenceOmegas[j]
+        # Explicit if/else, not a ternary: both branches read referenceValues[j], and a
+        # ternary assigned to a local where both branches index the *same* array silently
+        # zeroes that array's adjoint (compiles fine, runs the correct branch, wrong
+        # gradient) -- see docs/lessons_learned.md, the bug that broke Interpolate this way.
+        if correctionData.useGradHTerms:
+            fj = referenceValues[j] / correctionData.referenceOmegas[j]
+        else:
+            fj = referenceValues[j]
 
         kernelGradient = computeKernelGradientCRK(
-            xi, xj,
-            hi, hj,
+            iPtcl.position, jPtcl.position,
+            iPtcl.support, jPtcl.support,
             kernelProperties, domainState,
-            useCRK, Ai, Bi, gradAi, gradBi
+            correctionData.useCRK, iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB
         )
 
-        if useGradientRenormalization:
-            kernelGradient = matmul(Li, kernelGradient)
+        if correctionData.useGradientRenormalization:
+            kernelGradient = matmul(iCorrectionData.renormalizationMatrix, kernelGradient)
 
         q_ij = zero_like_warp(fi)
 
@@ -198,14 +199,14 @@ def computeSPHLaplacianTensor_Func_i(
         if kernelProperties.gradientMode == wp.static(GradientScheme.Naive.value): # Naive
             q_ij = (fj - fi) * apparentVolume
         elif kernelProperties.gradientMode == wp.static(GradientScheme.Symmetric.value): # Symmetric
-            q_ij = (fj - fi) * mj * rhoi / iPow(rhoj, 2)
+            q_ij = (fj - fi) * jPtcl.mass * iPtcl.density / iPow(jPtcl.density, 2)
         elif kernelProperties.gradientMode == wp.static(GradientScheme.Difference.value): # Difference
             q_ij = (fj - fi) * apparentVolume
         elif kernelProperties.gradientMode == wp.static(GradientScheme.Summation.value): # Summation
             q_ij = (fj - fi) * apparentVolume
 
-        h_ij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
-        x_ij = computeDistanceVec(xi, xj, domainState)
+        h_ij = computePairwiseSupport(iPtcl.support, jPtcl.support, kernelProperties.supportMode)
+        x_ij = computeDistanceVec(iPtcl.position, jPtcl.position, domainState)
         r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
 
         eps = scalar_t(1e-8)
@@ -214,7 +215,7 @@ def computeSPHLaplacianTensor_Func_i(
         laplacian_contribution = zero_like_warp(outputValue)
 
         if kernelProperties.laplacianMode == wp.static(LaplacianScheme.Naive.value): # Naive
-            laplacian_contribution = q_ij * sphKernelLaplacian(xi, xj, hi, hj, kernelProperties, domainState)
+            laplacian_contribution = q_ij * sphKernelLaplacian(iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support, kernelProperties, domainState)
         elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Brookshaw.value): # Brookshaw
             laplacian_contribution = -scalar_t(2.0) * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
         elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Dot.value): # Dot
@@ -233,63 +234,49 @@ def computeSPHLaplacianTensor_Func_i(
 @wp.func
 def computeSPHLaplacianTensor_Func_Adjacency(
     i: wp.int32, dim: wp.int32,
-
+    # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
-
+    # Domain properties 
     domainState: domainData,
+    # Adjacency / grid traversal properties
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
-
+    # Kernel properties, e.g., kernel type, support scheme, gradient scheme, etc.
     kernelProperties: kernelState,
+    # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     queryValue: Any, referenceValues: Any, # type: ignore
 
     outputValue: Any, # type: ignore
 ):
-    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    iPtcl = getParticleData(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-        if not checkDirectionality_i(ki, kernelProperties.operationMode):
+        if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
             return zero_like_warp(outputValue)
 
-    useGradientRenormalization, Li = getL_i(correctionData, i)
-    useGradHTerms, omega_i = getGradH_i(correctionData, i)
-    useVolume, Vi = getVolume_i(correctionData, i)
-    useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
+    iCorrectionData = getParticleCorrectionData_i(correctionData, i)
 
     fi = queryValue[i]
-    if useGradHTerms:
-        fi = queryValue[i] / omega_i
+    if correctionData.useGradHTerms:
+        fi = queryValue[i] / iCorrectionData.omega
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
-        numIndices = wp.int32(0)
-        if useAdjacency:
-            beginIndex = adjacencyState.neighborOffsets[i]
-            numIndices = adjacencyState.numNeighbors[i]
-        else:
-            beginIndex, numIndices = checkOffset(
-                i, queryState.positions, gridState.numCells, gridState.D,
-                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
-                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
-            )
-            if beginIndex < 0:
-                continue
+        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
 
         out += computeSPHLaplacianTensor_Func_i(
-            i, dim, numDims, flatInputShape, flatOutputShape,
-            xi, hi, mi, rhoi,
+            i, dim,
+            iPtcl,
             referenceState, domainState,
             kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            ki, referenceState.kinds,
 
-            useGradientRenormalization, Li,
-            useGradHTerms, omega_i, correctionData.referenceOmegas,
-            useVolume, Vi, correctionData.referenceVolumes,
-            useCRK, Ai, Bi, gradA_i, gradB_i,
-            correctionData,
+            iCorrectionData, correctionData,
+            # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
+            flatInputShape, flatOutputShape,
 
             fi, referenceValues,
 

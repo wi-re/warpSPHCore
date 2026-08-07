@@ -82,3 +82,33 @@ class correctionData_3:
     referenceB: wp.array(dtype=vector(length=3, dtype=scalar_t))  # type: ignore
     referenceGradA: wp.array(dtype=vector(length=3, dtype=scalar_t))  # type: ignore
     referenceGradB: wp.array(dtype=matrix(shape=(3,3), dtype=scalar_t)) # type: ignore
+
+@wp.struct
+class ParticleCorrectionData_1:
+    renormalizationMatrix: matrix(shape=(1,1), dtype=scalar_t)
+    volume: scalar_t
+    omega: scalar_t
+    A: scalar_t
+    B: vector(length=1, dtype=scalar_t)
+    gradA: vector(length=1, dtype=scalar_t)
+    gradB: matrix(shape=(1,1), dtype=scalar_t)
+
+@wp.struct
+class ParticleCorrectionData_2:
+    renormalizationMatrix: matrix(shape=(2,2), dtype=scalar_t)
+    volume: scalar_t
+    omega: scalar_t
+    A: scalar_t
+    B: vector(length=2, dtype=scalar_t)
+    gradA: vector(length=2, dtype=scalar_t)
+    gradB: matrix(shape=(2,2), dtype=scalar_t)
+
+@wp.struct
+class ParticleCorrectionData_3:
+    renormalizationMatrix: matrix(shape=(3,3), dtype=scalar_t)
+    volume: scalar_t
+    omega: scalar_t
+    A: scalar_t
+    B: vector(length=3, dtype=scalar_t)
+    gradA: vector(length=3, dtype=scalar_t)
+    gradB: matrix(shape=(3,3), dtype=scalar_t)

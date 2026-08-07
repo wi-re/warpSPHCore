@@ -3,13 +3,14 @@ from .naive.radius_naive import (
     radiusNaiveFixed,
 )
 
-from .grid_util import checkOffset
+from .grid_util import checkOffset, getIndexRange
 
 
 __all__ = [
     "radiusNaive",
     "radiusNaiveFixed",
     "checkOffset",
+    'getIndexRange'
 ]
 
 from .compactHash import *

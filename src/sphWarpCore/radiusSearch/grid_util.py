@@ -143,3 +143,26 @@ def checkOffset(
     cellCount = hashEntry[1]
 
     return iterateCell(linearIndex, cellCount, cellStart, cellTable)
+
+
+@wp.func
+def getIndexRange(
+    i: wp.int32,
+    o: wp.int32,
+    useAdjacency: wp.bool,
+    adjacencyState: adjacencyData,
+    gridState: gridData,
+    queryState: Any, # particleDataSoA_1/2/3
+    domainState: domainData,
+):
+    if useAdjacency:
+        beginIndex = adjacencyState.neighborOffsets[i]
+        numIndices = adjacencyState.numNeighbors[i]
+        return beginIndex, numIndices
+    else:
+        beginIndex, numIndices = checkOffset(
+            i, queryState.positions, gridState.numCells, gridState.D,
+            o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
+            domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
+        )
+        return beginIndex, numIndices

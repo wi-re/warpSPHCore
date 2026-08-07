@@ -9,7 +9,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import checkOffset
+from ..radiusSearch.grid_util import getIndexRange, checkOffset
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -31,17 +31,24 @@ from ..crk import computeKernelCRK, computeKernelGradientCRK
 @wp.func
 def computeSPHDensity_Func_i(
     i: wp.int32, dim: wp.int32,
+    # SPH properties for the query point (indexed by i)
+    iPtcl: Any, # WarpParticle_1/2/3, picked by dimensionality
+    # SPH properties for the reference set (indexed by j in the neighbor loop)
+    referenceState: Any, # particleDataSoA_1/2/3, picked by dimensionality
 
-    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, # type: ignore
-
-    referenceState: Any, # particleDataSoA_1/2/3
-
+    # Domain and kernel parameters
     domainState: domainData,
     kernelProperties: kernelState,
 
+    # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
+    # neighbor list or the grid's sorted particle index, depending on the caller.
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+    # Optional correction terms
+    iCorrectionData: Any, # ParticleCorrectionData_1/2/3, picked by dimensionality
+    correctionData: Any, # correctionData_1/2/3
+    # End of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
+
 
     outputValue: Any, # type: ignore
 ):
@@ -49,16 +56,15 @@ def computeSPHDensity_Func_i(
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
         j = wp.int32(offsetArray[jj])
+        jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
+            if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
-
-        out += mj * sphKernel(xi, xj, hi, hj, kernelProperties, domainState)
+        out += jPtcl.mass * sphKernel(iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support, kernelProperties, domainState)
 
     return out
 
@@ -66,45 +72,41 @@ def computeSPHDensity_Func_i(
 @wp.func
 def computeSPHDensity_Func_Adjacency(
     i: wp.int32, dim: wp.int32,
-
+    # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
-
+    # Domain properties 
     domainState: domainData,
+    # Adjacency / grid traversal properties
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
-
+    # Kernel properties, e.g., kernel type, support scheme, gradient scheme, etc.
     kernelProperties: kernelState,
+    # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 
     outputValue: Any, # type: ignore
 ):
-    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    iPtcl = getParticleData(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-        if not checkDirectionality_i(ki, kernelProperties.operationMode):
+        if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
             return zero_like_warp(outputValue)
+
+    iCorrectionData = getParticleCorrectionData_i(correctionData, i)
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
-        numIndices = wp.int32(0)
-        if useAdjacency:
-            beginIndex = adjacencyState.neighborOffsets[i]
-            numIndices = adjacencyState.numNeighbors[i]
-        else:
-            beginIndex, numIndices = checkOffset(
-                i, queryState.positions, gridState.numCells, gridState.D,
-                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
-                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
-            )
-            if beginIndex < 0:
-                continue
+        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
 
         out += computeSPHDensity_Func_i(
             i, dim,
-            xi, hi,
+            iPtcl,
             referenceState, domainState,
             kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            ki, referenceState.kinds,
+
+            iCorrectionData, correctionData,
+            # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 
             outputValue,
         )
