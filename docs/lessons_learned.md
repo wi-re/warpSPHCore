@@ -214,23 +214,34 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   function's backward pass was unreachable. See warpier_core.md's
   "Renormalization Grid-Mode Coverage" note for the full story.
 
-* **Still open:** `checkKinds` (`autograd/arg_check.py`) substitutes a
-  length-1 dummy tensor for `queryKinds`/`referenceKinds` when they're
-  `None`, even under `OperationDirection.AllToAll` — but `checkDirectionality_j`
-  genuinely indexes that array by neighbor index under AllToAll rather than
-  trivially passing, so `ParticleState(kinds=None)` under AllToAll is an
-  out-of-bounds read, not a real no-op. Every fixture in this repo's test
-  suite sets `kinds` explicitly, so nothing here exercises it. Found while
-  landing CRK (see warpier_core.md's "Landing CRK's dual-path rework"); not
-  fixed, out of scope for that migration.
+* **CLOSED (2026-08-07):** ~~`checkKinds` substitutes a length-1 dummy
+  tensor for `queryKinds`/`referenceKinds` when they're `None`, even under
+  `OperationDirection.AllToAll`~~ — `checkKinds` (`autograd/arg_check.py`)
+  now takes `queryNumParticles`/`referenceNumParticles` and builds a
+  correctly-sized dummy array for `AllToAll` instead of a length-1 one;
+  `extractStateInfo` (`autograd/arg_extract.py`, the live call path) passes
+  `qPos.shape[0]`/`rPos.shape[0]` through. `ParticleState(kinds=None)`
+  under `AllToAll` is no longer an out-of-bounds read — verified directly
+  with a 529-particle 2D Density call. Found while landing CRK (see
+  warpier_core.md's "Landing CRK's dual-path rework"); fixed in
+  warpier_core.md's "RadiusSearch Package Split, Mechanical `__all__`, and
+  the AllToAll-Kinds Fix". One residual: `autograd/arg_parse.py`'s
+  `parseArguments` — dead code, superseded by `extractStateInfo`, not
+  called anywhere in the repo — still has the old unsized `checkKinds`
+  call and would reintroduce this bug if ever revived.
 
-* **`LaplacianScheme.Dot` does not support scalar fields in domains with
-  `dim>1`**, and is guarded with an explicit `ValueError` rather than
-  fixed — `computeLaplacianDot2`'s indexing assumes the field's flattened
-  size is a multiple of `dim`, true for vector fields but false for scalar
-  ones. The correct scalar-field generalization (if one exists) needs SPH
-  domain expertise to redo properly; this is a deliberate stop-gap, not a
-  resolved bug.
+* **Not a bug — by design.** `LaplacianScheme.Dot` computes a dot product
+  between the field quantity and the kernel gradient, which is only
+  mathematically defined for a vector field matching the domain's spatial
+  dimension; a scalar field has no such dot product to take. The explicit
+  `ValueError` guard (`coreOperations/wp_laplacian.py`, triggered when
+  `flatInputShape % spatialDim != 0` under `dim>1`) is the intended,
+  permanent behavior for that combination, not a stop-gap awaiting a
+  "correct" scalar-field generalization — there isn't one. Callers with
+  scalar fields should use `LaplacianScheme.Naive`/`Brookshaw`/`Default`
+  instead, per the error message. (Previously logged here as an open gap
+  needing SPH domain expertise to fix; reclassified 2026-08-07 — the guard
+  itself was always the correct fix, not a placeholder for one.)
 
 ## Notebook/documentation conventions
 

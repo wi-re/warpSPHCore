@@ -24,10 +24,9 @@ from __future__ import annotations
 
 import torch
 
-from sphWarpCore import ParticleState, radiusSearchCompactHashMap
+from sphWarpCore import ParticleState, radiusSearchCompactHashMap, buildCompactHashMap
 from sphWarpCore.enumTypes import KernelFunctions, SupportScheme
 from sphWarpCore.dataTypes import DomainDescription
-from sphWarpCore.radiusSearch.compactHash.wp_compactHash import buildCompactHashMap
 
 DEVICE = torch.device("cpu")
 DTYPE = torch.float64
