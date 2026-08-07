@@ -18,6 +18,22 @@ from torch.profiler import record_function
 from ..type_config import scalar_t
 from ..util import *
 from ..math import *
+from ..autograd import warpWrapper, launch_kernel
+
+# wp.mat22f/wp.vec2f (etc.) are warp's own built-in named 2x2-matrix/length-2-vector
+# types, one per precision -- unlike the 1x1 case (see wp_pinv1x1.py's comment), warp
+# already ships named subclasses for 2x2/vec2 so there's no need for sphWarpCore to
+# define its own; picked here by scalar_t for the same reason wp_pinv1x1.py picks
+# mat11f/vec1f -- launch_kernel's wp.zeros(..., dtype=...) needs a concrete, hashable
+# type, and it must match scalar_t rather than being hardcoded to float32.
+if scalar_t == wp.float32:
+    _mat22_t, _vec2_t = wp.mat22f, wp.vec2f
+elif scalar_t == wp.float64:
+    _mat22_t, _vec2_t = wp.mat22d, wp.vec2d
+elif scalar_t == wp.float16:
+    _mat22_t, _vec2_t = wp.mat22h, wp.vec2h
+else:
+    raise ValueError(f"Unsupported scalar type: {scalar_t}")
 
 
 @torch.compile
@@ -73,10 +89,13 @@ def matmul2(
 
 @wp.kernel
 def pinv2x2_warp(
+    # Inputs first, outputs last -- launch_kernel builds its kernel_inputs list as
+    # inputs + outputs, so the parameter order here must match that convention (see
+    # wp_pinv1x1.py's pseudoInverse1x1Kernel for the same shape).
     C: wp.array(dtype=matrix(shape=(2,2), dtype=scalar_t)), # type: ignore
+    num_nbrs: wp.array(dtype=wp.int32),  # type: ignore
     L: wp.array(dtype=matrix(shape=(2,2), dtype=scalar_t)), # type: ignore
     EV: wp.array(dtype=vector(length=2, dtype=scalar_t)), # type: ignore
-    num_nbrs: wp.array(dtype=wp.int32)  # type: ignore
 ):
     i = wp.tid()
     a = C[i][0,0]
@@ -155,12 +174,13 @@ def pinv2x2_warpBackend(
     C: torch.Tensor,
     num_nbrs: torch.Tensor
 ):
-    mat_warp = castTorchToWarpAsBuiltins(C)
-    inv = torch.empty_like(C)
-    evs = torch.empty((C.shape[0], 2), device = C.device, dtype = C.dtype)
-
-    inv_warp = castTorchToWarpAsBuiltins(inv)
-    evs_warp = castTorchToWarpAsBuiltins(evs)
-    nnbrs = castTorchToWarpAsBuiltins(num_nbrs)
-    wp.launch(kernel=pinv2x2_warp, dim=mat_warp.shape[0], inputs=[mat_warp, inv_warp, evs_warp, nnbrs], device=inv_warp.device)
+    # Previously a raw wp.launch on cast tensors -- not wrapped in a torch.autograd.Function
+    # at all, so it had no backward pass to gradcheck in the first place (found while closing
+    # out the "pinv2x2_warpBackend has no gradcheck coverage" item in warpier_core.md). Ported
+    # to the same warpWrapper/launch_kernel pattern wp_pinv1x1.py's pinv1x1 already used.
+    outputSize = C.shape[0]
+    inv, evs = warpWrapper(
+        launch_kernel, pinv2x2_warp, outputSize, (_mat22_t, _vec2_t),
+        C, num_nbrs
+    )
     return inv, evs

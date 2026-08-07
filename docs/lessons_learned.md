@@ -230,6 +230,27 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   called anywhere in the repo — still has the old unsized `checkKinds`
   call and would reintroduce this bug if ever revived.
 
+* **CLOSED (2026-08-07):** ~~`pinv2x2_warpBackend` (the dim=2 pseudo-inverse
+  `pinv_warp` dispatches to for every 2D renormalization call) has no
+  gradcheck coverage~~ — it turned out to have no backward pass at all to
+  gradcheck: unlike `pinv1x1` (`warpWrapper`-wrapped `launch_kernel`),
+  `pinv2x2_warpBackend` did a raw `wp.launch` directly on tensors converted
+  via `castTorchToWarpAsBuiltins`, with no `torch.autograd.Function`
+  wrapping it. Any `loss.backward()` through a 2D renormalization call was
+  silently treating the pseudo-inverse as contributing no gradient from its
+  input covariance matrix, which is wrong. Ported to the same
+  `warpWrapper`/`launch_kernel` pattern `pinv1x1` uses (kernel parameter
+  order changed to inputs-first/outputs-last to match `launch_kernel`'s
+  assembly convention); `scripts/gradcheck_pinv_native.py` now gradchecks
+  both `pinv1x1` and `pinv2x2_warpBackend` directly, and a full
+  `computeRenormalizationMatrices` call was verified end-to-end to produce
+  finite gradients through a genuine 2D case. **Lesson generalized:** a raw
+  `wp.launch` call reachable from a differentiable pipeline is a silent
+  gradient hole, not merely "untested" — it doesn't raise, it just drops
+  that link's contribution. Grep for bare `wp.launch(` outside
+  `autograd/launcher.py` itself before trusting gradients through any new
+  operator.
+
 * **Not a bug — by design.** `LaplacianScheme.Dot` computes a dot product
   between the field quantity and the kernel gradient, which is only
   mathematically defined for a vector field matching the domain's spatial

@@ -38,6 +38,7 @@ GRADCHECK_SCRIPTS = [
     "gradcheck_covariance_native.py",
     "gradcheck_crk_native.py",
     "gradcheck_renorm_native.py",
+    "gradcheck_pinv_native.py",
 ]
 
 
