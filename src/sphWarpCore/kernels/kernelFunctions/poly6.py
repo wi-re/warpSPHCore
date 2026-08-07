@@ -1,6 +1,6 @@
 import numpy as np
 from ...math import cpow_warp, iPow, bpow_warp
-from ...types import *
+from ...type_config import *
 from typing import Any
 import warp as wp
 from warp.types import vector

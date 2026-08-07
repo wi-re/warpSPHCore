@@ -1,6 +1,6 @@
 import warp as wp
 from warp.types import vector, matrix
-from ..types import *
+from ..type_config import *
 from .wp_sqrt import *
 from typing import Optional, Any, Union, List, Tuple
 

@@ -1,8 +1,9 @@
 from dataclasses import dataclass
 import torch
 import warp as wp
-from typing import NamedTuple, Union, Optional
-from ..types import *
+from typing import NamedTuple, Union, Tuple, List, Optional, Any
+from warp.types import vector, matrix
+from ..type_config import *
 
 
 # @torch.jit.script

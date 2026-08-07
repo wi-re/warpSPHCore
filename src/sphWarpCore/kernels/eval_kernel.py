@@ -1,6 +1,6 @@
 
 from .kernelFunctions import *
-from ..types import *
+from ..type_config import *
 from typing import Any
 import warp as wp
 import numpy as np

@@ -1,4 +1,4 @@
-from ..types import *
+from ..type_config import *
 from typing import Any
 import warp as wp
 from .wp_vec1 import *

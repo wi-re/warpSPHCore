@@ -1,5 +1,5 @@
 from typing import Any
-from ..types import *
+from ..type_config import *
 import warp as wp
 from warp.types import vector, matrix
 from .properties import eval_C_d

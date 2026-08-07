@@ -1,4 +1,3 @@
-from .radiusSearch.wp_compactHash import CompactHashMap
 import warp as wp
 from warp.types import vector, matrix
 # from wp_tensor import tensor
@@ -14,7 +13,7 @@ from .kernels import *
 
 from .coreOperations import *
 from .enumTypes import *
-from typing import Optional
+from typing import Optional, Tuple
 from torch.profiler import profile, record_function, ProfilerActivity
 
 
@@ -235,3 +234,8 @@ def sphOperation_warp(
         consistentDivergence=consistentDivergence,
     )
 
+
+__all__ = [
+    "sphOperation_warp",
+    "warpOperation",
+]

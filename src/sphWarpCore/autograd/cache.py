@@ -1,6 +1,6 @@
 import warp as wp
 import torch
-from ..types import *
+from ..type_config import *
 
 
 # Reusable cache for tiny default tensors passed to kernels as optional dummy args.

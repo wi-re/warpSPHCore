@@ -1,4 +1,4 @@
-from ..types import *
+from ..type_config import *
 from ..math import *
 import warp as wp
 from ..kernels import *

@@ -84,7 +84,7 @@ def extractStateInfo(
                 else referenceParticles.kinds
             )
             operationMode = operationProperties.operationMode
-            qK, rK = checkKinds(operationMode, device, queryKinds, referenceKinds)
+            qK, rK = checkKinds(operationMode, device, queryKinds, referenceKinds, qPos.shape[0], rPos.shape[0])
         with record_function("[ESI] 2. resolve correction states"):
             # ------------------------------------------------------------------ #
             # 2.  Resolve correction states

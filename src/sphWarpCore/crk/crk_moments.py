@@ -4,11 +4,11 @@ from typing import Any, Optional, Union
 import torch
 from torch.profiler import record_function
 
-from ..types import *
+from ..type_config import *
 from ..autograd import *
 
 from ..dataTypes import *
-from ..radiusSearch.wp_compactHash import CompactHashMap
+
 from ..radiusSearch.grid_util import checkOffset
 from ..math import *
 from ..kernels import *

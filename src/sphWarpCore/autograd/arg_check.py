@@ -13,7 +13,7 @@ from .cache import getCachedDummyTensor
 from sphWarpCore.util import *
 from sphWarpCore.enumTypes import *
 from typing import Optional
-from ..types import *
+from ..type_config import *
 
 
 def checkInputRenormalization( dim: int, device: torch.device,
@@ -75,9 +75,9 @@ def checkQV(
     return False, queryValues, referenceValues
 
 def checkKinds(
-    operationMode: OperationDirection, device: torch.device, queryKinds: Optional[torch.Tensor], referenceKinds: Optional[torch.Tensor]):
+    operationMode: OperationDirection, device: torch.device, queryKinds: Optional[torch.Tensor], referenceKinds: Optional[torch.Tensor], queryNumParticles: Optional[int] = None, referenceNumParticles: Optional[int] = None):
     if operationMode == OperationDirection.AllToAll:
-        return getCachedDummyTensor((1,), dtype=torch.int32, device=device) if queryKinds is None else queryKinds, getCachedDummyTensor((1,), dtype=torch.int32, device=device) if referenceKinds is None else referenceKinds
+        return getCachedDummyTensor((queryNumParticles,), dtype=torch.int32, device=device) if queryKinds is None else queryKinds, getCachedDummyTensor((referenceNumParticles,), dtype=torch.int32, device=device) if referenceKinds is None else referenceKinds
     else:
         if queryKinds is None or referenceKinds is None:
             raise ValueError("For directional operations, query and reference kinds must be provided to determine interaction masking.")

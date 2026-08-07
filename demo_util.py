@@ -7,7 +7,7 @@
 # from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
 # from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
 # from diffSPH.operations import SPHOperation
-from sphWarpCore.util import getNextPrime, generateNeighborTestData
+# from sphWarpCore.util import getNextPrime, generateNeighborTestData
 
     
 import os, sys
@@ -20,16 +20,13 @@ import warp as wp
 # Initialize Warp
 wp.init()
 
-from sphWarpCore.math import *
-from sphWarpCore.util import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins
-from sphWarpCore.radiusSearch.wp_radius_small import warp_radius_search_small
-from sphWarpCore.radius import *
+from sphWarpCore import *
 from warp.types import vector
-from sphWarpCore.autograd import warpWrapper, WarpFunctionWrapper
-from sphWarpCore.operations import *
+# from sphWarpCore.autograd import warpWrapper, WarpFunctionWrapper
+# from sphWarpCore.operations import *
 import matplotlib.pyplot as plt
 # from sphWarpCore.ops import sphOperation_warp
-from sphWarpCore.enumTypes import *
+# from sphWarpCore.enumTypes import *
 # import diffSPH
 # from diffSPH.sampling import ParticleSet
 # from diffSPH.schemes.states.common import BasicState
@@ -40,7 +37,7 @@ from sphWarpCore.enumTypes import *
 # from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
 # from diffSPH.operations import SPHOperation
 # from sphWarpCore.ops import sphOperation_warp
-from sphWarpCore.enumTypes import *
+# from sphWarpCore.enumTypes import *
 # from sphWarpCore.sph import computeSPHCovariance_warpBackend
 # from diffSPH.math import pinv2x2
 # from diffSPH.modules.renorm import computeCovarianceMatrices
@@ -85,7 +82,7 @@ def timeFunction(func, *args, **kwargs):
 # wp.config.verify_autograd_array_access = True
 # wp.config.verbose = True
 
-from sphWarpCore import *
+# from sphWarpCore import *
 
 def prepData(
     nx, targetNumNeighbors, dim, device, periodic = False, warpOnly = False, noiseAmplitude = 0.1

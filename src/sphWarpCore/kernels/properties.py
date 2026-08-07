@@ -1,5 +1,5 @@
 from typing import Any
-from ..types import *
+from ..type_config import *
 import warp as wp
 import numpy as np
 from ..math import computeDistanceVec

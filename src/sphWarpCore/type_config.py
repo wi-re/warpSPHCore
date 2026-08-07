@@ -143,4 +143,20 @@ def to_numpy(value: scalar_t) -> float:
     return float(value)
 
 
-__all__ = ["scalar_t", "scalar", "dim_t", "get_type_config", "get_precision", "get_dim", "get_torch_precision", "to_torch", "to_numpy"]
+from warp.types import vector, matrix
+
+vec_t: type = vector(length=dim_t, dtype=scalar_t)
+mat_t: type = matrix(shape =(dim_t, dim_t), dtype=scalar_t)
+int_t: type = wp.int32
+
+vecArray_t: type = wp.array(dtype=vec_t)
+matArray_t: type = wp.array(dtype=mat_t)
+intArray_t: type = wp.array(dtype=int_t)
+scalarArray_t: type = wp.array(dtype=scalar_t)
+
+@wp.func
+def scalar(value: float) -> scalar_t:
+    """Convert a Python float to the active scalar type."""
+    return scalar_t(value)
+
+__all__ = ["scalar_t", "scalar", "dim_t", "get_type_config", "get_precision", "get_dim", "get_torch_precision", "to_torch", "to_numpy", "vec_t", "mat_t", "int_t", "vecArray_t", "matArray_t", "intArray_t", "scalarArray_t"]

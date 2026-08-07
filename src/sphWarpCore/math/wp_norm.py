@@ -1,5 +1,5 @@
 import warp as wp
-from ..types import vec_t, scalar_t
+from ..type_config import vec_t, scalar_t
 from .wp_sqrt import safe_sqrt
 from .wp_eps import get_epsilon
 from warp.types import vector, matrix

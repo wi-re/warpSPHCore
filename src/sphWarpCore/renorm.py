@@ -116,3 +116,7 @@ def computeRenormalizationMatrices(
             return C, eigVals, RenormalizationState(renormalizationMatrices = L)
         else:
             return RenormalizationState(renormalizationMatrices = L)
+
+__all__ = [
+    "computeRenormalizationMatrices",
+]

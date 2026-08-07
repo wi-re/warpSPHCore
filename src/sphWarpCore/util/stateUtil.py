@@ -2,7 +2,7 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Union
 import torch
-from ..types import *
+from ..type_config import *
 from ..dataTypes import *
 
 from ..math import zero_like_warp

@@ -2,8 +2,9 @@ from .hashMap_t import CompactHashMap
 from dataclasses import dataclass
 import torch
 import warp as wp
-from typing import NamedTuple, Union
-from ..types import *
+from typing import NamedTuple, Union, Tuple, List, Optional, Any
+from warp.types import vector, matrix
+from ..type_config import *
 
 # A dataclass to hold the adjacency list information, including the indices of the neighbors, the number of neighbors for each query point, and the edge offsets for efficient access.
 # This can be used as a coordinate formate (COO) for the adjacency list, where i and j represent the row and column indices of the neighbors

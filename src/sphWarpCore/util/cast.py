@@ -1,6 +1,6 @@
 import warp as wp
 import torch
-from ..types import *
+from ..type_config import *
 from warp.types import vector, matrix
 
 

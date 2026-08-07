@@ -1,8 +1,12 @@
 
 import warp as wp
-from ..types import *
+from typing import NamedTuple, Union, Tuple, List, Optional, Any
+from warp.types import vector, matrix
+from ..type_config import *
 from ..enumTypes import *
-from .wp_compactHash import CompactHashMap, getLinearIndex64, hashGridVec3i
+from ..dataTypes import *
+from .compactHash.indexing import getLinearIndex64
+from .compactHash.wp_hashCells import hashGridVec3i
 from warp.types import vector, matrix
 from typing import Any
 

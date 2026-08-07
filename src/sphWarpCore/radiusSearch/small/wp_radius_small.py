@@ -1,6 +1,6 @@
 import warp as wp
-from ..math import *
-from ..util import *
+from ...math import *
+from ...util import *
 
 # Define kernels that work with flattened float32 arrays
 @wp.kernel
@@ -105,8 +105,8 @@ def warp_radius_search_collect_kernel_direct_2(
 
 
 import numpy as np
-from ..dataTypes import AdjacencyList
-from ..enumTypes import SupportScheme, supportSchemeToUint
+from ...dataTypes import AdjacencyList
+from ...enumTypes import SupportScheme, supportSchemeToUint
 
 def warp_radius_search_small(queryPositions, referencePositions, supportX, supportsY, periodicity, domainDescription, mode:SupportScheme = SupportScheme.Gather) -> AdjacencyList:
     minD = domainDescription.min.cpu()

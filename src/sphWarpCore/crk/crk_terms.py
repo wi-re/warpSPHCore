@@ -2,7 +2,7 @@ import torch
 
 # from sphWarpCore.renorm.wp_pinv2x2 import pinv2x2
 # from sphWarpCore.pinv import pinv2x2 as pinv2x2_warp
-from ..types import *
+from ..type_config import *
 
 def computeCRKTermsWarp(
         m_0: torch.Tensor, m_1: torch.Tensor, m_2: torch.Tensor,

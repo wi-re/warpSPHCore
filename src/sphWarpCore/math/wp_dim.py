@@ -1,6 +1,6 @@
 import warp as wp
 from warp.types import vector, matrix
-from ..types import *
+from ..type_config import *
 
 @wp.func
 def get_dim(v: vector(length=1, dtype = scalar_t)): # type: ignore

@@ -1,14 +1,14 @@
 import warp as wp
+from typing import NamedTuple, Union, Tuple, List, Optional, Any
 from warp.types import vector, matrix
 from typing import Any, Optional, Union
 import torch
 from torch.profiler import record_function
 
-from ..types import *
+from ..type_config import *
 from ..autograd import *
 
 from ..dataTypes import *
-from ..radiusSearch.wp_compactHash import CompactHashMap
 from ..radiusSearch.grid_util import checkOffset
 from ..math import *
 from ..kernels import *
