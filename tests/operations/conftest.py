@@ -4,14 +4,14 @@ import pytest
 import torch
 import warp as wp
 
-from sphWarpCore import (
+from warpSPHCore import (
     ParticleState,
     OperationProperties,
     radiusSearchCompactHashMap,
     warpOperation,
 )
-from sphWarpCore.crk import computeCRKFactors
-from sphWarpCore.enumTypes import (
+from warpSPHCore.crk import computeCRKFactors
+from warpSPHCore.enumTypes import (
     GradientScheme,
     KernelFunctions,
     LaplacianScheme,
@@ -19,9 +19,9 @@ from sphWarpCore.enumTypes import (
     SupportScheme,
     WarpOperation,
 )
-from sphWarpCore.renorm import computeRenormalizationMatrices
-from sphWarpCore.dataTypes import RenormalizationState
-from sphWarpCore.util import generateNeighborTestData
+from warpSPHCore.renorm import computeRenormalizationMatrices
+from warpSPHCore.dataTypes import RenormalizationState
+from warpSPHCore.util import generateNeighborTestData
 
 
 @pytest.fixture(scope="session", autouse=True)

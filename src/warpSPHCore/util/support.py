@@ -1,6 +1,6 @@
 from warp.types import vector, matrix
 
-from sphWarpCore.math.wp_distance import computeDistanceVec
+from warpSPHCore.math.wp_distance import computeDistanceVec
 from ..math import safe_sqrt
 from typing import Optional, Any, Union, List, Tuple
 import math

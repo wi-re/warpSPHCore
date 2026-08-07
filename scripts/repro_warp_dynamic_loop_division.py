@@ -14,11 +14,11 @@ Run:
     python repro_warp_dynamic_loop_division.py
 
 --------------------------------------------------------------------------
-Status: OPEN. Found while gradient-checking sphWarpCore's CRK-volume kernel
-(src/sphWarpCore/crk/crk_volume.py, since fixed by restructuring around this
+Status: OPEN. Found while gradient-checking warpSPHCore's CRK-volume kernel
+(src/warpSPHCore/crk/crk_volume.py, since fixed by restructuring around this
 -- see warpier_core.md's "Landing CRK's dual-path rework"). Not yet reported
 upstream to warp-lang. This script isolates it down to ~20 lines with no
-sphWarpCore dependency at all, for that report and as a standing regression
+warpSPHCore dependency at all, for that report and as a standing regression
 guard once/if it's fixed.
 --------------------------------------------------------------------------
 

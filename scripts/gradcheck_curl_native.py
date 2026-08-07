@@ -31,7 +31,7 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("SPHWARPCORE_PRECISION", "float64")
+os.environ.setdefault("warpSPHCore_PRECISION", "float64")
 
 import sys
 
@@ -39,8 +39,8 @@ import torch
 import warp as wp
 
 from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, grid_case_2d, make_domain
-from sphWarpCore import OperationProperties, ParticleState, warpOperation
-from sphWarpCore.enumTypes import GradientScheme, OperationDirection, SupportScheme, WarpOperation
+from warpSPHCore import OperationProperties, ParticleState, warpOperation
+from warpSPHCore.enumTypes import GradientScheme, OperationDirection, SupportScheme, WarpOperation
 
 
 def compute_densities(positions, supports, masses, kinds, domain, adjacency):

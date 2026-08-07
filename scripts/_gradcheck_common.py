@@ -4,12 +4,12 @@ Not a standalone entrypoint (leading underscore) -- imported by the
 per-operator gradcheck scripts. See any gradcheck_*.py script's own
 docstring for the precision/reentrancy background this builds on; in short:
 
-  * SPHWARPCORE_PRECISION must be set to "float64" by the entry script
-    *before* it imports this module (which imports sphWarpCore) -- that
+  * warpSPHCore_PRECISION must be set to "float64" by the entry script
+    *before* it imports this module (which imports warpSPHCore) -- that
     setting is baked into every @wp.kernel/@wp.func at import time and
     cannot be changed afterward in the same process.
   * As of 2026-08-05, WarpFunctionWrapper.backward / StateAwareWarpFunction
-    .backward (src/sphWarpCore/utils/wp_autograd.py) were fixed to clone
+    .backward (src/warpSPHCore/utils/wp_autograd.py) were fixed to clone
     the gradient read out of Warp and zero the tape afterward, so
     torch.autograd.gradcheck can now be called directly against
     warpOperation -- no manual Jacobian workaround needed for new scripts.
@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import torch
 
-from sphWarpCore import ParticleState, radiusSearchCompactHashMap, buildCompactHashMap
-from sphWarpCore.enumTypes import KernelFunctions, SupportScheme
-from sphWarpCore.dataTypes import DomainDescription
+from warpSPHCore import ParticleState, radiusSearchCompactHashMap, buildCompactHashMap
+from warpSPHCore.enumTypes import KernelFunctions, SupportScheme
+from warpSPHCore.dataTypes import DomainDescription
 
 DEVICE = torch.device("cpu")
 DTYPE = torch.float64
@@ -124,8 +124,8 @@ def build_grid_adjacency(positions: torch.Tensor, supports: torch.Tensor, masses
 # Pure-PyTorch reference Wendland2 kernel (no Warp involved at all -- an
 # independent implementation of the same formula sphKernel_ uses, dim=1):
 #   W(r, h) = C_d/h * k(r/h),  k=0 for q=r/h > 1
-# See src/sphWarpCore/kernels/kernelFunctions/wendland2.py and
-# src/sphWarpCore/kernels/wp_kernel.py:sphKernel_ for the formula this
+# See src/warpSPHCore/kernels/kernelFunctions/wendland2.py and
+# src/warpSPHCore/kernels/wp_kernel.py:sphKernel_ for the formula this
 # mirrors. Reusable across operators as a ground truth kernel; each
 # operator's own reference formula (density sum, gradient sum, ...) is
 # built on top of this per-script.

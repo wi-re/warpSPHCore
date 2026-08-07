@@ -12,9 +12,9 @@ forward values. Run as its own process:
 --------------------------------------------------------------------------
 Precision note
 --------------------------------------------------------------------------
-sphWarpCore's scalar precision (SPHWARPCORE_PRECISION) is a process-global
+warpSPHCore's scalar precision (warpSPHCore_PRECISION) is a process-global
 setting baked into every @wp.kernel/@wp.func at *import* time, so it cannot
-be changed after sphWarpCore has been imported once in a process. A
+be changed after warpSPHCore has been imported once in a process. A
 gradcheck-quality comparison needs float64. That is why this is a
 standalone script (`python scripts/gradcheck_density.py`) rather than a
 pytest case living alongside the float32 forward-mode suite in
@@ -31,7 +31,7 @@ torch.autograd.gradcheck. That was originally a workaround for what looked
 like a warp-lang Tape-reentrancy limitation (a second backward() against a
 retained graph, which is exactly what gradcheck's default multi-output
 Jacobian construction does, silently returned a wrong gradient). That bug
-turned out to be in sphWarpCore's own AD bridge (WarpFunctionWrapper.backward
+turned out to be in warpSPHCore's own AD bridge (WarpFunctionWrapper.backward
 / StateAwareWarpFunction.backward in wp_autograd.py: the gradient read out
 of Warp wasn't cloned, and the tape wasn't zeroed afterward, so a later call
 sharing the same tensor storage could read stale/aliased state) and has
@@ -52,7 +52,7 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("SPHWARPCORE_PRECISION", "float64")
+os.environ.setdefault("warpSPHCore_PRECISION", "float64")
 
 import argparse
 import sys
@@ -71,8 +71,8 @@ from _gradcheck_common import (
     single_particle_case,
     wendland2_kernel_1d,
 )
-from sphWarpCore import OperationProperties, ParticleState, warpOperation
-from sphWarpCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
+from warpSPHCore import OperationProperties, ParticleState, warpOperation
+from warpSPHCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
 
 
 # --------------------------------------------------------------------------

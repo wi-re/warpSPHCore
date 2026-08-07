@@ -23,7 +23,7 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
 * **Raw Python numeric literals inside a `@wp.func`/`@wp.kernel` do not
   auto-promote to match a `scalar_t` value.** `eps = 1e-8` used against a
   `float64` value fails kernel compilation outright under
-  `SPHWARPCORE_PRECISION=float64` (and can produce a confusing, seemingly
+  `warpSPHCore_PRECISION=float64` (and can produce a confusing, seemingly
   unrelated cascade error on the *next* compile attempt). Always wrap:
   `eps = scalar_t(1e-8)`. This only surfaces under non-default precision, so
   a float32-only test pass will not catch it — see the "always sweep
@@ -48,7 +48,7 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   passed straight into `wp.launch` gets Warp's default type inference —
   `wp.float32` — regardless of the kernel's declared `scalar_t`.** This
   silently breaks any kernel argument comparison under
-  `SPHWARPCORE_PRECISION=float64` (`expected float64, got float32`). Cast
+  `warpSPHCore_PRECISION=float64` (`expected float64, got float32`). Cast
   explicitly at the call site (`scalar_t(some_python_float)`), matching the
   existing `wp.int32(...)`/`wp.bool(...)` convention used for other scalar
   launch arguments.
@@ -85,13 +85,13 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
 
 ## AD-bridge / autograd gotchas
 
-* **`SPHWARPCORE_PRECISION` is baked into every compiled kernel at first
-  `sphWarpCore` import, per-process, and cannot change afterward.** Any
+* **`warpSPHCore_PRECISION` is baked into every compiled kernel at first
+  `warpSPHCore` import, per-process, and cannot change afterward.** Any
   tooling that needs to test more than one precision in the same run must
   isolate each precision in its own subprocess (`os.environ` mutation +
   re-import inside one process does nothing once a kernel has already
   compiled). This is why `scripts/operation_matrix.py` imports
-  `sphWarpCore` lazily inside a `_configure()` called after arg parsing, and
+  `warpSPHCore` lazily inside a `_configure()` called after arg parsing, and
   why `tests/operations/test_gradcheck_scripts.py` runs each gradcheck
   script via `subprocess.run` rather than importing its module directly.
   **This is a deliberate design tradeoff, not an oversight worth
@@ -242,9 +242,9 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   parity + gradcheck across all three traversal inputs). Finding that gap
   also surfaced two independent bugs, now fixed: `pinv/wp_pinv1x1.py`
   referenced `wp.mat11f`/`wp.vec1f` (don't exist on the `warp` module —
-  only as sphWarpCore's own precision-specific subclasses in
+  only as warpSPHCore's own precision-specific subclasses in
   `math/wp_vec1.py`) and hardcoded the float32 variant regardless of
-  `SPHWARPCORE_PRECISION`; and `WarpFunctionWrapper.backward`
+  `warpSPHCore_PRECISION`; and `WarpFunctionWrapper.backward`
   (`autograd/stateLessWarpFunction.py`) only checked `isinstance(outputs_warp,
   list)` when seeding gradients for a multi-output warp function, not
   `(list, tuple)` — `launch_kernel` returns a tuple for multi-output, so any

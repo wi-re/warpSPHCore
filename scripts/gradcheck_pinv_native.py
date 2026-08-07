@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Native torch.autograd.gradcheck against pinv1x1 and pinv2x2_warpBackend
-(src/sphWarpCore/pinv/wp_pinv1x1.py, wp_pinv2x2.py) directly, as pure
+(src/warpSPHCore/pinv/wp_pinv1x1.py, wp_pinv2x2.py) directly, as pure
 matrix -> (inverse, eigenvalues) functions -- independent of the
 renormalization pipeline that's their only production caller.
 
@@ -35,14 +35,14 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("SPHWARPCORE_PRECISION", "float64")
+os.environ.setdefault("warpSPHCore_PRECISION", "float64")
 
 import sys
 
 import torch
 import warp as wp
 
-from sphWarpCore.pinv import pinv1x1, pinv2x2_warpBackend
+from warpSPHCore.pinv import pinv1x1, pinv2x2_warpBackend
 
 DEVICE = torch.device("cpu")
 DTYPE = torch.float64

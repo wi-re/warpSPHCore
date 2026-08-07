@@ -11,7 +11,7 @@ test cases, no product code changes are required to unlock it.
 import pytest
 import torch
 
-from sphWarpCore.enumTypes import GradientScheme, LaplacianScheme, WarpOperation
+from warpSPHCore.enumTypes import GradientScheme, LaplacianScheme, WarpOperation
 
 from conftest import (
     interior_mask,

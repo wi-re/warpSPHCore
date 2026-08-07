@@ -10,7 +10,7 @@ It was originally written to document a warp-lang Tape-reentrancy bug (a
 second backward() against a retained tape -- exactly what gradcheck's
 default multi-output Jacobian construction and its own reentrancy self-check
 both do -- silently returned a wrong, typically-zero gradient). That has
-since been fixed at the source in sphWarpCore's AD bridge
+since been fixed at the source in warpSPHCore's AD bridge
 (WarpFunctionWrapper.backward / StateAwareWarpFunction.backward in
 wp_autograd.py: clone the gradient tensor read out of Warp, and explicitly
 zero the tape afterward, so a later call reusing the same underlying memory
@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("SPHWARPCORE_PRECISION", "float64")
+os.environ.setdefault("warpSPHCore_PRECISION", "float64")
 
 import sys
 
@@ -36,8 +36,8 @@ import torch
 import warp as wp
 
 from _gradcheck_common import KERNEL, build_adjacency, line_case, make_domain, single_particle_case
-from sphWarpCore import OperationProperties, ParticleState, warpOperation
-from sphWarpCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
+from warpSPHCore import OperationProperties, ParticleState, warpOperation
+from warpSPHCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
 
 
 def run_gradcheck(name: str, positions: torch.Tensor, supports: torch.Tensor, masses: torch.Tensor) -> bool:

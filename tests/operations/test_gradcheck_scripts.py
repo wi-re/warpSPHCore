@@ -2,8 +2,8 @@
 
 Phase 0's "gradient/finite checks" task (see warpier_core.md's Gradcheck
 Script Rollout Plan) produced these as standalone scripts, one per operator,
-rather than in-process pytest functions, because SPHWARPCORE_PRECISION is
-baked into every compiled kernel at first sphWarpCore import and cannot
+rather than in-process pytest functions, because warpSPHCore_PRECISION is
+baked into every compiled kernel at first warpSPHCore import and cannot
 change mid-process (the same constraint operation_matrix.py's _configure()
 docstring documents) -- importing several of these scripts' modules into one
 pytest process would have the later ones silently reuse the first script's

@@ -1,8 +1,8 @@
 
-from sphWarpCore import *
+from warpSPHCore import *
 import torch
 import math
-from sphWarpCore.util import generateNeighborTestData
+from warpSPHCore.util import generateNeighborTestData
 
 
 def make_scalar_field(dim, positions, field_mode="linear", linear_slope_x=1.0, linear_slope_y=1.0, linear_slope_z=1.0):

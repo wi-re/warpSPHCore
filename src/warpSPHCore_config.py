@@ -1,14 +1,14 @@
-"""Pre-import configuration for sphWarpCore.
+"""Pre-import configuration for warpSPHCore.
 
 Usage:
 
-    import sphWarpCore_config as swc
+    import warpSPHCore_config as swc
     swc.configure(precision="float64", dim=2)
 
-    import sphWarpCore
+    import warpSPHCore
 
 This avoids environment variables while still configuring types before
-`sphWarpCore` modules are imported.
+`warpSPHCore` modules are imported.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ def configure(*, precision: Optional[str] = None, dim: Optional[int | str] = Non
     """Set pre-import precision and dimension overrides.
 
     Parameters are intentionally permissive and validated by
-    `sphWarpCore.type_config` when the package is imported.
+    `warpSPHCore.type_config` when the package is imported.
     """
     globals()["precision"] = precision
     globals()["dim"] = dim

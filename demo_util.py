@@ -7,7 +7,7 @@
 # from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
 # from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
 # from diffSPH.operations import SPHOperation
-# from sphWarpCore.util import getNextPrime, generateNeighborTestData
+# from warpSPHCore.util import getNextPrime, generateNeighborTestData
 
     
 import os, sys
@@ -20,13 +20,13 @@ import warp as wp
 # Initialize Warp
 wp.init()
 
-from sphWarpCore import *
+from warpSPHCore import *
 from warp.types import vector
-# from sphWarpCore.autograd import warpWrapper, WarpFunctionWrapper
-# from sphWarpCore.operations import *
+# from warpSPHCore.autograd import warpWrapper, WarpFunctionWrapper
+# from warpSPHCore.operations import *
 import matplotlib.pyplot as plt
-# from sphWarpCore.ops import sphOperation_warp
-# from sphWarpCore.enumTypes import *
+# from warpSPHCore.ops import sphOperation_warp
+# from warpSPHCore.enumTypes import *
 # import diffSPH
 # from diffSPH.sampling import ParticleSet
 # from diffSPH.schemes.states.common import BasicState
@@ -36,9 +36,9 @@ import matplotlib.pyplot as plt
 # from diffSPH.neighborhood import evaluateNeighborhood, SupportScheme, computeNeighborhoodStates
 # from diffSPH.enums import Operation, SupportScheme, GradientMode, LaplacianMode
 # from diffSPH.operations import SPHOperation
-# from sphWarpCore.ops import sphOperation_warp
-# from sphWarpCore.enumTypes import *
-# from sphWarpCore.sph import computeSPHCovariance_warpBackend
+# from warpSPHCore.ops import sphOperation_warp
+# from warpSPHCore.enumTypes import *
+# from warpSPHCore.sph import computeSPHCovariance_warpBackend
 # from diffSPH.math import pinv2x2
 # from diffSPH.modules.renorm import computeCovarianceMatrices
 # from diffSPH.operations import KernelCorrectionScheme
@@ -82,7 +82,7 @@ def timeFunction(func, *args, **kwargs):
 # wp.config.verify_autograd_array_access = True
 # wp.config.verbose = True
 
-# from sphWarpCore import *
+# from warpSPHCore import *
 
 def prepData(
     nx, targetNumNeighbors, dim, device, periodic = False, warpOnly = False, noiseAmplitude = 0.1

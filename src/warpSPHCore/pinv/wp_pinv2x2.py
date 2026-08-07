@@ -22,7 +22,7 @@ from ..autograd import warpWrapper, launch_kernel
 
 # wp.mat22f/wp.vec2f (etc.) are warp's own built-in named 2x2-matrix/length-2-vector
 # types, one per precision -- unlike the 1x1 case (see wp_pinv1x1.py's comment), warp
-# already ships named subclasses for 2x2/vec2 so there's no need for sphWarpCore to
+# already ships named subclasses for 2x2/vec2 so there's no need for warpSPHCore to
 # define its own; picked here by scalar_t for the same reason wp_pinv1x1.py picks
 # mat11f/vec1f -- launch_kernel's wp.zeros(..., dtype=...) needs a concrete, hashable
 # type, and it must match scalar_t rather than being hardcoded to float32.

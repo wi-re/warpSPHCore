@@ -6,12 +6,12 @@ from typing import Any
 import torch
 # from .wp_autograd import *
 
-from sphWarpCore.dataTypes import *
-from sphWarpCore.math import *
-from sphWarpCore.kernels import *
+from warpSPHCore.dataTypes import *
+from warpSPHCore.math import *
+from warpSPHCore.kernels import *
 from .cache import getCachedDummyTensor
-from sphWarpCore.util import *
-from sphWarpCore.enumTypes import *
+from warpSPHCore.util import *
+from warpSPHCore.enumTypes import *
 from typing import Optional
 from ..type_config import *
 

@@ -1,6 +1,6 @@
 ---
 name: operation-matrix
-description: Run scripts/operation_matrix.py, the forward-value diagnostic matrix for sphWarpCore's SPH operators (Density, Interpolate, Gradient, Divergence, Curl, Laplacian) across GradientScheme/LaplacianScheme variants, both traversal modes (adjacency/grid), and all three correction paths (none/CRK/renorm). Use a quick 2D/float32 smoke sweep for routine iteration on operator or kernel code, and the full precision x dim x jitter x device sweep sparingly -- before merging a change that touches kernel math broadly, not on every edit. Pair with the gradcheck skill, which checks backward-mode (gradients) instead of forward values.
+description: Run scripts/operation_matrix.py, the forward-value diagnostic matrix for warpSPHCore's SPH operators (Density, Interpolate, Gradient, Divergence, Curl, Laplacian) across GradientScheme/LaplacianScheme variants, both traversal modes (adjacency/grid), and all three correction paths (none/CRK/renorm). Use a quick 2D/float32 smoke sweep for routine iteration on operator or kernel code, and the full precision x dim x jitter x device sweep sparingly -- before merging a change that touches kernel math broadly, not on every edit. Pair with the gradcheck skill, which checks backward-mode (gradients) instead of forward values.
 ---
 
 # Running the operation matrix

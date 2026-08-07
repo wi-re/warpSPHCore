@@ -50,18 +50,18 @@ from __future__ import annotations
 import argparse
 import os
 
-os.environ.setdefault("SPHWARPCORE_PRECISION", "float64")
+os.environ.setdefault("warpSPHCore_PRECISION", "float64")
 
 import torch
 import warp as wp
 
 from _gradcheck_common import build_adjacency, line_case, make_domain, single_particle_case
-from sphWarpCore import ParticleState
-from sphWarpCore.crk.crk_moments import _computeCRKMoments_stateBackend
-from sphWarpCore.crk.crk_terms import computeCRKTermsWarp
-from sphWarpCore.crk.crk_volume import _computeCRKVolume_stateBackend
-from sphWarpCore.dataTypes import OperationProperties
-from sphWarpCore.enumTypes import KernelFunctions, OperationDirection, SupportScheme
+from warpSPHCore import ParticleState
+from warpSPHCore.crk.crk_moments import _computeCRKMoments_stateBackend
+from warpSPHCore.crk.crk_terms import computeCRKTermsWarp
+from warpSPHCore.crk.crk_volume import _computeCRKVolume_stateBackend
+from warpSPHCore.dataTypes import OperationProperties
+from warpSPHCore.enumTypes import KernelFunctions, OperationDirection, SupportScheme
 
 KERNEL = KernelFunctions.Wendland2
 

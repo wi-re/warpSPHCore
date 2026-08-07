@@ -1,6 +1,6 @@
-# sphWarpCore
+# warpSPHCore
 
-sphWarpCore is a Warp- and PyTorch-based backend for core Smoothed Particle Hydrodynamics (SPH) operations. The package focuses on GPU-accelerated neighborhood construction and particle operators such as density estimation, interpolation, gradients, divergence, curl, Laplacians, and CRK-corrected variants.
+warpSPHCore is a Warp- and PyTorch-based backend for core Smoothed Particle Hydrodynamics (SPH) operations. The package focuses on GPU-accelerated neighborhood construction and particle operators such as density estimation, interpolation, gradients, divergence, curl, Laplacians, and CRK-corrected variants.
 
 The repository also includes notebooks that compare the Warp implementation against diffSPH reference workflows and demonstrate common operator setups.
 
@@ -57,11 +57,11 @@ GPU notes:
 
 Common entry points:
 
-- `sphWarpCore.radiusSearchCompactHashMap`: builds adjacency lists with compact hashing
-- `sphWarpCore.sphOperation_warp`: dispatches SPH operators from one high-level function
-- `sphWarpCore.crk.computeCRKFactors`: computes CRK apparent area and correction tensors
-- `sphWarpCore.util.generateNeighborTestData`: helper for generating regular particle test sets
-- `sphWarpCore.util.getNextPrime`: helper for choosing compact-hash table sizes
+- `warpSPHCore.radiusSearchCompactHashMap`: builds adjacency lists with compact hashing
+- `warpSPHCore.sphOperation_warp`: dispatches SPH operators from one high-level function
+- `warpSPHCore.crk.computeCRKFactors`: computes CRK apparent area and correction tensors
+- `warpSPHCore.util.generateNeighborTestData`: helper for generating regular particle test sets
+- `warpSPHCore.util.getNextPrime`: helper for choosing compact-hash table sizes
 
 Important enums:
 
@@ -79,8 +79,8 @@ This follows the same setup pattern used by `prepData` in the demo utilities.
 import torch
 import warp as wp
 
-from sphWarpCore import radiusSearchCompactHashMap
-from sphWarpCore.util import generateNeighborTestData, getNextPrime
+from warpSPHCore import radiusSearchCompactHashMap
+from warpSPHCore.util import generateNeighborTestData, getNextPrime
 
 wp.init()
 
@@ -132,9 +132,9 @@ This mirrors the interpolation workflow used in `warp_interpolate.ipynb`.
 import torch
 import warp as wp
 
-from sphWarpCore import radiusSearchCompactHashMap, sphOperation_warp
-from sphWarpCore.enumTypes import KernelFunctions, OperationDirection, SupportScheme, WarpOperation
-from sphWarpCore.util import generateNeighborTestData, getNextPrime
+from warpSPHCore import radiusSearchCompactHashMap, sphOperation_warp
+from warpSPHCore.enumTypes import KernelFunctions, OperationDirection, SupportScheme, WarpOperation
+from warpSPHCore.util import generateNeighborTestData, getNextPrime
 
 wp.init()
 
@@ -218,16 +218,16 @@ This matches the corrected linear-field gradient workflow in `warp_gradient.ipyn
 import torch
 import warp as wp
 
-from sphWarpCore import radiusSearchCompactHashMap, sphOperation_warp
-from sphWarpCore.crk import computeCRKFactors
-from sphWarpCore.enumTypes import (
+from warpSPHCore import radiusSearchCompactHashMap, sphOperation_warp
+from warpSPHCore.crk import computeCRKFactors
+from warpSPHCore.enumTypes import (
     GradientScheme,
     KernelFunctions,
     OperationDirection,
     SupportScheme,
     WarpOperation,
 )
-from sphWarpCore.util import generateNeighborTestData, getNextPrime
+from warpSPHCore.util import generateNeighborTestData, getNextPrime
 
 wp.init()
 
@@ -356,4 +356,4 @@ bash scripts/setup_pypi_token.sh testpypi
 bash scripts/publish_pypi.sh --testpypi
 ```
 
-Before publishing, bump the package version in both `pyproject.toml` and `src/sphWarpCore/__init__.py`. The publish script checks that these two versions match and stops if they do not.
+Before publishing, bump the package version in both `pyproject.toml` and `src/warpSPHCore/__init__.py`. The publish script checks that these two versions match and stops if they do not.

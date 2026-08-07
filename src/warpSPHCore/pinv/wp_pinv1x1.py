@@ -3,15 +3,15 @@ from warp.types import vector, matrix
 # from wp_tensor import tensor
 from typing import Any
 import torch
-from sphWarpCore.autograd import *
+from warpSPHCore.autograd import *
 
 from ..dataTypes import *
-from sphWarpCore.math import *
-from sphWarpCore.kernels import *
-from sphWarpCore.autograd.cache import getCachedDummyTensor
+from warpSPHCore.math import *
+from warpSPHCore.kernels import *
+from warpSPHCore.autograd.cache import getCachedDummyTensor
 from torch.profiler import profile, record_function, ProfilerActivity
-from sphWarpCore.enumTypes import *
-from sphWarpCore.autograd.arg_check import *
+from warpSPHCore.enumTypes import *
+from warpSPHCore.autograd.arg_check import *
 from typing import Optional
 
 # mat11f/vec1f (etc.) are named wp.matrix/wp.vector subclasses, one per precision
@@ -23,7 +23,7 @@ from typing import Optional
 # passing the generic factory type through, and picking the one that matches scalar_t
 # rather than hardcoding float32 (which silently mismatches the kernel's actual output
 # dtype -- and doesn't even exist as `wp.mat11f`/`wp.vec1f` on the warp module itself,
-# only as sphWarpCore's own subclasses -- under any other SPHWARPCORE_PRECISION).
+# only as warpSPHCore's own subclasses -- under any other warpSPHCore_PRECISION).
 if scalar_t == wp.float32:
     _mat11_t, _vec1_t = mat11f, vec1f
 elif scalar_t == wp.float64:

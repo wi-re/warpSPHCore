@@ -1,6 +1,6 @@
 ---
 name: gradcheck
-description: Run sphWarpCore's torch.autograd.gradcheck regression scripts against the SPH operators (Density, Interpolate, Gradient, Divergence, Curl, Laplacian) -- all of them at once, or a single one while iterating on that operator's kernel or the AD bridge. Use whenever rewriting operator kernels, wp_autograd.py, or anything touching backward-mode differentiation, to catch silently-wrong gradients (adjoint bugs, ternary array-read zeroing, reentrancy/caching bugs) that forward-only checks (see the operation-matrix skill) cannot see.
+description: Run warpSPHCore's torch.autograd.gradcheck regression scripts against the SPH operators (Density, Interpolate, Gradient, Divergence, Curl, Laplacian) -- all of them at once, or a single one while iterating on that operator's kernel or the AD bridge. Use whenever rewriting operator kernels, wp_autograd.py, or anything touching backward-mode differentiation, to catch silently-wrong gradients (adjoint bugs, ternary array-read zeroing, reentrancy/caching bugs) that forward-only checks (see the operation-matrix skill) cannot see.
 ---
 
 # Running the gradcheck scripts
@@ -26,8 +26,8 @@ scripts/gradcheck_curl_native.py
 scripts/gradcheck_laplacian_native.py
 ```
 
-All of them hardcode `SPHWARPCORE_PRECISION=float64` (set via
-`os.environ.setdefault` before importing `sphWarpCore` -- required, since
+All of them hardcode `warpSPHCore_PRECISION=float64` (set via
+`os.environ.setdefault` before importing `warpSPHCore` -- required, since
 Warp bakes precision into every compiled kernel at first import and it
 can't change mid-process) and run on `DEVICE = torch.device("cpu")`
 (`scripts/_gradcheck_common.py`) -- there's no `--device`/`--precision` flag

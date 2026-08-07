@@ -1,9 +1,9 @@
 """Central precision and dimension configuration for Warp SPH types.
 
-Configure before importing `sphWarpCore` by setting environment variables:
+Configure before importing `warpSPHCore` by setting environment variables:
 
-- `SPHWARPCORE_PRECISION`: one of `float16|half|float32|single|float64|double`
-- `SPHWARPCORE_DIM`: positive integer for fixed dimension, or `Any` for dynamic
+- `warpSPHCore_PRECISION`: one of `float16|half|float32|single|float64|double`
+- `warpSPHCore_DIM`: positive integer for fixed dimension, or `Any` for dynamic
 
 Defaults:
 
@@ -41,7 +41,7 @@ def _resolve_precision(value: str | None):
     if key not in _PRECISION_ALIASES:
         valid = ", ".join(sorted(_PRECISION_ALIASES.keys()))
         raise ValueError(
-            f"Invalid SPHWARPCORE_PRECISION='{value}'. Expected one of: {valid}."
+            f"Invalid warpSPHCore_PRECISION='{value}'. Expected one of: {valid}."
         )
 
     return _PRECISION_ALIASES[key]
@@ -55,7 +55,7 @@ def _resolve_dim(value: str | int | None):
         dim = value
         if dim <= 0:
             raise ValueError(
-                f"Invalid SPHWARPCORE_DIM={value}. Dimension must be a positive integer."
+                f"Invalid warpSPHCore_DIM={value}. Dimension must be a positive integer."
             )
         return dim
     key = value.strip()
@@ -69,26 +69,26 @@ def _resolve_dim(value: str | int | None):
         dim = int(key)
     except ValueError as exc:
         raise ValueError(
-            f"Invalid SPHWARPCORE_DIM='{value}'. Expected a positive integer or 'Any'."
+            f"Invalid warpSPHCore_DIM='{value}'. Expected a positive integer or 'Any'."
         ) from exc
 
     if dim <= 0:
         raise ValueError(
-            f"Invalid SPHWARPCORE_DIM='{value}'. Dimension must be a positive integer."
+            f"Invalid warpSPHCore_DIM='{value}'. Dimension must be a positive integer."
         )
 
     return dim
 
 
-scalar_t: type = _resolve_precision(os.getenv("SPHWARPCORE_PRECISION"))
+scalar_t: type = _resolve_precision(os.getenv("warpSPHCore_PRECISION"))
 scalar: type = scalar_t
 
-dim_t: int | Any = _resolve_dim(os.getenv("SPHWARPCORE_DIM"))
+dim_t: int | Any = _resolve_dim(os.getenv("warpSPHCore_DIM"))
 
 
 def _load_pythonic_preconfig() -> tuple[str | None, str | int | None]:
     try:
-        cfg = importlib.import_module("sphWarpCore_config")
+        cfg = importlib.import_module("warpSPHCore_config")
     except ModuleNotFoundError:
         return None, None
 

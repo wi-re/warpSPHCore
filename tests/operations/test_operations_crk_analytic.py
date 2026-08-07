@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from sphWarpCore.enumTypes import GradientScheme, WarpOperation
+from warpSPHCore.enumTypes import GradientScheme, WarpOperation
 
 from conftest import (
     crk_state,

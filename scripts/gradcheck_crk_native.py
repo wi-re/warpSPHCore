@@ -50,7 +50,7 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("SPHWARPCORE_PRECISION", "float64")
+os.environ.setdefault("warpSPHCore_PRECISION", "float64")
 
 import sys
 
@@ -58,9 +58,9 @@ import torch
 import warp as wp
 
 from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, build_grid_adjacency, line_case, make_domain, single_particle_case
-from sphWarpCore import ParticleState
-from sphWarpCore.crk import computeCRKFactors
-from sphWarpCore.enumTypes import OperationDirection
+from warpSPHCore import ParticleState
+from warpSPHCore.crk import computeCRKFactors
+from warpSPHCore.enumTypes import OperationDirection
 
 
 def run_gradcheck(name: str, positions: torch.Tensor, supports: torch.Tensor, masses: torch.Tensor, traversal: str) -> bool:

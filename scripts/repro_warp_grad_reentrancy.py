@@ -63,8 +63,8 @@ caller's tensor is never mutated. This fixes Bug 2 outright (no .clone()
 of grad_output needed at all). Bug 1 still needs its own fix on the read
 side: .clone() the gradient read off Warp, and call tape.zero() afterward.
 
-Applied to sphWarpCore's real AD bridge in
-src/sphWarpCore/utils/wp_autograd.py (WarpFunctionWrapper.backward and
+Applied to warpSPHCore's real AD bridge in
+src/warpSPHCore/utils/wp_autograd.py (WarpFunctionWrapper.backward and
 StateAwareWarpFunction.backward) -- see warpier_core.md for the
 production-code writeup.
 """

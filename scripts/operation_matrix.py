@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Console diagnostic matrix for sphWarpCore operations.
+"""Console diagnostic matrix for warpSPHCore operations.
 
 Runs every operation (Density, Interpolate, Gradient, Divergence, Curl,
 Laplacian) against every relevant scheme variant (GradientScheme /
@@ -47,12 +47,12 @@ import warp as wp
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 # --------------------------------------------------------------------------
-# sphWarpCore is imported lazily, inside _configure() (called from main()
+# warpSPHCore is imported lazily, inside _configure() (called from main()
 # after --precision is parsed), NOT at module load time. Warp bakes scalar_t
-# into every @wp.kernel/@wp.func the first time any sphWarpCore submodule is
-# imported in this process (src/sphWarpCore/type_config.py reads
-# SPHWARPCORE_PRECISION once, at that import); it cannot be changed
-# afterwards. All the sphWarpCore-derived names below are populated by
+# into every @wp.kernel/@wp.func the first time any warpSPHCore submodule is
+# imported in this process (src/warpSPHCore/type_config.py reads
+# warpSPHCore_PRECISION once, at that import); it cannot be changed
+# afterwards. All the warpSPHCore-derived names below are populated by
 # _configure() and referenced as globals by the functions/classes further
 # down -- that's safe in Python because free-variable lookup for a global
 # happens when the function is *called*, not when it's *defined*, and
@@ -90,9 +90,9 @@ PRECISION_TO_TORCH_DTYPE = {"float32": torch.float32, "float64": torch.float64}
 
 
 def _configure(precision: str) -> None:
-    """Sets SPHWARPCORE_PRECISION and imports every sphWarpCore symbol this
+    """Sets warpSPHCore_PRECISION and imports every warpSPHCore symbol this
     script needs. Must be called exactly once, before any Case/build_rows/
-    evaluate/etc. call, and before any other sphWarpCore import in this
+    evaluate/etc. call, and before any other warpSPHCore import in this
     process."""
     global OperationProperties, ParticleState, DomainDescription, radiusSearchCompactHashMap, warpOperation
     global computeCRKFactors
@@ -100,32 +100,32 @@ def _configure(precision: str) -> None:
     global computeRenormalizationMatrices, CRKState, RenormalizationState, generateNeighborTestData, n_h_to_nH
     global KERNEL, SUPPORT_MODE, OP_MODE, GRADIENT_SCHEMES, LAPLACIAN_SCHEMES
 
-    os.environ["SPHWARPCORE_PRECISION"] = precision
+    os.environ["warpSPHCore_PRECISION"] = precision
 
-    import sphWarpCore
-    import sphWarpCore.crk
-    import sphWarpCore.enumTypes
-    import sphWarpCore.dataTypes
-    import sphWarpCore.renorm
-    import sphWarpCore.util
+    import warpSPHCore
+    import warpSPHCore.crk
+    import warpSPHCore.enumTypes
+    import warpSPHCore.dataTypes
+    import warpSPHCore.renorm
+    import warpSPHCore.util
 
-    OperationProperties = sphWarpCore.OperationProperties
-    ParticleState = sphWarpCore.ParticleState
-    DomainDescription = sphWarpCore.dataTypes.DomainDescription
-    radiusSearchCompactHashMap = sphWarpCore.radiusSearchCompactHashMap
-    warpOperation = sphWarpCore.warpOperation
-    computeCRKFactors = sphWarpCore.crk.computeCRKFactors
-    GradientScheme = sphWarpCore.enumTypes.GradientScheme
-    KernelFunctions = sphWarpCore.enumTypes.KernelFunctions
-    LaplacianScheme = sphWarpCore.enumTypes.LaplacianScheme
-    OperationDirection = sphWarpCore.enumTypes.OperationDirection
-    SupportScheme = sphWarpCore.enumTypes.SupportScheme
-    WarpOperation = sphWarpCore.enumTypes.WarpOperation
-    computeRenormalizationMatrices = sphWarpCore.renorm.computeRenormalizationMatrices
-    CRKState = sphWarpCore.dataTypes.CRKState
-    RenormalizationState = sphWarpCore.dataTypes.RenormalizationState
-    generateNeighborTestData = sphWarpCore.util.generateNeighborTestData
-    n_h_to_nH = sphWarpCore.n_h_to_nH
+    OperationProperties = warpSPHCore.OperationProperties
+    ParticleState = warpSPHCore.ParticleState
+    DomainDescription = warpSPHCore.dataTypes.DomainDescription
+    radiusSearchCompactHashMap = warpSPHCore.radiusSearchCompactHashMap
+    warpOperation = warpSPHCore.warpOperation
+    computeCRKFactors = warpSPHCore.crk.computeCRKFactors
+    GradientScheme = warpSPHCore.enumTypes.GradientScheme
+    KernelFunctions = warpSPHCore.enumTypes.KernelFunctions
+    LaplacianScheme = warpSPHCore.enumTypes.LaplacianScheme
+    OperationDirection = warpSPHCore.enumTypes.OperationDirection
+    SupportScheme = warpSPHCore.enumTypes.SupportScheme
+    WarpOperation = warpSPHCore.enumTypes.WarpOperation
+    computeRenormalizationMatrices = warpSPHCore.renorm.computeRenormalizationMatrices
+    CRKState = warpSPHCore.dataTypes.CRKState
+    RenormalizationState = warpSPHCore.dataTypes.RenormalizationState
+    generateNeighborTestData = warpSPHCore.util.generateNeighborTestData
+    n_h_to_nH = warpSPHCore.n_h_to_nH
 
     KERNEL = KernelFunctions.Wendland2
     SUPPORT_MODE = SupportScheme.Gather
@@ -221,7 +221,7 @@ class Case:
             nx, target_neighbors, dim, True, device
         )
         # generateNeighborTestData hardcodes float32 internally (see
-        # src/sphWarpCore/utils/wp_util.py) regardless of SPHWARPCORE_PRECISION
+        # src/warpSPHCore/utils/wp_util.py) regardless of warpSPHCore_PRECISION
         # -- cast everything to the requested precision here rather than
         # touching that shared utility, which pytest fixtures and demo_util.py
         # also depend on at float32.
@@ -772,8 +772,8 @@ def main():
     parser.add_argument("--device", choices=["auto", "cpu", "cuda", "both"], default="auto")
     parser.add_argument("--precision", choices=["float32", "float64"], default="float32",
                          help="scalar precision baked into every compiled kernel for this run (default: float32). "
-                              "Warp bakes this in at first sphWarpCore import and cannot change it afterwards, so "
-                              "this script sets SPHWARPCORE_PRECISION and imports sphWarpCore only after parsing "
+                              "Warp bakes this in at first warpSPHCore import and cannot change it afterwards, so "
+                              "this script sets warpSPHCore_PRECISION and imports warpSPHCore only after parsing "
                               "this flag -- one process/invocation tests exactly one precision. float16 is "
                               "deliberately not offered: half precision is numerically nonsensical for this kind "
                               "of SPH kernel sum, a separate problem from what this smoke test checks.")

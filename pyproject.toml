@@ -3,8 +3,8 @@ requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "sphWarpCore"
-version = "0.4.5"
+name = "warpSPHCore"
+version = "0.5.0"
 description = "GPU-accelerated SPH neighbor search and operators built with NVIDIA Warp and PyTorch"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
@@ -39,7 +39,7 @@ dev = [
 
 [tool.setuptools]
 package-dir = {"" = "src"}
-py-modules = ["sphWarpCore_config"]
+py-modules = ["warpSPHCore_config"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

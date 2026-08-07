@@ -1,5 +1,5 @@
 
-from sphWarpCore import *
+from warpSPHCore import *
 import torch
 import math
 

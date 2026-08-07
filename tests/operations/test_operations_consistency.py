@@ -1,6 +1,6 @@
 import torch
 
-from sphWarpCore.enumTypes import GradientScheme, WarpOperation
+from warpSPHCore.enumTypes import GradientScheme, WarpOperation
 
 from conftest import interior_mask, linear_vector_field, mean_abs_error, op
 

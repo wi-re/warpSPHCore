@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Native torch.autograd.gradcheck against Covariance -- no workarounds.
 
-Covariance (src/sphWarpCore/coreOperations/wp_covariance.py) was the operator the
+Covariance (src/warpSPHCore/coreOperations/wp_covariance.py) was the operator the
 canonical structured kernel ABI (queryState/referenceState/domainState/useAdjacency/
 adjacencyState/gridState/correctionData/...) was originally modeled on (see
 warpier_core.md's "Working Prototype -> Production"), and its kernel already branched
@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import os
 
-os.environ.setdefault("SPHWARPCORE_PRECISION", "float64")
+os.environ.setdefault("warpSPHCore_PRECISION", "float64")
 
 import sys
 
@@ -45,8 +45,8 @@ import torch
 import warp as wp
 
 from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, build_grid_adjacency, line_case, make_domain, single_particle_case
-from sphWarpCore import OperationProperties, ParticleState, warpOperation
-from sphWarpCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
+from warpSPHCore import OperationProperties, ParticleState, warpOperation
+from warpSPHCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
 
 
 def compute_densities(positions, supports, masses, kinds, domain, adjacency):

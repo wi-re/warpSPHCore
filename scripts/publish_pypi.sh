@@ -62,17 +62,17 @@ except ModuleNotFoundError:
     sys.exit(1)
 
 pyproject_version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
-init_text = Path("src/sphWarpCore/__init__.py").read_text()
+init_text = Path("src/warpSPHCore/__init__.py").read_text()
 match = re.search(r'^__version__\s*=\s*"([^"]+)"', init_text, re.MULTILINE)
 if match is None:
-    print("Could not find __version__ in src/sphWarpCore/__init__.py", file=sys.stderr)
+    print("Could not find __version__ in src/warpSPHCore/__init__.py", file=sys.stderr)
     sys.exit(1)
 
 package_version = match.group(1)
 if pyproject_version != package_version:
     print(
         f"Version mismatch: pyproject.toml has {pyproject_version}, "
-        f"but src/sphWarpCore/__init__.py has {package_version}",
+        f"but src/warpSPHCore/__init__.py has {package_version}",
         file=sys.stderr,
     )
     sys.exit(1)
