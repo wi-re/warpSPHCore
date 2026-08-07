@@ -94,7 +94,7 @@ class ViscosityTerms(Enum):
     DeltaSPH = 11
 
 class OperationDirection(Enum):
-    NoGhost = 0
+    TrueAllToToAll = 0
     FluidToFluid = 1
     FluidToBoundary = 2
     BoundaryToFluid = 3

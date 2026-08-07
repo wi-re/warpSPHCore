@@ -51,14 +51,14 @@ def computeCRKMoments_Func_i(
 
     # Domain and kernel parameters
     domainState: domainData,
-    mode_uint: wp.uint32, kernel_int: wp.int32,
+    kernelProperties: kernelState,
 
     # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
     # neighbor list or the grid's sorted particle index, depending on the caller.
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
     # Operation mode for masking certain kinds of interactions, e.g. for directional operations
-    opInt: wp.int32, ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
 
     correctionData: Any, # correctionData_1/2/3 -- only used here for the (query==reference) apparent volumes
 
@@ -82,8 +82,8 @@ def computeCRKMoments_Func_i(
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
         j  = wp.int32(offsetArray[jj])
-        if opInt != 0:
-            if not checkDirectionality_j(referenceKinds[j], opInt):
+        if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
@@ -92,9 +92,9 @@ def computeCRKMoments_Func_i(
         xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
         _, V_j = getVolume_j(correctionData, j)
 
-        x_ij = computeDistanceVec(xi, xj, domainState.periodicity, domainState.domainMin, domainState.domainMax)
-        w_ij = sphKernel_ij(x_ij, hi, hj, kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax)
-        gradw_ij = sphKernelGradient_ij(x_ij, hi, hj, kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax)
+        x_ij = computeDistanceVec(xi, xj, domainState)
+        w_ij = sphKernel_ij(x_ij, hi, hj, kernelProperties, domainState)
+        gradw_ij = sphKernelGradient_ij(x_ij, hi, hj, kernelProperties, domainState)
 
         m_0 += V_j * w_ij
         m_1 += x_ij * (V_j * w_ij)
@@ -126,7 +126,7 @@ def computeCRKMoments_Func_Adjacency(
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
 
     output_m_0: scalar_t, # type: ignore
     output_m_1: vector(length=Any, dtype=scalar_t), # type: ignore
@@ -136,8 +136,8 @@ def computeCRKMoments_Func_Adjacency(
     output_dm_2dgamma: vector(length=Any, dtype=scalar_t) # type: ignore
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
-    if opInt != 0:
-        if not checkDirectionality_i(ki, opInt):
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_i(ki, kernelProperties.operationMode):
             return (
                 zero_like_warp(output_m_0), zero_like_warp(output_m_1), zero_like_warp(output_m_2),
                 zero_like_warp(output_dm_0dgamma), zero_like_warp(output_dm_1dgamma), zero_like_warp(output_dm_2dgamma),
@@ -171,10 +171,10 @@ def computeCRKMoments_Func_Adjacency(
             i, dim,
             xi, hi,
             referenceState, domainState,
-            mode_uint, kernel_int,
+            kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            opInt, ki, referenceState.kinds,
+            ki, referenceState.kinds,
 
             correctionData,
 
@@ -200,7 +200,7 @@ def computeCRKMoments_Kernel(
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
     # Do not change the parameters above -- this is the canonical structured kernel ABI
     # (see warpier_core.md, Phase 1 / Step 1); other operators share this argument prefix.
 
@@ -222,7 +222,7 @@ def computeCRKMoments_Kernel(
         i, domainState.dim,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
-        mode_uint, kernel_int, opInt,
+        kernelProperties,
         # The parameters above are default parameters and should not be changed
 
         # zero_like_warp on the *array itself* only has overloads up to a 3-vector /

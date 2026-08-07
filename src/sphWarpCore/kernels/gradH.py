@@ -9,6 +9,8 @@ from ..math import *
 from ..type_config import scalar_t, dim_t
 from .kernelFunctions import *
 from ..util.support import computePairwiseSupport
+from ..dataTypes.domain_t import domainData
+from ..dataTypes.kernelState_t import kernelState
 
 @wp.func
 def sphKernelDkDh_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
@@ -29,16 +31,13 @@ def sphKernelDkDh(
     xj: vector(dtype=scalar_t, length=dim_t),
     hi: scalar_t,
     hj: scalar_t,
-    kernel: wp.int32,
-    mode: wp.uint32,
-    periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = scalar_t),
-    maxDomain: wp.array(dtype = scalar_t),
+    kernelProperties: kernelState,
+    domainState: domainData,
 ):
-    hij = computePairwiseSupport(hi, hj, mode)
-    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
-        return (sphKernelDkDh_(xij,hi,kernel) + sphKernelDkDh_(xij,hj,kernel))/scalar_t(2.0)
-    
-    return sphKernelDkDh_(xij, hij, kernel)
+    hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
+    xij = computeDistanceVec(xi, xj, domainState)
+    if kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
+        return (sphKernelDkDh_(xij,hi,kernelProperties.kernelFunction) + sphKernelDkDh_(xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0)
+
+    return sphKernelDkDh_(xij, hij, kernelProperties.kernelFunction)
     

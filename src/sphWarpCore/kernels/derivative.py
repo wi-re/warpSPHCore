@@ -9,6 +9,8 @@ from ..math import *
 from ..type_config import scalar_t, dim_t
 from .kernelFunctions import *
 from ..util.support import computePairwiseSupport
+from ..dataTypes.domain_t import domainData
+from ..dataTypes.kernelState_t import kernelState
 
 
 @wp.func
@@ -26,15 +28,11 @@ def sphKernelDerivative(
     xj: vector(dtype=scalar_t, length=dim_t),
     hi: scalar_t,
     hj: scalar_t,
-    kernel: wp.int32,
-    mode: wp.uint32,
-    periodic: wp.array(dtype = wp.bool),
-    minDomain: wp.array(dtype = scalar_t),
-    maxDomain: wp.array(dtype = scalar_t),   
+    kernelProperties: kernelState,
+    domainState: domainData,
 ):
-    hij = computePairwiseSupport(hi, hj, mode)
-    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
-    if mode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
-        return (sphKernelDerivative_(xij,hi,kernel) + sphKernelDerivative_(xij,hj,kernel))/scalar(2.0)
-    return sphKernelDerivative_(xij, hij, kernel)
-    
+    hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
+    xij = computeDistanceVec(xi, xj, domainState)
+    if kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
+        return (sphKernelDerivative_(xij,hi,kernelProperties.kernelFunction) + sphKernelDerivative_(xij,hj,kernelProperties.kernelFunction))/scalar(2.0)
+    return sphKernelDerivative_(xij, hij, kernelProperties.kernelFunction)

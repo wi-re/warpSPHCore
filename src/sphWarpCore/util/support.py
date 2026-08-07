@@ -10,6 +10,7 @@ import torch
 from ..type_config import scalar_t
 from ..enumTypes import SupportScheme
 from ..math import vectorNorm_warp
+from ..dataTypes.domain_t import domainData
 
 @torch.jit.script
 def volumeToSupport(volume : float, targetNeighbors : int, dim : int):
@@ -81,12 +82,17 @@ def computePairwiseSupport(hx: scalar_t, hy: scalar_t, mode: wp.uint32):
 
 @wp.func
 def isInSupport(
-    xi: vector(dtype=scalar_t, length=3), xj: vector(dtype=scalar_t, length=3), 
+    xi: vector(dtype=scalar_t, length=3), xj: vector(dtype=scalar_t, length=3),
     hi: scalar_t, hj: scalar_t, mode: wp.uint32,
     periodic: wp.array(dtype = wp.bool), minDomain: wp.array(dtype = scalar_t), maxDomain: wp.array(dtype = scalar_t)
     ):
     hij = computePairwiseSupport(hi, hj, mode)
-    xij = computeDistanceVec(xi, xj, periodic, minDomain, maxDomain)
+    domainState = domainData()
+    domainState.domainMin = minDomain
+    domainState.domainMax = maxDomain
+    domainState.periodicity = periodic
+    domainState.dim = wp.int32(minDomain.shape[0])
+    xij = computeDistanceVec(xi, xj, domainState)
     r = vectorNorm_warp(xij)
     q = r / hij
     return q <= scalar_t(1.0)

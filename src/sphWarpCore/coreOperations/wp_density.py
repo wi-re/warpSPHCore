@@ -37,11 +37,11 @@ def computeSPHDensity_Func_i(
     referenceState: Any, # particleDataSoA_1/2/3
 
     domainState: domainData,
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32,
+    kernelProperties: kernelState,
 
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    opInt: wp.int32, ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -49,8 +49,8 @@ def computeSPHDensity_Func_i(
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
         j = wp.int32(offsetArray[jj])
-        if opInt != 0:
-            if not checkDirectionality_j(referenceKinds[j], opInt):
+        if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
@@ -58,7 +58,7 @@ def computeSPHDensity_Func_i(
 
         xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
 
-        out += mj * sphKernel(xi, xj, hi, hj, kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax)
+        out += mj * sphKernel(xi, xj, hi, hj, kernelProperties, domainState)
 
     return out
 
@@ -72,13 +72,13 @@ def computeSPHDensity_Func_Adjacency(
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
 
     outputValue: Any, # type: ignore
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
-    if opInt != 0:
-        if not checkDirectionality_i(ki, opInt):
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_i(ki, kernelProperties.operationMode):
             return zero_like_warp(outputValue)
 
     out = zero_like_warp(outputValue)
@@ -101,10 +101,10 @@ def computeSPHDensity_Func_Adjacency(
             i, dim,
             xi, hi,
             referenceState, domainState,
-            mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int,
+            kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            opInt, ki, referenceState.kinds,
+            ki, referenceState.kinds,
 
             outputValue,
         )
@@ -120,7 +120,7 @@ def computeSPHDensity_Kernel(
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     # The last parameter is always the output array and should not be changed
@@ -135,7 +135,7 @@ def computeSPHDensity_Kernel(
         i, domainState.dim,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
-        mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int, opInt,
+        kernelProperties,
 
         zero_like_warp(outputValues[i]),
     )

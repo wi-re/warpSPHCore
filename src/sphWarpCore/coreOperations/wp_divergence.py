@@ -97,11 +97,11 @@ def computeSPHDivergenceTensor_Func_i(
     referenceState: Any, # particleDataSoA_1/2/3
 
     domainState: domainData,
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32,
+    kernelProperties: kernelState,
 
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    opInt: wp.int32, ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
 
     useGradientRenormalization: wp.bool, Li: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
     useGradHTerms: wp.bool, omega_i: scalar_t, referenceOmegas: wp.array(dtype = scalar_t), # type: ignore
@@ -116,12 +116,12 @@ def computeSPHDivergenceTensor_Func_i(
     outputValue: Any, # type: ignore
 ):
     out = zero_like_warp(outputValue)
-    dotMode = divergenceMode_int != 0
+    dotMode = kernelProperties.divergenceMode
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
         j = wp.int32(offsetArray[jj])
-        if opInt != 0:
-            if not checkDirectionality_j(referenceKinds[j], opInt):
+        if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
@@ -144,20 +144,20 @@ def computeSPHDivergenceTensor_Func_i(
         kernelGradient = computeKernelGradientCRK(
             xi, xj,
             hi, hj,
-            kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax,
+            kernelProperties, domainState,
             useCRK, Ai, Bi, gradAi, gradBi
         )
 
         if useGradientRenormalization:
             kernelGradient = matmul(Li, kernelGradient)
 
-        if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
+        if kernelProperties.gradientMode == wp.static(GradientScheme.Naive.value): # Naive
             out += divergenceProduct(fj * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
-        elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
+        elif kernelProperties.gradientMode == wp.static(GradientScheme.Symmetric.value): # Symmetric
             out += divergenceProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)), kernelGradient, outputValue, flatOutputShape, dotMode)
-        elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
+        elif kernelProperties.gradientMode == wp.static(GradientScheme.Difference.value): # Difference
             out += divergenceProduct((fj - fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
-        elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation
+        elif kernelProperties.gradientMode == wp.static(GradientScheme.Summation.value): # Summation
             out += divergenceProduct((fj + fi) * apparentVolume, kernelGradient, outputValue, flatOutputShape, dotMode)
 
     return out
@@ -172,7 +172,7 @@ def computeSPHDivergenceTensor_Func_Adjacency(
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
 
     consistentDivergence: wp.bool,
 
@@ -182,8 +182,8 @@ def computeSPHDivergenceTensor_Func_Adjacency(
     outputValue: Any, # type: ignore
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
-    if opInt != 0:
-        if not checkDirectionality_i(ki, opInt):
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_i(ki, kernelProperties.operationMode):
             return zero_like_warp(outputValue)
 
     useGradientRenormalization, Li = getL_i(correctionData, i)
@@ -215,10 +215,10 @@ def computeSPHDivergenceTensor_Func_Adjacency(
             i, dim, numDims, flatInputShape, flatOutputShape,
             xi, hi, mi, rhoi,
             referenceState, domainState,
-            mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int,
+            kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            opInt, ki, referenceState.kinds,
+            ki, referenceState.kinds,
 
             useGradientRenormalization, Li,
             useGradHTerms, omega_i, correctionData.referenceOmegas,
@@ -244,7 +244,7 @@ def computeSPHDivergenceTensor_Kernel(
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     consistentDivergence: wp.bool,
@@ -264,7 +264,7 @@ def computeSPHDivergenceTensor_Kernel(
         i, domainState.dim,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
-        mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int, opInt,
+        kernelProperties,
         consistentDivergence,
         numDims, flatInputShape, flatOutputShape,
         queryValues, referenceValues,

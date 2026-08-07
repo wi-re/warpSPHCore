@@ -3,7 +3,7 @@ from ..math import *
 import warp as wp
 from ..kernels import *
 from warp.types import vector, matrix
-
+from ..dataTypes import *
 
 @wp.func
 def correctGradientCRK(
@@ -35,19 +35,16 @@ def computeKernelGradientCRK(
     xj: vector(dtype=scalar_t, length=dim_t),
     hi: scalar_t,
     hj: scalar_t,
-    kernel: wp.int32,
-    mode: wp.uint32,
-    periodicity: wp.array(dtype = wp.bool),
-    domainMin: wp.array(dtype = scalar_t),
-    domainMax: wp.array(dtype = scalar_t),
+    kernelProperties: kernelState,
+    domainState: domainData,
     useCRK: wp.bool,
     Ai: scalar_t, Bi: vector(length=dim_t, dtype=scalar_t), gradAi: vector(length=dim_t, dtype=scalar_t), gradBi: matrix(shape=(dim_t, dim_t), dtype=scalar_t), # type: ignore
 ):
-    x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
-    kernelGradient = sphKernelGradient_ij(x_ij, hi, hj, kernel, mode, periodicity, domainMin, domainMax)
+    x_ij = computeDistanceVec(xi, xj, domainState)
+    kernelGradient = sphKernelGradient_ij(x_ij, hi, hj, kernelProperties, domainState)
 
     if useCRK:
-        W_ij = sphKernel_ij(x_ij, hi, hj, kernel, mode, periodicity, domainMin, domainMax)
+        W_ij = sphKernel_ij(x_ij, hi, hj, kernelProperties, domainState)
         return correctGradientCRK(
             W_ij,
             kernelGradient, 
@@ -62,17 +59,14 @@ def computeKernelCRK(
     xj: vector(dtype=scalar_t, length=dim_t),
     hi: scalar_t,
     hj: scalar_t,
-    kernel: wp.int32,
-    mode: wp.uint32,
-    periodicity: wp.array(dtype = wp.bool),
-    domainMin: wp.array(dtype = scalar_t),
-    domainMax: wp.array(dtype = scalar_t),
+    kernelProperties: kernelState,
+    domainState: domainData,
     useCRK: wp.bool,
     Ai: scalar_t, Bi: vector(length=dim_t, dtype=scalar_t)
 ):
-    x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
-    w_ij = sphKernel_ij(x_ij, hi, hj, kernel, mode, periodicity, domainMin, domainMax)
+    x_ij = computeDistanceVec(xi, xj, domainState)
+    w_ij = sphKernel_ij(x_ij, hi, hj, kernelProperties, domainState)
     if useCRK:
-        xij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
+        xij = computeDistanceVec(xi, xj, domainState)
         return Ai * (scalar_t(1.0) + wp.dot(Bi, xij)) * w_ij
     return w_ij

@@ -33,26 +33,26 @@ def computeCRKVolume_Func_i(
     referenceState: Any, # particleDataSoA_1/2/3
 
     domainState: domainData,
-    mode_uint: wp.uint32, kernel_int: wp.int32,
+    kernelProperties: kernelState,
 
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    opInt: wp.int32, ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
 ):
     out = scalar_t(0.0)
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
         j  = wp.int32(offsetArray[jj])
-        if opInt != 0:
-            if not checkDirectionality_j(referenceKinds[j], opInt):
+        if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
         xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
-        x_ij = computeDistanceVec(xi, xj, domainState.periodicity, domainState.domainMin, domainState.domainMax)
-        w_ij = sphKernel_ij(x_ij, hi, hj, kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax)
+        x_ij = computeDistanceVec(xi, xj, domainState)
+        w_ij = sphKernel_ij(x_ij, hi, hj, kernelProperties, domainState)
 
         out += w_ij
 
@@ -68,7 +68,7 @@ def computeCRKVolume_Func_Adjacency(
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
 ):
     # Returns (wsum, masked) rather than the final 1/wsum reciprocal -- Warp's adjoint
     # for a *dynamic* for-loop (numOffsets is a runtime value, not a compile-time
@@ -81,8 +81,8 @@ def computeCRKVolume_Func_Adjacency(
     # computeCRKVolume_Kernel, outside the function that contains the loop -- verified
     # to fix the NaN gradient (same data, same case, clean backward once moved).
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
-    if opInt != 0:
-        if not checkDirectionality_i(ki, opInt):
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_i(ki, kernelProperties.operationMode):
             return scalar_t(0.0), True
 
     wsum = scalar_t(0.0)
@@ -105,10 +105,10 @@ def computeCRKVolume_Func_Adjacency(
             i, dim,
             xi, hi,
             referenceState, domainState,
-            mode_uint, kernel_int,
+            kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            opInt, ki, referenceState.kinds,
+            ki, referenceState.kinds,
         )
 
     return wsum, False
@@ -123,7 +123,7 @@ def computeCRKVolume_Kernel(
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any, # unused (no corrections apply to the volume estimate itself) -- kept for ABI consistency, see coreOperations/wp_density.py for the same pattern
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
     # Do not change the parameters above -- this is the canonical structured kernel ABI
     # (see warpier_core.md, Phase 1 / Step 1); other operators share this argument prefix.
 
@@ -139,7 +139,7 @@ def computeCRKVolume_Kernel(
         i, domainState.dim,
         queryState, referenceState, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
-        mode_uint, kernel_int, opInt,
+        kernelProperties,
     )
     # The reciprocal is applied here, outside computeCRKVolume_Func_Adjacency's dynamic
     # loop -- see that function's docstring comment for why.

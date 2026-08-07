@@ -1,6 +1,7 @@
 import warp as wp
 from ...math import *
 from ...util import *
+from ...dataTypes import domainData
 
 # Define kernels that work with flattened float32 arrays
 @wp.kernel
@@ -22,15 +23,21 @@ def warp_radius_search_kernel_direct_2(
     M = y.shape[0]
     D = x.shape[1]
     i = wp.tid()
-    
+
+    domainState = domainData()
+    domainState.domainMin = min_domain
+    domainState.domainMax = max_domain
+    domainState.periodicity = periodic
+    domainState.dim = D
+
     if i < wp.len(hx):  # Loop over query points
         count = int(0)
-        
+
         for j in range(M):
             dist = computeCartesianDistance(
-                x[i], 
-                y[j], 
-                min_domain, max_domain, periodic
+                x[i],
+                y[j],
+                domainState
             )
             
             # Determine threshold based on mode
@@ -72,16 +79,22 @@ def warp_radius_search_collect_kernel_direct_2(
     """
     i = wp.tid()
     M = y.shape[0]
-    
+
+    domainState = domainData()
+    domainState.domainMin = min_domain
+    domainState.domainMax = max_domain
+    domainState.periodicity = periodic
+    domainState.dim = wp.int32(x.shape[1])
+
     if i < wp.len(hx):  # Loop over query points
         offset = edge_offsets[i]
         edge_idx = offset
-        
+
         for j in range(M):
             dist = computeCartesianDistance(
-                x[i], 
-                y[j], 
-                min_domain, max_domain, periodic
+                x[i],
+                y[j],
+                domainState
             )
             
             # Determine threshold based on mode

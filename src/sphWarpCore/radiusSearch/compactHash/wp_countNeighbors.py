@@ -64,7 +64,13 @@ def radiusSearchCountNeighborsCompactHashMap(
     
     queryPos = queryPositions[i]
     querySupport = querySupports[i]
-    
+
+    domainState = domainData()
+    domainState.domainMin = minDomain
+    domainState.domainMax = maxDomain
+    domainState.periodicity = periodicity
+    domainState.dim = D
+
     # Determine the cell index of the query particle
     cellIndex = wp.vec3i(0, 0, 0, dtype=wp.int32)
     for d in range(D):
@@ -164,7 +170,7 @@ def radiusSearchCountNeighborsCompactHashMap(
                 neighborPos = sortedPositions[neighborIndex]
                 neighborSupport = sortedSupports[neighborIndex] if sortedSupports.shape[0] > 0 else scalar_t(0.0)
                 
-                dist = computeCartesianDistance(queryPos, neighborPos, minDomain, maxDomain, periodicity)
+                dist = computeCartesianDistance(queryPos, neighborPos, domainState)
                 
                 # Determine threshold based on mode
                 threshold = scalar_t(0.0)

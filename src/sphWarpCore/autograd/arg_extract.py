@@ -219,8 +219,8 @@ def extractStateInfo(
                 'kernel_int':               kernel_int,
                 'gradientMode_int':         gradientMode_int,
                 'laplacianMode_int':        laplacianMode_int,
-                'positiveDivergence_int':   1 if positiveDivergence else 0,
-                'divergenceMode_int':       1 if divergenceMode else 0,
+                'positiveDivergence':       positiveDivergence,
+                'divergenceMode':           divergenceMode,
                 'opInt':                    opInt,
             }
         with record_function("[ESI] 6. assemble flat tensor list"):
@@ -268,8 +268,8 @@ def extractStateInfo(
     _kernel_int                  = cfg['kernel_int']
     _gradientMode_int            = cfg['gradientMode_int']
     _laplacianMode_int           = cfg['laplacianMode_int']
-    _positiveDivergence_int      = cfg['positiveDivergence_int']
-    _divergenceMode_int          = cfg['divergenceMode_int']
+    _positiveDivergence          = cfg['positiveDivergence']
+    _divergenceMode              = cfg['divergenceMode']
     _opInt                       = cfg['opInt']
 
     def build_fn(wa: list) -> tuple:
@@ -333,12 +333,25 @@ def extractStateInfo(
         corrState.referenceGradA             = wa[21]
         corrState.referenceGradB             = wa[22]
 
+        # Kernel-properties struct — replaces the seven flat scalars
+        # (mode_uint/kernel_int/gradientMode_int/laplacianMode_int/
+        # positiveDivergence_int/divergenceMode_int/opInt) that used to be
+        # threaded individually through every operator kernel's ABI. See
+        # dataTypes/kernelState_t.py and warpier_core.md.
+        kernProps = kernelState()
+        kernProps.kernelFunction        = _kernel_int
+        kernProps.supportMode           = _mode_uint
+        kernProps.gradientMode          = _gradientMode_int
+        kernProps.laplacianMode         = _laplacianMode_int
+        kernProps.positiveDivergenceMode = _positiveDivergence
+        kernProps.divergenceMode        = _divergenceMode
+        kernProps.operationMode         = _opInt
+
         return (
             qPart, rPart, domState,
             _useAdjacency, adjState, gState,
             corrState,
-            _mode_uint, _kernel_int,
-            _gradientMode_int, _laplacianMode_int, _positiveDivergence_int, _divergenceMode_int, _opInt,
+            kernProps,
         )
 
     return flat_tensors, build_fn, device, dim

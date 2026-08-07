@@ -37,3 +37,8 @@ from .properties_t import OperationProperties
 __all__.extend([
     'OperationProperties',
 ])
+
+from .kernelState_t import kernelState
+__all__.extend([
+    'kernelState',
+])

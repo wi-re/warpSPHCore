@@ -23,15 +23,15 @@ def updateNeighborsVerletFunc(
     
     # Domain and kernel parameters
     periodicity : wp.array(dtype = wp.bool), domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), # type: ignore
-    mode_uint: wp.uint32, 
-    
+    mode_uint: wp.uint32,
+
     # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
     neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32, 
+    neighborOffset : wp.int32, numNeighs: wp.int32,
 
     # New Neighbor list data
-    newNeighborOffset: wp.int32, newNumNeighs: wp.int32, 
-    
+    newNeighborOffset: wp.int32, newNumNeighs: wp.int32,
+
     # Outputs
     edge_i: wp.array1d(dtype=wp.int64),  # shape [total_edges] # type: ignore
     edge_j: wp.array1d(dtype=wp.int64)   # shape [total_edges] # type: ignore
@@ -39,16 +39,22 @@ def updateNeighborsVerletFunc(
     xi = queryPositions[i]
     hi = querySupports[i]
 
+    domainState = domainData()
+    domainState.domainMin = domainMin
+    domainState.domainMax = domainMax
+    domainState.periodicity = periodicity
+    domainState.dim = wp.int32(domainMin.shape[0])
+
     counter = wp.int32(0)
-    # Loop over neighbors to compute the gradient contribution from each neighbor    
+    # Loop over neighbors to compute the gradient contribution from each neighbor
     for neighborIndex in range(numNeighs):
         jj = neighborOffset + neighborIndex
         j  = wp.int32(neighborList[jj])
 
         xj = referencePositions[j]
         hj = referenceSupports[j]
-        
-        x_ij = computeDistanceVec(xi, xj, periodicity, domainMin, domainMax)
+
+        x_ij = computeDistanceVec(xi, xj, domainState)
         hij = computePairwiseSupport(hi, hj, mode_uint)
         
         r_ij = safe_sqrt(wp.dot(x_ij, x_ij))

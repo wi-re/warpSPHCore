@@ -4,6 +4,8 @@ from ..type_config import *
 from .wp_sqrt import *
 from typing import Optional, Any, Union, List, Tuple
 
+from ..dataTypes.domain_t import domainData
+
 @wp.func
 def mod_distance(
     x : scalar_t, y: scalar_t, minDomain: scalar_t, maxDomain: scalar_t, periodic: bool
@@ -15,7 +17,7 @@ def mod_distance(
             dx = wp.sign(dx) * (wp.abs(dx) - domain_size)
     else:
         dx = x - y
-    
+
     return dx
 
 # # @wp.kernel
@@ -37,13 +39,11 @@ def mod_distance(
 def computeCartesianDistance(
     x: wp.array(dtype=scalar_t),  # Shape (D,)
     y: wp.array(dtype=scalar_t),  # Shape (D,)
-    minDomain: wp.array(dtype=scalar_t),  # Shape (D,)
-    maxDomain: wp.array(dtype=scalar_t),  # Shape (D,)
-    periodic: wp.array(dtype=wp.bool)        # Shape (D,)
+    domainState: domainData
 ):
     dist_sq = scalar_t(0.0)
     for d in range(wp.len(x)):
-        dx = mod_distance(x[d], y[d], minDomain[d], maxDomain[d], periodic[d])
+        dx = mod_distance(x[d], y[d], domainState.domainMin[d], domainState.domainMax[d], domainState.periodicity[d])
         dist_sq += dx * dx
     return wp.sqrt(dist_sq)
 
@@ -54,31 +54,31 @@ def mod_warp(x : scalar_t, min: scalar_t, max: scalar_t):
     return ((x + h / scalar(2.0)) - wp.floor((x + h / scalar(2.0)) / h) * h) - h / scalar(2.0)
 
 @wp.func
-def moduloDistanceWarp(xij:wp.array(dtype = scalar_t), periodicity: wp.array(dtype = wp.bool), min: wp.array(dtype = scalar_t), max: wp.array(dtype = scalar_t)):
+def moduloDistanceWarp(xij:wp.array(dtype = scalar_t), domainState: domainData):
     result = wp.zeros_like(xij)
-    for i in range(periodicity.shape[0]):
-        if periodicity[i]:
-            result[i] = mod_warp(xij[i], min[i], max[i])
+    for i in range(domainState.periodicity.shape[0]):
+        if domainState.periodicity[i]:
+            result[i] = mod_warp(xij[i], domainState.domainMin[i], domainState.domainMax[i])
         else:
             result[i] = xij[i]
     return result
 @wp.func
-def minimumImageDistanceWarp(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t), min: wp.array(dtype = scalar_t), max: wp.array(dtype = scalar_t), periodicity: wp.array(dtype = wp.bool)):
+def minimumImageDistanceWarp(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t), domainState: domainData):
     x_projected = wp.zeros_like(x)
     y_projected = wp.zeros_like(y)
-    for i in range(periodicity.shape[0]):
-        if periodicity[i]:
-            x_projected[i] = wp.remainder(x[i] - min[i], max[i] - min[i]) + min[i]
-            y_projected[i] = wp.remainder(y[i] - min[i], max[i] - min[i]) + min[i]
+    for i in range(domainState.periodicity.shape[0]):
+        if domainState.periodicity[i]:
+            x_projected[i] = wp.remainder(x[i] - domainState.domainMin[i], domainState.domainMax[i] - domainState.domainMin[i]) + domainState.domainMin[i]
+            y_projected[i] = wp.remainder(y[i] - domainState.domainMin[i], domainState.domainMax[i] - domainState.domainMin[i]) + domainState.domainMin[i]
         else:
             x_projected[i] = x[i]
             y_projected[i] = y[i]
     xij = x_projected - y_projected
-    return moduloDistanceWarp(xij, periodicity, min, max)
+    return moduloDistanceWarp(xij, domainState)
 
 @wp.func 
-def computeDistance(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t), min: wp.array(dtype = scalar_t), max: wp.array(dtype = scalar_t), periodicity: wp.array(dtype = wp.bool)):
-    vectorDistance = minimumImageDistanceWarp(x, y, min, max, periodicity)
+def computeDistance(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t), domainState: domainData):
+    vectorDistance = minimumImageDistanceWarp(x, y, domainState)
     length = wp.sqrt(wp.sum(vectorDistance * vectorDistance))
     return length
 
@@ -112,43 +112,36 @@ from typing import Any
 def minimumImageDistance(
     x: vector(dtype=scalar_t, length=Any),
     y: vector(dtype=scalar_t, length=Any),
-    periodicity: wp.array(dtype=wp.bool),
-    min: wp.array(dtype=scalar_t),
-    max: wp.array(dtype=scalar_t),
-    D: wp.int32
+    domainState: domainData,
+    D: wp.int32,
 ):
+    # D is threaded through explicitly, not read via x.length inside the loop
+    # bound -- older Warp versions silently treated vector .length/matrix
+    # .size as zero when used as a dynamic for-loop bound (see the dynamic-loop
+    # adjoint notes in warpier_core.md/docs/lessons_learned.md for the class of
+    # bug this guards against).
     retVal = wp.vector(scalar(0.0), length = x.length, dtype = scalar_t)
     for i in range(D):
-        retVal[i] = moduloDistanceComponent(x[i], y[i], periodicity[i], min[i], max[i])
+        retVal[i] = moduloDistanceComponent(x[i], y[i], domainState.periodicity[i], domainState.domainMin[i], domainState.domainMax[i])
     return retVal
-    
-    
-    # return wp.vector(
-    #     [moduloDistanceComponent(x[i], y[i], periodicity[i], min[i], max[i]) for i in range(x.length)],
-    #     dtype=scalar_t
-    # )
-    
+
 @wp.func
 def computeDistance(
     x: vector(dtype=scalar_t, length=Any),
     y: vector(dtype=scalar_t, length=Any),
-    periodicity: wp.array(dtype=wp.bool),
-    min: wp.array(dtype=scalar_t),
-    max: wp.array(dtype=scalar_t)
+    domainState: domainData
 ):
-    distVec = minimumImageDistance(x, y, periodicity, min, max, wp.int32(x.length))
+    distVec = minimumImageDistance(x, y, domainState, domainState.dim)
     # distVec = x-y
     return safe_sqrt(wp.dot(distVec, distVec))
-    
+
 @wp.func
 def computeDistanceVec(
     x: vector(dtype=scalar_t, length=Any),
     y: vector(dtype=scalar_t, length=Any),
-    periodicity: wp.array(dtype=wp.bool),
-    min: wp.array(dtype=scalar_t),
-    max: wp.array(dtype=scalar_t)
+    domainState: domainData,
 ):
-    distVec = minimumImageDistance(x, y, periodicity, min, max, wp.int32(x.length))
+    distVec = minimumImageDistance(x, y, domainState, domainState.dim)
     return distVec
     # distVec = x-y
     # return safe_sqrt(wp.dot(distVec, distVec))

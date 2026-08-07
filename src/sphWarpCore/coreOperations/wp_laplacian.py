@@ -124,11 +124,11 @@ def computeSPHLaplacianTensor_Func_i(
     referenceState: Any, # particleDataSoA_1/2/3
 
     domainState: domainData,
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32,
+    kernelProperties: kernelState,
 
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    opInt: wp.int32, ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
 
     useGradientRenormalization: wp.bool, Li: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
     useGradHTerms: wp.bool, omega_i: scalar_t, referenceOmegas: wp.array(dtype = scalar_t), # type: ignore
@@ -144,8 +144,8 @@ def computeSPHLaplacianTensor_Func_i(
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
         j = wp.int32(offsetArray[jj])
-        if opInt != 0:
-            if not checkDirectionality_j(referenceKinds[j], opInt):
+        if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
@@ -166,7 +166,7 @@ def computeSPHLaplacianTensor_Func_i(
         kernelGradient = computeKernelGradientCRK(
             xi, xj,
             hi, hj,
-            kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax,
+            kernelProperties, domainState,
             useCRK, Ai, Bi, gradAi, gradBi
         )
 
@@ -195,17 +195,17 @@ def computeSPHLaplacianTensor_Func_i(
         # weighting is density-asymmetric, so the same self-term subtraction
         # instead yields a distinct (but equally consistent) density-weighted
         # variant of the same (fj - fi) family.
-        if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
+        if kernelProperties.gradientMode == wp.static(GradientScheme.Naive.value): # Naive
             q_ij = (fj - fi) * apparentVolume
-        elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
+        elif kernelProperties.gradientMode == wp.static(GradientScheme.Symmetric.value): # Symmetric
             q_ij = (fj - fi) * mj * rhoi / iPow(rhoj, 2)
-        elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
+        elif kernelProperties.gradientMode == wp.static(GradientScheme.Difference.value): # Difference
             q_ij = (fj - fi) * apparentVolume
-        elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation
+        elif kernelProperties.gradientMode == wp.static(GradientScheme.Summation.value): # Summation
             q_ij = (fj - fi) * apparentVolume
 
-        h_ij = computePairwiseSupport(hi, hj, mode_uint)
-        x_ij = computeDistanceVec(xi, xj, domainState.periodicity, domainState.domainMin, domainState.domainMax)
+        h_ij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
+        x_ij = computeDistanceVec(xi, xj, domainState)
         r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
 
         eps = scalar_t(1e-8)
@@ -213,16 +213,16 @@ def computeSPHLaplacianTensor_Func_i(
 
         laplacian_contribution = zero_like_warp(outputValue)
 
-        if laplacianMode_int == wp.static(LaplacianScheme.Naive.value): # Naive
-            laplacian_contribution = q_ij * sphKernelLaplacian(xi, xj, hi, hj, kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax)
-        elif laplacianMode_int == wp.static(LaplacianScheme.Brookshaw.value): # Brookshaw
+        if kernelProperties.laplacianMode == wp.static(LaplacianScheme.Naive.value): # Naive
+            laplacian_contribution = q_ij * sphKernelLaplacian(xi, xj, hi, hj, kernelProperties, domainState)
+        elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Brookshaw.value): # Brookshaw
             laplacian_contribution = -scalar_t(2.0) * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
-        elif laplacianMode_int == wp.static(LaplacianScheme.Dot.value): # Dot
+        elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Dot.value): # Dot
             laplacian_contribution = computeLaplacianDot2(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
-        elif laplacianMode_int == wp.static(LaplacianScheme.Default.value): # Default
+        elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Default.value): # Default
             laplacian_contribution = computeDotLaplacian(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
 
-        if positiveDivergence_int != 0:
+        if kernelProperties.positiveDivergenceMode:
             out += positiveDotProduct(x_ij, q_ij, laplacian_contribution, dim)
         else:
             out += laplacian_contribution
@@ -239,7 +239,7 @@ def computeSPHLaplacianTensor_Func_Adjacency(
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
 
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     queryValue: Any, referenceValues: Any, # type: ignore
@@ -247,8 +247,8 @@ def computeSPHLaplacianTensor_Func_Adjacency(
     outputValue: Any, # type: ignore
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
-    if opInt != 0:
-        if not checkDirectionality_i(ki, opInt):
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_i(ki, kernelProperties.operationMode):
             return zero_like_warp(outputValue)
 
     useGradientRenormalization, Li = getL_i(correctionData, i)
@@ -280,10 +280,10 @@ def computeSPHLaplacianTensor_Func_Adjacency(
             i, dim, numDims, flatInputShape, flatOutputShape,
             xi, hi, mi, rhoi,
             referenceState, domainState,
-            mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int,
+            kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            opInt, ki, referenceState.kinds,
+            ki, referenceState.kinds,
 
             useGradientRenormalization, Li,
             useGradHTerms, omega_i, correctionData.referenceOmegas,
@@ -306,8 +306,7 @@ def computeSPHLaplacianTensor_Kernel(
 
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any,
-
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
@@ -325,7 +324,7 @@ def computeSPHLaplacianTensor_Kernel(
         i, domainState.dim,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
-        mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int, opInt,
+        kernelProperties,
         numDims, flatInputShape, flatOutputShape,
         queryValues, referenceValues,
 

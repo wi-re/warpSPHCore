@@ -48,14 +48,14 @@ def computeSPHGradientTensor_Func_i(
 
     # Domain and kernel parameters
     domainState: domainData,
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32,
+    kernelProperties: kernelState,
 
     # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
     # neighbor list or the grid's sorted particle index, depending on the caller.
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
     # Operation mode for masking certain kinds of interactions, e.g. for directional operations
-    opInt: wp.int32, ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
 
     # Optional correction terms
     useGradientRenormalization: wp.bool, Li: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
@@ -73,8 +73,8 @@ def computeSPHGradientTensor_Func_i(
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
         j = wp.int32(offsetArray[jj])
-        if opInt != 0:
-            if not checkDirectionality_j(referenceKinds[j], opInt):
+        if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
@@ -95,20 +95,20 @@ def computeSPHGradientTensor_Func_i(
         kernelGradient = computeKernelGradientCRK(
             xi, xj,
             hi, hj,
-            kernel_int, mode_uint, domainState.periodicity, domainState.domainMin, domainState.domainMax,
+            kernelProperties, domainState,
             useCRK, Ai, Bi, gradAi, gradBi
         )
 
         if useGradientRenormalization:
             kernelGradient = matmul(Li, kernelGradient)
 
-        if gradientMode_int == wp.static(GradientScheme.Naive.value): # Naive
+        if kernelProperties.gradientMode == wp.static(GradientScheme.Naive.value): # Naive
             out += outerTensorProduct(fj * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
-        elif gradientMode_int == wp.static(GradientScheme.Symmetric.value): # Symmetric
+        elif kernelProperties.gradientMode == wp.static(GradientScheme.Symmetric.value): # Symmetric
             out += outerTensorProduct(mj * rhoi * (fi / iPow(rhoi,2) + fj / iPow(rhoj,2)), kernelGradient, out, numDims, flatInputShape, flatOutputShape)
-        elif gradientMode_int == wp.static(GradientScheme.Difference.value): # Difference
+        elif kernelProperties.gradientMode == wp.static(GradientScheme.Difference.value): # Difference
             out += outerTensorProduct((fj - fi) * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
-        elif gradientMode_int == wp.static(GradientScheme.Summation.value): # Summation
+        elif kernelProperties.gradientMode == wp.static(GradientScheme.Summation.value): # Summation
             out += outerTensorProduct((fj + fi) * apparentVolume, kernelGradient, out, numDims, flatInputShape, flatOutputShape)
 
     return out
@@ -123,7 +123,7 @@ def computeSPHGradientTensor_Func_Adjacency(
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
 
     numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
     queryValue: Any, referenceValues: Any, # type: ignore
@@ -131,8 +131,8 @@ def computeSPHGradientTensor_Func_Adjacency(
     outputValue: Any, # type: ignore
 ):
     xi, hi, mi, rhoi, ki = getParticle(queryState, i)
-    if opInt != 0:
-        if not checkDirectionality_i(ki, opInt):
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_i(ki, kernelProperties.operationMode):
             return zero_like_warp(outputValue)
 
     useGradientRenormalization, Li = getL_i(correctionData, i)
@@ -162,10 +162,10 @@ def computeSPHGradientTensor_Func_Adjacency(
             i, dim,
             xi, hi, mi, rhoi,
             referenceState, domainState,
-            mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int,
+            kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            opInt, ki, referenceState.kinds,
+            ki, referenceState.kinds,
 
             useGradientRenormalization, Li,
             useGradHTerms, omega_i, correctionData.referenceOmegas,
@@ -190,7 +190,7 @@ def computeSPHGradientTensor_Kernel(
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
     correctionData: Any,
 
-    mode_uint: wp.uint32, kernel_int: wp.int32, gradientMode_int: wp.int32, laplacianMode_int: wp.int32, positiveDivergence_int: wp.int32, divergenceMode_int: wp.int32, opInt: wp.int32,
+    kernelProperties: kernelState,
     # Do not change the parameters above -- this is the canonical structured kernel ABI
     # (see warpier_core.md, Phase 1 / Step 1); other operators share this argument prefix.
 
@@ -209,7 +209,7 @@ def computeSPHGradientTensor_Kernel(
         i, domainState.dim,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
-        mode_uint, kernel_int, gradientMode_int, laplacianMode_int, positiveDivergence_int, divergenceMode_int, opInt,
+        kernelProperties,
         numDims, flatInputShape, flatOutputShape,
         queryValues, referenceValues,
 
