@@ -9,7 +9,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import checkOffset
+from ..radiusSearch.grid_util import checkOffset, getIndexRange
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -34,20 +34,12 @@ from ..enumTypes import *
 
 
 @wp.func
-def delta(a: wp.int32, b: wp.int32):
-    return scalar_t(1.0) if a == b else scalar_t(0.0)
-
-
-@wp.func
 def computeCRKMoments_Func_i(
-    # General shape parameters
     i: wp.int32, dim: wp.int32,
-
     # SPH properties for the query point (indexed by i)
-    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, # type: ignore
-
+    iPtcl: Any, # WarpParticle_1/2/3, picked by dimensionality
     # SPH properties for the reference set (indexed by j in the neighbor loop)
-    referenceState: Any, # particleDataSoA_1/2/3
+    referenceState: Any, # particleDataSoA_1/2/3, picked by dimensionality
 
     # Domain and kernel parameters
     domainState: domainData,
@@ -57,10 +49,10 @@ def computeCRKMoments_Func_i(
     # neighbor list or the grid's sorted particle index, depending on the caller.
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    # Operation mode for masking certain kinds of interactions, e.g. for directional operations
-    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
-
-    correctionData: Any, # correctionData_1/2/3 -- only used here for the (query==reference) apparent volumes
+    # Optional correction terms
+    iCorrectionData: Any, # ParticleCorrectionData_1/2/3, picked by dimensionality
+    correctionData: Any, # correctionData_1/2/3
+    # End of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 
     output_m_0: scalar_t, # type: ignore
     output_m_1: vector(length=Any, dtype=scalar_t), # type: ignore
@@ -77,24 +69,24 @@ def computeCRKMoments_Func_i(
     dm_2dgamma = zero_like_warp(output_dm_2dgamma)
     numNeighbors = wp.int32(0)
 
-    eye = warp_eye(xi)
+    eye = warp_eye(iPtcl.position)
 
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
-        j  = wp.int32(offsetArray[jj])
+        j = wp.int32(offsetArray[jj])
+        jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
+            if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
         _, V_j = getVolume_j(correctionData, j)
 
-        x_ij = computeDistanceVec(xi, xj, domainState)
-        w_ij = sphKernel_ij(x_ij, hi, hj, kernelProperties, domainState)
-        gradw_ij = sphKernelGradient_ij(x_ij, hi, hj, kernelProperties, domainState)
+        x_ij = computeDistanceVec(iPtcl.position, jPtcl.position, domainState)
+        w_ij = sphKernel_ij(x_ij, iPtcl.support, jPtcl.support, kernelProperties, domainState)
+        gradw_ij = sphKernelGradient_ij(x_ij, iPtcl.support, jPtcl.support, kernelProperties, domainState)
 
         m_0 += V_j * w_ij
         m_1 += x_ij * (V_j * w_ij)
@@ -107,8 +99,8 @@ def computeCRKMoments_Func_i(
             for beta in range(dim):
                 for gamma in range(dim):
                     gradTerm = x_ij[alpha] * x_ij[beta] * gradw_ij[gamma]
-                    deltaA = x_ij[alpha] * delta(beta, gamma)
-                    deltaB = delta(alpha, gamma) * x_ij[beta]
+                    deltaA = x_ij[alpha] * kroneckerDelta(beta, gamma)
+                    deltaB = kroneckerDelta(alpha, gamma) * x_ij[beta]
                     kernelTerm = w_ij * (deltaA + deltaB)
                     dm_2dgamma[gamma * dim * dim + alpha * dim + beta] += V_j * (gradTerm + kernelTerm)
 
@@ -120,13 +112,15 @@ def computeCRKMoments_Func_i(
 @wp.func
 def computeCRKMoments_Func_Adjacency(
     i: wp.int32, dim: wp.int32,
-
+    # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
-
+    # Domain properties 
     domainState: domainData,
+    # Adjacency / grid traversal properties
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
-
+    # Kernel properties, e.g., kernel type, support scheme, gradient scheme, etc.
     kernelProperties: kernelState,
+    # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 
     output_m_0: scalar_t, # type: ignore
     output_m_1: vector(length=Any, dtype=scalar_t), # type: ignore
@@ -135,14 +129,15 @@ def computeCRKMoments_Func_Adjacency(
     output_dm_1dgamma: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
     output_dm_2dgamma: vector(length=Any, dtype=scalar_t) # type: ignore
 ):
-    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    iPtcl = getParticleData(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-        if not checkDirectionality_i(ki, kernelProperties.operationMode):
+        if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
             return (
                 zero_like_warp(output_m_0), zero_like_warp(output_m_1), zero_like_warp(output_m_2),
                 zero_like_warp(output_dm_0dgamma), zero_like_warp(output_dm_1dgamma), zero_like_warp(output_dm_2dgamma),
                 wp.int32(0),
             )
+    iCorrectionData = getParticleCorrectionData_i(correctionData, i)
 
     m_0 = zero_like_warp(output_m_0)
     m_1 = zero_like_warp(output_m_1)
@@ -153,30 +148,19 @@ def computeCRKMoments_Func_Adjacency(
     numNeighbors = wp.int32(0)
 
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
-        numIndices = wp.int32(0)
-        if useAdjacency:
-            beginIndex = adjacencyState.neighborOffsets[i]
-            numIndices = adjacencyState.numNeighbors[i]
-        else:
-            beginIndex, numIndices = checkOffset(
-                i, queryState.positions, gridState.numCells, gridState.D,
-                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
-                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
-            )
-            if beginIndex < 0:
-                continue
+        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
 
         s_m0, s_m1, s_m2, s_dm0, s_dm1, s_dm2, s_n = computeCRKMoments_Func_i(
             i, dim,
-            xi, hi,
+            iPtcl,
             referenceState, domainState,
             kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            ki, referenceState.kinds,
 
-            correctionData,
+            iCorrectionData, correctionData,
 
             output_m_0, output_m_1, output_m_2, output_dm_0dgamma, output_dm_1dgamma, output_dm_2dgamma,
         )
@@ -223,7 +207,7 @@ def computeCRKMoments_Kernel(
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
-        # The parameters above are default parameters and should not be changed
+        # The parameters above are default parameters and shold not be changed
 
         # zero_like_warp on the *array itself* only has overloads up to a 3-vector /
         # 3x3-matrix (see math/wp_zero.py) -- dm_2dgamma flattens to dim**3 components,

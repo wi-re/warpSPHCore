@@ -9,7 +9,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import checkOffset
+from ..radiusSearch.grid_util import checkOffset, getIndexRange
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -29,19 +29,23 @@ from .kernel import computeKernelCRK
 @wp.func
 def computeCRKDensity_Func_i(
     i: wp.int32, dim: wp.int32,
+    # SPH properties for the query point (indexed by i)
+    iPtcl: Any, # WarpParticle_1/2/3, picked by dimensionality
+    # SPH properties for the reference set (indexed by j in the neighbor loop)
+    referenceState: Any, # particleDataSoA_1/2/3, picked by dimensionality
 
-    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, Ai: scalar_t, Bi: vector(length=Any, dtype=scalar_t), # type: ignore
-
-    referenceState: Any, # particleDataSoA_1/2/3
-
+    # Domain and kernel parameters
     domainState: domainData,
     kernelProperties: kernelState,
 
+    # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
+    # neighbor list or the grid's sorted particle index, depending on the caller.
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
-
-    correctionData: Any, # correctionData_1/2/3, for the reference-side apparent volumes
+    # Optional correction terms
+    iCorrectionData: Any, # ParticleCorrectionData_1/2/3, picked by dimensionality
+    correctionData: Any, # correctionData_1/2/3
+    # End of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 ):
     mDensity = scalar_t(0.0)
     vol1 = scalar_t(0.0)
@@ -55,25 +59,26 @@ def computeCRKDensity_Func_i(
 
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
-        j  = wp.int32(offsetArray[jj])
+        j = wp.int32(offsetArray[jj])
+        jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
+            if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
+        # xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
         _, Vj = getVolume_j(correctionData, j)
 
         w_ij = computeKernelCRK(
-            xi, xj,
-            hi, hj,
+            iPtcl.position, jPtcl.position,
+            iPtcl.support, jPtcl.support,
             crkKernelProperties, domainState,
-            True, Ai, Bi
+            True, iCorrectionData.A, iCorrectionData.B
         )
 
-        mDensity += mj * Vj * w_ij
+        mDensity += jPtcl.mass * Vj * w_ij
         vol1 += Vj * Vj * w_ij
 
     return mDensity, vol1
@@ -82,13 +87,15 @@ def computeCRKDensity_Func_i(
 @wp.func
 def computeCRKDensity_Func_Adjacency(
     i: wp.int32, dim: wp.int32,
-
+    # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
-
+    # Domain properties 
     domainState: domainData,
+    # Adjacency / grid traversal properties
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
-
+    # Kernel properties, e.g., kernel type, support scheme, gradient scheme, etc.
     kernelProperties: kernelState,
+    # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 ):
     # Returns (mDensity, vol1, masked) rather than the final mDensity/vol1 ratio --
     # Warp's adjoint for a dynamic for-loop (numOffsets is a runtime value) that
@@ -97,40 +104,29 @@ def computeCRKDensity_Func_Adjacency(
     # issue as computeCRKVolume_Func_Adjacency, see its docstring comment and
     # scripts/debug_crk_backward.py for the minimal repro. The ratio is applied one
     # level up, in computeCRKDensity_Kernel, outside the function that contains the loop.
-    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    iPtcl = getParticleData(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-        if not checkDirectionality_i(ki, kernelProperties.operationMode):
+        if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
             return scalar_t(0.0), scalar_t(0.0), True
-
-    useCRK, Ai, Bi, gradA_i, gradB_i = getCRK_i(correctionData, i)
+    iCorrectionData = getParticleCorrectionData_i(correctionData, i)
 
     mDensity = scalar_t(0.0)
     vol1 = scalar_t(0.0)
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
-        numIndices = wp.int32(0)
-        if useAdjacency:
-            beginIndex = adjacencyState.neighborOffsets[i]
-            numIndices = adjacencyState.numNeighbors[i]
-        else:
-            beginIndex, numIndices = checkOffset(
-                i, queryState.positions, gridState.numCells, gridState.D,
-                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
-                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
-            )
-            if beginIndex < 0:
-                continue
+        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
 
         d_mDensity, d_vol1 = computeCRKDensity_Func_i(
             i, dim,
-            xi, hi, Ai, Bi,
+            iPtcl,
             referenceState, domainState,
             kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            ki, referenceState.kinds,
 
-            correctionData,
+            iCorrectionData, correctionData,
+            # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
         )
         mDensity += d_mDensity
         vol1 += d_vol1
@@ -164,6 +160,7 @@ def computeCRKDensity_Kernel(
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
+        # The parameters above are default parameters and shold not be changed
     )
     # The ratio is applied here, outside computeCRKDensity_Func_Adjacency's dynamic
     # loop -- see that function's docstring comment for why.

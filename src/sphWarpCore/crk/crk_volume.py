@@ -9,7 +9,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import checkOffset
+from ..radiusSearch.grid_util import checkOffset, getIndexRange
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -27,32 +27,38 @@ from ..enumTypes import *
 @wp.func
 def computeCRKVolume_Func_i(
     i: wp.int32, dim: wp.int32,
+    # SPH properties for the query point (indexed by i)
+    iPtcl: Any, # WarpParticle_1/2/3, picked by dimensionality
+    # SPH properties for the reference set (indexed by j in the neighbor loop)
+    referenceState: Any, # particleDataSoA_1/2/3, picked by dimensionality
 
-    xi: vector(dtype = scalar_t, length=Any), hi: scalar_t, # type: ignore
-
-    referenceState: Any, # particleDataSoA_1/2/3
-
+    # Domain and kernel parameters
     domainState: domainData,
     kernelProperties: kernelState,
 
+    # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
+    # neighbor list or the grid's sorted particle index, depending on the caller.
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
-    ki: wp.int32, referenceKinds: wp.array(dtype = wp.int32), # type: ignore
+    # Optional correction terms
+    iCorrectionData: Any, # ParticleCorrectionData_1/2/3, picked by dimensionality
+    correctionData: Any, # correctionData_1/2/3
+    # End of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 ):
     out = scalar_t(0.0)
     for neighborIndex in range(numIndices):
         jj = beginIndex + neighborIndex
-        j  = wp.int32(offsetArray[jj])
+        j = wp.int32(offsetArray[jj])
+        jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-            if not checkDirectionality_j(referenceKinds[j], kernelProperties.operationMode):
+            if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
                 continue
         ##########################################################
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        xj, hj, mj, rhoj, kj = getParticle(referenceState, j)
-        x_ij = computeDistanceVec(xi, xj, domainState)
-        w_ij = sphKernel_ij(x_ij, hi, hj, kernelProperties, domainState)
+        x_ij = computeDistanceVec(iPtcl.position, jPtcl.position, domainState)
+        w_ij = sphKernel_ij(x_ij, iPtcl.support, jPtcl.support, kernelProperties, domainState)
 
         out += w_ij
 
@@ -62,13 +68,15 @@ def computeCRKVolume_Func_i(
 @wp.func
 def computeCRKVolume_Func_Adjacency(
     i: wp.int32, dim: wp.int32,
-
-    queryState: Any, referenceState: Any,
-
+    # SPH properties for the points and the corrections
+    queryState: Any, referenceState: Any, correctionData: Any,
+    # Domain properties 
     domainState: domainData,
+    # Adjacency / grid traversal properties
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
-
+    # Kernel properties, e.g., kernel type, support scheme, gradient scheme, etc.
     kernelProperties: kernelState,
+    # end of the canonical structured kernel ABI prefix; the rest of the arguments are specific to this operator.
 ):
     # Returns (wsum, masked) rather than the final 1/wsum reciprocal -- Warp's adjoint
     # for a *dynamic* for-loop (numOffsets is a runtime value, not a compile-time
@@ -80,35 +88,27 @@ def computeCRKVolume_Func_Adjacency(
     # directly with no further transform. The reciprocal is applied one level up, in
     # computeCRKVolume_Kernel, outside the function that contains the loop -- verified
     # to fix the NaN gradient (same data, same case, clean backward once moved).
-    xi, hi, mi, rhoi, ki = getParticle(queryState, i)
+    iPtcl = getParticleData(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
-        if not checkDirectionality_i(ki, kernelProperties.operationMode):
+        if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
             return scalar_t(0.0), True
+    iCorrectionData = getParticleCorrectionData_i(correctionData, i)
 
     wsum = scalar_t(0.0)
     for o in range(numOffsets):
-        beginIndex = wp.int32(0)
-        numIndices = wp.int32(0)
-        if useAdjacency:
-            beginIndex = adjacencyState.neighborOffsets[i]
-            numIndices = adjacencyState.numNeighbors[i]
-        else:
-            beginIndex, numIndices = checkOffset(
-                i, queryState.positions, gridState.numCells, gridState.D,
-                o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
-                domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
-            )
-            if beginIndex < 0:
-                continue
+        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
 
         wsum += computeCRKVolume_Func_i(
             i, dim,
-            xi, hi,
+            iPtcl,
             referenceState, domainState,
             kernelProperties,
 
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            ki, referenceState.kinds,
+
+            iCorrectionData, correctionData,
         )
 
     return wsum, False
@@ -137,9 +137,10 @@ def computeCRKVolume_Kernel(
 
     wsum, masked = computeCRKVolume_Func_Adjacency(
         i, domainState.dim,
-        queryState, referenceState, domainState,
+        queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
+        # The parameters above are default parameters and shold not be changed
     )
     # The reciprocal is applied here, outside computeCRKVolume_Func_Adjacency's dynamic
     # loop -- see that function's docstring comment for why.
