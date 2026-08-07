@@ -94,6 +94,19 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   `sphWarpCore` lazily inside a `_configure()` called after arg parsing, and
   why `tests/operations/test_gradcheck_scripts.py` runs each gradcheck
   script via `subprocess.run` rather than importing its module directly.
+  **This is a deliberate design tradeoff, not an oversight worth
+  "fixing"** (confirmed with the repo owner 2026-08-07, after this kept
+  getting flagged as a design smell in reviews without the rationale being
+  written down anywhere): some Warp versions don't fully recompile kernels
+  when the backing global type changes mid-process, and using a fully
+  generic `dim_t=Any`/dtype-agnostic kernel would make casting inside
+  genuinely generic kernels very difficult given current Warp limitations.
+  A single precision/dimension resolved once at import time was judged the
+  reasonable compromise for now. The eventual `Field` abstraction
+  (`warpier_core.md` Phase 3) can still track per-field dtype metadata
+  (including richer Warp dtypes like `mat33f` that don't fit `scalar_t` at
+  all) — it just can't use that metadata to change the underlying compiled
+  kernel type within one process run.
 
 * **Never cache/reuse a `wp.array` (and its persistent `.grad` buffer) by
   tensor identity across the "query" and "reference" roles of the same
@@ -187,6 +200,31 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   (particles per smoothing length, per axis) converted via `n_h_to_nH`,
   which already accounts for `dim`, instead of picking a raw neighbor
   count when sweeping dimension.
+
+* **Removing a `@torch.jit.script` decorator can expose a latent eager-mode
+  bug that TorchScript was silently absorbing — always smoke-test the
+  undecorated function, not just re-import it.** `util/support.py`'s
+  `volumeToSupport(volume: float, targetNeighbors: int, dim: int)` calls
+  `torch.sqrt`/`torch.pow` on plain Python `float`/`int` arguments (the
+  function is pure scalar math — no tensors anywhere in its signature).
+  Under `@torch.jit.script`, TorchScript's compiled scalar-op dispatch
+  handles `torch.sqrt`/`torch.pow` on a bare `float` without complaint; the
+  identical code called eagerly crashes immediately (`TypeError: sqrt():
+  argument 'input' must be Tensor, not float`). Because this function sits
+  underneath `generateNeighborTestData`, which every operator's shared
+  `particle_case` pytest fixture depends on, removing one decorator (as
+  part of a Python-3.14-driven jit.script cleanup — `torch.jit.script` is
+  unsupported there and has no `torch.compile` substitute for SPH's
+  non-static tensor shapes) broke the *entire* test suite (67/67 →
+  11/67, all `ERROR` not `FAIL`) instantly and silently until someone
+  actually ran the tests. Fixed by switching to `math.sqrt`/`**(1/3)` —
+  genuine scalar math, matching what the function's own type annotations
+  already promised. Every other `@torch.jit.script` decorator already
+  removed from this codebase happened to decorate pure-tensor functions
+  (no bare-scalar-into-torch-op calls), so they were unaffected — but that
+  was luck, not a property checked in advance. Any future jit.script
+  removal needs an actual run of the affected function (or its test
+  coverage), not just a successful `import`.
 
 ## Architectural facts still true (open capability gaps, not yet closed)
 

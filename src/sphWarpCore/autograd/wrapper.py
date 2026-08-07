@@ -29,7 +29,7 @@ def warpWrapper2(
         kernel:                 The ``wp.kernel`` to execute.
         outputSizes:            Output shape passed to the launcher.
         outputDtypes:           Output Warp dtype(s) passed to the launcher.
-        defaultStateArguments:  Tuple in the same order as ``parseArguments``:
+        defaultStateArguments:  Tuple in the fixed state-argument order:
                                     (queryParticles, operationProperties, domain,
                                      queryVolumes, referenceVolumes, adjacency,
                                      referenceParticles, crkState,

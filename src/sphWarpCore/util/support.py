@@ -3,6 +3,7 @@ from warp.types import vector, matrix
 from sphWarpCore.math.wp_distance import computeDistanceVec
 from ..math import safe_sqrt
 from typing import Optional, Any, Union, List, Tuple
+import math
 import numpy as np
 import warp as wp
 
@@ -12,7 +13,7 @@ from ..enumTypes import SupportScheme
 from ..math import vectorNorm_warp
 from ..dataTypes.domain_t import domainData
 
-@torch.jit.script
+# @torch.jit.script
 def volumeToSupport(volume : float, targetNeighbors : int, dim : int):
     """
     Calculates the support radius based on the given volume, target number of neighbors, and dimension.
@@ -23,17 +24,17 @@ def volumeToSupport(volume : float, targetNeighbors : int, dim : int):
     dim (int): The dimension of the space.
 
     Returns:
-    torch.Tensor: The support radius.
+    float: The support radius.
     """
     if dim == 1:
         # N_h = 2 h / v -> h = N_h * v / 2
         return targetNeighbors * volume / 2
     elif dim == 2:
         # N_h = \pi h^2 / v -> h = \sqrt{N_h * v / \pi}
-        return torch.sqrt(targetNeighbors * volume / np.pi)
+        return math.sqrt(targetNeighbors * volume / np.pi)
     else:
         # N_h = 4/3 \pi h^3 / v -> h = \sqrt[3]{N_h * v / \pi * 3/4}
-        return torch.pow(targetNeighbors * volume / np.pi * 3 /4, 1/3)
+        return (targetNeighbors * volume / np.pi * 3 / 4) ** (1 / 3)
 
 
 def n_h_to_nH(n_h: float, dim: int) -> float:

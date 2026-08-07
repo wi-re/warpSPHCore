@@ -24,8 +24,8 @@ def extractStateInfo(
     single, deterministically ordered flat list and return a *build_fn* closure
     that can reconstruct all Warp kernel structs from a parallel list of Warp arrays.
 
-    This is the extraction half of what ``parseArguments`` previously did in one
-    shot; the conversion half is deferred to ``StateAwareWarpFunction.forward`` so
+    This is the extraction half of what a single-shot flat-tensor builder used to
+    do; the conversion half is deferred to ``StateAwareWarpFunction.forward`` so
     that the original torch tensors can be saved for autograd.
 
     Flat tensor index layout (36 entries):

@@ -1,7 +1,9 @@
+import torch
 import warp as wp
 from ...math import *
 from ...util import *
 from ...dataTypes import domainData
+from ...type_config import scalar_t
 
 # Define kernels that work with flattened float32 arrays
 @wp.kernel
@@ -39,24 +41,13 @@ def warp_radius_search_kernel_direct_2(
                 y[j],
                 domainState
             )
-            
-            # Determine threshold based on mode
-            threshold = 0.0
-            if mode == 1:  # gather
-                threshold = hx[i]
-            elif mode == 2:  # scatter
-                threshold = hy[j]
-            elif mode == 5:  # meanSymmetric
-                threshold = (hx[i] + hy[j]) / 2.0
-            elif mode == 4:  # superSymmetric
-                threshold = wp.max(hx[i], hy[j])
-            elif mode == 2:  # symmetric
-                threshold = wp.max(hx[i], hy[j])
-            
+
+            threshold = computePairwiseSupport(hx[i], hy[j], mode)
+
             # Count valid neighbors
             if dist <= threshold:
                 count += 1
-        
+
         edge_count[i] = count
 
 
@@ -96,20 +87,9 @@ def warp_radius_search_collect_kernel_direct_2(
                 y[j],
                 domainState
             )
-            
-            # Determine threshold based on mode
-            threshold = 0.0
-            if mode == 1:  # gather
-                threshold = hx[i]
-            elif mode == 2:  # scatter
-                threshold = hy[j]
-            elif mode == 5:  # meanSymmetric
-                threshold = (hx[i] + hy[j]) / 2.0
-            elif mode == 4:  # superSymmetric
-                threshold = wp.max(hx[i], hy[j])
-            elif mode == 2:  # symmetric
-                threshold = wp.max(hx[i], hy[j])
-            
+
+            threshold = computePairwiseSupport(hx[i], hy[j], mode)
+
             # Store valid neighbors
             if dist <= threshold:
                 edge_i[edge_idx] = i

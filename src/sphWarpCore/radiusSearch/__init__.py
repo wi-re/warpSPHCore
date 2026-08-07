@@ -5,12 +5,15 @@ from .naive.radius_naive import (
 
 from .grid_util import checkOffset, getIndexRange
 
+from .small.wp_radius_small import warp_radius_search_small
+
 
 __all__ = [
     "radiusNaive",
     "radiusNaiveFixed",
     "checkOffset",
-    'getIndexRange'
+    'getIndexRange',
+    'warp_radius_search_small',
 ]
 
 from .compactHash import *
