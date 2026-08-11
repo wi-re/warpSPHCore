@@ -58,6 +58,35 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   (all four share this exact `useGradHTerms` pattern) can be converted back
   to ternaries.
 
+* **A manual nested `for row / for col: acc[row] += x[col] * mat[row, col]`
+  accumulation into a Warp vector/matrix-indexed local can produce a
+  finite-but-wrong adjoint, with the *forward* value completely correct.**
+  Found in `crk/kernel.py`'s `correctGradientCRK` (`term4`, the CRK
+  product-rule term contracting `gradBi` against `x_ij`): a downstream
+  user's `torch.autograd.gradcheck` against a real CRK-corrected force
+  computation failed with a finite (not NaN/Inf) but numerically wrong
+  Jacobian, reproducing even in 1D (where any index-order/transpose choice
+  is a no-op on a 1x1 matrix — ruling that out as the cause) and in a
+  from-scratch single-neighbor-pair repro with no dependency on
+  `crk_moments.py`/`crk_terms.py` at all. Routing the exact same
+  contraction through the existing `matmul(...)` `@wp.func` (already used
+  elsewhere, e.g. `wp_gradient.py`'s renormalization path) instead of the
+  manual loop fixed it outright — despite `matmul`'s own implementation
+  using a structurally similar `res[i] += mat[i, j] * vec[j]` loop, so this
+  is not simply "loops are broken", something about the *inlined,
+  hand-written* loop specifically (as opposed to the same shape inside a
+  separately-compiled `@wp.func` call) triggered a bad adjoint. Forward-only
+  checks and even the existing `gradcheck_crk_native.py` (which only checks
+  `d(A,B,gradA,gradB)/d(position)`, not that a downstream consumer of
+  `gradB` differentiates correctly) both missed this —
+  `gradcheck_crk_correction_native.py` was added specifically to close this
+  gap, exercising `correctGradientCRK` through a real operator call with a
+  genuinely nonzero, position-dependent `B`/`gradB`. Treat any new manual
+  index-accumulation loop over a Warp vector/matrix as suspect until it has
+  its own gradcheck coverage; prefer an existing, already-gradchecked
+  helper (`matmul`, `wp.dot`, etc.) over a fresh hand-rolled loop when one
+  fits.
+
 * **A plain Python scalar (e.g. a `float` field on a Python-side struct)
   passed straight into `wp.launch` gets Warp's default type inference —
   `wp.float32` — regardless of the kernel's declared `scalar_t`.** This

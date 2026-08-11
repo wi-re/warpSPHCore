@@ -19,11 +19,13 @@ def correctGradientCRK(
     term3 = ((scalar_t(1.0) + wp.dot(Bi, x_ij)) * W_ij) * gradAi
 
     factor = Ai * W_ij
-    # Compute the dot product of x_ij with each row of gradBi
-    product = type(gradW_ij)(scalar_t(0.0))
-    for row in range(dim):
-        for col in range(dim):
-            product[row] += x_ij[col] * gradBi[row, col]
+    # gradBi[c, g] = d(B[c]) / d(x_i[g]) (component index first, differentiation
+    # index second -- same convention crk_terms.py's computeCRKTermsWarp produces
+    # gradB in). The product-rule term needs that contracted against x_ij on the
+    # component index c, leaving the differentiation index g free in the output
+    # (matching term1..term3, which are all indexed by the differentiation/output
+    # direction) -- i.e. contract gradBi's FIRST axis against x_ij, not its second.
+    product = matmul(wp.transpose(gradBi), x_ij)
     term4 = factor * product
 
     return term1 + term2 + term3  + term4

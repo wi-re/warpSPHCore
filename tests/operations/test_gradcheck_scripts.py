@@ -37,8 +37,10 @@ GRADCHECK_SCRIPTS = [
     "gradcheck_laplacian_native.py",
     "gradcheck_covariance_native.py",
     "gradcheck_crk_native.py",
+    "gradcheck_crk_correction_native.py",
     "gradcheck_renorm_native.py",
     "gradcheck_pinv_native.py",
+    "gradcheck_scalar_arg_native.py",
 ]
 
 
