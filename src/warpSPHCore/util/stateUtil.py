@@ -189,3 +189,25 @@ def getParticleCorrectionData_j(
         omega_j,
         A_j, B_j, gradA_j, gradB_j
     )
+
+
+# @wp.func
+# def access_optional(arr: wp.array(dtype = Any), index: wp.int32, defaultValue: Any): # type: ignore
+#     if arr.shape[0] > 1:
+#         return arr[index]
+#     else:
+#         return defaultValue
+
+@wp.func
+def access_optional(arr: wp.array(dtype = Any), index: wp.int32, condition: wp.bool, defaultValue: Any): # type: ignore
+    if condition:
+        return arr[index]
+    else:
+        return defaultValue
+
+@wp.func    
+def ternary_helper(condition: wp.bool, true_value: Any, false_value: Any): # type: ignore
+    if condition:
+        return true_value
+    else:
+        return false_value

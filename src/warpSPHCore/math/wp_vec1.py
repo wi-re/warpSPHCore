@@ -18,3 +18,6 @@ class vec1d(vector(length=1, dtype=wp.float64)):
     pass
 class mat11d(matrix(shape=(1, 1), dtype=wp.float64)):
     pass
+
+class vec1i(vector(length=1, dtype=wp.int32)):
+    pass

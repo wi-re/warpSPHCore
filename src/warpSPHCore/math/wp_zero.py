@@ -70,9 +70,20 @@ def zero_like(
 
 @wp.func
 def zero_like(
+    input: wp.int32
+):
+    return wp.int32(0)
+@wp.func
+def zero_like(
+    input: vector(length=Any, dtype=wp.int32) # type: ignore
+):
+    return type(input)(0) * 0
+
+@wp.func
+def zero_like(
     input: wp.array(dtype=vector(length=1, dtype=wp.int32)) # type: ignore
 ):
-    return vector(length=1, dtype=wp.int32)(0)
+    return vec1i(0)
 @wp.func
 def zero_like(
     input: wp.array(dtype=vector(length=2, dtype=wp.int32)) # type: ignore

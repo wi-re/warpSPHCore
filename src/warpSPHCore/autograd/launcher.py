@@ -3,6 +3,19 @@ import warp as wp
 from ..util import *
 from .cache import *
 
+
+def _dtype_is_float(dtype):
+    # dtype may be a plain scalar (wp.float32, wp.int32, ...) or a
+    # vector/matrix built from one -- vector/matrix types carry their
+    # element type on _wp_scalar_type_, plain scalars don't, so this falls
+    # back to the dtype itself in that case. requires_grad can only be set
+    # on floating-point Warp arrays; setting it on an int-dtype output (e.g.
+    # a per-particle counter alongside a differentiable accumulator in the
+    # same multi-output kernel) raises in wp.to_torch.
+    scalar = getattr(dtype, "_wp_scalar_type_", dtype)
+    return wp.types.type_is_float(scalar)
+
+
 def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
     # with record_function(f"Warp Kernel Launch"):
     inputs = list(args)
@@ -35,7 +48,7 @@ def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
         for i, out_type in enumerate(output_dtype):
             # print(f"Allocating output {i} with shape {output_shape[i] if isinstance(output_shape, list) or isinstance(output_shape, tuple) else output_shape} and dtype {out_type} on device {device}")
             output = wp.zeros(output_shape[i] if isinstance(output_shape, list) or isinstance(output_shape, tuple) else output_shape, dtype=out_type, device=device)
-            output.requires_grad = requires_grad
+            output.requires_grad = requires_grad and _dtype_is_float(out_type)
             outputs.append(output)
 
         kernel_dim = output_shape[0] if isinstance(output_shape, list) else output_shape
@@ -52,7 +65,7 @@ def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
         return tuple(outputs)
     
     output = wp.zeros(output_shape, dtype=output_dtype, device=device)
-    output.requires_grad = requires_grad
+    output.requires_grad = requires_grad and _dtype_is_float(output_dtype)
     kernel_inputs = inputs + [output]
     
     actual_dim = numThreads if numThreads is not None else (output_shape[0] if not isinstance(output_shape, int) else output_shape)
