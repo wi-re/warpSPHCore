@@ -14,7 +14,7 @@ from .wp_util import (
 #     StateAwareWarpFunction
 # )
 
-from .support import volumeToSupport, n_h_to_nH, volumeToSupport_warp, computePairwiseSupport
+from .support import volumeToSupport, n_h_to_nH, volumeToSupport_warp, computePairwiseSupport, nH_to_n_h
 
 
 __all__ = [
@@ -32,6 +32,7 @@ __all__ = [
     # "launch_kernel",
     "volumeToSupport",
     "n_h_to_nH",
+    "nH_to_n_h",
     "volumeToSupport_warp",
     "computePairwiseSupport",
     "generateNeighborTestData",

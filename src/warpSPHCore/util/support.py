@@ -57,6 +57,12 @@ def n_h_to_nH(n_h: float, dim: int) -> float:
     vH = 2.0 if dim == 1 else (np.pi if dim == 2 else (4.0 / 3.0) * np.pi)
     return vH / v
 
+def nH_to_n_h(nH: float, dim: int) -> float:
+    vH = 2.0 if dim == 1 else (np.pi if dim == 2 else (4/3) * np.pi)
+    v = vH / nH
+    return (1 / v)**(1/dim)
+
+
 
 @wp.func
 def volumeToSupport_warp(volume : scalar_t, targetNeighbors : wp.int32, dim : wp.int32):
