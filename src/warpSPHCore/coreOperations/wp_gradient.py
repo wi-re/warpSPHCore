@@ -79,6 +79,10 @@ def computeSPHGradientTensor_Func_i(
         # ternary assigned to a local where both branches index the *same* array silently
         # zeroes that array's adjoint (compiles fine, runs the correct branch, wrong
         # gradient) -- see docs/lessons_learned.md, the bug that broke Interpolate this way.
+        # CONFIRMED FIXED upstream in warp-lang 1.17.0.dev3 (warp_dev env) as of 2026-08-11
+        # -- see scripts/repro_ternary_adjoint_zeroing.py. Not yet on PyPI; once a 1.17+
+        # release lands and pyproject.toml's warp-lang floor is bumped to it, this can go
+        # back to the ternary form (see git history around 2026-08-11 for the tested diff).
         if correctionData.useGradHTerms:
             fj = referenceValues[j] / correctionData.referenceOmegas[j]
         else:

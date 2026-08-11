@@ -43,6 +43,20 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   ternary is only dangerous when both branches index the *same* array
   (confirmed non-issue for the `apparentVolume = mj/rhoj if ... else
   referenceVolumes[j]` pattern, which indexes different arrays per branch).
+  **Update 2026-08-11: fixed upstream in warp-lang 1.17.0.dev3.**
+  `scripts/repro_ternary_adjoint_zeroing.py` now passes for both the ternary
+  and if/else forms under the `warp_dev` conda env (1.17.0.dev3), while still
+  failing the ternary case under the pinned/installed `warp` env (1.12.0).
+  Verified by temporarily restoring the ternary in `wp_gradient.py`'s
+  `computeSPHGradientTensor_Func_i` (the `useGradHTerms` branch) and rerunning
+  `scripts/gradcheck_gradient_native.py`: PASSED under `warp_dev`, FAILED
+  (zeroed analytical Jacobian) under `warp` 1.12.0 — then reverted back to
+  the explicit `if/else` since 1.17 isn't on PyPI yet and `pyproject.toml`
+  doesn't pin a `warp-lang` floor. Once a 1.17+ release is published and the
+  project's Warp dependency is bumped to it, the `if/else` workarounds in
+  `wp_gradient.py`, `wp_divergence.py`, `wp_curl.py`, and `wp_laplacian.py`
+  (all four share this exact `useGradHTerms` pattern) can be converted back
+  to ternaries.
 
 * **A plain Python scalar (e.g. a `float` field on a Python-side struct)
   passed straight into `wp.launch` gets Warp's default type inference —
