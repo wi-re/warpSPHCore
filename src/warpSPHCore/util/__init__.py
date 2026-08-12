@@ -14,7 +14,7 @@ from .wp_util import (
 #     StateAwareWarpFunction
 # )
 
-from .support import volumeToSupport, n_h_to_nH, volumeToSupport_warp, computePairwiseSupport, nH_to_n_h
+from .support import volumeToSupport, volumeToSupport_tensor, n_h_to_nH, volumeToSupport_warp, computePairwiseSupport, nH_to_n_h
 
 
 __all__ = [
@@ -31,6 +31,7 @@ __all__ = [
     # "warpWrapper",
     # "launch_kernel",
     "volumeToSupport",
+    "volumeToSupport_tensor",
     "n_h_to_nH",
     "nH_to_n_h",
     "volumeToSupport_warp",

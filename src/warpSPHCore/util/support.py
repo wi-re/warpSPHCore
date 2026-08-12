@@ -13,19 +13,31 @@ from ..enumTypes import SupportScheme
 from ..math import vectorNorm_warp
 from ..dataTypes.domain_t import domainData
 
-# @torch.jit.script
-def volumeToSupport(volume : float, targetNeighbors : int, dim : int):
+def volumeToSupport_tensor(volume : torch.Tensor, targetNeighbors : int, dim : int) -> torch.Tensor:
+    """Tensor-aware counterpart of volumeToSupport (uses torch.sqrt instead of
+    math.sqrt so it works elementwise on a tensor of per-particle volumes)."""
+    if dim == 1:
+        return targetNeighbors * volume / 2
+    elif dim == 2:
+        return torch.sqrt(targetNeighbors * volume / np.pi)
+    else:
+        return (targetNeighbors * volume / np.pi * 3 / 4) ** (1 / 3)
+
+
+def volumeToSupport(volume, targetNeighbors : int, dim : int):
     """
     Calculates the support radius based on the given volume, target number of neighbors, and dimension.
 
     Parameters:
-    volume (float): The volume of the support region.
+    volume (float or torch.Tensor): The volume of the support region.
     targetNeighbors (int): The desired number of neighbors.
     dim (int): The dimension of the space.
 
     Returns:
-    float: The support radius.
+    float or torch.Tensor: The support radius.
     """
+    if isinstance(volume, torch.Tensor):
+        return volumeToSupport_tensor(volume, targetNeighbors, dim)
     if dim == 1:
         # N_h = 2 h / v -> h = N_h * v / 2
         return targetNeighbors * volume / 2
