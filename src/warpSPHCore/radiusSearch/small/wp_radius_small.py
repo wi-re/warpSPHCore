@@ -135,7 +135,7 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
     # mode_uint = mode_map.get(mode, 0)
     mode_uint = supportSchemeToUint(mode)
         
-    edge_count = wp.zeros(N, dtype=wp.int32, device=x_warp.device)  # Allocate on same device as input data
+    edge_count_t, edge_count = allocateTorchWarp(N, wp.int32, x_warp.device)  # Allocate on same device as input data
 
     # import time
     # wp.synchronize()  # Ensure all previous GPU work is done before starting timer
@@ -161,8 +161,8 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
     edge_offsets_warp = wp.from_numpy(edge_offsets, device=x_warp.device)
 
     # Allocate output arrays on GPU
-    edge_i = wp.zeros(total_edges, dtype=wp.int32, device=x_warp.device)
-    edge_j = wp.zeros(total_edges, dtype=wp.int32, device=x_warp.device)
+    i_torch, edge_i = allocateTorchWarp(total_edges, wp.int32, x_warp.device)
+    j_torch, edge_j = allocateTorchWarp(total_edges, wp.int32, x_warp.device)
 
     # Second pass: collect edges
     wp.launch(warp_radius_search_collect_kernel_direct_2, dim=N, inputs=[
@@ -170,14 +170,10 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
         periodic_warp, wp.uint32(mode_uint), edge_offsets_warp, edge_i, edge_j
     ], device=x_warp.device)  # Ensure kernel runs on the same device as input data
 
-    # Convert Warp arrays back to PyTorch tensors using wp.to_torch() for direct GPU access
-    i_torch = wp.to_torch(edge_i)
-    j_torch = wp.to_torch(edge_j)
-    
     return AdjacencyList(
         i=i_torch.to(dtype=torch.int64),  # Ensure dtype is long for indexing
         j=j_torch.to(dtype=torch.int64),
-        numNeighbors=wp.to_torch(edge_count).to(dtype=torch.int64),
+        numNeighbors=edge_count_t.to(dtype=torch.int64),
         edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int64),
         numRows=N,
         numCols=M

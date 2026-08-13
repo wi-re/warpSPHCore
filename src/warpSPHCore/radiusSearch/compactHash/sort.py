@@ -60,8 +60,8 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     # print('Cell count:', cellCount, 'Cell size:', hCell, 'Domain extent:', qExtent)
     # print('indices:', indices.contiguous())
     warp_indices = castTorchToWarp(indices)
-    
-    out = wp.zeros((indices.shape[0],), dtype=wp.int64, device=warp_indices.device)
+
+    linearIndices, out = allocateTorchWarp((indices.shape[0],), wp.int64, warp_indices.device)
     warp_cell_count = castTorchToWarp(cellCount)
     wp.launch(
         indexCells,
@@ -69,7 +69,6 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
         inputs=[warp_indices, warp_cell_count, out],
         device=warp_indices.device,
     )
-    linearIndices = wp.to_torch(out)
     # linearIndices = linearIndexing(indices, cellCount)
     # with record_function("neighborSearch - sortReferenceParticles[argsort]"): 
     sortingIndices = torch.argsort(linearIndices)

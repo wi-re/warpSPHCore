@@ -67,11 +67,12 @@ __all__.extend([
     "checkDirectionality_j"
 ])
 
-from .cast import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins, _torch_scalar_to_warp_dtype, _get_warp_matrix_dtype, _get_warp_vector_dtype
+from .cast import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins, allocateTorchWarp, _torch_scalar_to_warp_dtype, _get_warp_matrix_dtype, _get_warp_vector_dtype
 __all__.extend([
     "castTorchToWarp",
     "castWarpToTorch",
     "castTorchToWarpAsBuiltins",
+    "allocateTorchWarp",
     "_torch_scalar_to_warp_dtype",
     "_get_warp_matrix_dtype",
     "_get_warp_vector_dtype"

@@ -74,6 +74,28 @@ def _get_warp_matrix_dtype(rows: int, cols: int, torch_dtype: torch.dtype):
         _WARP_MATRIX_DTYPE_CACHE[key] = cached
     return cached
 
+def allocateTorchWarp(shape, dtype, device, requires_grad: bool = False):
+    """
+    Allocate a Warp kernel output on torch's own caching allocator instead of
+    Warp's (wp.zeros(...) + wp.to_torch(...)), so kernel outputs that end up
+    as torch tensors don't grow a second, independent GPU memory pool.
+
+    Returns (torch_tensor, warp_array), where warp_array is a zero-copy Warp
+    view of torch_tensor suitable for passing straight into wp.launch(...).
+    ``device`` is a Warp DeviceLike (a wp.Device or a device string Warp
+    recognizes, e.g. "cuda:0"), matching what callers already have on hand
+    from e.g. ``castTorchToWarp(x).device``.
+    """
+    shape = (shape,) if isinstance(shape, int) else tuple(shape)
+    trailing_shape = getattr(dtype, "_shape_", ())
+    scalar_dtype = getattr(dtype, "_wp_scalar_type_", dtype)
+    torch_dtype = wp.dtype_to_torch(scalar_dtype)
+    torch_device = wp.device_to_torch(device)
+    output_torch = torch.zeros(shape + trailing_shape, dtype=torch_dtype, device=torch_device)
+    output_warp = wp.from_torch(output_torch, dtype=dtype, requires_grad=requires_grad)
+    return output_torch, output_warp
+
+
 def castTorchToWarpAsBuiltins(x_torch):
     """
     Cast a PyTorch tensor to a Warp array of built-in types (e.g., float32, int32), ensuring it's on the correct device and has the right dtype.

@@ -46,8 +46,8 @@ def filterVerletList_(
     edge_offsets_warp = wp.from_torch(edge_offsets)
 
     # Allocate output arrays on GPU
-    edge_i = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
-    edge_j = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+    i_torch, edge_i = allocateTorchWarp(total_edges, wp.int64, warpDevice)
+    j_torch, edge_j = allocateTorchWarp(total_edges, wp.int64, warpDevice)
 
     wp.launch(
         updateNeighborsVerlet, 
@@ -63,8 +63,6 @@ def filterVerletList_(
         edge_i, edge_j
         ]
     )
-    i_torch = wp.to_torch(edge_i)
-    j_torch = wp.to_torch(edge_j)
 
     return AdjacencyList(
         i = i_torch, j = j_torch,

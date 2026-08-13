@@ -63,12 +63,27 @@ class WarpFunctionWrapper(torch.autograd.Function):
             output = function(*warp_args)
             
         ctx.tape = tape if ctx.any_requires_grad else None
-        ctx.outputs_warp = output
-        
+        # launcher (usually launch_kernel) now returns torch tensors
+        # allocated on torch's own allocator; the wp.array view used for the
+        # actual (taped) kernel launch is stashed on each tensor, since
+        # backward must seed gradients through that exact object -- see the
+        # comment in launcher.py's _allocate_output. The stash is only a
+        # courier across that return boundary: wp.from_torch() gives the
+        # wp.array a `_tensor` back-reference to its source tensor, so
+        # leaving `_warp_array` attached here closes a reference cycle
+        # (tensor -> wp.array -> tensor) that only the cyclic GC -- not
+        # refcounting -- can break, on its own schedule rather than as
+        # memory is freed. Deleting it once read keeps the wp.array
+        # reachable only via ctx.outputs_warp, a plain acyclic reference.
         if isinstance(output, list) or isinstance(output, tuple):
-            return tuple(wp.to_torch(out) for out in output)
+            ctx.outputs_warp = tuple(out._warp_array for out in output)
+            for out in output:
+                del out._warp_array
+            return tuple(output)
         else:
-            return wp.to_torch(output)
+            ctx.outputs_warp = output._warp_array
+            del output._warp_array
+            return output
         
     @staticmethod
     def backward(ctx, *grad_outputs):

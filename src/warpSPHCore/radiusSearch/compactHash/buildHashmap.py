@@ -80,10 +80,12 @@ def buildCompactHashMap(
             torchDevice = queryPositions.device
 
             cellGridIndices_warp = castTorchToWarp(cellGridIndices)
-            hashedIndices_warp = wp.zeros(cellGridIndices.shape[0], dtype=wp.uint32, device=warpDevice)
+            # wp.dtype_to_torch(wp.uint32) is torch.int32 (torch has no native
+            # uint32), so this already gives us an int32 tensor directly --
+            # matches the .to(torch.int32) the old wp.to_torch() path needed.
+            hashedIndices, hashedIndices_warp = allocateTorchWarp(cellGridIndices.shape[0], wp.uint32, warpDevice)
             wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice)
             wp.synchronize()  # ensure hashCells is done before PyTorch reads on its own stream
-            hashedIndices = wp.to_torch(hashedIndices_warp).to(torch.int32)
             referenceHashedIndices = hashGridIndicesTorch(cellGridIndices, hashMapLength)
             # if not torch.equal(hashedIndices, referenceHashedIndices):
             #     mismatch = torch.nonzero(hashedIndices != referenceHashedIndices, as_tuple=False).flatten()

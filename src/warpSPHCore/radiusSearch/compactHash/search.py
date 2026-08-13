@@ -49,11 +49,11 @@ def radiusSearchOnCompactHashMap(
     offsets = datastructure.cellOffsets
 
     warpDevice = castTorchToWarp(queryPositions).device
-    
+
     with record_function("neighborSearch - count neighbors"):
         N = queryPositions.shape[0]
         M = sortedPositions.shape[0]
-        edge_count = wp.zeros(queryPositions.shape[0], dtype=wp.int32, device=warpDevice)
+        edge_count_t, edge_count = allocateTorchWarp(queryPositions.shape[0], wp.int32, warpDevice)
         wp.launch(radiusSearchCountNeighborsCompactHashMap, dim=queryPositions.shape[0], inputs=[
             castTorchToWarp(y),
             castTorchToWarp(querySupports),
@@ -77,8 +77,6 @@ def radiusSearchOnCompactHashMap(
 
         # Synchronize so PyTorch reads the fully-written count results from Warp's stream
         wp.synchronize()
-        # Convert counts to host (only the counts, not the main data)
-        edge_count_t = wp.to_torch(edge_count)
         total_edges = torch.sum(edge_count_t).cpu().item()
 
         # Compute cumulative offsets
@@ -90,8 +88,8 @@ def radiusSearchOnCompactHashMap(
         edge_offsets_warp = wp.from_torch(edge_offsets)
 
         # Allocate output arrays on GPU
-        edge_i = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
-        edge_j = wp.zeros(total_edges, dtype=wp.int64, device=warpDevice)
+        edge_i_t, edge_i = allocateTorchWarp(total_edges, wp.int64, warpDevice)
+        edge_j_t, edge_j = allocateTorchWarp(total_edges, wp.int64, warpDevice)
     with record_function("neighborSearch - collect neighbors"):
         wp.launch(radiusSearchCollectCompactHashMap, dim=queryPositions.shape[0], inputs=[
             castTorchToWarp(y),
@@ -118,14 +116,11 @@ def radiusSearchOnCompactHashMap(
 
 
     with record_function("neighborSearch - build adjacency"):
-        i_torch = wp.to_torch(edge_i)
-        j_torch = wp.to_torch(edge_j)
-
         adjacencyCH = AdjacencyList(
-            i=i_torch,  # Ensure dtype is long for indexing
-            j=j_torch,
-            numNeighbors=wp.to_torch(edge_count).to(dtype=torch.int32),
-            edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int32),
+            i=edge_i_t,  # Ensure dtype is long for indexing
+            j=edge_j_t,
+            numNeighbors=edge_count_t,
+            edgeOffsets=edge_offsets,
             numRows=N,
             numCols=M,
             queryPositions = queryPositions,

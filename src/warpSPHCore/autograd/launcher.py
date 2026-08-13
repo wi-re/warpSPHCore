@@ -16,6 +16,32 @@ def _dtype_is_float(dtype):
     return wp.types.type_is_float(scalar)
 
 
+def _allocate_output(shape, dtype, device, requires_grad):
+    # Allocate the output on torch's own caching allocator (rather than
+    # wp.zeros, which allocates from Warp's separate memory pool) so a
+    # torch-heavy caller doesn't pay for two independently-growing GPU
+    # allocators. wp.from_torch() gives a zero-copy Warp view of that same
+    # buffer for the kernel launch; the torch tensor itself is what gets
+    # returned to callers.
+    output_torch, output_warp = allocateTorchWarp(
+        shape, dtype, device, requires_grad=requires_grad and _dtype_is_float(dtype)
+    )
+    # Stashed for StateAwareWarpFunction/WarpFunctionWrapper: Warp's tape
+    # records the exact wp.array object passed to wp.launch below, so
+    # backward() must seed gradients through that same object -- not a
+    # freshly re-wrapped one -- for Tape.backward(grads=...) to find it.
+    # This is only a courier across this return boundary: wp.from_torch()
+    # gives output_warp a `_tensor` back-reference to output_torch, so if a
+    # caller reads `_warp_array` into ctx and leaves it attached, that closes
+    # a reference cycle (tensor -> wp.array -> tensor) that only the cyclic
+    # GC -- not refcounting -- can break, on its own schedule rather than as
+    # memory is freed (this produced a sawtooth allocation pattern on every
+    # kernel launch, grad or not). Callers MUST `del tensor._warp_array`
+    # immediately after stashing the wp.array elsewhere (e.g. ctx.output_warp).
+    output_torch._warp_array = output_warp
+    return output_torch, output_warp
+
+
 def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
     # with record_function(f"Warp Kernel Launch"):
     inputs = list(args)
@@ -44,17 +70,18 @@ def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
         device = firstTensorInput.device
 
     if isinstance(output_dtype, (list, tuple)):
-        outputs = []
+        outputs_torch = []
+        outputs_warp = []
         for i, out_type in enumerate(output_dtype):
-            # print(f"Allocating output {i} with shape {output_shape[i] if isinstance(output_shape, list) or isinstance(output_shape, tuple) else output_shape} and dtype {out_type} on device {device}")
-            output = wp.zeros(output_shape[i] if isinstance(output_shape, list) or isinstance(output_shape, tuple) else output_shape, dtype=out_type, device=device)
-            output.requires_grad = requires_grad and _dtype_is_float(out_type)
-            outputs.append(output)
+            shape_i = output_shape[i] if isinstance(output_shape, list) or isinstance(output_shape, tuple) else output_shape
+            out_torch, out_warp = _allocate_output(shape_i, out_type, device, requires_grad)
+            outputs_torch.append(out_torch)
+            outputs_warp.append(out_warp)
 
         kernel_dim = output_shape[0] if isinstance(output_shape, list) else output_shape
         kernel_dim = kernel_dim if isinstance(kernel_dim, int) else kernel_dim[0]
         actual_dim = numThreads if numThreads is not None else kernel_dim
-        kernel_inputs = inputs + outputs
+        kernel_inputs = inputs + outputs_warp
 
         wp.launch(
             kernel,
@@ -62,12 +89,11 @@ def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
             inputs = kernel_inputs,
             device = device
         )
-        return tuple(outputs)
-    
-    output = wp.zeros(output_shape, dtype=output_dtype, device=device)
-    output.requires_grad = requires_grad and _dtype_is_float(output_dtype)
-    kernel_inputs = inputs + [output]
-    
+        return tuple(outputs_torch)
+
+    output_torch, output_warp = _allocate_output(output_shape, output_dtype, device, requires_grad)
+    kernel_inputs = inputs + [output_warp]
+
     actual_dim = numThreads if numThreads is not None else (output_shape[0] if not isinstance(output_shape, int) else output_shape)
     wp.launch(
         kernel,
@@ -75,5 +101,5 @@ def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
         inputs = kernel_inputs,
         device = device
     )
-    
-    return output
+
+    return output_torch
