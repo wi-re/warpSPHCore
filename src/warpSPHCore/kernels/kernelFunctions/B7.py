@@ -25,7 +25,7 @@ def B7_d3kdq3(q: scalar_t, dim: wp.int32 = 2):
 def B7_C_d(dim: wp.int32):
     if dim == 1: return scalar_t(4096.0)/scalar_t(315.0)
     elif dim == 2: return scalar_t(589824.0) / (scalar_t(7435.0) * scalar_t(np.pi))
-    else: return scalar_t(1024.0) / (scalar_t(105.0) * scalar_t(np.pi))
+    else: return scalar_t(16384.0) / (scalar_t(105.0) * scalar_t(np.pi))
 
 @wp.func # See Dehnen & Aly: Improving convergence in smoothed particle hydrodynamics simulations
 def B7_kernelScale(dim: wp.int32 = 2):
