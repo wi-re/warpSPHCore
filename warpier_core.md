@@ -545,6 +545,25 @@ Operators should consume semantic information ("positions", "densities", "neighb
 
 # Phase 3 – Introduce a Field Abstraction
 
+## Status: planned in detail — see `warpier_fields.md`
+
+`warpier_fields.md` is the executable plan for Phases 3 and 4, written against the repo
+after `3cdd4e6` and cross-checked against the `warpSPH` frontend. It carries the
+measured baseline (~900 us of N-independent CPU overhead per operator call, of which
+~33% is 38 `wp.from_torch` calls), the prototyped savings, the `Field`/`StateBundle`
+design, an eight-step execution order with per-step gates, and the argument for why
+reintroducing wrapper reuse does not reintroduce the gradient-accumulation bug that got
+the previous cache deleted.
+
+It also carries three findings that reach beyond Phase 3: `kinds` can be made a
+required member with zero call-site churn in either repo, which closes the open
+`kinds=None` + `AllToAll` out-of-bounds read (its Step A); Warp 1.15 has no
+forward-mode AD of any kind, so Phase 6 is entirely hand-written, but every SPH
+operator is *measurably linear in the field values*, which makes tangents w.r.t.
+values a re-launch of the existing kernel rather than a new one (its §3.6); and the
+`warpSPHIntegrators` buffer-pool work in that repo's NOTES.md §2.1 should share this
+plan's `ExecutionMode` switch rather than introduce its own (its §7).
+
 ## Goal
 
 Represent every simulation quantity through a common field abstraction.
