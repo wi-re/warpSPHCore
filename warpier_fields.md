@@ -633,6 +633,13 @@ folding in Section 3.7's "cheap wins" (a circular import; an unhashable `wp.Devi
 key) -- see the Step F subsection for both. Full verification battery green; CUDA bench in
 `docs/regression/bench_call_overhead_step_f.md`.
 
+**Step numbering note (2026-08-17):** a new Step H (real-world bottleneck audit) was inserted
+between the forward-mode readiness audit and the interface break, at the user's request, after a
+real 70k-particle simulation showed a much smaller end-to-end speedup than the per-call
+microbenchmarks predicted (see that step's own rationale). The old Steps H and I (the interface
+break, Section 8) are renumbered to I and J throughout this document; nothing about their content
+changed, only their labels.
+
 **Frontend verification (2026-08-17, `~/dev/warpSPH`, same `warp` conda env, editable install --
 so it picked up every Steps A-F change automatically with no reinstall):** ran the frontend's full
 test suite against the modified core. **88 passed, 1 skipped, 0 failed:**
@@ -669,8 +676,11 @@ touching anything -- they carry the corrections and hazards below, and the numbe
 "Step X notes" are denser than the surrounding prose for a reason.
 
 **What to do next:** Step G (a checklist/audit against already-landed code -- no new
-implementation) and then Steps H/I (Section 8, the interface break -- deliberately last). Nothing
-about Steps A-F's design blocks starting Step G immediately.
+implementation), then Step H (a real-world bottleneck audit across particle-count scales, inserted
+2026-08-17 -- see that step), then Steps I/J (Section 8, the interface break -- deliberately last,
+and now additionally gated on Step H's findings: if Step H turns up a bottleneck that needs a
+deeper architectural change, doing that before the interface moves is cheaper than doing it after).
+Nothing about Steps A-F's design blocks starting Step G immediately.
 
 **The one habit to carry forward, stated plainly because it paid off repeatedly:** every step from
 C onward had at least one real, silent-corruption-class bug in the *written* sketch -- not
@@ -681,7 +691,7 @@ checked *before* any implementation code existed, plus two more bugs in the "che
 alongside it). None of these were caught by reading the plan carefully -- they were caught by
 writing a targeted empirical check (a raw warp repro, a cross-check against an env-var-disabled
 reference, a monkeypatch proving a test isn't vacuous) *before* trusting a design or *after*
-implementing it but before calling it done. Budget for that on Step H too, especially anywhere it
+implementing it but before calling it done. Budget for that on Step I too, especially anywhere it
 touches the autograd bridge or introduces new shared/cached state -- the failure mode here has
 consistently been "looks right, runs, produces a plausible number" with the actual bug only
 visible in a gradient value or an object-identity check, never in a stack trace.
@@ -945,7 +955,7 @@ at most 3 bundles (dim ∈ {1,2,3}) will ever exist):
    compared -- not 20+ named `_xxx_id` attributes) and writes only where it changed; scalar fields
    (`grid.hCell`, the four correction `use*` flags, all seven `kernelProperties` fields) are always
    assigned, since several legitimately change every call. `getStateBundle(dim)` is a plain dict,
-   no eviction. No `torch.autograd` import anywhere in the file (Step H prerequisite, verified).
+   no eviction. No `torch.autograd` import anywhere in the file (Step I prerequisite, verified).
 2. **`arg_extract.py`'s `build_fn` gained a `use_bundle: bool = False` parameter** rather than being
    replaced by a bundle-returning signature: when `True` it calls `getStateBundle(dim).refresh(wa,
    cfg)` and returns the bundle's structs directly; when `False` (the default, and every call site
@@ -997,7 +1007,7 @@ at most 3 bundles (dim ∈ {1,2,3}) will ever exist):
   `WARPSPHCORE_PROFILING=0` (the new default) -- `record_function`'s own overhead when actually
   hooked to a profiler turned out to be ~70-115 us per call on top of that, confirming Section
   3.7's second claim independently of the struct-assembly win.
-* **Prerequisite for Step H satisfied:** no `torch.autograd` import anywhere in `stateBundle.py`
+* **Prerequisite for Step I satisfied:** no `torch.autograd` import anywhere in `stateBundle.py`
   (Section 3.6, requirement 6) -- verified by grep, not just by construction.
 
 ## Step G -- Forward-mode readiness audit (no forward mode implemented)
@@ -1014,15 +1024,124 @@ known state rather than a hopeful one.
   `torch.autograd.functional.jvp` on a small case. If that spike passes, Tier-1
   forward mode is a bridge, not a kernel project.
 * **Gate:** all four hold; findings written back into `warpier_core.md`'s Phase 6.
-  Requirement 4's *API-surface* half is Step H's job -- G audits the internals,
-  H exposes them.
+  Requirement 4's *API-surface* half is Step I's job -- G audits the internals,
+  I exposes them.
 
-## Steps H / I -- The interface break
+## Step H -- Real-world bottleneck audit across particle-count scales  [inserted 2026-08-17]
 
-Detailed in Section 8, and deliberately last: land, measure and stabilise the
-internals before the interface they sit behind starts moving. Step H introduces
+**Why this step exists.** A real ~70k-particle, no-grad simulation went from 45 to 42 minutes
+after Steps A-F landed -- about 7%, against a per-call microbenchmark showing the fixed dispatch
+overhead these steps target dropped ~4-6x (`bench_call_overhead_step_f.md`). Both numbers are
+correct; they answer different questions. `bench_call_overhead.py` isolates exactly the thing
+Steps A-F changed -- repeated calls to one operator (Density), on a fixed particle count, against
+**a `CompactHashMap` built once and reused across all 200 timed iterations** (the script's own
+comment: *"measures operator call overhead, not hash-map construction"*) -- and confirms that
+piece works, with `torch.cuda.synchronize()` around the timed region so the numbers are real
+completed-work time, not queued-but-unfinished dispatch. What it cannot tell you is what fraction
+of a real simulation's wall-clock time that piece actually is, because a real run also pays for
+neighbor-list rebuilds every step (excluded from the bench by construction), genuine GPU kernel
+compute scaling with N and neighbor count (out of scope for this plan by design -- "must not touch
+kernel math"), the integrator's own tensor churn (Section 7, ~40 allocations/RK4 step, explicitly
+deferred as "after this plan"), and whichever CPU-GPU synchronization points a real solver's
+control flow introduces (adaptive timestepping, logging, I/O) that an isolated single-operator loop
+never triggers. Section 1.1's own baseline data already shows the CPU-dispatch-bound / GPU-compute
+-bound crossover sitting somewhere between N=20k and N=200k (Density: 919us at 2k, flat through
+20k, 7484us at 200k) -- so at 70k, before any of Steps A-F landed, a meaningful and growing share
+of each call's cost was *already* GPU compute, not the CPU marshalling this plan fixes. The
+per-call multiplier is real and validated; whether it was ever the dominant cost of a full run at a
+given scale is a separate, unanswered question this step exists to answer with data instead of
+inference from a different benchmark.
+
+**This is diagnostic, not a caching step -- treat it with the same rigor as Steps C-F's
+verification, not as a lighter aside.** The output feeds a real decision: whether something Steps
+A-F did *not* touch needs a deeper architectural change before Steps I/J move the interface under
+it. Section 7 (integrator buffer pool) is the leading candidate already written up in this
+document; this step's job is to find out whether it -- or something else entirely (neighbor-list
+rebuild cost, most likely) -- is actually where the time goes, rather than assuming Section 7's own
+"~3% drag" estimate (Section 7.2, itself derived from the *no-grad-only field-cache* miss rate, not
+from a full-run profile) still holds now that the field cache and StateBundle it was compared
+against have both landed.
+
+**Methodology.**
+
+1. **Real workload, not synthetic.** Use `~/dev/warpSPH` (the frontend), not
+   `bench_call_overhead.py` or the gradcheck/operation-matrix scripts -- those exercise correctness
+   and isolated per-call cost, not a full solver loop. Pick one or two representative case setups
+   already in the frontend's `caseUtils`/examples (a weakly-compressible or similar production-
+   shaped case, matching what actually produced the 45-minute run if that setup is available)
+   rather than inventing a new one, so the profile reflects real usage.
+2. **Particle-count sweep spanning the CPU-dispatch-bound to GPU-compute-bound crossover and
+   beyond it**, informed by Section 1.1's baseline: something like 2k, 20k, 70k (the reported data
+   point), 200k, and at least one point past 500k if it fits in the RTX PRO 6000's 96GB, in
+   whichever of 2D/3D matches real usage (do both if both matter to the project -- 3D's per-particle
+   neighbor count is higher, which changes the neighbor-rebuild-vs-compute balance). Run each scale
+   long enough to profile a representative handful of steps (not the full run -- profiling overhead
+   itself would distort a 45-minute measurement), but confirm the profiled steps are steady-state
+   (post-warmup, no one-time kernel-compile artifacts of the kind seen in Steps C-F's CUDA bench
+   sweeps skewing the sample).
+3. **Profile with `WARPSPHCORE_PROFILING=1`** (Step F's gate; without it, the `record_function`
+   regions Steps A-F's own bench relies on are no-ops and this step loses the ability to attribute
+   time the same way those docs already do) plus `torch.profiler`'s CUDA activities, attributing
+   wall-clock time per step to: neighbor-list/adjacency rebuild, operator dispatch overhead
+   (extract/convert/build_fn/allocate -- what Steps A-F targeted, expected to now be small),
+   GPU kernel compute proper, integrator tensor churn (the out-of-place update allocations Section
+   7 describes), and CPU-GPU synchronization points (adaptive `dt` computation reading a value back
+   to host is the most likely culprit -- check whether one exists in the profiled case and whether
+   it forces a device sync every step). Exclude plotting/I/O from the profiled window, or account
+   for it separately if it can't be disabled.
+4. **One clean before/after comparison on the real workload**, not just synthetic-bench numbers:
+   at one representative scale, run the profiled steps twice -- once as landed, once with every
+   Steps A-F escape hatch flipped off (`WARPSPHCORE_DISABLE_FIELD_CACHE=1`,
+   `WARPSPHCORE_FIELD_CACHE_GRAD=0`, and Step F's `use_bundle` gate would need a matching
+   escape hatch added if one doesn't already exist -- note as a finding if it's missing) --
+   to get an in-situ confirmation of what Steps A-F actually bought on this workload, separate from
+   what remains.
+5. **Compute cost of this step itself is non-trivial** (multiple real simulations at multiple
+   scales, some potentially large, some possibly running many minutes each). Confirm the GPU is
+   actually free before each run rather than assuming the green light from Steps A-F's CUDA bench
+   work still stands by the time this step executes -- this machine's GPU is shared with other
+   simulation work.
+
+**Deliverable:** a written report (`docs/regression/real_workload_bottleneck_audit.md` or similar)
+with a bottleneck-by-scale table -- which bucket dominates at which N, in which dimension -- and an
+explicit recommendation, one of:
+
+* **Nothing further needed before Steps I/J.** Steps A-F's target was never far from the true
+  bottleneck at the scales that matter to this project; Section 7's estimate holds up under a real
+  profile. Proceed to Steps I/J as planned.
+* **Neighbor-list rebuild is the dominant or a major cost.** Investigate whether
+  `AdjacencyList`'s existing (per its own docstring in `adjacency_t.py`) but seemingly-unused
+  Verlet-style rebuild-threshold fields (`queryPositions`/`querySupports` etc., "extra neighbors to
+  avoid rebuilding the neighbor list every step") are actually wired up anywhere, or are dead
+  scaffolding from an earlier design. Scope a follow-on step to actually use a buffered rebuild
+  before Steps I/J move the interface underneath whatever that fix touches.
+* **Integrator tensor churn is the dominant or a major cost.** This promotes Section 7's buffer
+  pool (`PooledState`/`WarpState`, the fused `axpy` kernel, CUDA-graph capture on the `NONE`-mode
+  path) from "after this plan" to "before Steps I/J" -- Section 7.4 already ties its `ExecutionMode`
+  gating to the same switch this plan introduced, so the interface dependency runs the other way:
+  doing it first means Steps I/J's `SPHContext` can be designed as the pool's natural handle
+  (Section 8.3 already anticipates this) rather than retrofitted onto it later.
+* **GPU kernel compute time itself dominates at the scales that matter.** Out of scope for a
+  quick follow-on -- this plan does not touch kernel math -- but worth stating plainly rather than
+  implying more headroom exists than does. CUDA graph capture (a dispatch-level, not kernel-math,
+  mitigation, and Section 7.3's territory) is the one remaining lever this plan's approach can still
+  pull; note whether it looks worthwhile at the profiled scales.
+* **Dispatch overhead is still non-trivial even after Steps A-F**, once real multi-operator
+  sequencing (not an isolated single-operator loop) is accounted for. If so, instrument the actual
+  cache hit rates (Field cache, StateBundle) in a real run rather than trusting Section 2.3's
+  projected hit-rate, which was derived analytically, not measured against a real integrator loop.
+
+* **Gate:** the report exists, names a scale-by-scale bottleneck, and gives one of the above
+  recommendations (or a mix, by scale) with enough specificity that Steps I/J -- or a newly-scoped
+  step ahead of them -- can be planned from it without re-deriving the profile.
+
+## Steps I / J -- The interface break
+
+Detailed in Section 8, and deliberately last -- now gated on Step H's findings too, not just on
+Steps A-F being landed: land, measure, stabilise, *and profile the real workload* before the
+interface they sit behind starts moving. Step I introduces
 `OperatorSpec` / `SPHContext` / `launchOperator` and ports the core, with
-`warpWrapper2` reduced to a shim so the frontend is untouched; Step I migrates the
+`warpWrapper2` reduced to a shim so the frontend is untouched; Step J migrates the
 frontend's 24 wrapper sites and 65 `warpOperation` sites and deletes the shim.
 
 
@@ -1317,20 +1436,20 @@ forward mode exists.
 
 Same idiom as the state-based rewrite, which is why it is known to work here.
 
-**Step H (core).** Introduce `OperatorSpec` / `SPHContext` / `launchOperator`. Port all
+**Step I (core).** Introduce `OperatorSpec` / `SPHContext` / `launchOperator`. Port all
 15 core files that use `warpWrapper2` / `extractStateInfo`. Reimplement `warpWrapper2`
 as a thin deprecating shim over `launchOperator` -- it keeps its exact current
 signature, so **the frontend keeps working untouched throughout this step**. Gate:
 operation matrix bit-identical; gradcheck green through both the new path and the shim;
 bench shows no regression and the dtype-probe saving.
 
-**Step I (frontend).** Migrate the 24 `warpWrapper2` sites and the 65 `warpOperation`
+**Step J (frontend).** Migrate the 24 `warpWrapper2` sites and the 65 `warpOperation`
 sites, module by module, each with the frontend gradcheck and physics suites green.
 Convert the sprawling `Optional[...]` parameter lists on wrappers like
 `computeCompSPHBalanceTermWarp` into an `SPHContext` plus declared extras while doing
 so. Then delete the shim and the old `defaultStateArguments` path from the core.
 
-**Prerequisite for Step I:** give `warpSPH` a `.github/workflows/` that runs its
+**Prerequisite for Step J:** give `warpSPH` a `.github/workflows/` that runs its
 existing `tests/` -- the suites are there but nothing runs them automatically, and a
 65-site migration should not be the first thing to find that out. Skip this step as the
 tests are computationally expensive (if they run on CPU only and GPU runners are not available).
@@ -1338,4 +1457,7 @@ Especially the physics ones are expensive, and running them on every push is not
 especially before this major rework is done. 
 
 Both steps are behind everything else deliberately: the perf work should be landed,
-measured and stable before the interface it sits behind starts moving.
+measured and stable before the interface it sits behind starts moving -- and, as of Step H's
+insertion, "measured" now explicitly includes real-workload profiling, not just the synthetic
+per-call benchmark, so a deeper architectural fix Step H turns up has a chance to land while the
+interface is still the old one, rather than being bolted onto the new one under time pressure.
