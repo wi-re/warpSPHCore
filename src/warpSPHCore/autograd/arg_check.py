@@ -74,11 +74,9 @@ def checkQV(
         return True, scatteredQuantities, scatteredQuantities
     return False, queryValues, referenceValues
 
-def checkKinds(
-    operationMode: OperationDirection, device: torch.device, queryKinds: Optional[torch.Tensor], referenceKinds: Optional[torch.Tensor], queryNumParticles: Optional[int] = None, referenceNumParticles: Optional[int] = None):
-    if operationMode == OperationDirection.AllToAll:
-        return getCachedDummyTensor((queryNumParticles,), dtype=torch.int32, device=device) if queryKinds is None else queryKinds, getCachedDummyTensor((referenceNumParticles,), dtype=torch.int32, device=device) if referenceKinds is None else referenceKinds
-    else:
-        if queryKinds is None or referenceKinds is None:
-            raise ValueError("For directional operations, query and reference kinds must be provided to determine interaction masking.")
-        return queryKinds, referenceKinds
+def checkKinds(queryKinds: Optional[torch.Tensor], referenceKinds: Optional[torch.Tensor]):
+    # kinds is a required ParticleState member (warpier_fields.md Section 2.5)
+    # -- no more N-sized dummy fallback for AllToAll.
+    if queryKinds is None or referenceKinds is None:
+        raise ValueError("Query and reference kinds must be provided; ParticleState.kinds is required.")
+    return queryKinds, referenceKinds

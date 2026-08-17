@@ -2,6 +2,7 @@ import torch
 import warp as wp
 from ..util import *
 from .cache import *
+from torch.profiler import record_function
 
 
 def _dtype_is_float(dtype):
@@ -23,9 +24,10 @@ def _allocate_output(shape, dtype, device, requires_grad):
     # allocators. wp.from_torch() gives a zero-copy Warp view of that same
     # buffer for the kernel launch; the torch tensor itself is what gets
     # returned to callers.
-    output_torch, output_warp = allocateTorchWarp(
-        shape, dtype, device, requires_grad=requires_grad and _dtype_is_float(dtype)
-    )
+    with record_function("launch_kernel - allocate_output"):
+        output_torch, output_warp = allocateTorchWarp(
+            shape, dtype, device, requires_grad=requires_grad and _dtype_is_float(dtype)
+        )
     # Stashed for StateAwareWarpFunction/WarpFunctionWrapper: Warp's tape
     # records the exact wp.array object passed to wp.launch below, so
     # backward() must seed gradients through that same object -- not a

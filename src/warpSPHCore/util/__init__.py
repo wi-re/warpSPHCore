@@ -77,3 +77,11 @@ __all__.extend([
     "_get_warp_matrix_dtype",
     "_get_warp_vector_dtype"
 ])
+
+from .fieldRegistry import acquireView, nullField, clearNullFieldRegistry, structFor
+__all__.extend([
+    "acquireView",
+    "nullField",
+    "clearNullFieldRegistry",
+    "structFor",
+])

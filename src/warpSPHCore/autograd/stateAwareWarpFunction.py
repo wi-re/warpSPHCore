@@ -2,6 +2,7 @@ import torch
 import warp as wp
 from ..util import *
 from .cache import *
+from torch.profiler import record_function
 
 class StateAwareWarpFunction(torch.autograd.Function):
     """
@@ -41,7 +42,6 @@ class StateAwareWarpFunction(torch.autograd.Function):
             t.requires_grad for t in flat_tensors if isinstance(t, torch.Tensor)
         )
         if ctx.any_requires_grad:
-            print(f"Forward pass with gradients required for {sum(1 for t in flat_tensors if isinstance(t, torch.Tensor) and t.requires_grad)} tensors.")
             ctx.save_for_backward(*flat_tensors)
         else:
             
@@ -52,23 +52,26 @@ class StateAwareWarpFunction(torch.autograd.Function):
         # Always builds fresh wrapper objects -- see the module-level note
         # above on why a data_ptr-keyed cache used to live here and why it
         # was removed.
-        warp_arrays = []
-        for t in flat_tensors:
-            wa = getCachedWarpArray(t.detach())
-            wa.requires_grad = t.requires_grad
-            warp_arrays.append(wa)
-        ctx.warp_arrays = warp_arrays
+        with record_function("SAWF.forward - convert"):
+            warp_arrays = []
+            for t in flat_tensors:
+                wa = getCachedWarpArray(t.detach())
+                wa.requires_grad = t.requires_grad
+                warp_arrays.append(wa)
+            ctx.warp_arrays = warp_arrays
 
         # Reconstruct all kernel args via the caller-supplied closure
-        kernel_args = build_fn(warp_arrays)
+        with record_function("SAWF.forward - build_fn"):
+            kernel_args = build_fn(warp_arrays)
 
-        if ctx.any_requires_grad:
-            tape = wp.Tape()
-            with tape:
+        with record_function("SAWF.forward - launch"):
+            if ctx.any_requires_grad:
+                tape = wp.Tape()
+                with tape:
+                    output = launcher(kernel, output_shape, output_dtype, *kernel_args)
+            else:
+                tape = None
                 output = launcher(kernel, output_shape, output_dtype, *kernel_args)
-        else:
-            tape = None
-            output = launcher(kernel, output_shape, output_dtype, *kernel_args)
 
         ctx.tape = tape
         # launcher() now returns torch tensors allocated on torch's own

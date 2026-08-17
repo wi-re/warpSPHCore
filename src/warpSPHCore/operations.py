@@ -175,7 +175,8 @@ def sphOperation_warp(
     consistentDivergence: bool = False,
     divergenceDotMode: bool = False,
     preScatteredQuantities: Optional[torch.Tensor] = None,
-    queryKinds: Optional[torch.Tensor] = None, referenceKinds: Optional[torch.Tensor] = None,
+    *,
+    queryKinds: torch.Tensor, referenceKinds: torch.Tensor,
 
     useGradientRenormalization: bool = False, renormalizationMatrices: Optional[torch.Tensor] = None,
     useGradHTerms: bool = False, queryOmegas: Optional[torch.Tensor] = None, referenceOmegas: Optional[torch.Tensor] = None,
@@ -190,10 +191,12 @@ def sphOperation_warp(
     caller setting e.g. ``useCRK=True`` without actually passing ``crk_A``/``crk_B``, a
     mistake that can't happen through the state-object API since CRK is "on" precisely
     when a ``CRKState`` is passed.
-    """
-    if operationMode != OperationDirection.AllToAll and (queryKinds is None or referenceKinds is None):
-        raise ValueError("Query and reference kinds must be provided for non AllToAll operation modes. Operation mode: {}, queryKinds is None: {}, referenceKinds is None: {}".format(operationMode, queryKinds is None, referenceKinds is None))
 
+    ``queryKinds``/``referenceKinds`` are required keyword-only arguments (not
+    ``Optional``, no default): ``ParticleState.kinds`` is a required field --
+    see warpier_fields.md Section 2.5 -- so this flat entry point can no
+    longer default them to ``None`` either.
+    """
     if useGradientRenormalization and renormalizationMatrices is None:
         raise ValueError("Renormalization matrices must be provided if useGradientRenormalization is True.")
     if useGradHTerms and (queryOmegas is None or referenceOmegas is None):

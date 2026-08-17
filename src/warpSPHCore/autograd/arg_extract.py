@@ -67,7 +67,6 @@ def extractStateInfo(
 
             torch_t = get_torch_precision()
             _d1f   = getCachedDummyTensor((1,),          dtype=torch_t, device=device)
-            _d1i   = getCachedDummyTensor((1,),          dtype=torch.int32,   device=device)
             _d1Df  = getCachedDummyTensor((1, dim),      dtype=torch_t, device=device)
             _d1DDf = getCachedDummyTensor((1, dim, dim), dtype=torch_t, device=device)
 
@@ -77,14 +76,12 @@ def extractStateInfo(
             if rDen is None:
                 rDen = _d1f
 
-            # Kinds
-            queryKinds    = queryParticles.kinds if hasattr(queryParticles, 'kinds') else None
-            referenceKinds = (
-                queryKinds if referenceParticles is None or not hasattr(referenceParticles, 'kinds')
-                else referenceParticles.kinds
-            )
+            # Kinds -- required on ParticleState (warpier_fields.md Section 2.5);
+            # no more hasattr probe or None fallback.
+            queryKinds    = queryParticles.kinds
+            referenceKinds = queryKinds if referenceParticles is None else referenceParticles.kinds
             operationMode = operationProperties.operationMode
-            qK, rK = checkKinds(operationMode, device, queryKinds, referenceKinds, qPos.shape[0], rPos.shape[0])
+            qK, rK = checkKinds(queryKinds, referenceKinds)
         with record_function("[ESI] 2. resolve correction states"):
             # ------------------------------------------------------------------ #
             # 2.  Resolve correction states

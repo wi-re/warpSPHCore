@@ -894,7 +894,10 @@ so. Then delete the shim and the old `defaultStateArguments` path from the core.
 
 **Prerequisite for Step I:** give `warpSPH` a `.github/workflows/` that runs its
 existing `tests/` -- the suites are there but nothing runs them automatically, and a
-65-site migration should not be the first thing to find that out.
+65-site migration should not be the first thing to find that out. Skip this step as the
+tests are computationally expensive (if they run on CPU only and GPU runners are not available).
+Especially the physics ones are expensive, and running them on every push is not necessary, 
+especially before this major rework is done. 
 
 Both steps are behind everything else deliberately: the perf work should be landed,
 measured and stable before the interface it sits behind starts moving.

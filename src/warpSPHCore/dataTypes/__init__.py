@@ -48,3 +48,11 @@ from .kernelState_t import kernelState
 __all__.extend([
     'kernelState',
 ])
+
+from .field_t import Field, Role, ExecutionMode, FieldKind
+__all__.extend([
+    'Field',
+    'Role',
+    'ExecutionMode',
+    'FieldKind',
+])
