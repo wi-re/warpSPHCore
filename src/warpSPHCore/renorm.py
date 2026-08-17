@@ -77,10 +77,18 @@ def computeRenormalizationMatrices_(
         # Too few neighbors to trust the covariance matrix (e.g. free-surface fingers, isolated
         # particles): fall back to the identity so the pseudo-inverse doesn't amplify noise. The
         # 2D path re-checks this internally in pinv2x2_warp; applying it here as well covers 3D+.
+        # Selected with torch.where rather than `if torch.any(mask): C[mask] = eye`.
+        # That guard was two host readbacks per step in a real run (`torch.any` on a
+        # device tensor in a Python `if`), and the masked assignment it guarded is
+        # itself a synchronising op (a boolean-mask index_put_ reads the mask count on
+        # the host), so the fast path paid a stall to *maybe* avoid a stall. `where`
+        # has neither, needs no clone, and gives the same values and the same
+        # gradients -- a low-neighbour row is replaced by a constant either way, so
+        # nothing flows back through it. See Step H's sync census in
+        # docs/regression/real_workload_bottleneck_audit.md.
         lowNbrMask = num_nbrs < dim + 2
-        if torch.any(lowNbrMask):
-            C = C.clone()
-            C[lowNbrMask, :, :] = torch.eye(dim, dtype = dtype, device = device)[None, :, :]
+        identity = torch.eye(dim, dtype = dtype, device = device)
+        C = torch.where(lowNbrMask.view(-1, 1, 1), identity.unsqueeze(0), C)
 
     with record_function("[warpSPH] - Renorm - Pseudo Inverse"):
         L, eigVals = pinv_warp(C, num_nbrs)

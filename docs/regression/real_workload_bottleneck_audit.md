@@ -67,6 +67,14 @@ and rises to 5.6 ms at 155k -- i.e. it scales like the device work it now is, ra
 like a per-stage host round-trip. At 155k the whole step is now within 5% of the same case
 with the forcing removed entirely (17.11 vs 16.35 ms).
 
+**Confirmed end-to-end on the real run, not just in this harness:** the full ~70k-particle
+production run went from **42 to 16 minutes** (user-reported, same case, immediately after
+the interpolator change) -- **2.6x**, sitting inside the 1.76x (57k) / 2.81x (155k) bracket
+measured above and close to what interpolating between them predicts. Worth stating plainly
+because it is the second time this audit's two measurement scales have agreed with a full
+run: the same workload is what earlier pinned Steps A-F's own contribution at ~7%. A
+profiled 15-step window on this case predicts full-run wall clock well.
+
 ## Result 2 -- the current picture: dispatch is the largest host bucket again
 
 Kolmogorov forcing **ON**, torch interpolator (i.e. the frontend as it now stands):
@@ -240,22 +248,45 @@ Recorded because either would have produced a confident, wrong recommendation.
    `[warpSPH] - computeForcing` and only ~0.05 ms/step actually inside `[Integration]`
    regions. A follow-on bug in the same fix charged a region's *own* self-time to its
    parent, hiding half the forcing cost (16.4 ms/step) in the generic `solver` bucket.
+3. **Region attribution misread the sync census too** -- the same failure mode a third time,
+   and worth stating as a general caution about this harness. Region-based attribution said
+   15 readbacks/step were in "the Verlet validity check", which reads naturally as *the
+   rebuild decision*; the decision is 2.9/step and the other 11.5 were
+   `_minimum_image_delta` nested inside the same region. Acting on the region number would
+   have meant restructuring the rebuild logic (hard, and it is the one genuinely
+   irreducible sync) instead of deleting a per-axis `.item()` (eleven lines, 1.2x).
+   **When a bucket is the target of actual work, re-derive it by counting in Python** --
+   wrap `Tensor.item`/`__bool__` and record call sites -- rather than trusting the region
+   totals, which attribute to the nearest enclosing region and cannot distinguish a
+   region's own cost from its callees'.
 
 ## Recommendation
 
-**"Nothing further needed before Steps I/J", with the one high-value fix already landed and
-two of Step H's candidate follow-ons explicitly ruled out.**
+**"Nothing further needed before Steps I/J", with two high-value fixes already landed (the
+forcing, and the core-side host stalls) and two of Step H's candidate follow-ons explicitly
+ruled out.**
 
-* **Steps I/J are not blocked.** No bottleneck found needs an architectural change to the
-  core before the interface moves. Dispatch is a flat ~4 ms/step and, with the forcing
-  fixed, once again the largest core-side host bucket below ~57k -- so the interface work's
-  own goals (retiring the 27 hot-path dtype probes, the per-call `additionalArguments`
-  re-analysis, somewhere to put `ExecutionMode`) remain worthwhile. The *performance* case
-  for them is now quantified: ~1 ms/step on this workload, not more.
-* **The forcing fix is done** (`d9ad712`). It was worth 1.76x at 57k and 2.81x at 155k on
-  this case -- an order of magnitude more than any remaining core-side dispatch work. It
-  also *gains* differentiability through the forcing, which the scipy version could not
-  offer.
+* **Host-stall removal: done, both repos.** 39.1 -> 8.6 readbacks/step, worth 1.27-1.40x of
+  per-step wall clock across the two passes. What remains is load-bearing (the rebuild
+  decision, the NaN check) or setup-only. This turned out to be the best value-per-line in
+  the whole of Step H after the forcing fix -- eleven lines of core code alone beat every
+  caching layer in Steps A-F -- and it is now finished rather than outstanding.
+
+* **Steps I/J are not blocked, and dispatch is now the clear target below ~57k.** No
+  bottleneck found needs an architectural change to the core before the interface moves.
+  After the forcing and sync fixes, dispatch is a flat ~4.1 ms/step and **35-37% of host
+  time -- the largest single bucket** -- so the interface work's own goals (retiring the 27
+  hot-path dtype probes, the per-call `additionalArguments` re-analysis, somewhere to put
+  `ExecutionMode`) sit directly on top of what now dominates. Note what that does *not*
+  mean: the caching layers already took the marshalling out of dispatch, and the measured
+  value of turning them off is ~0.6-1.2 ms/step, so the remaining ~4 ms is warp's launch
+  machinery and the Python call chain, not argument conversion. Steps I/J should be scoped
+  on their ergonomic and forward-mode merits, with any further dispatch win measured rather
+  than assumed.
+* **The forcing fix is done** (`d9ad712`). It was worth 1.76x at 57k and 2.81x at 155k in
+  this harness and **2.6x on the real ~70k production run (42 -> 16 min)** -- an order of
+  magnitude more than any remaining core-side dispatch work. It also *gains*
+  differentiability through the forcing, which the scipy version could not offer.
 * **Section 7's integrator buffer pool is NOT the bottleneck in 2D -- do not promote it on
   this evidence.** `[Integration]` regions are 6-10% of host time and 0.4-0.9 ms/step of
   GPU time, and the integrator's own `aten::copy_` traffic is ~0.05 ms/step. Section 7.2's
@@ -271,9 +302,151 @@ two of Step H's candidate follow-ons explicitly ruled out.**
 * **GPU kernel compute dominates above ~150k** (61-67% device-busy), so headroom from
   dispatch-level work shrinks past that scale, as expected. CUDA-graph capture (Section
   7.3) is the remaining dispatch-level lever; at ~350 launches and ~41 host stalls per step
-  it looks worthwhile in principle, and the forcing fix has now removed the host round-trip
-  that would have made the step uncapturable. It is still gated on the integrator's step
-  shape being fixed.
+  it looks worthwhile in principle. What blocks it is **not** the integrator -- see below.
+
+### What actually blocks CUDA-graph capture
+
+Section 7.3 says capture is gated on a "fixed step shape", and earlier drafts of this
+report repeated that as "gated on the integrator". Measured at 19,044 particles over 20
+steady-state steps, that is wrong on both counts:
+
+| blocker | measured | in whose code |
+|---|---|---|
+| **Host readbacks (`.item()`)** -- illegal inside a captured region, since capture forbids synchronization | **49 per step** | solver modules, the Verlet check, the forcing |
+| **`aten::nonzero`** -- output shape depends on data, so launch and allocation sizes are not known at capture time | **12 per step** | `computeForcing` (6), `[Integration] Finalize` (1), `computeDeltaShift` (1), unattributed (4) |
+| Data-dependent neighbour rebuild branch (`shouldRebuild = bool(shouldRebuild_t.item())`, `radiusSearch/verlet/build.py`) | validity check runs 6x/step; **rebuild fired 0 times in 20 steps** | core |
+| Integrator's out-of-place allocation churn | 3 fresh tensors per component per stage | integrator |
+
+### The sync census, and the two core-side sites now fixed
+
+Profiler region attribution turned out to be misleading here too: it put 15
+readbacks/step in "the Verlet validity check", which read as *the rebuild decision*. Counting
+in Python instead -- `scripts/count_host_syncs.py`, which wraps `Tensor.item` / `__bool__` /
+`tolist` / `numpy` and records the calling site -- showed the decision is only 2.9/step and the
+real cost was `_minimum_image_delta`, nested inside the same region, at 11.5/step. **Census
+total: 39.1 host readbacks per step** at 19,044 particles (the earlier profiler figure of 49
+double-counted `aten::item` against its inner `aten::_local_scalar_dense`).
+
+```bash
+python scripts/count_host_syncs.py --nx 128 --steps 5          # every site, per step
+python scripts/count_host_syncs.py --filter warpSPHCore        # only this repo's
+```
+
+Two of them were core, and both are now fixed:
+
+| per step | site | what it was | fix |
+|---------:|------|-------------|-----|
+| **11.5** | `radiusSearch/verlet/util.py` `_minimum_image_delta` | `if bool(periodicity[d].item())` once per axis per call, reading a **domain property fixed for the whole run** | branch-free: wrap every axis and select with `torch.where`, keeping `periodicity` on device |
+| **2.0** | `renorm.py` low-neighbour fallback | `if torch.any(lowNbrMask):` guarding a masked assignment -- and a boolean-mask `index_put_` **is itself a synchronizing op**, so the guard paid a stall to *maybe* avoid a stall | `torch.where(mask, identity, C)`; no guard, no clone, no scatter |
+
+Both verified bit-identical to what they replaced before being trusted: `_minimum_image_delta`
+across dims 1-3, every periodicity pattern, and motion from 0.01x to 3x the box length (max
+difference exactly 0.0, including the seam-crossing case); the renorm fallback on values *and*
+gradients, with the masked path fully exercised. Pinned by
+`tests/operations/test_no_host_sync.py`, which counts readbacks rather than timing and was
+confirmed non-vacuous by restoring both old implementations (2 of 6 tests fail).
+
+**Measured effect -- 39.1 -> 25.5 readbacks/step (-35%), and per-step wall clock:**
+
+| particles | before | after | speedup |
+|----------:|-------:|------:|--------:|
+| 19,044    | 10.64 ms | 8.89 ms | **1.20x** |
+| 57,121    | 11.07 ms | 9.78 ms | **1.13x** |
+| 155,236   | 16.38 ms | 15.19 ms | **1.08x** |
+
+(60 measured steps per point, medians, forcing on.) **Two changes touching eleven lines of core
+code are worth more than every caching layer in Steps A-F combined** (1.19-1.75 ms/step against
+~0.6-1.2 ms/step), which is worth sitting with: the win came from deleting stalls, not from
+making anything faster. Core suite 112 passed, 2D+3D operation matrix 258 OK / 0 HIGH each, all
+15 gradcheck scripts green, frontend suite 104 passed / 1 skipped / 0 failed.
+
+### Frontend follow-up: the rest of the removable syncs are gone too
+
+The frontend's straightforward, non-load-bearing readbacks were removed after this audit
+(`3d4646a`..`c3238c3`, touching `math/__init__.py`, the three mDBC modules,
+`shifting/delta.py`, `schemes/deltaSPH.py`, `schemes/dfsph.py`,
+`systems/weaklyCompressible.py`, plus a shared `mdbc/_util.py` helper). Re-measured with the
+same census and harness:
+
+**39.1 -> 25.5 (core fixes) -> 8.6 readbacks per step: a 78% reduction.** Per-step wall clock
+across the whole of Step H:
+
+| particles | scipy era | + forcing fix | + core sync fixes | + frontend sync fixes | total |
+|----------:|----------:|--------------:|------------------:|----------------------:|------:|
+| 19,044    | 12.35 ms  | 10.75 ms      | 8.89 ms           | **8.25 ms**           | **1.50x** |
+| 57,121    | 20.56 ms  | 11.67 ms      | 9.78 ms           | **8.35 ms**           | **2.46x** |
+| 155,236   | 48.03 ms  | 17.11 ms      | 15.19 ms          | **13.49 ms**          | **3.56x** |
+
+The two sync passes together are 1.27-1.40x; the frontend half alone is 1.08-1.17x (not
+purely attributable -- two unrelated frontend commits landed in the same range). Frontend
+suite green throughout: 104 passed, 1 skipped, 0 failed.
+
+**Step time is now essentially flat from 2.4k to 57k particles** (7.91 -> 9.37 ms for 24x the
+particles; 19k and 57k are within 2% of each other), so below ~57k the run is now almost
+entirely fixed-overhead-bound. And **dispatch is now unambiguously the largest host bucket**
+at 35-37% of host time, a flat ~4.1 ms/step, against a blocking cost that has fallen from
+19-24% of host time to 11-15%:
+
+| particles | step (ms) | GPU share | dispatch | neighbour | forcing | integrator | solver | blocking |
+|----------:|----------:|----------:|---------:|----------:|--------:|-----------:|-------:|---------:|
+| 2,401     | 7.91      | 45.5%     | **37.3%**| 11.1%     | 14.1%   | 8.3%       | 23.9%  | 10.8%    |
+| 5,476     | 9.15      | 41.1%     | **35.9%**| 10.6%     | 14.7%   | 7.9%       | 24.6%  | 12.8%    |
+| 19,044    | 9.19      | 42.4%     | **37.0%**| 11.0%     | 13.8%   | 8.2%       | 24.2%  | 10.8%    |
+| 57,121    | 9.37      | 49.6%     | **34.9%**| 10.6%     | 15.3%   | 8.0%       | 24.3%  | 15.2%    |
+| 155,236   | 14.18     | 72.5%     | 26.1%    | 8.3%      | 32.3%   | 6.1%       | 22.1%  | 36.0%    |
+
+At 155k the run is now **72.5% device-busy** -- genuinely GPU-bound, where no host-side work
+can help much. Below that, dispatch is the target, which is what Steps I/J address.
+
+### Where the remaining readbacks are
+
+8.6/step remain and are close to irreducible. Traced to the issuing op (19,044 particles):
+
+| per step | site | repo | status |
+|---------:|------|------|--------|
+| 2.88 | `radiusSearch/verlet/build.py:74` `bool(shouldRebuild_t.item())` | core | **load-bearing** -- selects a Python code path (rebuild or reuse). Only removable by restructuring; at 2.9/step, leave it. |
+| 1.00 | `runner/runner.py:306` NaN divergence check | frontend | load-bearing (stops a diverged run), but amortisable to every k steps if it ever matters |
+| ~0.35 each | `compactHash/{grid,buildHashmap,search,indexing}.py` | core | only fire on an actual hashmap rebuild, so this is a fraction of a step, not a per-step cost |
+| ~0.5 each | `sample/regular.py`, `regions/contour.py` | frontend | **setup only** -- these are one-time costs divided over the measured steps, not per-step work |
+
+For historical reference, the pre-fix census that this list replaced:
+
+| per step | issuing op | site | repo | why it syncs |
+|---------:|------------|------|------|--------------|
+| **15** | `.item()` | `[Verlet] Checking validity of prior neighborhood` | core | `shouldRebuild = bool(shouldRebuild_t.item())` -- one per check, and the check runs 15x/step across adjacency pairs and support schemes. Inherent to deciding *in Python* whether to rebuild. |
+| **8** | `aten::is_nonzero` | `[warpSPH] - computeForcing` | frontend | a Python truth test on a tensor (`if t:`), which forces a host read |
+| **6** | `aten::_index_put_impl_` | `[deltaSPH - 17] - enforce updates` | frontend | boolean-mask `index_put_`, which reads the mask count on the host |
+| 2 | `aten::is_nonzero` | `[warpSPH] - Renorm - Covariance Postprocess` | **core** | `if torch.any(lowNbrMask):` in `renorm.py`'s low-neighbour-count fallback |
+| 2 | `.item()` | `[warpSPH] - (shift) - computeDeltaShift` | frontend | |
+| 1 each | `aten::is_nonzero` | mDBC density, boundary velocities | frontend | same `if t:` pattern |
+| ~5 | mixed | unattributed / runner | frontend | the `t` readback, NaN check, diagnostics |
+
+Two things follow. The `is_nonzero` group (~12/step) is the cheapest to remove -- an `if
+tensor:` where a `.numel()` test or a Python flag would do is pure waste, and removing it
+costs nothing in behaviour. The Verlet group (15/step) is the largest single source and is
+*core* code; the check is one host read per call with no redundancy to squeeze, so
+shortening it means either amortising the decision (check every k steps), or sharing one
+decision across the adjacency pairs that currently each make their own, rather than
+micro-optimising the check itself.
+
+Three consequences:
+
+1. **The step shape is already stable in steady state.** The Verlet rebuild -- the one
+   genuinely data-dependent branch in the shape -- did not fire once in 20 measured steps;
+   the validity check is doing its job and reusing the list. So "fixed step shape" is not
+   what is missing. A capture scheme could capture the no-rebuild fast path and fall back
+   to eager execution on the rare rebuild step.
+2. **The blocker is the ~49 host readbacks and 12 data-dependent-shape ops, and they are
+   almost all in frontend solver modules**, not in the integrator and not in this repo. Each
+   would have to move on-device (a device-side flag rather than a Python `if`) or out of the
+   captured region before any of the step is capturable.
+3. **The integrator's allocation churn does not forbid capture -- it makes capture
+   worthless without a buffer pool.** Repeated identical allocation sequences are fine
+   (that is what a torch graph memory pool is for), but a captured graph bakes in device
+   addresses, so the buffers it writes through must stay valid across replays. That is
+   exactly what Section 7.3's `PooledState` provides. So the integrator work is a
+   *prerequisite for capture to be worth anything*, not the thing standing in its way --
+   the opposite of the dependency direction Section 7.3's wording implies.
 
 ## Notes
 

@@ -1278,7 +1278,11 @@ remaining core work, and two of this step's candidate follow-ons explicitly rule
    26.36 -> 2.27 ms/step at 57k and 35.13 -> 5.62 at 155k, i.e. **step time 20.56 -> 11.67 ms
    (1.76x) and 48.03 -> 17.11 ms (2.81x)**. It has left the scaling cost -- flat through 57k, and
    at 155k the whole step is now within 5% of the same case with the forcing removed entirely. It
-   also gains differentiability the scipy version could not offer.
+   also gains differentiability the scipy version could not offer. **Confirmed on the real run:
+   the ~70k production case went 42 -> 16 minutes (2.6x, user-reported), inside the bracket the
+   harness predicted.** That is the second time a profiled 15-step window on this case has matched
+   a full run's wall clock (the first being Steps A-F's own ~7%), which is worth trusting the
+   harness for next time rather than re-deriving.
 3. **Steps A-F targeted the right thing for the scales this project runs at.** Step time is nearly
    flat from 2.4k to 57k (8.71 -> 10.66 ms without forcing, a 1.2x rise for 24x the particles) and
    **dispatch is the largest single host bucket at every scale up to 57k, at a flat ~4.0-4.4
@@ -1341,9 +1345,57 @@ remaining core work, and two of this step's candidate follow-ons explicitly rule
 **Consequence for Steps I/J:** unblocked, and no new step is needed ahead of them. Their own
 rationale (retiring the 27 hot-path dtype probes, the per-call `additionalArguments` re-analysis,
 somewhere to put `ExecutionMode`) stands; the *performance* argument for them is now known to be
-worth ~1 ms/step on this workload, not more. CUDA-graph capture (Section 7.3) remains the one
-untried dispatch-level lever at 348 launches and 41 host stalls per step, but it is gated on the
-forcing fix -- a host round-trip mid-step is not capturable.
+worth ~1 ms/step on this workload, not more.
+
+**Host-stall removal, core side: done, and it beat every caching layer in this plan.** Step H's
+sync census (counted in Python, not inferred from profiler regions -- the region numbers misread
+this, see the report) found 39.1 device->host readbacks per step, of which two sites were core:
+`_minimum_image_delta` testing `bool(periodicity[d].item())` once per axis per call (11.5/step,
+reading a domain property that is *fixed for the whole run*), and `renorm.py`'s
+`if torch.any(lowNbrMask):` guarding a masked assignment that is itself a synchronising op
+(2.0/step). Both are now branch-free via `torch.where`. **39.1 -> 25.5 readbacks/step, and per-step
+wall clock 10.64 -> 8.89 ms at 19k (1.20x), 11.07 -> 9.78 at 57k (1.13x), 16.38 -> 15.19 at 155k
+(1.08x)** -- i.e. **eleven lines of core code are worth more than Steps A-F's entire caching
+programme** (1.19-1.75 vs ~0.6-1.2 ms/step). Verified bit-identical before being trusted (all
+periodicity patterns, motion to 3x the box length, seam crossing; renorm on values *and*
+gradients with the masked path exercised), pinned by `tests/operations/test_no_host_sync.py`
+(counts readbacks, not time; confirmed non-vacuous by restoring both old implementations), and
+green across the core suite, 2D+3D operation matrix, all 15 gradcheck scripts and the frontend
+suite.
+
+**Host-stall removal, frontend side: also done** (`3d4646a`..`c3238c3`, by the user, same two
+patterns across `math/__init__.py`, the three mDBC modules, `shifting/delta.py`, the deltaSPH and
+dfsph schemes and `systems/weaklyCompressible.py`). Re-measured: **39.1 -> 25.5 -> 8.6 readbacks
+per step, a 78% reduction**, with what remains either load-bearing (the Verlet rebuild decision at
+2.9/step, the runner's NaN check at 1.0) or setup-only. Frontend suite still 104 passed, 1 skipped.
+
+**Cumulative effect of Step H's three fixes on per-step wall clock** (same case, same harness):
+19k particles 12.35 -> 8.25 ms (**1.50x**), 57k 20.56 -> 8.35 ms (**2.46x**), 155k 48.03 -> 13.49 ms
+(**3.56x**). Two consequences worth carrying into Steps I/J: **step time is now essentially flat
+from 2.4k to 57k** (7.91 -> 9.37 ms for 24x the particles -- 19k and 57k within 2% of each other),
+so that range is almost purely fixed-overhead-bound; and **dispatch is now unambiguously the
+largest host bucket at 35-37%** (flat ~4.1 ms/step) with blocking down from 19-24% to 11-15%. At
+155k the run is 72.5% device-busy, i.e. genuinely GPU-bound, where no host-side work helps much.
+Note what the dispatch figure does *not* imply: Steps A-F already removed the marshalling, and
+disabling them costs only ~0.6-1.2 ms/step, so the residual ~4 ms is warp's launch machinery and
+the Python call chain -- Steps I/J should be justified on ergonomics and forward-mode readiness,
+with any further dispatch win measured rather than assumed.
+
+**Correction to Section 7.3's CUDA-graph claim (measured 2026-08-17, 19,044 particles, 20 steady
+steps -- see the report's "What actually blocks CUDA-graph capture").** Section 7.3 says capture is
+gated on a "fixed step shape", and earlier drafts of the Step H report repeated that as "gated on
+the integrator". Both are wrong. (a) The step shape is *already* stable in steady state: the one
+genuinely data-dependent branch, the Verlet rebuild, **fired 0 times in 20 steps** (the validity
+check runs 6x/step and reuses). (b) The real blockers are **49 `.item()` host readbacks per step**
+(illegal inside a captured region -- capture forbids synchronization) and **12 `aten::nonzero` per
+step** (output shape is data-dependent, so launch sizes are unknown at capture time), and they live
+almost entirely in *frontend solver modules*, not in the integrator and not in this repo: 15/step in
+the Verlet validity check, 8 in `computeForcing`, 6 in `[deltaSPH - 17] - enforce updates`, 3 in
+`computeDeltaShift`, the rest scattered. (c) The integrator's allocation churn does not forbid
+capture at all -- repeated identical allocation sequences are what a graph memory pool exists for --
+but a captured graph bakes in device addresses, so **Section 7.3's `PooledState` is what makes
+capture *worth* anything rather than what unblocks it.** The dependency runs the opposite way to
+Section 7.3's wording.
 
 ## Steps I / J -- The interface break
 
