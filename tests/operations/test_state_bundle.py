@@ -19,6 +19,7 @@
    completed.
 """
 
+import pytest
 import torch
 
 from warpSPHCore import DomainDescription, OperationProperties, ParticleState, radiusSearchCompactHashMap, warpOperation
@@ -105,3 +106,27 @@ def test_deferred_backward_across_two_grad_calls_not_corrupted():
     # identical -- e.g. a rigid translation, which this operator is
     # invariant to -- would also hide this bug).
     assert not torch.allclose(grad_A_deferred, grad_B_deferred)
+
+
+def test_forward_mode_rejected_regardless_of_cache_warmth():
+    """Step G, audit item 1: ExecutionMode.FORWARD must be rejected with a
+    clear error at *every* entry, not only on a cold cache.
+
+    `getStateBundle` used to validate the mode implicitly, via
+    `StateBundle.__init__` -> `structFor`. That only runs on a miss, so once
+    any bundle existed for a given dim the FORWARD request hit the dict and
+    got a REVERSE-shaped bundle back instead of raising -- an error whose
+    presence depended on cache warmth. Inert today (arg_extract.py always
+    passes REVERSE) but precisely the guard Phase 6 will lean on first.
+    """
+    from warpSPHCore.dataTypes import ExecutionMode
+
+    clearStateBundleCache()
+    with pytest.raises(NotImplementedError):
+        getStateBundle(2, ExecutionMode.FORWARD)  # cold cache
+
+    warm = getStateBundle(2, ExecutionMode.REVERSE)
+    assert warm is getStateBundle(2, ExecutionMode.REVERSE)
+    with pytest.raises(NotImplementedError):
+        getStateBundle(2, ExecutionMode.FORWARD)  # warm cache -- the regression
+    clearStateBundleCache()

@@ -458,6 +458,12 @@ This splits Phase 6 into two very different tiers:
 * **Tier 1 -- tangents w.r.t. field values.** The JVP of a linear map is the map
   itself. Propagating a tangent means **re-launching the same kernel on the tangent
   array**. Zero new kernels, zero new adjoint code, zero new kernel math to validate.
+  **Confirmed end-to-end by Step G's spike** (`scripts/spike_forward_mode_tier1.py`),
+  not just inferred from the linearity table above: 14/14 operator x scheme x dim x
+  field-rank x correction cases satisfy the JVP identity to float64 round-off, with
+  `f(0) == 0` exactly (linear, not merely affine -- an affine term would offset every
+  tangent). Stronger than requirement 3 assumed: Tier 1 needs **no new struct type**,
+  hence no `FORWARD` row in `structFor` and no widening of the bundle cache key.
 * **Tier 2 -- tangents w.r.t. positions / supports / masses / densities.** The kernel
   is genuinely nonlinear in these (kernel function of `|x_i - x_j| / h`), so this needs
   hand-written JVP twins per operator. This is the expensive tier and it should be
@@ -480,6 +486,15 @@ Cheap now, expensive to retrofit. Each is a constraint on Steps A and E.
    `structFor(kind, dim, mode)`. Phase 6 registers `particleDataSoA_2_dual` and
    friends into the same table. **This is the single most important item** -- leaving
    the ternaries in place means Phase 6 rewrites every extractor.
+   **Two corrections from Step G's audit.** (a) Registering a dual struct in the table is
+   *not* the whole change if dual structs ever happen: `util/stateUtil.py` carries three
+   concretely-typed `@wp.func` overload sets (`getParticleData`,
+   `getParticleCorrectionData_i/_j`), one per dim, resolved by **warp's** overload dispatch
+   on struct type rather than by any Python branch, so each new struct type needs its own
+   set. (b) That cost is avoidable: Tier 1 needs no new struct type at all, so this item is
+   insurance for Tier 2 / a fused dual-struct design rather than a Tier-1 prerequisite --
+   which downgrades it from "the single most important item" to "cheap and still worth
+   having". The table did earn its keep anyway: it is where `FORWARD` gets rejected.
 4. **`ExecutionMode` exists now, with `FORWARD` declared and unimplemented.**
    `NONE | REVERSE | FORWARD`, carried on a minimal execution context and folded into
    the `StateBundle` cache key. Phase 6 then adds a value to an enum and a row to a
@@ -509,6 +524,19 @@ two views through the same `Field`, launch, re-dual the output with `make_dual`.
 Field's tangent slot maps one-to-one onto torch's dual representation, which means no
 bespoke tangent bookkeeping to invent.
 
+**Two things Step G established about that route, one of them a trap.** Passing a dual
+tensor through the *current* bridge raises `NotImplementedError: You must implement the jvp
+function for custom autograd.Function to use it with forward mode AD` -- clean, and it names
+the deliverable precisely. But **`torch.autograd.functional.jvp` must not be used as the
+reference** when validating that bridge: it does not raise, it returns a **silently zero**
+tangent (its double-backward trick needs a differentiable backward, which reading gradients
+off a `wp.Tape` is not, and the default `strict=False` degrades to zeros; `strict=True`
+raises). A half-finished bridge that also emitted zeros would agree with it perfectly. Use a
+reverse-mode Jacobian contracted with the tangent instead -- exact on small cases, and it
+leans only on the first-order backward the gradcheck suite already validates. Step G's text
+originally specified the `jvp` reference; `scripts/spike_forward_mode_tier1.py` documents
+and probes both failure modes so the next person does not have to rediscover them.
+
 ## 3.7 Two cheap wins to pick up in passing
 
 * **`record_function` hooks are always on.** 12 enter/exit pairs per operator call,
@@ -532,7 +560,9 @@ testable. Steps 0-B and F are pure wins with no caching risk at all.
 
 **✅ COMPLETE:** Steps 0 (bench harness), A (kinds required), B (Field/nullField/structFor), C (null
 fields wired into `arg_extract.py`), D (view reuse, no-grad path only), E (view reuse, grad path),
-F (`StateBundle`, no-grad path only)
+F (`StateBundle`, no-grad path only), G (forward-mode readiness audit -- found and fixed two real
+bugs, see its section), H (real-workload bottleneck audit -- the ~7% end-to-end observation is now
+fully explained; see its results subsection)
 - Baseline numbers recorded and gate passes
 - Field attachment proven safe; no reference cycles, survives clone, dies with tensor
 - **Design decision used:** Option A (flat_tensors carries `[torch.Tensor | Field]`;
@@ -664,23 +694,33 @@ Section 3.3 correction above.
 
 ## Resuming from here
 
-**State as of 2026-08-17: Steps 0, A-F complete and verified (including against the frontend);
-none of it is committed yet.** `git status` shows the full set of changed/new files still sitting
-in the working tree on `main`, one commit ahead of `origin/main` (`ba3dbee`, itself the prior
-session's plan-document update, also uncommitted-to-remote). Nothing here has been committed
-during Steps C-F's implementation -- that was a deliberate default (commit only when the user
-asks), not an oversight, but it means a fresh session picking this up needs `git status`/`git
-diff`, not just this document, to see the actual change set. If you're that fresh session: read
+**State as of 2026-08-17: Steps 0, A-G complete and verified (including against the frontend).
+Steps 0/A-F are committed (`d6c0d2d`, "First steps of the warpier fields setup"); Step G's changes
+are in the working tree.** The earlier version of this paragraph said "none of it is committed
+yet", which was true when written and is now stale -- check `git log`/`git status` rather than
+trusting either claim. If you're a fresh session: read
 this whole "Status as of 2026-08-17" block plus each Step's own subsection (B through F) before
 touching anything -- they carry the corrections and hazards below, and the numbered lists under
 "Step X notes" are denser than the surrounding prose for a reason.
 
-**What to do next:** Step G (a checklist/audit against already-landed code -- no new
-implementation), then Step H (a real-world bottleneck audit across particle-count scales, inserted
-2026-08-17 -- see that step), then Steps I/J (Section 8, the interface break -- deliberately last,
-and now additionally gated on Step H's findings: if Step H turns up a bottleneck that needs a
-deeper architectural change, doing that before the interface moves is cheaper than doing it after).
-Nothing about Steps A-F's design blocks starting Step G immediately.
+**What to do next:** Steps I/J (Section 8, the interface break). Step H cleared them explicitly --
+it found no bottleneck needing an architectural change to the core first, and ruled out both
+candidate follow-ons (the integrator buffer pool and the neighbour-list rebuild) on measured
+evidence. Four findings feed Step I directly: move `stateBundle.py` out of `autograd/` and freeze
+`OperationProperties` (Step G), and note that the performance case for the interface break is now
+quantified at ~1 ms/step on a real workload rather than assumed (Step H).
+
+**Step H's highest-value finding has already been fixed** (in the frontend, `d9ad712`): the
+Kolmogorov forcing's host-side scipy interpolator, 66-68% of host time above 57k particles, is now a
+torch-native device-resident interpolator, worth 1.76x at 57k and 2.81x at 155k on that case. With
+it gone, dispatch is the largest host bucket again below ~57k, which is what Steps I/J sit on top
+of. Re-measured after the fix; the report's tables carry both the before and after.
+
+**Note on GPU-sharing decisions (2026-08-17, from the user):** judge whether the GPU is free by
+**percent VRAM free and utilisation**, not by whether some other process appears in `nvidia-smi`.
+This box has 96 GB of VRAM, so an unrelated simulation holding a few GB is not a reason to defer a
+test run. Step H's sweeps are the one place where actual contention matters, since they want the
+whole device to produce meaningful timings.
 
 **The one habit to carry forward, stated plainly because it paid off repeatedly:** every step from
 C onward had at least one real, silent-corruption-class bug in the *written* sketch -- not
@@ -700,7 +740,9 @@ visible in a gradient value or an object-identity check, never in a stack trace.
 (kills the Field cache entirely, Steps B-F), `WARPSPHCORE_FIELD_CACHE_GRAD=0` (grad-path view
 reuse only, Step E), `WARPSPHCORE_NULL_FILL=sentinel` (poisons disabled-correction reads instead
 of zero-filling, Step C), `WARPSPHCORE_PROFILING=1` (restores real `record_function` hooks, Step
-F). All four are independent single-variable bisects, not reverts.
+F), `WARPSPHCORE_DISABLE_BUNDLE=1` (falls back to per-call struct construction, added in Step H as
+a *measurement* hatch -- see that step's finding 7). All five are independent single-variable
+bisects, not reverts.
 
 ## Step 0 -- Baseline harness (prerequisite, no behaviour change)
 
@@ -1010,7 +1052,7 @@ at most 3 bundles (dim ∈ {1,2,3}) will ever exist):
 * **Prerequisite for Step I satisfied:** no `torch.autograd` import anywhere in `stateBundle.py`
   (Section 3.6, requirement 6) -- verified by grep, not just by construction.
 
-## Step G -- Forward-mode readiness audit (no forward mode implemented)
+## Step G -- Forward-mode readiness audit (no forward mode implemented) -- ✅ DONE
 
 Not a feature step -- a checklist run against the landed code, so Phase 6 starts from a
 known state rather than a hopeful one.
@@ -1026,6 +1068,78 @@ known state rather than a hopeful one.
 * **Gate:** all four hold; findings written back into `warpier_core.md`'s Phase 6.
   Requirement 4's *API-surface* half is Step I's job -- G audits the internals,
   I exposes them.
+
+**Findings (2026-08-17).** Full write-up is in `warpier_core.md`'s new "Phase 6 -- Status:
+readiness audited" block (that was this step's deliverable); the short version, and the two
+places this document was wrong:
+
+1. **Item 1 did NOT hold as landed, and it failed in a cache-warmth-dependent way.**
+   `getStateBundle(dim, FORWARD)` validated the mode only implicitly, through
+   `StateBundle.__init__` -> `structFor` -- which runs on a *miss*. Once any bundle existed
+   for that dim, the FORWARD request hit the dict first and got the REVERSE-shaped bundle
+   back with no error at all. `stateBundle.py`'s own comment asserted the opposite
+   ("ExecutionMode.FORWARD raises in structFor() rather than silently handing back a
+   REVERSE-shaped struct, so this does not need to guard against it separately") -- true of
+   the cold path only, and the comment is why nobody looked. Fixed by validating ahead of
+   the lookup; `test_forward_mode_rejected_regardless_of_cache_warmth` pins both cache
+   states. Inert today (only `arg_extract.py` calls it, always with REVERSE), but it is the
+   first guard Phase 6 leans on.
+2. **Items 2 and 3 hold, with one caveat each.** No Python-side struct ternary survives
+   outside `structFor`. But `util/stateUtil.py` has three concretely-typed `@wp.func`
+   overload sets per dim, dispatched by *warp's* overload resolution on struct type -- so
+   requirement 3's "Phase 6 registers `particleDataSoA_2_dual` into the same table" is not
+   the whole change if dual structs ever happen; each needs its own overload set too. And
+   `stateBundle.py` itself imports no torch (verified by constructing a bundle with
+   `torch.autograd.Function` replaced by a poison class), but it *lives* in the `autograd/`
+   package, so importing it runs that `__init__.py` and drags `StateAwareWarpFunction` in
+   anyway. Requirement 6 is real at the code level, cosmetic at the import level; moving the
+   file out of `autograd/` is folded into Step I, which reworks these imports regardless.
+3. **Item 4's spike passes, and Tier 1 is cheaper than requirement 3 assumed:** 14/14 cases
+   (Interpolate, Gradient x 4 schemes, Divergence, Curl, Laplacian; 1D and 2D; scalar and
+   vector fields; renormalisation off and on) agree with the reverse-mode Jacobian
+   contracted with the tangent, to float64 round-off (7e-17 … 2.7e-16), with `f(0) == 0`
+   exactly -- linear, not merely affine. **Tier 1 needs no new struct type**, so it needs
+   no `FORWARD` row in `structFor` and no widening of the bundle key: it is the existing
+   kernel on the existing structs with the tangent array substituted for the value array.
+4. **This document's Step G text named the wrong reference and would have validated a
+   broken bridge.** `torch.autograd.functional.jvp` does not raise here -- it returns a
+   **silently zero** tangent (rel_err 1.0 against the verified answer), because its
+   double-backward trick needs a differentiable backward and `strict=False` degrades to
+   zeros instead of erroring (`strict=True` does raise). A Phase 6 bridge that also emitted
+   zeros would agree with it perfectly. The spike uses `torch.autograd.functional.jacobian`
+   contracted with the tangent instead -- reverse-mode only, so it needs nothing the
+   gradcheck suite has not already validated, and it is exact on cases this small. The
+   honest path, `torch.autograd.forward_ad`, raises `NotImplementedError: You must implement
+   the jvp function for custom autograd.Function` -- which names Phase 6's actual deliverable.
+5. **A real bug in shipped code, unrelated to Steps A-F, found by the spike:**
+   `computeRenormalizationMatrices` mutated the *caller's* `OperationProperties`
+   (`operationProperties.operation = WarpOperation.Covariance`). A caller that reused that
+   object afterwards silently launched Covariance where it asked for a Gradient and got a
+   plausible `(N, D, D)` tensor back. No call site in either repo hit it -- they all
+   construct a fresh properties object inline -- but **Section 3.5's own suggested
+   follow-up (hoist those constructions out of the hot path so a reusable, hashable
+   properties object can key the `StateBundle`) would have introduced this bug rather than
+   found it.** Fixed with `dataclasses.replace` in `renorm.py`; pinned by
+   `tests/operations/test_renorm_no_caller_mutation.py`, verified non-vacuous by
+   temporarily restoring the mutation (4/4 fail). Also confirmed that line was the *only*
+   in-place mutation of an `OperationProperties` field anywhere in either repo, so
+   Section 3.5's `frozen=True` proposal is now unblocked -- worth taking at Step I, where
+   the bundle key wants it.
+* **Spike kept, not thrown away.** `scripts/spike_forward_mode_tier1.py` is wired into
+  `tests/operations/test_gradcheck_scripts.py` (as `SPIKE_SCRIPTS`, distinct from
+  `GRADCHECK_SCRIPTS` since it checks a forward JVP identity, not a backward pass), ~3s.
+  What it pins is load-bearing for Phase 6's entire cost estimate -- exact linearity in the
+  field values -- and if a future kernel change breaks that, nothing else in the suite
+  would notice.
+* **Verification:** full pytest suite including CUDA-parametrized tests, **112 passed**; all
+  14 gradcheck scripts plus the spike via `test_gradcheck_scripts.py` (15 passed, CPU by
+  construction); 2D/float32 operation-matrix sweep on both devices clean (**258 OK, 0
+  HIGH/ERR/NAN**), matching Steps D-F's gate exactly. A jittered variant
+  (`--jitter 0.2`) reports 74 OK / 184 HIGH -- **checked against unmodified `HEAD` and
+  bit-identical there (74/184)**, so those cells are a pre-existing property of the
+  jittered configuration (which is a diagnostic, not the `--ci` gate), not anything this
+  step did. Worth knowing before someone runs the jittered sweep and reads it as a
+  regression.
 
 ## Step H -- Real-world bottleneck audit across particle-count scales  [inserted 2026-08-17]
 
@@ -1134,6 +1248,102 @@ explicit recommendation, one of:
 * **Gate:** the report exists, names a scale-by-scale bottleneck, and gives one of the above
   recommendations (or a mix, by scale) with enough specificity that Steps I/J -- or a newly-scoped
   step ahead of them -- can be planned from it without re-deriving the profile.
+
+### Step H results (2026-08-17) -- ✅ DONE
+
+Report: `docs/regression/real_workload_bottleneck_audit.md`. Harness:
+`scripts/bench_real_workload.py`. Workload: the frontend `dambreak` case as fully-periodic
+Kolmogorov flow (the invocation actually used for data generation), 2.4k -> 155k particles, via
+`warpSPH.runner.run` so the profile covers the real deltaSPH/RK2 loop.
+
+**Verdict: "Nothing further needed before Steps I/J", plus one frontend fix worth far more than any
+remaining core work, and two of this step's candidate follow-ons explicitly ruled out on evidence.**
+
+1. **The 45 -> 42 min observation is fully accounted for; there is no missing regression.** In-situ
+   before/after (every caching layer disabled via escape hatches, 40 measured steps) gives
+   **1.04-1.16x on the full solver loop** -- a near-constant **~0.6-1.2 ms/step** saved at every
+   scale. Against the scipy-era ~20 ms step at 57k that is ~5%, matching the reported ~7% to within
+   either measurement's precision. The 4-6x from `bench_call_overhead.py` is also right: it measures
+   the marshalling Steps A-F removed, while the loop still pays ~350 `cudaLaunchKernel`s and ~41
+   host stalls per step, warp's launch machinery, and the Python chain through 16 operator wrappers.
+   With the forcing now fixed the same ~1 ms is 8-12% of a step rather than ~5%, purely because the
+   denominator shrank.
+2. **The audit's headline finding was the Kolmogorov forcing at 66-68% of host time from 57k
+   particles up -- and it has since been fixed in the frontend.**
+   `caseUtils/weaklyCompressible.py`'s `forcing()` evaluated a **scipy
+   `RegularGridInterpolator` on the host every stage**, round-tripping the position array
+   device->host->device: 16.4 ms/step in the scipy call plus 9.1 ms in `aten::copy_` and 3.7 ms in
+   `cudaStreamSynchronize` at 155k. `d9ad712` ("add torch interpolator") replaced it with a
+   torch-native device-resident port. Re-measured with the same harness: the forcing bucket drops
+   26.36 -> 2.27 ms/step at 57k and 35.13 -> 5.62 at 155k, i.e. **step time 20.56 -> 11.67 ms
+   (1.76x) and 48.03 -> 17.11 ms (2.81x)**. It has left the scaling cost -- flat through 57k, and
+   at 155k the whole step is now within 5% of the same case with the forcing removed entirely. It
+   also gains differentiability the scipy version could not offer.
+3. **Steps A-F targeted the right thing for the scales this project runs at.** Step time is nearly
+   flat from 2.4k to 57k (8.71 -> 10.66 ms without forcing, a 1.2x rise for 24x the particles) and
+   **dispatch is the largest single host bucket at every scale up to 57k, at a flat ~4.0-4.4
+   ms/step** -- and with the forcing fixed it is the largest one again in the case as actually run
+   (31-32%). The run only becomes genuinely GPU-bound at ~150k (61-67% device-busy). Section 1.1's
+   predicted crossover is confirmed, just located higher than the 20k-200k bracket suggested.
+4. **Section 7's integrator buffer pool is NOT the bottleneck in 2D -- do not promote it on this
+   evidence, but do not dismiss it either.** `[Integration]` regions are 6-10% of host time and
+   0.4-0.9 ms/step of device time in 2D; the integrator's own `aten::copy_` traffic is ~0.05
+   ms/step, so Section 7.2's "~3% drag" estimate survives a real 2D profile. **This ruling-out is
+   load-bearing:** the first, naive attribution said the opposite (see finding 6) and would have
+   promoted this work on false evidence. **But the scenario probes (finding 9) show the integrator
+   as the *largest* bucket under CRKSPH (43%) and in 3D (45%)** -- so Section 7 should be
+   re-profiled against those before being scoped, not written off from the 2D numbers.
+5. **Neighbour rebuild is not the bottleneck in 2D either, and the Verlet scaffolding is live, not
+   dead.** 1.6-1.9 ms/step host, 10-15% of host time and *falling* with N. `[Verlet] Checking
+   validity of prior neighborhood` runs ~3x per step and is doing its job -- answering this step's
+   open question about `adjacency_t.py`'s rebuild-threshold fields. Same 3D caveat as above: 29% of
+   host time there.
+6. **Two attribution bugs in the harness, each of which reversed a conclusion before being caught.**
+   Recorded because they are the same failure class every step from C onward produced -- plausible
+   numbers, wrong answer. (a) `key_averages()` merges a key's CPU and CUDA aspects into one
+   `DeviceType.CUDA` entry, so each `record_function` region carries the device time of every kernel
+   inside it; summing that gave a **GPU share of 175%**, which is the only reason it was noticed.
+   Fixed by aggregating raw events filtered on `is_user_annotation`, now matching the profiler's own
+   "Self CUDA time total" exactly. (b) Bucketing host events by their own name charged
+   `aten::copy_` to the *integrator*, putting 18 of 20 ms/step at 57k there and making Section 7
+   look like the bottleneck; walking the parent chain showed 9 of those ms inside
+   `[warpSPH] - computeForcing` and ~0.05 ms/step actually in `[Integration]`. A follow-on bug in
+   that same fix charged a region's own self-time to its parent, hiding another 16.4 ms/step of
+   forcing cost in the generic `solver` bucket.
+7. **`WARPSPHCORE_DISABLE_BUNDLE` added** (this step's methodology anticipated it: "note as a
+   finding if it's missing"). Step F ships no hatch by design -- the grad path is gated on
+   `requires_grad`, not a variable, so there is nothing to bisect -- but without one the before/after
+   comparison silently left the bundle on in both arms. It is a **measurement-only** hatch: turning
+   it off only falls back to `arg_extract.py`'s original per-call struct construction, so it can
+   never be the unsafe direction. Verified non-inert (`_BUNDLE_CACHE` stays empty with it set)
+   rather than assumed.
+8. **Frontend fix required to run the sweep at all, worth keeping on its own merits** (suggested by
+   the user mid-step): `perlinNoise*D` needs its grid resolution to be an exact multiple of every
+   octave's lattice frequency -- 16 for the default 4 octaves at base frequency 2 -- so `nx=39`
+   died with a shape mismatch several frames deep and the sweep was pinned to multiples of 16.
+   `warpSPH/math/noiseFunctions/generator.py` now generates at `paddedNoiseResolution(n, ...)` and
+   resamples down to `n` via a wrap-aware separable linear resample (`resampleNoise`), keeping
+   tileability across the seam. Already-valid resolutions take neither path and stay bit-identical.
+   Frontend suite after the change: 87 passed, 1 skipped, 0 failed -- unchanged from the Steps A-F
+   baseline.
+9. **The harness is scenario-driven, and the bottleneck moves substantially between scenarios** --
+   documented in the report's "Re-running with other scenarios" section and in the script's own
+   docstring, at the user's request, so it can be pointed at other paths through the solver rather
+   than re-derived. `--case` / `--preset` / `--param` / `--spec` cover case, scheme, integrator,
+   kernel, support mode and dimension. Five verified probes, same core, same harness:
+   dambreak+Kolmogorov RK2 2D is dispatch-bound (32%); `integrationScheme=rungeKutta4` doubles
+   operator calls (16 -> 30) and 2.6x's allocations (409 -> 1060) at identical N; `--case tgv` is
+   dispatch 47% / integrator 28%; `--case sod2d --spec scheme=CRKSPH` is **integrator 43%**; and
+   `--case sod3d` at only 16k particles is **integrator 45% / neighbour 29% / dispatch 5%** -- the
+   inverse of the 2D conclusion. Anything scoped off this audit should be re-profiled in the
+   scenario it targets; that is the reason this is a harness and not a one-off script.
+
+**Consequence for Steps I/J:** unblocked, and no new step is needed ahead of them. Their own
+rationale (retiring the 27 hot-path dtype probes, the per-call `additionalArguments` re-analysis,
+somewhere to put `ExecutionMode`) stands; the *performance* argument for them is now known to be
+worth ~1 ms/step on this workload, not more. CUDA-graph capture (Section 7.3) remains the one
+untried dispatch-level lever at 348 launches and 41 host stalls per step, but it is gated on the
+forcing fix -- a host round-trip mid-step is not capturable.
 
 ## Steps I / J -- The interface break
 

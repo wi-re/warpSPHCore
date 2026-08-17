@@ -45,7 +45,23 @@ GRADCHECK_SCRIPTS = [
 ]
 
 
-@pytest.mark.parametrize("script_name", GRADCHECK_SCRIPTS)
+# Not gradchecks (they check a forward-mode JVP identity, not a backward
+# pass), but the same subprocess-per-script gate, for the same
+# precision-baking reason. warpier_fields.md Step G called the Tier-1 spike
+# "throwaway"; it is kept as a standing gate instead because what it pins is
+# load-bearing for Phase 6's cost estimate -- that every operator is exactly
+# linear in its field values, so a Tier-1 tangent is the existing kernel
+# re-launched on the tangent array. If a future kernel change breaks that
+# linearity (an affine term, a value-dependent correction), Phase 6's plan
+# stops being valid and nothing else in the suite would notice. It also
+# happens to be what found renorm.py's caller-properties mutation -- see
+# test_renorm_no_caller_mutation.py.
+SPIKE_SCRIPTS = [
+    "spike_forward_mode_tier1.py",
+]
+
+
+@pytest.mark.parametrize("script_name", GRADCHECK_SCRIPTS + SPIKE_SCRIPTS)
 def test_gradcheck_script(script_name):
     script_path = SCRIPTS_DIR / script_name
     result = subprocess.run(

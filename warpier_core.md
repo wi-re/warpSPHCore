@@ -655,6 +655,88 @@ The objective is to avoid rewriting the same dispatch logic across many operator
 
 # Phase 6 – Extend States for Forward-Mode AD
 
+## Status: readiness audited 2026-08-17 (`warpier_fields.md` Step G) — not started
+
+Step G was an audit against landed code, not an implementation. Its four checks and what
+they actually found, so Phase 6 starts from tested facts rather than the plan's
+expectations:
+
+**1. Tier 1 works, and it is cheaper than requirement 3 assumed.** The spike is
+`scripts/spike_forward_mode_tier1.py` (kept as a standing gate in
+`tests/operations/test_gradcheck_scripts.py`, not thrown away — see below). It checks the
+JVP identity `JVP_v[f](qval, rval)·(dq, dr) == f(dq, dr)` for Interpolate, Gradient
+(Naive/Difference/Summation/Symmetric), Divergence, Curl and Laplacian, in 1D and 2D,
+scalar and vector fields, with the renormalisation correction both off and on: **14/14
+cases agree to float64 round-off (rel_err 7e-17 … 2.7e-16)**, and `f(0) == 0` exactly in
+every case, so each operator is genuinely linear and not merely affine. `warpier_fields.md`
+§3.6's linearity measurement therefore does carry over to the JVP itself.
+
+The stronger finding: **Tier 1 needs no new struct type at all**, so it needs no
+`ExecutionMode.FORWARD` row in `structFor`'s table and no widening of the `StateBundle`
+cache key. A Tier-1 tangent is the *existing* kernel, on the *existing* struct types,
+launched with the tangent array in place of the value array. `structFor`'s mode axis and
+the bundle key's mode dimension are insurance for Tier 2 (or for a fused dual-struct
+design that computes primal and tangent in one launch), not prerequisites for Tier 1.
+
+**2. Neither of torch's own forward-mode entry points can validate that bridge, and one
+of them fails dangerously.** Probed directly in the spike:
+
+* `torch.autograd.forward_ad` + `make_dual` raises `NotImplementedError: You must
+  implement the jvp function for custom autograd.Function to use it with forward mode AD`.
+  That is honest, and it names Phase 6's actual deliverable: a `jvp` staticmethod on the
+  bridge (or a separate non-`autograd.Function` bridge, per `warpier_fields.md` §3.6
+  requirement 6).
+* `torch.autograd.functional.jvp` **returns without raising and hands back a silently
+  zero tangent** (rel_err 1.0 against the verified Tier-1 answer). Its double-backward
+  trick needs a differentiable backward, which reading gradients out of a `wp.Tape` is
+  not, and `strict=False` (the default) degrades to zeros rather than erroring;
+  `strict=True` does raise. `warpier_fields.md`'s Step G text said to validate the spike
+  against this function — **do not**. A Phase 6 bridge that also produced zero tangents
+  would agree with it perfectly. The spike uses a reverse-mode Jacobian
+  (`torch.autograd.functional.jacobian`, which needs only the first-order backward the
+  gradcheck suite already validates) contracted with the tangent, which is exact on cases
+  this small.
+
+**3. Warp-side helper overloads are the Phase-6 cost requirement 3 does not mention.**
+No Python-side `dim == 1/2/3` struct ternary survives outside `structFor` (verified:
+`arg_extract.py` has no non-comment reference to a dim-suffixed struct class). But
+`util/stateUtil.py` carries three concretely-typed `@wp.func` overload sets
+(`getParticleData`, `getParticleCorrectionData_i`, `getParticleCorrectionData_j`), one per
+dim, resolved by *warp's* own overload dispatch on struct type rather than by any Python
+branch. So if Phase 6 ever does introduce dual struct types, registering them in
+`structFor` is **not** the whole change — each one needs its own set of these overloads
+too. Tier 1 as spiked avoids this entirely, which is the main argument for doing Tier 1
+first. (`castTorchToWarpAsBuiltins`'s `ndim == 1/2/3` branch is shape-driven, not
+dim-driven, and needs no change: a tangent array has the same shape as its primal.)
+
+**4. Two bugs found, both fixed, both of the "runs fine, plausible number" class this
+plan keeps producing:**
+
+* `getStateBundle(dim, ExecutionMode.FORWARD)` only raised on a **cold** cache. Once any
+  bundle existed for that dim, the FORWARD request hit the dict before any validation and
+  got the REVERSE-shaped bundle back. Fixed by validating the mode ahead of the lookup;
+  pinned by `test_forward_mode_rejected_regardless_of_cache_warmth`.
+* `computeRenormalizationMatrices` mutated the **caller's** `OperationProperties`
+  (`operationProperties.operation = WarpOperation.Covariance`). Any caller reusing that
+  object afterwards silently launched Covariance where it asked for a Gradient, and the
+  resulting `(N, D, D)` tensor is plausible enough to pass unnoticed. Every call site in
+  both repos happens to pass a freshly-constructed properties object, so it never bit --
+  but `warpier_fields.md` §3.5's suggested follow-up (hoist those constructions out of the
+  hot path so a reusable, hashable properties object can key the `StateBundle`) would have
+  *introduced* the bug rather than found it. Fixed with `dataclasses.replace`; pinned by
+  `tests/operations/test_renorm_no_caller_mutation.py`. Found by the Tier-1 spike, which
+  reuses one properties object across the renorm call and the gradient consuming its output.
+
+Requirement 6's separation (bundle construction independent of the AD bridge) holds at the
+level that matters — `stateBundle.py` imports no torch at all, and constructing/refreshing
+a bundle still works with `torch.autograd.Function` replaced by a poison class — but it is
+currently *cosmetic in one respect*: the module lives in the `autograd/` package, so
+`import warpSPHCore.autograd.stateBundle` runs that package's `__init__.py` and pulls
+`StateAwareWarpFunction` in as a side effect. Moving the file out of `autograd/` is the
+one-line-per-importer fix; it is deferred to `warpier_fields.md` Step I, which reworks
+these imports anyway. Nothing today imports the bundle without the bridge, so the
+distinction is latent.
+
 ## Goal
 
 Introduce tangent information as part of the state representation instead of extending every kernel interface.

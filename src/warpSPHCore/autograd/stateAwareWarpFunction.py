@@ -15,6 +15,20 @@ def _field_cache_grad_enabled() -> bool:
     return os.environ.get("WARPSPHCORE_FIELD_CACHE_GRAD", "1") != "0"
 
 
+def _bundle_enabled() -> bool:
+    # warpier_fields.md Step H: a *measurement* hatch, not a correctness one.
+    # Step F deliberately ships no env switch for StateBundle reuse -- the grad
+    # path never shares a bundle (there is no contract that would make that safe,
+    # so the gate is `requires_grad`, not a variable), which leaves nothing to
+    # bisect. But Step H's in-situ before/after needs to turn every Steps A-F
+    # caching layer off on the *no-grad* path to measure what they bought on a
+    # real workload, and without this the bundle stayed on in both arms and the
+    # comparison silently understated the win. Turning it off only ever falls
+    # back to arg_extract.py's original per-call struct construction, so this can
+    # never be the unsafe direction.
+    return os.environ.get("WARPSPHCORE_DISABLE_BUNDLE", "0") != "1"
+
+
 class StateAwareWarpFunction(torch.autograd.Function):
     """
     Autograd bridge for SPH operations called with structured state arguments
@@ -125,7 +139,10 @@ class StateAwareWarpFunction(torch.autograd.Function):
         # unlike Step E's view-reuse cache, struct reuse has no zero-on-
         # acquire equivalent that would make grad-path sharing safe.
         with record_function("SAWF.forward - build_fn"):
-            kernel_args = build_fn(warp_arrays, use_bundle=not ctx.any_requires_grad)
+            kernel_args = build_fn(
+                warp_arrays,
+                use_bundle=(not ctx.any_requires_grad) and _bundle_enabled(),
+            )
 
         with record_function("SAWF.forward - launch"):
             if ctx.any_requires_grad:

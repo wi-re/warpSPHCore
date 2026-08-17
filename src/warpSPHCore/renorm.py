@@ -14,6 +14,7 @@ note for why this needed its own script rather than reusing gradcheck_covariance
 """
 
 import torch
+from dataclasses import replace
 from typing import Optional, Union, Tuple
 from .profiling import record_function
 
@@ -38,9 +39,25 @@ def computeRenormalizationMatrices_(
     renormalizationState: Optional[Union[torch.Tensor,RenormalizationState]] = None,
 ):
     with record_function("[warpSPH] - Renorm - Compute Covariance"):
-        operationProperties.operation = WarpOperation.Covariance
+        # Covariance is this function's own internal step, not something the
+        # caller selects -- so it is applied to a *copy* of the properties
+        # rather than written back into the caller's object. This used to be
+        # `operationProperties.operation = WarpOperation.Covariance`, an
+        # in-place write to a dataclass the caller still owns: any caller that
+        # reused its properties object afterwards silently got a Covariance
+        # launch where it asked for a Gradient, and the (N, D, D) result of
+        # that is plausible enough to go unnoticed. Every call site in both
+        # repos today happens to construct a fresh OperationProperties inline
+        # for this call, which is why it never bit -- but that also means
+        # hoisting those constructions out of the hot path (warpier_fields.md
+        # Section 3.5's suggested follow-up, which wants a reusable, hashable
+        # properties object to key the StateBundle on) would have introduced
+        # the bug rather than found it. Found by Step G's Tier-1 spike, which
+        # reuses one properties object across the renorm call and the gradient
+        # call that consumes its output.
+        covarianceProperties = replace(operationProperties, operation=WarpOperation.Covariance)
         C, num_nbrs = warpOperation(
-            queryParticles, operationProperties, domain,
+            queryParticles, covarianceProperties, domain,
             queryVolumes = queryVolumes, referenceVolumes = referenceVolumes,
             adjacency = adjacency,
             referenceParticles = referenceParticles,
