@@ -3,7 +3,7 @@ from typing import NamedTuple, Union, Tuple, List, Optional, Any
 from warp.types import vector, matrix
 from typing import Any, Optional, Union
 import torch
-from torch.profiler import record_function
+from ..profiling import record_function
 
 from ..type_config import *
 from ..autograd import *

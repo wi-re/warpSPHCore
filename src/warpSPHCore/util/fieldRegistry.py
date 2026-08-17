@@ -37,16 +37,30 @@ def acquireView(t: torch.Tensor, role: Role = Role.PRIMAL) -> "wp.array":
     """Read t._wsc_field -> revalidate -> hit returns the cached view; miss
     (including a non-contiguous tensor, which is never cached -- see
     Field.matches's docstring and Section 3.1's staleness hazard) builds a
-    fresh view and, if contiguous, attaches it for next time."""
+    fresh view and, if contiguous, attaches it for next time.
+
+    Every branch below builds from ``t.detach()``, never bare ``t``: until
+    warpier_fields.md Step E, this function was only ever called with a
+    tensor that could not have requires_grad=True (null fields never
+    require grad; Step D's caller-tensor caching was gated to the no-grad
+    path only), so a missing detach() in the miss/escape-hatch branches was
+    latent, not exercised. Step E is the first caller that can hand this a
+    requires_grad=True tensor, and building an array off it undetached lets
+    that array's conversion op (e.g. `.contiguous()`, a no-op that returns
+    the same tensor when already contiguous) sit inside torch's own
+    autograd graph in addition to warp's tape -- silently doubling the
+    reported gradient. Caught by cross-checking a cached run against one
+    with WARPSPHCORE_DISABLE_FIELD_CACHE=1, which hits exactly this branch.
+    """
     if _cache_disabled():
-        return castTorchToWarpAsBuiltins(t.contiguous())
+        return castTorchToWarpAsBuiltins(t.detach().contiguous())
 
     if not t.is_contiguous():
         # castTorchToWarpAsBuiltins would .contiguous()-copy a non-contiguous
         # tensor; a later in-place write to the original storage would then
         # be invisible through that copy while data_ptr on the original stays
         # stable, so caching here would be a false hit. Rebuild every time.
-        return castTorchToWarpAsBuiltins(t)
+        return castTorchToWarpAsBuiltins(t.detach())
 
     field: Optional[Field] = getattr(t, _ATTR, None)
     if field is not None and field.matches(t) and role in field.views:

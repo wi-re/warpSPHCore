@@ -2,7 +2,7 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Optional, Union
 import torch
-from torch.profiler import record_function
+from ..profiling import record_function
 
 from ..type_config import *
 from ..autograd import *

@@ -19,7 +19,7 @@ from ..type_config import *
 # warpier_core.md. getCachedWarpArray now always builds a fresh wrapper.
 
 
-from torch.profiler import record_function
+from ..profiling import record_function
 from .cast import castTorchToWarpAsBuiltins, castWarpToTorch
 
 

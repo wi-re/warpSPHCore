@@ -13,7 +13,7 @@ import warp as wp
 from warp.types import vector, matrix
 from typing import Any
 import torch
-from torch.profiler import record_function
+from ..profiling import record_function
 
 from ..type_config import scalar_t
 from ..util import *

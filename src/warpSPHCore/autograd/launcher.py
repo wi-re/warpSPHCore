@@ -2,7 +2,7 @@ import torch
 import warp as wp
 from ..util import *
 from .cache import *
-from torch.profiler import record_function
+from ..profiling import record_function
 
 
 def _dtype_is_float(dtype):

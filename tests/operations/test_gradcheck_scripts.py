@@ -41,6 +41,7 @@ GRADCHECK_SCRIPTS = [
     "gradcheck_renorm_native.py",
     "gradcheck_pinv_native.py",
     "gradcheck_scalar_arg_native.py",
+    "gradcheck_twice_in_process.py",
 ]
 
 

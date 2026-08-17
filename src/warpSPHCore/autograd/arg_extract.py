@@ -6,6 +6,7 @@ from ..dataTypes import *
 from typing import Optional, Union, Tuple
 from .arg_check import *
 from ..radiusSearch import buildCompactHashMap
+from .stateBundle import getStateBundle
 
 def extractStateInfo(
     queryParticles: ParticleState,
@@ -28,6 +29,15 @@ def extractStateInfo(
     do; the conversion half is deferred to ``StateAwareWarpFunction.forward`` so
     that the original torch tensors can be saved for autograd.
 
+    Disabled correction paths (no CRK, no grad-h, no volumes, no renormalization,
+    adjacency-vs-grid whichever is unused) are filled with a permanent ``Field``
+    from the null-field registry (``util.fieldRegistry.nullField``,
+    warpier_fields.md Step C) rather than a fresh dummy tensor -- the entry is
+    never re-converted, since ``StateAwareWarpFunction.forward`` reads a Field's
+    view directly instead of running it through ``castTorchToWarpAsBuiltins``.
+    The flat list is therefore heterogeneous: ``torch.Tensor`` for real inputs,
+    ``Field`` for disabled/null slots.
+
     Flat tensor index layout (36 entries):
         0  qPos          6  qDen         12  rOmega       18  qcrk_gradB
         1  rPos          7  rDen         13  qVol         19  rcrk_A
@@ -43,7 +53,7 @@ def extractStateInfo(
        29  grid_numCells                 35  periodicity
 
     Returns:
-        flat_tensors  : List[torch.Tensor]
+        flat_tensors  : List[torch.Tensor | Field]
         build_fn      : Callable[[List[wp.array]], tuple]  - returns full kernel args
         device        : torch.device
         dim           : int
@@ -66,9 +76,9 @@ def extractStateInfo(
             dim    = qPos.shape[1]
 
             torch_t = get_torch_precision()
-            _d1f   = getCachedDummyTensor((1,),          dtype=torch_t, device=device)
-            _d1Df  = getCachedDummyTensor((1, dim),      dtype=torch_t, device=device)
-            _d1DDf = getCachedDummyTensor((1, dim, dim), dtype=torch_t, device=device)
+            _d1f   = nullField(FieldKind.SCALAR, dim, device, dtype=torch_t)
+            _d1Df  = nullField(FieldKind.VECTOR, dim, device, dtype=torch_t)
+            _d1DDf = nullField(FieldKind.MATRIX, dim, device, dtype=torch_t)
 
             # Replace None densities with a dummy so the flat list is never sparse
             if qDen is None:
@@ -167,19 +177,19 @@ def extractStateInfo(
                 adj_neighborList    = adjacency.j
                 adj_neighborOffsets = adjacency.edgeOffsets
                 adj_numNeighbors    = adjacency.numNeighbors
-                grid_sortIndex  = getCachedDummyTensor((1,),    dtype=torch.int64,  device=device)
+                grid_sortIndex  = nullField(FieldKind.INT64, dim, device)
                 grid_qMin       = domainMin
                 grid_qMax       = domainMax
                 grid_hCell      = scalar_t(scalar_t(0.0))
-                grid_numCells   = getCachedDummyTensor((1,),    dtype=torch.int32,  device=device)
-                grid_hashTable  = getCachedDummyTensor((1, 2),  dtype=torch.int32,  device=device)
-                grid_cellTable  = getCachedDummyTensor((1, 3),  dtype=torch.int64,  device=device)
+                grid_numCells   = nullField(FieldKind.INT32, dim, device)
+                grid_hashTable  = nullField(FieldKind.VEC2I, dim, device)
+                grid_cellTable  = nullField(FieldKind.VEC3L, dim, device)
                 grid_numOffsets = 0
-                grid_cellOffsets = getCachedDummyTensor((1, 3), dtype=torch.int32,  device=device)
+                grid_cellOffsets = nullField(FieldKind.VEC3I, dim, device)
             else:
-                adj_neighborList    = getCachedDummyTensor((1,), dtype=torch.int64,  device=device)
-                adj_neighborOffsets = getCachedDummyTensor((1,), dtype=torch.int32,  device=device)
-                adj_numNeighbors    = getCachedDummyTensor((1,), dtype=torch.int32,  device=device)
+                adj_neighborList    = nullField(FieldKind.INT64, dim, device)
+                adj_neighborOffsets = nullField(FieldKind.INT32, dim, device)
+                adj_numNeighbors    = nullField(FieldKind.INT32, dim, device)
                 grid_sortIndex   = adjacency.sortIndex
                 grid_qMin        = adjacency.qMin
                 grid_qMax        = adjacency.qMax
@@ -246,12 +256,31 @@ def extractStateInfo(
     #     Pre-resolve every type and scalar constant into the closure so that
     #     the hot path (called every kernel launch) contains no branches or
     #     dict lookups — only attribute assignments.
+    #
+    #     use_bundle=True (warpier_fields.md Step F) skips this fresh
+    #     per-call construction entirely and instead refreshes a persistent
+    #     StateBundle in place -- but ONLY when the caller has established
+    #     nothing in this call requires grad. This is not a gating nicety:
+    #     wp.Tape holds a live reference to whatever struct object a launch
+    #     was given and re-reads its fields lazily at backward() time (does
+    #     not snapshot values at launch time, verified directly against
+    #     warp 1.16.0 -- see stateBundle.py's module docstring). Reusing a
+    #     mutable struct across grad-requiring calls would silently corrupt
+    #     an earlier call's gradient the moment its backward is deferred
+    #     past a later call that refreshes the same bundle -- ordinary
+    #     PyTorch usage, not an edge case. StateAwareWarpFunction.forward is
+    #     the only caller that sets use_bundle=True, and only when
+    #     `not ctx.any_requires_grad`.
     # ------------------------------------------------------------------ #
 
-    # Pre-resolve concrete types once based on dim
+    # Pre-resolve concrete types once based on dim (Requirement 3, Section
+    # 3.6: struct types come from structFor's table, never a hard-coded
+    # dim==1/2/3 ternary -- Phase 6 registers *_dual rows into the same
+    # table instead of every extractor needing a rewrite).
     _dim            = cfg['dim']
-    _ParticleSoA    = particleDataSoA_1 if _dim == 1 else (particleDataSoA_2 if _dim == 2 else particleDataSoA_3)
-    _CorrData       = correctionData_1  if _dim == 1 else (correctionData_2  if _dim == 2 else correctionData_3)
+    _mode           = ExecutionMode.REVERSE
+    _ParticleSoA    = structFor("particleDataSoA", _dim, _mode)
+    _CorrData       = structFor("correctionData", _dim, _mode)
 
     # Capture all scalars that never change
     _grid_hCell                  = cfg['grid_hCell']
@@ -269,7 +298,16 @@ def extractStateInfo(
     _divergenceMode              = cfg['divergenceMode']
     _opInt                       = cfg['opInt']
 
-    def build_fn(wa: list) -> tuple:
+    def build_fn(wa: list, use_bundle: bool = False) -> tuple:
+        if use_bundle:
+            bundle = getStateBundle(_dim, _mode)
+            bundle.refresh(wa, cfg)
+            return (
+                bundle.queryParticle, bundle.referenceParticle, bundle.domain,
+                _useAdjacency, bundle.adjacency, bundle.grid,
+                bundle.correction,
+                bundle.kernelProperties,
+            )
         # Particle structs (no branch — types resolved at closure build time)
         qPart = _ParticleSoA()
         qPart.positions = wa[0]

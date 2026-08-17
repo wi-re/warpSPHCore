@@ -20,6 +20,12 @@ Or import subpackages directly:
 
 # Convenience re-exports of the most commonly used symbols
 
+# Imported first, before anything else: a zero-dependency leaf module many
+# submodules need (see profiling.py's docstring for the circular-import
+# hazard this avoids -- importing it anywhere else first can reenter a
+# still-initializing package).
+from . import profiling as _profiling  # noqa: F401
+
 submodules = []
 # Type related submodules
 from .type_config import *

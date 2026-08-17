@@ -10,7 +10,7 @@ from ...util import *
 from ...dataTypes import *
 from ...enumTypes import *
 
-from torch.profiler import record_function
+from ...profiling import record_function
 from .grid import *
 from .wp_countNeighbors import radiusSearchCountNeighborsCompactHashMap
 from .wp_collectNeighbors import radiusSearchCollectCompactHashMap

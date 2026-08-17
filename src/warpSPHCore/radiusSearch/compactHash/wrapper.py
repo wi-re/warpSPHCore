@@ -10,7 +10,7 @@ from ...util import *
 from ...dataTypes import *
 from ...enumTypes import *
 import numpy as np    
-from torch.profiler import record_function
+from ...profiling import record_function
 from ...dataTypes import *
 
 # For some operations we want to be able to run the operations directly on the hash map, e.g., to do a particle to grid transfer. In this case we only access the neighborhood once per query set. In this case, it is not worth it to build the full neighbor list as the overhead of building the neighbor list is larger than the cost of just doing the search.

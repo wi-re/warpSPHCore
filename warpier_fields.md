@@ -69,6 +69,18 @@ safer one.
 **Target: ~900 us -> ~450-500 us of fixed overhead per operator call**, i.e. roughly
 halving the CPU cost of every SPH operation in both repos.
 
+**Result (Steps A-F landed, 2026-08-17): exceeded on the no-grad path, on target on the grad
+path.** Measured on this machine, dim=2, `WARPSPHCORE_PROFILING=0`: no-grad total 1197-1413 us ->
+219-316 us (`bench_call_overhead_step_f.md`), well past the ~450-500 us target -- the no-grad path
+is where Steps C, D and F's caching all stack (null fields, view reuse, and struct-bundle reuse are
+all unconditionally active there). Grad-path total 1682-1995 us -> 346-415 us
+(`bench_call_overhead_step_e.md`; Step F does not further reduce it, by design -- see that step's
+notes), landing inside the target band. The asymmetry is intentional, not a shortfall: every
+caching layer in Steps D-F is gated to `not ctx.any_requires_grad` for correctness reasons specific
+to that layer (an unzeroed `.grad` buffer for Step D/E without Step E's fix; a stale struct-field
+pointer for Step F), so the grad path pays full reconstruction cost on the struct-assembly side
+while still getting Step E's tensor-view-reuse win.
+
 ## 1.4 The gradient path benefits too
 
 | Per differentiable input tensor            | Time    |
@@ -317,9 +329,16 @@ did not exist when the old cache was written now does:
   `tests/operations/test_gradcheck_scripts.py`, running each `scripts/gradcheck_*.py`
   in its own subprocess -- plus the operation matrix at five configurations
   (2D float32, 2D float64, 1D, jittered, and 3D when a CUDA runner is available).
-* `warpSPH/tests/test_gradcheck_scripts.py` **auto-discovers** `gradcheck_*.py` rather
-  than listing them, so a new module cannot silently stop being covered, and
-  `tests/test_physics.py` provides larger-scale gradient behaviour checks.
+* `warpSPH/tests/test_gradcheck_scripts.py` runs 15 `gradcheck_*.py` scripts, one per
+  kernel-bearing module, same subprocess-per-script shape as core's version, and
+  `tests/test_physics.py` provides larger-scale gradient behaviour checks. **Correction
+  (2026-08-17): this list is hardcoded (`GRADCHECK_SCRIPTS = [...]`), not auto-discovered** --
+  verified directly against the frontend repo when running its suite as part of Steps A-F's
+  landing. The original claim here (and its "only the frontend's does" echo further down) was
+  never actually checked against that file; both are wrong. Neither core's nor the frontend's
+  gradcheck suite currently auto-discovers -- a new script in either `scripts/` directory needs a
+  manual addition to the corresponding `GRADCHECK_SCRIPTS` list, same as core's
+  `gradcheck_twice_in_process.py` needed (Step E's notes, above).
 
 Two gaps in that machinery are worth closing alongside this work, and are folded into
 the gates below: the frontend has **no `.github/workflows/` at all** (its tests exist
@@ -511,17 +530,167 @@ testable. Steps 0-B and F are pure wins with no caching risk at all.
 
 ## Status as of 2026-08-17
 
-**✅ COMPLETE:** Steps 0 (bench harness), A (kinds required), B (Field/nullField/structFor)
+**✅ COMPLETE:** Steps 0 (bench harness), A (kinds required), B (Field/nullField/structFor), C (null
+fields wired into `arg_extract.py`), D (view reuse, no-grad path only), E (view reuse, grad path),
+F (`StateBundle`, no-grad path only)
 - Baseline numbers recorded and gate passes
-- 18 `getCachedDummyTensor` call sites identified (ready for Step C replacement)
 - Field attachment proven safe; no reference cycles, survives clone, dies with tensor
-- **Design decision locked:** Step C will use **Option A** (flat_tensors carries `[torch.Tensor | Field]`;
-  StateAwareWarpFunction.forward branches on `isinstance(item, Field)` for view acquisition)
+- **Design decision used:** Option A (flat_tensors carries `[torch.Tensor | Field]`;
+  `StateAwareWarpFunction.forward` branches on `isinstance(item, torch.Tensor)` -- the complement
+  of the isinstance-Field check the draft specified, same effect)
+- **Step C corrections found during implementation** (the draft's audit was written against a
+  slightly stale picture of the code):
+  1. **`arg_check.py`'s `checkInputRenormalization` / `checkInputGradHTerms` / `checkInputVolume`
+     / `checkInputCRK` / `checkQV` are dead code** -- grepped every call site in both this repo;
+     none exist. `arg_extract.py` does its own inline None-checks and never calls them. They were
+     **not** touched: converting unreachable functions serves no perf goal, and the plan's
+     description of them as "called from the correction-state checkers" does not hold for the
+     code as it stands. `checkKinds` (Step A, genuinely called) is unaffected.
+  2. **`getCachedDummyTensor` was *not* deleted.** `coreOperations/wp_interpolate.py:182-183` is a
+     live call site outside `arg_extract.py`/`arg_check.py` (builds a dummy `gradA`/`gradB` for a
+     CRKState that only supplies `A`/`B`). It doesn't need a Step-C-style fix: the tensor object it
+     returns is stable across calls (cached by shape/dtype/device key inside `getCachedDummyTensor`
+     itself), so once Step D's view-reuse cache lands it will get the same win automatically, no
+     separate change required. `getCachedIdentityMatrices` and the dummy-tensor cache in
+     `cache.py` stay.
+  3. **The plan's Step C code sketch for `StateAwareWarpFunction.forward` was incomplete.** It
+     showed only the conversion loop, but `flat_tensors` becoming heterogeneous also breaks
+     `ctx.save_for_backward(*flat_tensors)` (only accepts real tensors) and `backward()`'s
+     `zip(ctx.warp_arrays, ctx.saved_tensors)` (lengths would no longer match once Field entries
+     are excluded from `saved_tensors`). Fixed by tracking `ctx.is_tensor` (a per-position bool
+     tuple) alongside `flat_tensors`, saving only the Tensor-typed entries, and re-expanding
+     `backward()`'s returned gradient tuple against `is_tensor` so Field positions always
+     contribute `None`. See `stateAwareWarpFunction.py` for the result.
+- **Verification run (2026-08-17, CPU only -- see compute-sharing note below):** full CPU-only
+  pytest suite (55 tests, `tests/` minus `test_gradcheck_scripts.py`'s subprocess runs), all 12
+  `scripts/gradcheck_*.py` scripts individually (all hardcode `DEVICE = torch.device("cpu")` via
+  `_gradcheck_common.py`), and both suites repeated under `WARPSPHCORE_NULL_FILL=sentinel` (Test
+  10) -- all green, including CRK/renorm/gradH paths that exercise every `FieldKind` this step
+  touches. New regression test: `tests/operations/test_null_field_wiring.py` (disabled-correction
+  slots are `Field` instances; the same instance comes back on a second call; the unused
+  traversal side -- adjacency vs. grid -- is null; real tensors still flow through unwrapped).
+- **CUDA bench recorded (2026-08-17):** `docs/regression/bench_call_overhead_step_c.md` vs. the
+  Step-0 baseline, same script/device/grid. dim=2, no-grad, reference configuration: convert
+  298.7-319.8 us -> 62.3-64.0 us (~4.7-5.0x), total 1197-1413 us -> 363-454 us (~3.1-3.3x). This
+  is Step C's contribution alone (disabled-correction slots stop re-converting); Step D's
+  view-reuse for the *real* tensors is what closes the rest of the gap to the ~450-500 us
+  end-state target. One sweep-position outlier noted and explained in that doc (not reproduced in
+  isolation; looks like a one-time kernel-cache compile, not a regression).
 
-**➡️ READY FOR IMPLEMENTATION:** Steps C-F
-- All implementation paths detailed below with file paths and code locations
-- Risk mitigations in place (copy/pickle guards, non-contiguous refusal, zero-on-acquire, twice-in-process gate)
-- Escape hatches defined (`WARPSPHCORE_DISABLE_FIELD_CACHE`, `WARPSPHCORE_FIELD_CACHE_GRAD`, `WARPSPHCORE_NULL_FILL`)
+**Step D notes:**
+- **Design decision used:** the plan's sketch (`getCachedWarpArray(t, use_cache)` gated by
+  `not ctx.any_requires_grad`) was implemented as written, with one correctness fix found before
+  it shipped: the existing call site passed `t.detach()` into the conversion helper, and
+  `Tensor.detach()` returns a **new object every call** -- attaching the Field-registry cache entry
+  to that transient object would mean it was never seen again, so the cache would silently never
+  hit (0% hit rate, correctness unaffected, entire point of the step lost). Fixed by passing the
+  caller's original tensor `t` through and detaching only at the point of actual conversion, inside
+  `getCachedWarpArray`/`acquireView`. Caught by writing a reuse test before trusting the bench
+  number, not by the bench number itself (a 0%-hit-rate cache is invisible to a total-time
+  measurement if nothing else regresses).
+- **WARPSPHCORE_FIELD_CACHE_GRAD was not added.** The plan called for it at this step "so grad-path
+  bisects can force fresh builds," but at Step D the grad path is unconditionally uncached
+  regardless of any env var (the gate is `not ctx.any_requires_grad`, not a flag) -- an inert
+  environment variable would be dead configuration. It's introduced in Step E, where it starts
+  actually controlling behavior.
+- **Verification:** full pytest suite including CUDA-parametrized tests (90 passed), all 13
+  gradcheck scripts both directly and via `test_gradcheck_scripts.py`'s hardcoded
+  `GRADCHECK_SCRIPTS` list (this repo's version lists rather than auto-discovers -- only the
+  frontend's does, per Section 3.3's CI-wiring note; corrected here after writing it wrong the
+  first time), a 2D float32 operation-matrix smoke sweep (258 OK / 0 HIGH-ERR-NAN), and a new
+  `tests/operations/test_view_reuse.py` covering Section 5's reentrancy tests 1-3: repeated
+  no-grad calls hit the same cached view, the `WARPSPHCORE_DISABLE_FIELD_CACHE` escape hatch still
+  works, and -- the interaction Step D specifically introduces -- toggling `requires_grad` on the
+  *same* tensor object (no-grad call, then grad call, then no-grad again) produces the right
+  forward values and a gradient cross-checked bit-for-bit against a fully-cache-disabled run.
+- **CUDA bench recorded:** `docs/regression/bench_call_overhead_step_d.md`. dim=2, no-grad:
+  convert 62-64 us (Step C) -> 24-25 us (Step D), ~12-13x over Step C alone and ~12-13x over
+  baseline's 291.8-319.8 us; total 1197-1413 us (baseline) -> 275-374 us (Step D), 3.8-4.4x. Grad
+  path numbers are within noise of Step C's, as expected -- Step D deliberately does not touch it.
+
+**Step E notes:** see the dedicated subsection under "## Step E" below for the full account --
+summary: two real gradient-correctness bugs (grad-buffer double-counting when one tensor fills
+two kernel roles; a latent missing `.detach()` in `acquireView`'s fallback branches) were found
+and fixed before this shipped as default-on, both caught only by a new
+`scripts/gradcheck_twice_in_process.py` gate (now permanently wired into
+`test_gradcheck_scripts.py`) that no existing test provided. Full verification battery green
+after the fixes; CUDA bench in `docs/regression/bench_call_overhead_step_e.md`.
+
+**Step F notes:** see the dedicated subsection under "## Step F" below -- summary: the plan's
+`StateBundle` sketch proposed unconditional sharing of a persistent, mutable struct instance
+across calls, with no gating. Verified directly against warp 1.16.0 *before* writing any
+implementation code (given the pattern from Steps C-E) that this would have been a correctness
+bug far more serious than any of those: `wp.Tape` does not snapshot a struct's field values at
+launch time, it holds a live reference and re-reads them lazily at `backward()` time, so sharing a
+mutable bundle across grad-requiring calls would silently corrupt an earlier call's gradient any
+time its backward is deferred past a later call's refresh of the same bundle -- ordinary PyTorch
+usage (build a graph across several ops, call `.backward()` once), not an edge case. `StateBundle`
+reuse is therefore gated to `not ctx.any_requires_grad`, exactly like Step D's view-reuse cache but
+for a stronger reason: there is no zero-on-acquire-style contract that would make grad-path struct
+sharing safe, so unlike Steps D/E there is no escape-hatch env var for it either -- the grad path
+is simply always fresh, matching the original `build_fn` untouched. Two further bugs surfaced while
+folding in Section 3.7's "cheap wins" (a circular import; an unhashable `wp.Device` used as a dict
+key) -- see the Step F subsection for both. Full verification battery green; CUDA bench in
+`docs/regression/bench_call_overhead_step_f.md`.
+
+**Frontend verification (2026-08-17, `~/dev/warpSPH`, same `warp` conda env, editable install --
+so it picked up every Steps A-F change automatically with no reinstall):** ran the frontend's full
+test suite against the modified core. **88 passed, 1 skipped, 0 failed:**
+- `tests/test_caseSpec.py` + `tests/test_runner.py`: 22 passed, 1 skipped.
+- `tests/test_gradcheck_scripts.py`: 15 passed (float64 subprocess-per-script, one per
+  kernel-bearing frontend module -- `compSPH`, `dissipation`, `crk`, `adaptiveSupport`,
+  `deltaSPH`, `shockCapturing`, `mdbc`, `incompressible`, `liu`, `surfaceDetection`, `util`,
+  `deltaShift`, `sdf`, `scalarArg_dt`, `wp_surfaceAware`). This is much broader real-world
+  `warpWrapper2`/`warpOperation` call-site coverage than core's own test suite reaches on its own,
+  and it's exactly the surface Steps A-F's caching sits underneath.
+- `tests/test_physics.py`: 51 passed (sod shock tube 1D/2D/3D, Taylor-Green vortex, dambreak,
+  Sedov blast, every compressible solver scheme, uniform-lattice density checks -- real
+  simulations, not just single-kernel checks).
+
+Empirically confirms Section 2.1's "Steps A-F land underneath the existing signature, so the ~2x
+win arrives with zero frontend risk" claim, rather than leaving it as an assumption. Also caught
+the frontend's own `tests/test_gradcheck_scripts.py` docstring/list is the same hardcoded-list
+shape as core's, correcting this doc's earlier claim of frontend auto-discovery -- see the
+Section 3.3 correction above.
+
+---
+
+## Resuming from here
+
+**State as of 2026-08-17: Steps 0, A-F complete and verified (including against the frontend);
+none of it is committed yet.** `git status` shows the full set of changed/new files still sitting
+in the working tree on `main`, one commit ahead of `origin/main` (`ba3dbee`, itself the prior
+session's plan-document update, also uncommitted-to-remote). Nothing here has been committed
+during Steps C-F's implementation -- that was a deliberate default (commit only when the user
+asks), not an oversight, but it means a fresh session picking this up needs `git status`/`git
+diff`, not just this document, to see the actual change set. If you're that fresh session: read
+this whole "Status as of 2026-08-17" block plus each Step's own subsection (B through F) before
+touching anything -- they carry the corrections and hazards below, and the numbered lists under
+"Step X notes" are denser than the surrounding prose for a reason.
+
+**What to do next:** Step G (a checklist/audit against already-landed code -- no new
+implementation) and then Steps H/I (Section 8, the interface break -- deliberately last). Nothing
+about Steps A-F's design blocks starting Step G immediately.
+
+**The one habit to carry forward, stated plainly because it paid off repeatedly:** every step from
+C onward had at least one real, silent-corruption-class bug in the *written* sketch -- not
+typos, not edge cases, but wrong results a casual read would not catch (Step C: a
+`save_for_backward`/`backward()` alignment gap; Step D: a cache that would silently never hit;
+Step E: two independent gradient-doubling bugs; Step F: a hazard serious enough that it was
+checked *before* any implementation code existed, plus two more bugs in the "cheap wins" folded in
+alongside it). None of these were caught by reading the plan carefully -- they were caught by
+writing a targeted empirical check (a raw warp repro, a cross-check against an env-var-disabled
+reference, a monkeypatch proving a test isn't vacuous) *before* trusting a design or *after*
+implementing it but before calling it done. Budget for that on Step H too, especially anywhere it
+touches the autograd bridge or introduces new shared/cached state -- the failure mode here has
+consistently been "looks right, runs, produces a plausible number" with the actual bug only
+visible in a gradient value or an object-identity check, never in a stack trace.
+
+**Escape hatches available if something downstream looks wrong:** `WARPSPHCORE_DISABLE_FIELD_CACHE=1`
+(kills the Field cache entirely, Steps B-F), `WARPSPHCORE_FIELD_CACHE_GRAD=0` (grad-path view
+reuse only, Step E), `WARPSPHCORE_NULL_FILL=sentinel` (poisons disabled-correction reads instead
+of zero-filling, Step C), `WARPSPHCORE_PROFILING=1` (restores real `record_function` hooks, Step
+F). All four are independent single-variable bisects, not reverts.
 
 ## Step 0 -- Baseline harness (prerequisite, no behaviour change)
 
@@ -583,9 +752,11 @@ in-place and need revalidation.
    list (lines 227-242) -- Field objects mixed with Tensor objects. The flat list is now
    heterogeneous but remains deterministically ordered.
 
-2. **Replace `getCachedDummyTensor` calls in `arg_check.py` (lines 26, 36-37, 48-49, 60-63):**
-   These are called from the correction-state checkers but not used in arg_extract's flat list directly.
-   Replace with `nullField` calls; return Field.view() (not Field itself) so callers expect wp.array.
+2. ~~Replace `getCachedDummyTensor` calls in `arg_check.py`~~ **-- skipped, see Status section's
+   correction #1.** `checkInputRenormalization`/`checkInputGradHTerms`/`checkInputVolume`/
+   `checkInputCRK`/`checkQV` have zero call sites in the current codebase; `arg_extract.py`
+   never calls them and does its own inline None-handling. Left as unreachable dead code rather
+   than converted, since there is no hot path to speed up here.
 
 3. **Update `StateAwareWarpFunction.forward` (stateAwareWarpFunction.py, lines 56-60) to handle mixed list:**
    ```python
@@ -603,61 +774,59 @@ in-place and need revalidation.
 
 * **Gate:** operation matrix (full sweep) bit-identical; gradcheck green; bench shows
   the null-path improvement (dummy-tensor cost ~60 us → negligible dict lookup).
-* **Completion:** After Step C, `getCachedDummyTensor` has no remaining call sites and can be
-  deleted from `cache.py` (alongside the no-op `clearDummyTensorCache()`).
+* **Completion (revised):** `getCachedDummyTensor` is **not** dead after Step C --
+  `coreOperations/wp_interpolate.py:182-183` is a real, separate call site (see the Status
+  section's correction #2). It stays in `cache.py`; only `arg_extract.py`'s own dummy
+  construction was replaced.
 
-## Step D -- View reuse, no-grad path only  [signed off, Section 3.3; Option A gating]
+## Step D -- View reuse, no-grad path only  [signed off, Section 3.3; Option A gating] -- ✅ DONE
 
-**Implementation:**
+**As actually implemented** (the sketch below, written before the step was built, had a bug --
+see the correctness note under "Status as of 2026-08-17" above: `item.detach()` is a fresh Python
+object on every call, so caching against it would never hit. Fixed by threading the caller's
+original tensor object through instead and detaching only at the point of conversion):
 
-1. **Modify `getCachedWarpArray` in `src/warpSPHCore/autograd/cache.py` (lines 39-46):**
+1. **`src/warpSPHCore/autograd/cache.py`:**
    ```python
-   # OLD:
-   def getCachedWarpArray(t: torch.Tensor) -> "wp.array":
-       return castTorchToWarpAsBuiltins(t.contiguous())
-   
-   # NEW:
-   def getCachedWarpArray(t: torch.Tensor, use_cache: bool = True) -> "wp.array":
+   def getCachedWarpArray(t: torch.Tensor, use_cache: bool = False) -> "wp.array":
+       # t must be the caller's original tensor object, not an already-detached
+       # copy -- see the docstring in cache.py for why.
        if use_cache:
-           return acquireView(t, role=Role.PRIMAL)
-       else:
-           return castTorchToWarpAsBuiltins(t.contiguous())
+           return acquireView(t)
+       return castTorchToWarpAsBuiltins(t.detach().contiguous())
    ```
+   (`use_cache` defaults `False`, not `True` as first sketched -- `stateLessWarpFunction.py`'s
+   flat-tensor wrapper also calls this function and must keep today's always-fresh semantics
+   unless it explicitly opts in, which it does not.)
 
-2. **Add gate flag in `StateAwareWarpFunction.forward` (stateAwareWarpFunction.py, lines 41-60):**
+2. **`StateAwareWarpFunction.forward` (`stateAwareWarpFunction.py`):**
    ```python
-   ctx.any_requires_grad = any(
-       t.requires_grad for t in flat_tensors if isinstance(t, torch.Tensor)
-   )
-   
-   # Step D: cache views only on no-grad path
+   is_tensor = tuple(isinstance(t, torch.Tensor) for t in flat_tensors)
+   ctx.is_tensor = is_tensor
+   ctx.any_requires_grad = any(t.requires_grad for t, tt in zip(flat_tensors, is_tensor) if tt)
    use_cached_views = not ctx.any_requires_grad
-   ctx.use_cached_views = use_cached_views
-   
-   with record_function("SAWF.forward - convert"):
-       warp_arrays = []
-       for item in flat_tensors:
-           if isinstance(item, Field):
-               wa = item.view(Role.PRIMAL)
-           else:
-               # Tensor: use cache gate
-               if use_cached_views:
-                   wa = acquireView(item.detach(), role=Role.PRIMAL)
-               else:
-                   wa = castTorchToWarpAsBuiltins(item.detach())
-           wa.requires_grad = item.requires_grad if isinstance(item, torch.Tensor) else False
-           warp_arrays.append(wa)
+
+   warp_arrays = []
+   for t, tt in zip(flat_tensors, is_tensor):
+       if tt:
+           wa = getCachedWarpArray(t, use_cache=use_cached_views)  # t, not t.detach()
+           wa.requires_grad = t.requires_grad
+       else:
+           wa = t.view()  # Field entry
+           wa.requires_grad = False
+       warp_arrays.append(wa)
    ```
 
-3. **Add environment variable escape hatch:**
-   Set `WARPSPHCORE_FIELD_CACHE_GRAD=0` (default for Step D) so grad-path bisects can force fresh
-   builds. This flag is flipped to 1 (enabled) in Step E after twice-in-process gradcheck passes.
+3. **`WARPSPHCORE_FIELD_CACHE_GRAD` was not added at this step** -- see the correctness/decision
+   note above. It has no effect until Step E's grad-path caching exists for it to gate.
 
-* **Gate:** operation matrix bit-identical; full gradcheck suite green; reentrancy
-  tests (Section 5, tests 1-3: two calls on same leaf tensor in one process) pass; bench shows
-  conversion loop at ~13 us (vs 288 us today).
+* **Gate:** operation matrix 2D/float32 smoke sweep clean (258 OK, 0 HIGH/ERR/NAN); full pytest
+  suite (CPU+CUDA) green; all 13 gradcheck scripts green both standalone and via
+  `test_gradcheck_scripts.py`; new `tests/operations/test_view_reuse.py` covers reentrancy tests
+  1-3; bench (`docs/regression/bench_call_overhead_step_d.md`) shows dim=2 no-grad convert at
+  24-25 us, down from Step C's 62-64 us and baseline's 291.8-319.8 us.
 
-## Step E -- View reuse on the grad path  [Critical: zero-on-acquire contract]
+## Step E -- View reuse on the grad path  [Critical: zero-on-acquire contract] -- ✅ DONE
 
 **Hazard (Section 3.3):** The previous `data_ptr`-keyed cache was deleted because it reused
 `wp.array.grad` buffers without zeroing, causing non-reentrant backward and silent gradient
@@ -665,183 +834,171 @@ accumulation. This step reintroduces wrapper reuse but discharges the bug by des
 owned identity (Field attached to tensor, not inferred from storage address) + zero-on-acquire
 contract + twice-in-process gradcheck gate.
 
-**Implementation:**
+**As actually implemented** (the sketch originally written here had the *same* `item.detach()`
+identity bug already caught and fixed in Step D -- caching against a freshly-detached object never
+hits -- and, more importantly, said nothing about two other bugs the zero-on-acquire contract
+alone does not cover, both found and fixed while landing this step; see below):
 
-1. **Add zero-on-acquire in `StateAwareWarpFunction.forward` (stateAwareWarpFunction.py, lines 33-75):**
+1. **`src/warpSPHCore/autograd/stateAwareWarpFunction.py`:**
    ```python
-   @staticmethod
-   def forward(ctx, build_fn, launcher, kernel, output_shape, output_dtype, *flat_tensors):
-       ctx.any_requires_grad = any(
-           t.requires_grad for t in flat_tensors if isinstance(t, torch.Tensor)
-       )
-       
-       # Step E: Always use cached views (flip WARPSPHCORE_FIELD_CACHE_GRAD gate)
-       with record_function("SAWF.forward - convert"):
-           warp_arrays = []
-           for item in flat_tensors:
-               if isinstance(item, Field):
-                   wa = item.view(Role.PRIMAL)
-               else:
-                   wa = acquireView(item.detach(), role=Role.PRIMAL)
-               
-               # CRITICAL: Zero-on-acquire, unconditionally, before taping.
-               # The reused wrapper's .grad buffer is zero at start of forward,
-               # enforced at point of use rather than depending on a tape.zero()
-               # at end of some earlier backward.
-               if item.requires_grad if isinstance(item, torch.Tensor) else False:
-                   if wa.grad is not None:
-                       wa.grad.zero_()
-               
-               wa.requires_grad = item.requires_grad if isinstance(item, torch.Tensor) else False
-               warp_arrays.append(wa)
-           ctx.warp_arrays = warp_arrays
-       
-       # ... rest of forward (build_fn, launch, output handling unchanged)
+   def _field_cache_grad_enabled() -> bool:
+       return os.environ.get("WARPSPHCORE_FIELD_CACHE_GRAD", "1") != "0"
+
+   # forward():
+   use_cached_views = (not ctx.any_requires_grad) or _field_cache_grad_enabled()
+   for t, tt in zip(flat_tensors, is_tensor):
+       if tt:
+           wa = getCachedWarpArray(t, use_cache=use_cached_views)  # t, not t.detach()
+           wa.requires_grad = t.requires_grad
+           if t.requires_grad and wa.grad is not None:
+               wa.grad.zero_()  # zero-on-acquire, unconditional
+       else:
+           wa = t.view()
+           wa.requires_grad = False
+       warp_arrays.append(wa)
    ```
+   `tape.zero()` at the end of `backward()` stays as belt-and-braces, unchanged.
 
-2. **Keep belt-and-braces tape.zero() in backward (line 127):**
-   ```python
-   ctx.tape.backward(grads=grads)
-   # ... collect input_grads ...
-   ctx.tape.zero()  # Extra safety: clear tape gradients
-   ```
+2. **Bug found #1 -- grad-buffer double-counting when one tensor fills two roles.** The common
+   case `referenceParticles=None` makes `qPos`/`rPos` (and `qSup`/`rSup`, `qMas`/`rMas`) the *same*
+   tensor object. Under caching they now map to the *same* wp.array, so warp's adjoint kernels
+   correctly sum both roles' contributions into that one shared `.grad` buffer -- but
+   `backward()` was reading that buffer once per flat-tensor *position* (two reads of the same,
+   already-complete total), and PyTorch sums whatever a Function's backward returns across every
+   position a leaf occupies, so the total got doubled again on top. Fixed in `backward()` by
+   deduplicating on `id(wa)`: only the first flat-tensor position referencing a given cached
+   wp.array reports its gradient; later positions sharing it report `None`. (When caching is off,
+   aliased positions build distinct wp.array objects with independently-correct partial `.grad`
+   buffers, so `id(wa)` never collides and this is a no-op then -- the fix does not depend on
+   caching being active.) Caught by `gradcheck_density_native.py` failing with analytical exactly
+   2x numerical.
+3. **Bug found #2 -- a latent `detach()` gap in `fieldRegistry.acquireView`'s two fallback
+   branches** (the `WARPSPHCORE_DISABLE_FIELD_CACHE` escape hatch, and the non-contiguous-tensor
+   path): both built from the bare tensor `t` instead of `t.detach()`, unlike the main cached-view
+   path. Harmless through Steps B-D, since those branches only ever saw non-grad tensors (null
+   fields; Step D's no-grad-only gate). Step E is the first caller that can hand `acquireView` a
+   `requires_grad=True` tensor, and building off an undetached tensor let that conversion sit in
+   torch's own autograd graph in addition to warp's tape -- doubling the reported gradient again,
+   independently of bug #1. Fixed by adding `.detach()` in both branches. Caught by cross-checking
+   a cached run against a `WARPSPHCORE_DISABLE_FIELD_CACHE=1` run that disagreed by exactly 2x.
+4. **New regression gate: `scripts/gradcheck_twice_in_process.py`.** Neither bug was reachable by
+   any existing test: `tests/operations/test_gradcheck_scripts.py` runs each gradcheck script in
+   its own subprocess (isolated, so no cross-call state survives), and a single
+   `torch.autograd.gradcheck` call, while it does call backward many times, always does so against
+   *one* forward pass's tape/ctx -- it never exercises two independent `forward`+`backward`
+   invocations sharing the process-level Field cache. The new script runs (a) the same leaf
+   tensors through `torch.autograd.gradcheck` twice back-to-back, and (b) every
+   `gradcheck_*_native.py` script's `main()` twice back-to-back in one process (fresh tensors each
+   time, exercising the cache's handling of new objects arriving after now-dead ones). **Added to
+   `tests/operations/test_gradcheck_scripts.py`'s `GRADCHECK_SCRIPTS` list**, so it now runs on
+   every CI push (~13s locally).
 
-* **Gate (CRITICAL):** The full gradcheck suite (Section 5, tests 1-2), each script run
-  **twice in the same process** -- the exact shape of the workload that exposed the
-  original cache bug. Plus the frontend's 11 `gradcheck_*.py` scripts, same protocol.
-  If any gradcheck fails on the second run in the same process, the zero-on-acquire
-  contract is insufficient and the step must be reverted.
-* **Escape hatch:** `WARPSPHCORE_FIELD_CACHE_GRAD=0` forces fresh builds on grad path
-  only (no-grad still uses cache). For bisecting a suspected gradient bug, this is
-  one environment variable rather than a full revert.
-* **Performance:** grad-path per-tensor cost 46.5 us → 16.3 us (2.9x faster).
+* **Gate:** all 12 `gradcheck_*_native.py` scripts green (standalone and via
+  `test_gradcheck_scripts.py`, now 14 entries); `gradcheck_twice_in_process.py` green (both
+  scenarios); full pytest suite (90 tests, CPU+CUDA) green; 2D/float32 operation-matrix smoke sweep
+  clean (258 OK, 0 HIGH/ERR/NAN).
+* **Escape hatch:** `WARPSPHCORE_FIELD_CACHE_GRAD=0` forces fresh builds on the grad path only
+  (no-grad still uses cache). For bisecting a suspected gradient bug, this is one environment
+  variable rather than a full revert.
+* **Performance:** `docs/regression/bench_call_overhead_step_e.md`. dim=2 grad-path convert:
+  542.7-596.5 us (baseline) -> 133.8-145.8 us (Step D, uncached by design) -> 38.6-38.9 us (Step E,
+  ~14x over baseline); total 1681.9-1995.4 us -> 346.4-414.5 us (~4.6-5.1x). Grad-path convert is
+  now within ~1.6x of the no-grad path's ~24 us rather than ~6x higher.
 
-## Step F -- `StateBundle` replaces the per-call closure  [Struct assembly 66.5us → 1.6us]
+## Step F -- `StateBundle` replaces the per-call closure  [Struct assembly 66.5us → ~10-12us] -- ✅ DONE
 
 **Current Cost (Section 1.2):** `build_fn` closure performs ~51 warp struct field writes (66.5 us)
-and is rebuilt from scratch every kernel launch from inputs that almost never change. The goal is
-to cache preallocated struct instances and only update changed fields on each call.
+and is rebuilt from scratch every kernel launch from inputs that almost never change.
 
-**StateBundle Design (Section 3.5):**
+**The hazard this design has to defend against, found *before* writing implementation code.**
+Given Steps C-E's track record, the plan's core assumption -- a persistent, mutable struct
+instance, refreshed in place and shared across calls via `bundle.refresh(...)` -- was checked
+directly against warp 1.16.0 first. Minimal repro: build one mutable `@wp.struct` instance, launch
+a kernel with it under a `wp.Tape`, then **reassign the struct's array field to a different array**
+before calling `tape.backward()` on that first tape. Result: the *second* array's gradient came out
+populated (even though it was never used to compute the first tape's output), and the *first*
+array's gradient came out zero. **`wp.Tape` does not snapshot a struct's field values at launch
+time -- it holds a live reference to the mutable struct object and re-reads its fields lazily, at
+`backward()` time.**
 
-Persistent object holding preallocated `particleDataSoA_*`, `correctionData_*`, `adjacencyData`,
-`gridData`, `domainData`, and `kernelState` instances. Cached in small LRU keyed on configuration
-signature. `bundle.refresh(warp_arrays, cfg)` compares incoming arrays by identity and writes only
-changed fields (~1.6 us on full hit vs 66.5 us for fresh build).
+This means unconditional bundle sharing (as sketched) would silently corrupt an earlier
+grad-requiring call's gradient any time its `.backward()` is deferred past a *later* call that
+refreshes the same bundle -- which is ordinary PyTorch usage (build a graph across several
+operators, call `.backward()` once at the end), not a contrived edge case. So: **`StateBundle`
+reuse is gated to `not ctx.any_requires_grad`**, the same restriction as Step D's view-reuse cache,
+but for a stronger reason and with no escape hatch -- there is no zero-on-acquire-style contract
+that would make grad-path struct sharing safe (the corruption is a wrong *pointer*, not an
+unzeroed accumulator), so unlike `WARPSPHCORE_FIELD_CACHE_GRAD` there is nothing to bisect against.
+The grad path always gets a fresh, call-local struct set -- `arg_extract.py`'s original per-call
+construction, entirely untouched.
 
-**Implementation:**
+**As actually implemented** (simpler than the sketch once the above is settled: since only `dim`
+determines struct *type* today -- `structFor`'s table maps both `ExecutionMode.NONE` and
+`REVERSE` to the same classes -- the "signature" collapses to `dim` alone; no LRU is needed since
+at most 3 bundles (dim ∈ {1,2,3}) will ever exist):
 
-1. **New file `src/warpSPHCore/autograd/stateBundle.py`:**
-   ```python
-   from typing import Optional, Dict
-   from dataclasses import dataclass
-   from collections import OrderedDict
-   from ..dataTypes import *
-   from ..util import structFor
-   
-   @dataclass
-   class StateBundle:
-       """Persistent, refreshable warp struct instances."""
-       queryParticle: object  # particleDataSoA_1/2/3 instance
-       referenceParticle: object
-       domain: domainData
-       adjacency: adjacencyData
-       grid: gridData
-       correction: object  # correctionData_1/2/3 instance
-       kernelProperties: kernelState
-       
-       # Track array identity for refresh optimization
-       _last_warp_arrays: Optional[Dict[str, int]] = None
-       
-       def refresh(self, warp_arrays: list, cfg: Dict) -> None:
-           """Update struct fields from warp_arrays; write only changed arrays."""
-           # Compare arrays by identity; write only if changed
-           # Scalar fields (grid_hCell, etc) always written since they can change per-call
-           
-           # Particle structs (indices 0-9)
-           if id(warp_arrays[0]) != getattr(self, '_pos_id', None):
-               self.queryParticle.positions = warp_arrays[0]
-           if id(warp_arrays[2]) != getattr(self, '_sup_id', None):
-               self.queryParticle.supports = warp_arrays[2]
-           # ... (continue for all particle fields)
-           
-           # Correction structs (indices 10-22)
-           if id(warp_arrays[10]) != getattr(self, '_renorm_id', None):
-               self.correction.renormalizationMatrices = warp_arrays[10]
-           # ... (continue for all correction fields)
-           
-           # Domain/adjacency/grid (indices 23-35)
-           if id(warp_arrays[23]) != getattr(self, '_adjlist_id', None):
-               self.adjacency.neighborList = warp_arrays[23]
-           # ... (continue for all adjacency/grid fields)
-           
-           # Scalar fields: always assign (can change per call)
-           self.grid.hCell = cfg['grid_hCell']
-           self.kernelProperties.kernelFunction = cfg['kernel_int']
-           # ... (all scalar fields from cfg)
-   
-   _BUNDLE_CACHE_LRU: OrderedDict[tuple, StateBundle] = OrderedDict(maxlen=8)
-   
-   def getStateBundle(signature: tuple, dim: int, mode: ExecutionMode) -> StateBundle:
-       """Fetch or create StateBundle for config signature."""
-       if signature in _BUNDLE_CACHE_LRU:
-           _BUNDLE_CACHE_LRU.move_to_end(signature)
-           return _BUNDLE_CACHE_LRU[signature]
-       
-       bundle = StateBundle(
-           queryParticle=structFor("particleDataSoA", dim, mode)(),
-           referenceParticle=structFor("particleDataSoA", dim, mode)(),
-           domain=domainData(),
-           adjacency=adjacencyData(),
-           grid=gridData(),
-           correction=structFor("correctionData", dim, mode)(),
-           kernelProperties=kernelState(),
-       )
-       _BUNDLE_CACHE_LRU[signature] = bundle
-       return bundle
-   ```
-
-2. **Update `arg_extract.py` (lines 250-354) -- replace closure with signature:**
-   - Remove inline `dim == 1/2/3` ternaries (lines 252-254); use `structFor(kind, dim, mode)` instead
-   - Compute config signature from cfg dict (all scalar fields that determine struct types)
-   - Return `(flat_tensors, signature, device, dim)` instead of `(flat_tensors, build_fn, device, dim)`
-   - Signature includes: `(executionMode, dim, useAdjacency, useCRK, useGradHTerms, useVolumes,
-     useGradientRenormalization, mode_uint, kernel_int, gradientMode_int, laplacianMode_int,
-     positiveDivergence, divergenceMode, opInt, grid_numOffsets)`
-
-3. **Update `StateAwareWarpFunction.forward` signature and logic:**
-   ```python
-   @staticmethod
-   def forward(ctx, signature, launcher, kernel, output_shape, output_dtype, *flat_tensors):
-       # Fetch or create bundle
-       bundle = getStateBundle(signature, ...)
-       
-       # Build warp_arrays from flat_tensors (convert Tensors and Fields to wp.arrays)
-       warp_arrays = [...]  # Same as Step C/D
-       
-       # Refresh bundle with warp_arrays
-       cfg = {...}  # Reconstruct cfg from signature? Or pass it?
-       bundle.refresh(warp_arrays, cfg)
-       
-       # Launch using bundle
-       kernel_args = (
-           bundle.queryParticle, bundle.referenceParticle, bundle.domain,
-           bundle.useAdjacency, bundle.adjacency, bundle.grid,
-           bundle.correction,
-           bundle.kernelProperties,
-       )
-       # ... (rest of launch/output handling)
-   ```
-
-4. **Fold in Section 3.7 cheap wins:**
-   - Gate `record_function` hooks behind module-level `PROFILING` flag (no-op when off; reduces 12 enter/exit pairs per call)
-   - Memoize `allocateTorchWarp`'s `(warp_dtype, warp_device) -> (torch_dtype, torch_device, scalar_dtype)` mapping
-
-* **Gate:** operation matrix bit-identical; gradcheck green; bench shows total fixed
-  overhead at or below 500 us/call (from ~900 us today); debug assertion confirms refreshed
-  bundle produces same struct layout as freshly built one.
-* **Prerequisite for Step H:** Bundle construction must not depend on `torch.autograd.Function`
-  (Section 3.6, requirement 6), so Step H's forward-mode bridge can reuse it. Verify: no torch.autograd imports in stateBundle.py.
+1. **New file `src/warpSPHCore/autograd/stateBundle.py`:** `StateBundle` holds one instance each of
+   `particleDataSoA_N` (×2, query/reference), `correctionData_N`, `adjacencyData`, `gridData`,
+   `domainData`, `kernelState`, built via `structFor` (Requirement 3, closing the last
+   `dim==1/2/3` ternary in `arg_extract.py` too). `refresh(wa, cfg)` compares each array-typed
+   field's incoming `wp.array` against the previous call's (a single `self._last_wa` list, index-
+   compared -- not 20+ named `_xxx_id` attributes) and writes only where it changed; scalar fields
+   (`grid.hCell`, the four correction `use*` flags, all seven `kernelProperties` fields) are always
+   assigned, since several legitimately change every call. `getStateBundle(dim)` is a plain dict,
+   no eviction. No `torch.autograd` import anywhere in the file (Step H prerequisite, verified).
+2. **`arg_extract.py`'s `build_fn` gained a `use_bundle: bool = False` parameter** rather than being
+   replaced by a bundle-returning signature: when `True` it calls `getStateBundle(dim).refresh(wa,
+   cfg)` and returns the bundle's structs directly; when `False` (the default, and every call site
+   that predates this step) it does exactly what it always did. `cfg` was already a closure
+   variable `build_fn` captures -- no new return value needed from `extractStateInfo`.
+   `wrapper.py`'s own `build_fn` wrapper (which also splices in `additionalArguments`) just forwards
+   the flag to the inner `state_build_fn`; that splicing logic is unaffected either way.
+3. **`StateAwareWarpFunction.forward`** calls `build_fn(warp_arrays, use_bundle=not
+   ctx.any_requires_grad)` -- one extra keyword argument, no new positional parameter, no
+   `_N_NON_TENSOR` change.
+4. **Section 3.7's two "cheap wins", folded in, each surfacing its own bug:**
+   - **`record_function` gating.** New `warpSPHCore/profiling.py`: `WARPSPHCORE_PROFILING=1` gets
+     the real `torch.profiler.record_function`; otherwise every call site gets
+     `contextlib.nullcontext`. Applied at all ~19 `autograd/` call sites plus 17 more across
+     `coreOperations/`, `radiusSearch/`, `crk/`, `pinv/`, `util/wp_util.py`, `renorm.py`.
+     **Bug found: a circular import.** First placed at `autograd/profiling.py`; `util/wp_util.py`
+     importing `from ..autograd.profiling import record_function` forced
+     `warpSPHCore.autograd`'s `__init__.py` to run (which imports `arg_extract.py`, which imports
+     `radiusSearch`), and that reentered `util` *while `util/__init__.py` was still on its own
+     first import line* -- Python's reentrant-import handling returns the partially-initialized
+     module, silently missing `castTorchToWarp` and everything else `util/__init__.py` hadn't
+     reached yet. Every operator that builds adjacency failed with `NameError: name
+     'castTorchToWarp' is not defined`, several calls deep, nothing to do with the actual change.
+     Fixed by moving the gate to a genuinely zero-dependency top-level module
+     (`warpSPHCore/profiling.py`) imported as the *very first statement* in
+     `warpSPHCore/__init__.py` -- before even `type_config` -- so it is always fully populated in
+     `sys.modules` before any reentrant chain elsewhere in the package can start.
+   - **`allocateTorchWarp` dtype/device memoization.** Cache `(dtype, device) ->
+     (torch_dtype, torch_device, trailing_shape, scalar_dtype)`, keyed per call site instead of
+     re-resolved every time. **Bug found: `wp.Device` instances are unhashable** (define `__eq__`
+     without `__hash__`), and `allocateTorchWarp` is sometimes called with one directly (e.g.
+     `warp_array.device`) rather than a plain device string -- `TypeError: unhashable type:
+     'Device'` on the very first adjacency-building call. Fixed by keying on `str(device)`.
+* **New regression test:** `tests/operations/test_state_bundle.py`. One test confirms the no-grad
+  path actually reuses the bundle (the entire point of the step); the other,
+  `test_deferred_backward_across_two_grad_calls_not_corrupted`, pins the correctness property
+  above directly -- two independent grad-requiring forward calls sharing `dim` (so they *would*
+  share a bundle if the gate were ever weakened), neither backward run until both forwards
+  complete, checked against a fully-sequential reference (which cannot suffer this class of bug).
+  Verified the test is not vacuous by temporarily monkeypatching `use_bundle=True`
+  unconditionally and confirming it fails with exactly the predicted symptom (one call's gradient
+  reading as zero).
+* **Gate:** full pytest suite (92 tests, CPU+CUDA) green; all 12 `gradcheck_*_native.py` scripts
+  green; `gradcheck_twice_in_process.py` green; 2D/float32 operation-matrix smoke sweep clean (258
+  OK, 0 HIGH/ERR/NAN).
+* **Performance:** `docs/regression/bench_call_overhead_step_f.md`. dim=2 no-grad `build_fn`:
+  142.1-152.7 us (baseline) -> 58.0-62.1 us (Step E) -> 10.3-12.1 us (Step F, ~13-14x over baseline);
+  total 1197-1413 us (baseline) -> 219-316 us (Step F, ~4.5-5.5x), measured with
+  `WARPSPHCORE_PROFILING=0` (the new default) -- `record_function`'s own overhead when actually
+  hooked to a profiler turned out to be ~70-115 us per call on top of that, confirming Section
+  3.7's second claim independently of the struct-assembly win.
+* **Prerequisite for Step H satisfied:** no `torch.autograd` import anywhere in `stateBundle.py`
+  (Section 3.6, requirement 6) -- verified by grep, not just by construction.
 
 ## Step G -- Forward-mode readiness audit (no forward mode implemented)
 

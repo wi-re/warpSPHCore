@@ -68,8 +68,8 @@ def warpWrapper2(
         flat_tensors = flat_state_tensors + add_tensors
 
         # --- build_fn combines struct args + reconstructed additional args ---
-        def build_fn(wa: list) -> tuple:
-            struct_args = state_build_fn(wa[:n_state])
+        def build_fn(wa: list, use_bundle: bool = False) -> tuple:
+            struct_args = state_build_fn(wa[:n_state], use_bundle=use_bundle)
 
             # Reconstruct additional args preserving original order
             reconstructed = [None] * n_add

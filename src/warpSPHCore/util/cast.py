@@ -74,6 +74,30 @@ def _get_warp_matrix_dtype(rows: int, cols: int, torch_dtype: torch.dtype):
         _WARP_MATRIX_DTYPE_CACHE[key] = cached
     return cached
 
+# (warp dtype, warp device) -> (torch dtype, torch device, trailing shape,
+# scalar dtype): re-resolved on every allocateTorchWarp call otherwise, even
+# though for any given output slot the dtype/device pair is the same call
+# after call (warpier_fields.md Section 3.7). Does not cache the allocated
+# buffers themselves -- those must stay fresh per call for autograd.
+_ALLOC_DTYPE_DEVICE_CACHE: dict = {}
+
+
+def _resolve_alloc_dtype_device(dtype, device):
+    # device may be a wp.Device instance (unhashable -- defines __eq__
+    # without __hash__) or a plain device string; str() gives a stable,
+    # hashable key either way ("cuda:0" either form).
+    key = (dtype, str(device))
+    cached = _ALLOC_DTYPE_DEVICE_CACHE.get(key)
+    if cached is None:
+        trailing_shape = getattr(dtype, "_shape_", ())
+        scalar_dtype = getattr(dtype, "_wp_scalar_type_", dtype)
+        torch_dtype = wp.dtype_to_torch(scalar_dtype)
+        torch_device = wp.device_to_torch(device)
+        cached = (torch_dtype, torch_device, trailing_shape, scalar_dtype)
+        _ALLOC_DTYPE_DEVICE_CACHE[key] = cached
+    return cached
+
+
 def allocateTorchWarp(shape, dtype, device, requires_grad: bool = False):
     """
     Allocate a Warp kernel output on torch's own caching allocator instead of
@@ -87,10 +111,7 @@ def allocateTorchWarp(shape, dtype, device, requires_grad: bool = False):
     from e.g. ``castTorchToWarp(x).device``.
     """
     shape = (shape,) if isinstance(shape, int) else tuple(shape)
-    trailing_shape = getattr(dtype, "_shape_", ())
-    scalar_dtype = getattr(dtype, "_wp_scalar_type_", dtype)
-    torch_dtype = wp.dtype_to_torch(scalar_dtype)
-    torch_device = wp.device_to_torch(device)
+    torch_dtype, torch_device, trailing_shape, scalar_dtype = _resolve_alloc_dtype_device(dtype, device)
     output_torch = torch.zeros(shape + trailing_shape, dtype=torch_dtype, device=torch_device)
     output_warp = wp.from_torch(output_torch, dtype=dtype, requires_grad=requires_grad)
     return output_torch, output_warp

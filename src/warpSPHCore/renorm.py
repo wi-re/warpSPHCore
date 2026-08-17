@@ -15,7 +15,7 @@ note for why this needed its own script rather than reusing gradcheck_covariance
 
 import torch
 from typing import Optional, Union, Tuple
-from torch.profiler import record_function
+from .profiling import record_function
 
 from .enumTypes import WarpOperation
 
