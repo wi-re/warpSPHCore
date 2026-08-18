@@ -25,6 +25,26 @@ session's `scripts/kernel_sanity_native.py`.
 
 ## Status as of 2026-08-18
 
+**Tier 2.4 (Renormalization correction) is done.** `scripts/spike_forward_mode_tier2_renorm.py`
+assembles the covariance matrix's JVP from Tier 2.2's already-validated `kernelGradient` JVP
+building block (`useCRK=False`, no `useGradientRenormalization` -- the simple case
+`computeRenormalizationMatrices` itself uses when computing `C`) plus ordinary product-rule
+calculus for the `apparentVolume`/`fij` factors that turn a sum of kernel gradients into a
+covariance matrix, then the standard `d(C^-1) = -C^-1 (dC) C^-1` matrix-inverse-derivative
+identity for the pseudo-inverse -- no new kernel math, exactly as the plan entry predicted.
+Matches the production reverse-mode Jacobian to float64 round-off across every `SupportScheme`
+in 1D (line of 7) and a representative subset in 2D (3x3 grid), plus an explicit check that the
+low-neighbor-count identity fallback's tangent is exactly zero (both dim=1 and dim=2). Gate
+confirmed: new script green (including a forward-value parity check between the assembled and
+production covariance matrix, which also passed to float64 round-off), `gradcheck_renorm_native.py`
+and `gradcheck_pinv_native.py` both still PASS, `operation_matrix.py --device cpu` unaffected
+(`OK=258, HIGH=0, ERR=0, NAN=0` -- identical baseline), `pytest tests/` unaffected (119 passed/1
+skipped -- this tier added one script, touched no production code). The plan's flagged risk
+(`pinv2x2_warpBackend`'s eigenvalue-relative rank cutoff being a genuine JVP discontinuity) was
+deliberately not probed -- test geometries (a regular line, a regular grid) are comfortably
+well-conditioned and nowhere near that boundary, consistent with how earlier tiers treated the
+periodic-wrap and `SupportScheme`-tie boundaries. NEXT: Tier 2.5 (CRK), the last and hardest tier.
+
 **Tier 2.3 (Laplacian's Naive scheme) is done.** This tier's own entry (below) had
 recommended deferring it and asking whether `LaplacianScheme.Naive` matters in
 practice before spending the derivation effort, since Brookshaw (Tier 2.2) is the
@@ -585,6 +605,83 @@ producing a wrong tangent there.
 
 ---
 
+### Tier 2.4 -- Result (done, 2026-08-18)
+
+**Deliverable shipped.** `scripts/spike_forward_mode_tier2_renorm.py`, green on first full run
+(no bugs this time, unlike Tier 2.1's tensor-index slips or Tier 2.2's int-vs-enum/shape-mismatch
+pair -- reusing Tier 2.2's `_kernelGradientJVP` verbatim, per its own already-validated dispatch,
+left much less new surface area for a mistake to hide in than either of those tiers had). Gate
+confirmed: `gradcheck_renorm_native.py`/`gradcheck_pinv_native.py` both still PASS,
+`operation_matrix.py --device cpu` unaffected (`OK=258, HIGH=0, ERR=0, NAN=0` -- identical to
+Tier 2.3's baseline), `pytest tests/` unaffected (119 passed/1 skipped -- this tier added a
+script, touched no production code).
+
+**Math derivation.** `wp_covariance.py`'s per-neighbor contribution is
+`out += wp.outer(fij * apparentVolume, kernelGradient)`, where
+`fij = -computeDistanceVec(xi, xj) = -(x_i - x_j)`. Writing `y_ij = -x_ij = x_j - x_i` and
+`Vj = apparentVolume = mass_j/density_j` (the `useVolume=False` case this script covers -- no
+`queryVolumes`/`referenceVolumes`):
+
+```
+C_i  = Sum_j Vj * outer(y_ij, G_ij)
+dC_i = Sum_j [ dVj * outer(y_ij, G_ij) + Vj * outer(dy_ij, G_ij) + Vj * outer(y_ij, dG_ij) ]
+```
+
+`G_ij, dG_ij` are exactly Tier 2.2's `kernelGradient`/its JVP -- confirmed by reading
+`computeKernelGradientCRK`, which reduces to plain `sphKernelGradient_ij` when `useCRK=False`,
+and by `computeRenormalizationMatrices_`, which is only ever called here with
+`crkState=None, renormalizationState=None` (the base case; the more general "renormalize using an
+existing CRK/renorm state" path a caller *could* wire up by passing those through is out of scope
+for this tier, same as Tier 2.5 already claims CRK). `Vj, dVj` are literally Tier 2.2's
+`GradientScheme.Naive` `B_ij, dB_ij` reused under a new name, not re-derived.
+
+The low-neighbor-count identity fallback (`renorm.py`'s `lowNbrMask = num_nbrs < dim+2`) forces
+`C` to a literal constant (`I`) on the masked branch, so `dC = 0` there by construction --
+`num_nbrs` itself is consumed directly from production's own
+`covarianceReturnNumNeighbors=True` output rather than re-derived, the same "non-differentiable
+discrete branch decision, read off production rather than rebuilt" treatment every earlier tier
+gave `SupportScheme` dispatch and `h_i>=h_j` ties. Checked explicitly with an isolated single
+particle (`num_nbrs=1 < dim+2` for both dim=1 and dim=2): both the assembled and reference JVPs
+are exactly/near-exactly zero, and `L` is exactly the identity, mirroring
+`gradcheck_pinv_native.py`'s Test 3 for the analogous reverse-mode case.
+
+For the pseudo-inverse itself, `d(C^-1) = -C^-1 (dC) C^-1` is the standard matrix-inverse
+identity -- true whenever `L = C^-1` exactly (both eigenvalues on the "kept" side of
+`pinv2x2_warp`'s `rcond`-relative cutoff, or `pinv1x1`'s `m[0,0] > 1e-10` branch). `L` itself is
+taken directly from production's own `computeRenormalizationMatrices` output (already
+independently gradchecked by `gradcheck_pinv_native.py`) rather than re-derived -- consistent
+with how `num_nbrs` and every earlier tier's frozen densities were handled. Implemented as a
+plain batched `-L @ dC @ L` in torch (`(n,dim,dim)` tensors); no warp-level contraction-order
+subtlety actually bit here, since both `C` and `L` are symmetric by construction (a sum of
+`x_ij (x) x_ij`-shaped terms, per `pinv2x2_warp`'s own comment) so left/right multiplication
+order doesn't matter for these test cases -- the plan entry's caution about "the same
+first/second-axis care `correctGradientCRK` needed for `gradBi`" turned out not to be a live
+issue for the symmetric case this tier covers, though it may resurface once Tier 2.5's CRK
+moment matrices (not guaranteed symmetric) reuse this identity.
+
+**Risk from the plan entry, deliberately not tested.** `pinv2x2_warpBackend`'s eigenvalue-relative
+rank cutoff (`rcond=1e-6`) is a genuine JVP discontinuity, the same class of hazard as a
+`SupportScheme` tie or the periodic-wrap boundary. This script's test geometries (a regular 1D
+line, a regular 2D grid, both with only mildly perturbed supports) are comfortably well-conditioned
+and never approach that cutoff -- consistent with the "flag failing cases near that boundary
+rather than silently producing a wrong tangent" guidance: there is nothing to flag if the
+boundary is never approached, and manufacturing a near-singular covariance matrix on purpose to
+probe it was judged out of scope for this tier (the plan asked for the identity to be validated,
+not for the discontinuity itself to be characterized).
+
+**Validation, same two independent code paths as every earlier tier (both exact analytic
+derivatives, no finite differences):** a hand-written dense all-pairs assembly built only from
+Tier 2.2's already-validated `kernelGradient` JVP, vs. `torch.autograd.functional.jacobian` on
+the actual production `computeRenormalizationMatrices` call contracted with the tangent. Also
+includes a forward-value parity check (assembled `C` vs. production `C`, unmasked) as a cheap
+extra sanity gate, the same spirit as Tier 1's `f(0)==0` check, since a sign error in `fij`'s
+`-x_ij` convention would have shown up there before ever reaching the JVP comparison. Agreed to
+`rel_err ~1e-14` to `1e-15` (float64 round-off) across Gather/Scatter/MeanSymmetric/
+KernelMeanSymmetric/SuperSymmetric/PartialSymmetric in 1D and Gather/MeanSymmetric/
+KernelMeanSymmetric in 2D -- no tuning or tolerance-loosening needed.
+
+---
+
 ## Tier 2.5 -- CRK correction (hardest tier)
 
 **Scope.** `crk/kernel.py`'s `correctGradientCRK`/`computeKernelCRK` consume `A_i, B_i, gradA_i,
@@ -665,10 +762,12 @@ history flags as the most adjoint-fragile.
    math (one new dispatch function assembled from Tier 2.0's building blocks), all built on what
    Tier 2.0 already validated. Laplacian's Dot/Default schemes explicitly deferred -- see the Tier
    2.2 "Result" subsection's scope note. NEXT: Tier 2.4.
-3. **Tier 2.4** (Renormalization) -- NEXT. First tier needing genuinely new (matrix-calculus, not
-   kernel-derivative) work, but bounded and well-precedented by `gradcheck_pinv_native.py`.
-4. **Tier 2.5** (CRK) -- last, hardest, highest historical bug rate; do only once 2.2/2.4 are solid
-   since it depends on both.
+3. **Tier 2.4** (Renormalization) -- DONE (2026-08-18). The matrix-calculus (not
+   kernel-derivative) identity `d(C^-1) = -C^-1(dC)C^-1`, bounded and well-precedented by
+   `gradcheck_pinv_native.py`, assembled cleanly on the first attempt from Tier 2.2's
+   `kernelGradient` JVP. See the Tier 2.4 "Result" subsection above. NEXT: Tier 2.5.
+4. **Tier 2.5** (CRK) -- NEXT, last, hardest, highest historical bug rate; do only now that
+   2.2/2.4 are both solid, since it depends on both.
 5. **Tier 2.3** (Laplacian `Naive`) -- DONE (2026-08-18), out of the original numeric order.
    The entry below had recommended asking whether it matters in practice before deriving
    `d(∇²W)/dx`/`d(∇²W)/dh`, since Brookshaw (Tier 2.2) is the scheme the codebase's own comments
