@@ -5,8 +5,90 @@ as of 2026-08-17/18) and `warpier_adjoint.md` (Tiers 2.0-2.5 JVP derivations, al
 2026-08-18). Those two documents established that the *math* for forward-mode SPH is finished and
 validated; this plan is about actually running it, using testbeds in the sibling `warpSPH` repo
 (`~/dev/warpSPH`) at increasing difficulty, and about where that connects to `warpSPHIntegrators`'s
-(`~/dev/warpSPHIntegrators`) own already-scoped implicit-integrator plan. Not started -- no code
-changes have been made yet.
+(`~/dev/warpSPHIntegrators`) own already-scoped implicit-integrator plan.
+
+## Status (as of 2026-08-18)
+
+**Phases 1-3 done.** Phase 4 not started. Most of the work landed in the sibling `warpSPH` repo
+(new test files there, not this one), which is easy to lose track of from this document alone --
+recorded here explicitly for that reason.
+
+* **Phase 1 -- done.** `warpSPH/tests/test_forwardModeWave.py` (new), commit `ab28fc9` in
+  `warpSPH`. Seeds `du0`/`dv0` via `torch.func.jvp` on the plain-torch Wendland bump formula,
+  rolls a primal and a tangent system through the identical explicit-Euler `f_wave_equation`
+  step sequence, and cross-validates against an independent reverse-mode directional derivative
+  (a weighted probe of `u(T)`, backpropagated to `position`/`magnitude`, dotted with the
+  perturbation direction). Deliberately uses explicit Euler on *both* sides of the comparison
+  rather than the `rungeKutta2` integrator `test_waveEquation.py`'s other tests use --
+  the JVP/VJP identity only holds exactly when both sides differentiate the identical graph, and
+  reusing the already-tested Euler pattern from `test_gradientsReachSourcePositionAndMagnitude`
+  for both sides was simpler than proving RK2 forward/reverse consistency separately. Parametrized
+  over 1D/2D and two rollout lengths (3 and 6 steps); all 4 cases pass. No `warpSPHCore` changes
+  were needed or made in this phase.
+* **Phase 2 -- done.** Commit `7a3041b` in `warpSPHCore`. `structFor`
+  (`src/warpSPHCore/util/fieldRegistry.py`) now aliases `ExecutionMode.FORWARD` onto `REVERSE`'s
+  struct rows instead of raising, and `getStateBundle` (`util/stateBundle.py`) hands back the same
+  dim-keyed bundle for both modes, since Tier 1 needs no new struct shape. `warpOperationJVP`
+  (`src/warpSPHCore/operations.py`, next to `warpOperation`) is the new supported entry point --
+  it delegates to `warpOperation` on tangent arrays for the five operators that actually take
+  `queryValues`/`referenceValues` (Interpolate/Gradient/Divergence/Curl/Laplacian), raises
+  `NotImplementedError` for Density/Covariance (no value input -- routing them through would
+  silently ignore the tangent and hand back the primal result) and for any Tier-2 tangent argument
+  (positions/supports/masses/densities, already in the signature, reserved for Phase 4).
+  `launchOperator`'s own `FORWARD` rejection is untouched, since `warpOperationJVP` never sets
+  `ctx.mode = FORWARD` -- it just calls `warpOperation` normally with tangents substituted for
+  values. New gate: `tests/operations/test_forward_mode_tier1.py` (8 cases, in-process, checks
+  the JVP identity against a reverse-mode Jacobian reference). Two pre-existing tests that
+  asserted the old "FORWARD always raises" behavior
+  (`test_struct_for_forward_mode_rejected`/`test_forward_mode_rejected_regardless_of_cache_warmth`)
+  were rewritten, not deleted, to assert the new alias behavior. Verified unaffected:
+  `operation_matrix.py --device cpu` (`OK=258, HIGH=0, ERR=0, NAN=0`, matching the baseline), all
+  six `gradcheck_*_native.py` scripts, `spike_forward_mode_tier1.py`, and the full `tests/` suite
+  (127 passed, 1 skipped).
+* **Phase 3 -- done.** `warpSPH/tests/test_implicitWaveEquation.py` (new), commit `d882bf9` in
+  `warpSPH`. Backward Euler eliminates `v^{n+1}` algebraically into a single stage equation
+  `u^{n+1} - alpha * Laplacian(u^{n+1}) = rhs`; the matvec is exactly
+  `p -> p - alpha * warpOperationJVP(Laplacian, tangentQueryValues=p)`, no hand-derived Jacobian.
+  A from-scratch matrix-free CG was written (no CG solver existed in `warpSPH` to reuse --
+  `bicgstab.py`'s BiCGStab is the documented drop-in for a non-constant-`alpha` case, which would
+  make the stage operator non-symmetric). The symmetry the plan asked to verify empirically
+  (rather than assume) does hold on the tested case (constant `c`, zero `damping`,
+  `<matvec(a),b> == <a,matvec(b)>` to float32 tolerance), so CG was used directly rather than
+  falling back to BiCGStab. Validated both ways the plan asked for: agreement with the explicit
+  rollout at small `dt`, and monotonic error shrinkage against the closed-form standing wave
+  across resolutions. One bug found and fixed along the way: the first draft built "explicit" and
+  "implicit" comparison systems via `explicitSystem = system` / `implicitSystem = system` --
+  two names for the *same* mutable object, so the explicit loop's in-place state mutation silently
+  became the implicit loop's initial condition. Fixed by building two independent systems.
+
+**A finding along the way, outside this plan's scope but relevant to Phase 4's baseline.** While
+verifying the `warpSPH` suite was unaffected, `tests/test_implicitShifting.py::test_shiftingConvergesToUniformDensity[ShiftingScheme.implicit]`
+(pre-existing, unrelated to any of the above -- confirmed by stashing all Phase 1-3 changes and
+re-running, same failure) turned out to be flaky. Two separate issues, only the first fixed:
+
+1. **Fixed, committed (`warpSPH` commit `64c0bde`).** The test's domain is fully periodic with no
+   real free surface, but `WeaklyCompressibleSPHConfig`'s `surfaceDetectionConfig.active` defaults
+   to `True`, so `solveShifting`'s ColorField-based free-surface heuristic still runs and
+   occasionally flags false-positive "surface" particles as the jittered lattice relaxes; its
+   post-hoc shift zeroing/projection for those particles then destabilizes the implicit Newton
+   solve (density std observed jumping from ~0.008 back up to ~0.25 partway through a 25-step
+   relaxation). `deltaSPH`'s smaller, CFL-clamped per-step corrections happened to tolerate the
+   same interference, which is why only the `implicit` variant of the test was failing. Fix: set
+   `schemeConfig.surfaceDetectionConfig.active = False` in the test, since surface detection isn't
+   what it's meant to exercise.
+2. **Found, not fixed.** Even with (1) fixed, the test remains flaky specifically on GPU: passes
+   reliably and deterministically over repeated runs on CPU (`CUDA_VISIBLE_DEVICES=""`), but on
+   GPU occasionally still diverges (density std climbing from ~0.004 back to ~0.17 over the same
+   25 steps, at a different point each run). This points at CUDA's nondeterministic scatter-add
+   ordering in `_multiplyLaplacianBlock`'s `scatter_sum` calls interacting with an
+   already-marginal relaxation factor -- `implicitShifting.py`'s own docstring documents
+   `implicitRelaxation=0.1` as swept against instability, with `0.15` "already occasionally
+   unstable". This is a robustness gap in `computeImplicitShift`'s undamped-per-step Newton
+   iteration itself (e.g. no step-rejection or line search when a step increases the residual),
+   pre-existing and unrelated to forward-mode AD -- flagged rather than fixed, since Phase 4
+   explicitly uses this same hand-built solver as a comparison baseline and will need to account
+   for it (at minimum, prefer CPU or a lower relaxation factor for that comparison's own
+   stability, independent of whatever the automatic-JVP path needs).
 
 ## Context and motivation
 
@@ -62,7 +144,7 @@ independently rediscover the self-pair/block-symmetry pitfalls above, is a *win*
 purposes. Matching or beating the hand-built solvers' performance is explicitly not a goal or a
 gate for any phase here.
 
-## Phase 1 -- Tangent rollout on the wave-equation testbed (`warpSPH`, no `warpSPHCore` changes)
+## Phase 1 -- Tangent rollout on the wave-equation testbed (`warpSPH`, no `warpSPHCore` changes) [DONE 2026-08-18]
 
 Goal: a working, tested forward-mode sensitivity `d(u(x,T))/d(source position, magnitude)`,
 cross-checked against the existing backward-mode result. The cheap starting case -- it proves the
@@ -94,7 +176,7 @@ plumbing (seed a tangent IC, propagate it, compare to reverse-mode) without yet 
 
 Files touched: `warpSPH/tests/test_forwardModeWave.py` (new).
 
-## Phase 2 -- Promote Tier 1 into a supported `warpSPHCore` API, shaped for Tier 2
+## Phase 2 -- Promote Tier 1 into a supported `warpSPHCore` API, shaped for Tier 2 [DONE 2026-08-18]
 
 Goal: stop requiring every caller to hand-apply the "relaunch on the tangent array" trick; give it
 a name, a test, and an `ExecutionMode.FORWARD` path that isn't a blanket `NotImplementedError`.
@@ -125,7 +207,7 @@ Files touched: `src/warpSPHCore/operations.py`, `src/warpSPHCore/util/fieldRegis
 `src/warpSPHCore/util/stateBundle.py`, `src/warpSPHCore/autograd/operator_spec.py`,
 `tests/operations/test_forward_mode_tier1.py` (new), `warpier_core.md`.
 
-## Phase 3 -- Goal 1: an implicit wave-equation step, powered entirely by Tier 1
+## Phase 3 -- Goal 1: an implicit wave-equation step, powered entirely by Tier 1 [DONE 2026-08-18]
 
 Goal: the smallest possible demonstration that a forward-mode JVP bridge is enough to stand up an
 implicit SPH solve with *no per-problem Hessian derivation at all* -- "a single SPH operation and
@@ -160,7 +242,7 @@ trial field.
 Files touched: new `warpSPH/tests/test_implicitWaveEquation.py` (or a script promoted to a test
 once stable).
 
-## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting
+## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting [NOT STARTED]
 
 Goal: wire Tier 2 into `warpOperationJVP`, then build an implicit shifting solve whose `grad C`/
 `Hess C` come from *composed JVPs* instead of `wp_implicitShifting.py`'s hand-rolled per-pair
