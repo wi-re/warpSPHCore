@@ -694,12 +694,29 @@ Section 3.3 correction above.
 
 ## Resuming from here
 
-**State as of 2026-08-17: Steps 0, A-G complete and verified (including against the frontend).
-Steps 0/A-F are committed (`d6c0d2d`, "First steps of the warpier fields setup"); Step G's changes
-are in the working tree.** The earlier version of this paragraph said "none of it is committed
-yet", which was true when written and is now stale -- check `git log`/`git status` rather than
-trusting either claim. If you're a fresh session: read
-this whole "Status as of 2026-08-17" block plus each Step's own subsection (B through F) before
+**State as of 2026-08-17 (re-verified same day, working tree clean at `004e22f`, "finish write
+up"): Steps 0, A-H complete, verified, and fully committed.** `git log` for the six commits:
+`1418d5f`/`0ecd9d5` (plan + first field steps), `ba3dbee` (Step C-F write-up), `d6c0d2d` ("First
+steps of the warpier fields setup" -- Steps 0/A-F code), `caa1232`/`6d3863c`/`004e22f` (Step G's
+spike, Step H's real-workload audit and the two host-sync fixes, and this document's write-up).
+Nothing is sitting in the working tree uncommitted. The two earlier versions of this paragraph
+said first "none of it is committed yet" and then "Step G's changes are in the working tree" --
+both were true when written and both are now stale; this is the third correction in a row on the
+same claim, which is itself the reason to check `git log`/`git status` directly rather than
+trust this paragraph on faith next time either.
+
+**Independently re-run and confirmed on this machine (2026-08-17):** full `pytest tests/` --
+**118 passed, 1 skipped** (119 collected; the one skip is
+`test_renormalization_does_not_read_back[cpu]`, an intentional internal `pytest.skip` since
+that test counts CUDA readbacks and is meaningless on a CPU tensor -- not a gap). That total is
+Step G's reported 112 plus Step H's 7 new cases in `tests/operations/test_no_host_sync.py`, so it
+reconciles with every "Verification" note upstream in this document; no step's number needs
+correcting. All five CI-gated `operation_matrix.py` configurations (2D float32, float64, 1D,
+light jitter, 3D-CUDA) reproduced **258 OK / 0 HIGH-ERR-NAN** exactly as claimed throughout Steps
+D-H. All 14 gradcheck scripts plus the Tier-1 spike passed via `test_gradcheck_scripts.py` (part
+of the same `pytest tests/` run). GPU headroom checked before running (4.3/24.6 GB used, ~6%
+utilization on this run) per the GPU-sharing note below. If you're a fresh session: read this
+whole "Status as of 2026-08-17" block plus each Step's own subsection (B through H) before
 touching anything -- they carry the corrections and hazards below, and the numbered lists under
 "Step X notes" are denser than the surrounding prose for a reason.
 
