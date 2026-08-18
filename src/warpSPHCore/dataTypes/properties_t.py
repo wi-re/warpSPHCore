@@ -5,7 +5,7 @@ from typing import NamedTuple, Union, Tuple, List, Optional, Any
 from warp.types import vector, matrix
 from ..enumTypes import *
 
-@dataclass
+@dataclass(frozen=True)
 class OperationProperties:
     kernel: KernelFunctions
     operation: WarpOperation = WarpOperation.Interpolate
