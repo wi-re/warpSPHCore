@@ -229,9 +229,11 @@ def test_struct_for_correction_data(dim, expected):
     assert structFor("correctionData", dim, ExecutionMode.REVERSE) is expected
 
 
-def test_struct_for_forward_mode_rejected():
-    with pytest.raises(NotImplementedError):
-        structFor("particleDataSoA", 2, ExecutionMode.FORWARD)
+def test_struct_for_forward_mode_aliases_reverse():
+    # warpier_forward_mode_plan.md Phase 2: Tier-1 forward mode needs no new
+    # struct shape, so FORWARD's rows alias REVERSE's instead of raising.
+    assert structFor("particleDataSoA", 2, ExecutionMode.FORWARD) is structFor(
+        "particleDataSoA", 2, ExecutionMode.REVERSE)
 
 
 def test_struct_for_unknown_kind_raises():

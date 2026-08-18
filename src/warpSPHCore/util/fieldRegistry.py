@@ -202,34 +202,39 @@ def clearNullFieldRegistry() -> None:
 # structFor (Section 3.5, requirement 3): a lookup table replacing the
 # `dim == 1 if ... else ...` ternaries inline in arg_extract.py. Phase 6
 # registers *_dual rows into this same table instead of rewriting every
-# extractor. ExecutionMode.FORWARD is rejected here with a clear error --
-# Step G's readiness-audit bullet #1 -- rather than by a missing dict entry.
+# extractor. FORWARD rows alias REVERSE's struct classes rather than getting
+# their own: Tier 1 forward mode (warpier_forward_mode_plan.md Phase 2) needs
+# no new struct shape -- it relaunches the same kernels on a tangent array in
+# place of the value array -- so there is nothing for a FORWARD-specific row
+# to hold that REVERSE's rows don't already provide. A mode that needs an
+# actual struct difference (e.g. a future Tier-2 dual-number layout) gets its
+# own rows here instead of overloading this alias.
 # --------------------------------------------------------------------------
 
 _STRUCT_TABLE = {
     ("particleDataSoA", 1, ExecutionMode.NONE):    particleDataSoA_1,
     ("particleDataSoA", 1, ExecutionMode.REVERSE): particleDataSoA_1,
+    ("particleDataSoA", 1, ExecutionMode.FORWARD): particleDataSoA_1,
     ("particleDataSoA", 2, ExecutionMode.NONE):    particleDataSoA_2,
     ("particleDataSoA", 2, ExecutionMode.REVERSE): particleDataSoA_2,
+    ("particleDataSoA", 2, ExecutionMode.FORWARD): particleDataSoA_2,
     ("particleDataSoA", 3, ExecutionMode.NONE):    particleDataSoA_3,
     ("particleDataSoA", 3, ExecutionMode.REVERSE): particleDataSoA_3,
+    ("particleDataSoA", 3, ExecutionMode.FORWARD): particleDataSoA_3,
 
     ("correctionData", 1, ExecutionMode.NONE):    correctionData_1,
     ("correctionData", 1, ExecutionMode.REVERSE): correctionData_1,
+    ("correctionData", 1, ExecutionMode.FORWARD): correctionData_1,
     ("correctionData", 2, ExecutionMode.NONE):    correctionData_2,
     ("correctionData", 2, ExecutionMode.REVERSE): correctionData_2,
+    ("correctionData", 2, ExecutionMode.FORWARD): correctionData_2,
     ("correctionData", 3, ExecutionMode.NONE):    correctionData_3,
     ("correctionData", 3, ExecutionMode.REVERSE): correctionData_3,
+    ("correctionData", 3, ExecutionMode.FORWARD): correctionData_3,
 }
 
 
 def structFor(kind: str, dim: int, mode: ExecutionMode = ExecutionMode.REVERSE):
-    if mode == ExecutionMode.FORWARD:
-        raise NotImplementedError(
-            "ExecutionMode.FORWARD has no struct rows registered -- forward "
-            "mode is not implemented (warpier_fields.md Section 3.6 / Step G). "
-            "This is a deliberate rejection, not a missing table entry."
-        )
     try:
         return _STRUCT_TABLE[(kind, dim, mode)]
     except KeyError:

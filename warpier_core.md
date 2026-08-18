@@ -322,7 +322,7 @@ All operation-relevant notebooks are ported and accounted for in root (`warp_den
 The big remaining piece, in priority order — no re-investigation needed, this is the actual next step:
 
 1. **Phase 3: the `Field` abstraction.** Phases 1 and 5 (structured kernel ABI, traversal consolidation) are done for all 7 operators (Density/Interpolate/Gradient/Divergence/Curl/Laplacian/Covariance) plus CRK. Phase 2 (state consolidation) is informally done — state objects are already semantic (`ParticleState`, `CRKState`, etc.), just torch-native rather than owning a synchronized torch+warp pair. What's not started: `Field` (torch view + cached warp view + dtype/device/shape metadata + dirty/sync flags), which is the prerequisite for both Phase 4 (stop rebuilding kernel structs from scratch in `extractStateInfo` on every call) and Phase 6/7 (forward-mode AD, which needs somewhere to hang tangent storage). Concrete starting point per the plan's own Step 2: a minimal `Field` class with a torch-compatible public surface and a legacy fallback conversion path, wrapping lazily — start by profiling how much of `extractStateInfo`'s per-call cost (`autograd/arg_extract.py`) is actually the repeated `wp.from_torch()`/struct-population work `Field` is meant to eliminate, since that's the concrete win Phase 3 buys and it's worth confirming the size of the win before committing to the abstraction's design.
-2. Forward-mode AD (Phase 6/7) — do not start before (1). It's designed to be "extend `Field` with a tangent slot," not a kernel-by-kernel rewrite; starting it against the current torch-native state objects would mean redoing the work once `Field` lands.
+2. Forward-mode AD (Phase 6/7) — do not start before (1). It's designed to be "extend `Field` with a tangent slot," not a kernel-by-kernel rewrite; starting it against the current torch-native state objects would mean redoing the work once `Field` lands. Note: Tier 1 (the value-only JVP slice, `warpOperationJVP`) needed no `Field`/struct work at all and has already landed against the current torch-native state objects (`warpier_forward_mode_plan.md` Phase 2, 2026-08-18) — this item is about the Tier-2 (position/support/mass/density tangent) dual-struct work, which is the piece that does need `Field`.
 
 Smaller open items, independent of the above, each already root-caused (no re-investigation needed, just implementation):
 
@@ -655,7 +655,29 @@ The objective is to avoid rewriting the same dispatch logic across many operator
 
 # Phase 6 – Extend States for Forward-Mode AD
 
-## Status: readiness audited 2026-08-17 (`warpier_fields.md` Step G) — not started
+## Status: readiness audited 2026-08-17 (`warpier_fields.md` Step G); Tier 1 landed in production 2026-08-18 (`warpier_forward_mode_plan.md` Phase 2)
+
+**Update 2026-08-18.** `warpier_forward_mode_plan.md` Phase 2 promoted finding 1 below from a
+throwaway spike into a supported API: `structFor`'s `FORWARD` rows now alias `REVERSE`'s
+struct classes instead of raising (`util/fieldRegistry.py`), `getStateBundle(dim, FORWARD)`
+hands back the same dim-keyed bundle `REVERSE` uses (`util/stateBundle.py`), and
+`warpOperationJVP` (`operations.py`, next to `warpOperation`) is a real, tested entry
+point for the Tier-1 value-tangent JVP — restricted to the five operators that actually
+take `queryValues`/`referenceValues` (Interpolate/Gradient/Divergence/Curl/Laplacian;
+Density and Covariance raise, since they'd otherwise silently ignore the tangent and hand
+back the primal result), and shaped in its signature for the full Tier-2 tangent surface
+(positions/supports/masses/densities) even though every Tier-2 argument still raises
+`NotImplementedError` naming Phase 4. Gated by
+`tests/operations/test_forward_mode_tier1.py`, in addition to the `spike_forward_mode_tier1.py`
+gate below. `launchOperator`'s own `ExecutionMode.FORWARD` rejection (`autograd/operator_spec.py`)
+is deliberately unchanged — `warpOperationJVP` never sets `ctx.mode = FORWARD`, it just
+calls `warpOperation` (mode `AUTO`/`REVERSE` as usual) with tangent arrays substituted for
+value arrays, so any caller reaching `launchOperator` with `FORWARD` set is still an error.
+This also meant two tests asserting the old "FORWARD is rejected everywhere" behavior
+(`test_struct_for_forward_mode_rejected`, `test_forward_mode_rejected_regardless_of_cache_warmth`)
+had to be rewritten to assert the new alias-not-raise behavior instead of deleted outright,
+since the underlying finding they pin (a cache-warmth-dependent inconsistency) is still
+worth a regression test — now checked as "cold and warm cache agree" rather than "both raise".
 
 Step G was an audit against landed code, not an implementation. Its four checks and what
 they actually found, so Phase 6 starts from tested facts rather than the plan's

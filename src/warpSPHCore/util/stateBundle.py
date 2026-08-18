@@ -151,27 +151,17 @@ class StateBundle:
 # eviction is sufficient -- no LRU needed for a cache this small.
 #
 # Keyed on dim alone, not (dim, mode): every mode currently registered in
-# fieldRegistry._STRUCT_TABLE resolves NONE and REVERSE to the *same* struct
-# classes (Step B), so mode cannot yet select a different bundle. Widening the
-# key to include mode is a one-line change (`_BUNDLE_CACHE[(dim, mode)]`)
-# whenever Phase 6 registers FORWARD-specific struct rows that actually differ.
+# fieldRegistry._STRUCT_TABLE -- NONE, REVERSE, and (as of
+# warpier_forward_mode_plan.md Phase 2) FORWARD -- resolves to the *same*
+# struct classes (Step B; Phase 2 aliases FORWARD onto REVERSE's rows rather
+# than giving Tier 1 its own struct shape, since it needs none), so mode
+# cannot yet select a different bundle. Widening the key to include mode is a
+# one-line change (`_BUNDLE_CACHE[(dim, mode)]`) whenever a mode registers
+# struct rows that actually differ (e.g. a future Tier-2 dual-number layout).
 _BUNDLE_CACHE: Dict[int, StateBundle] = {}
 
 
 def getStateBundle(dim: int, mode: ExecutionMode = ExecutionMode.REVERSE) -> StateBundle:
-    # Validate the mode *before* the cache lookup, not implicitly via
-    # StateBundle.__init__ -> structFor. Step G's readiness audit (item 1:
-    # "FORWARD is rejected with a clear error at every entry") found that the
-    # earlier version only rejected FORWARD on a cold cache: once any bundle
-    # existed for this dim, getStateBundle(dim, FORWARD) hit the dict and
-    # silently handed back the REVERSE-shaped bundle instead of raising. Inert
-    # today -- arg_extract.py is the only caller and always passes REVERSE --
-    # but "unreachable" is exactly the state this guard exists to survive the
-    # end of, and a cache-warmth-dependent error is the kind that shows up
-    # only in the second process that tries forward mode.
-    if mode == ExecutionMode.FORWARD:
-        structFor("particleDataSoA", dim, mode)  # raises NotImplementedError
-
     bundle = _BUNDLE_CACHE.get(dim)
     if bundle is None:
         bundle = StateBundle(dim, mode)

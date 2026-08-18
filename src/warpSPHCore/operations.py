@@ -157,6 +157,80 @@ def warpOperation(
             raise ValueError("Unsupported SPH operation: {}".format(operation))
 
 
+# Operators `warpOperationJVP` (Tier 1) can serve: exactly the ones with a
+# `queryValues`/`referenceValues` input. Density has none (it reads
+# `queryParticles.masses` directly) and Covariance takes volumes, not values --
+# routing either through `warpOperation` with a tangent standing in for
+# `queryValues` would silently ignore the tangent and hand back the *primal*
+# result instead of raising, so both are excluded rather than left to fail
+# quietly. Tier 2 (Phase 4) extends Density's mass-tangent path separately.
+_TIER1_JVP_OPERATIONS = (
+    WarpOperation.Interpolate, WarpOperation.Gradient, WarpOperation.Divergence,
+    WarpOperation.Curl, WarpOperation.Laplacian,
+)
+
+
+def warpOperationJVP(
+    queryParticles: ParticleState,
+    operationProperties: OperationProperties,
+    domain: DomainDescription,
+    tangentQueryValues: Optional[torch.Tensor] = None, tangentReferenceValues: Optional[torch.Tensor] = None,
+    tangentQueryPositions: Optional[torch.Tensor] = None, tangentReferencePositions: Optional[torch.Tensor] = None,
+    tangentQuerySupports: Optional[torch.Tensor] = None, tangentReferenceSupports: Optional[torch.Tensor] = None,
+    tangentQueryMasses: Optional[torch.Tensor] = None, tangentReferenceMasses: Optional[torch.Tensor] = None,
+    tangentQueryDensities: Optional[torch.Tensor] = None, tangentReferenceDensities: Optional[torch.Tensor] = None,
+    queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None,
+    referenceParticles: Optional[ParticleState] = None,
+    crkState: Optional[CRKState] = None,
+    gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
+    renormalizationState: Optional[Union[torch.Tensor, RenormalizationState]] = None,
+    consistentDivergence: bool = False,
+):
+    """The JVP entry point `warpier_forward_mode_plan.md` Phase 2 promotes
+    Tier 1 into: today only value tangents are implemented (an operator is
+    exactly linear and homogeneous in `queryValues`/`referenceValues`, so its
+    JVP w.r.t. them is the same operator relaunched on the tangent arrays in
+    place of the value arrays -- verified by `scripts/spike_forward_mode_tier1.py`
+    and gated by `tests/operations/test_forward_mode_tier1.py`).
+
+    The full Tier-2 tangent surface (positions/supports/masses/densities) is
+    already in this signature so Phase 4 extends this entry point instead of
+    replacing it, but every one of those arguments raises `NotImplementedError`
+    until then.
+    """
+    tier2Args = {
+        "tangentQueryPositions": tangentQueryPositions, "tangentReferencePositions": tangentReferencePositions,
+        "tangentQuerySupports": tangentQuerySupports, "tangentReferenceSupports": tangentReferenceSupports,
+        "tangentQueryMasses": tangentQueryMasses, "tangentReferenceMasses": tangentReferenceMasses,
+        "tangentQueryDensities": tangentQueryDensities, "tangentReferenceDensities": tangentReferenceDensities,
+    }
+    providedTier2 = [name for name, value in tier2Args.items() if value is not None]
+    if providedTier2:
+        raise NotImplementedError(
+            f"warpOperationJVP: Tier-2 tangent argument(s) {providedTier2} are not "
+            "implemented yet -- warpier_forward_mode_plan.md Phase 4 extends this "
+            "entry point for position/support/mass/density tangents. Only "
+            "tangentQueryValues/tangentReferenceValues (Tier 1) are supported today."
+        )
+
+    if operationProperties.operation not in _TIER1_JVP_OPERATIONS:
+        raise NotImplementedError(
+            f"warpOperationJVP: Tier 1 is only defined for operators with a "
+            f"queryValues/referenceValues input ({[op.name for op in _TIER1_JVP_OPERATIONS]}); "
+            f"{operationProperties.operation} has none."
+        )
+
+    return warpOperation(
+        queryParticles, operationProperties, domain,
+        queryValues=tangentQueryValues, referenceValues=tangentReferenceValues,
+        queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
+        adjacency=adjacency, referenceParticles=referenceParticles,
+        crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,
+        consistentDivergence=consistentDivergence,
+    )
+
+
 def sphOperation_warp(
     queryPositions, referencePositions,
     querySupports, referenceSupports,
@@ -241,4 +315,5 @@ def sphOperation_warp(
 __all__ = [
     "sphOperation_warp",
     "warpOperation",
+    "warpOperationJVP",
 ]
