@@ -25,6 +25,32 @@ session's `scripts/kernel_sanity_native.py`.
 
 ## Status as of 2026-08-18
 
+**Tier 2.5 (CRK correction) is done -- the last tier in this plan.** All of Tier
+2.0-2.5 are now complete; see "Suggested order and why" below for the final
+scorecard. `scripts/spike_forward_mode_tier2_crk.py` assembles the JVP in four
+gated stages -- apparentVolume (`crk_volume.py`, Gather mode, Tier 2.1's
+single-h JVP dispatch), the CRK moments `m_0/m_1/m_2/dm_0dgamma/dm_1dgamma/
+dm_2dgamma` (`crk_moments.py`, Scatter mode, ordinary product rule over Tier
+2.1's kernel-value JVP and Tier 2.2's `kernelGradient` JVP), the CRK factors
+`A/B/gradA/gradB` (`crk_terms.py`'s `computeCRKTermsWarp`), and
+`correctGradientCRK`'s product-rule expansion (`crk/kernel.py`) combined with
+Tier 2.2's field-value coefficient into a CRK-corrected Gradient operator.
+Matches the production reverse-mode Jacobian to float64 round-off (`rel_err`
+`1e-15`-`1e-16`) at every stage, 1D line of 7 and 2D 3x3 grid, all four
+`GradientScheme`s in the final stage. Gate confirmed: new script green,
+`gradcheck_crk_native.py`/`gradcheck_crk_correction_native.py` both still
+PASS, `operation_matrix.py --device cpu` unaffected (`OK=258, HIGH=0, ERR=0,
+NAN=0` -- identical baseline), `pytest tests/` unaffected (119 passed/1
+skipped -- this tier added one script, touched no production code). The one
+genuine departure from every earlier tier's methodology: `computeCRKTermsWarp`
+is pure PyTorch with no Warp call anywhere in it, so (unlike every
+Warp-kernel-backed operator) `torch.autograd.functional.jvp`'s double-backward
+trick is exact on it, not silently zero -- confirmed empirically before
+relying on it -- so that stage's JVP is obtained directly from torch's own
+autodiff rather than hand-derived, sidestepping `gradATerm4`'s four-index
+tensor contraction by hand. See the "Tier 2.5 -- Result" subsection for the
+full derivation and this decision's justification.
+
 **Tier 2.4 (Renormalization correction) is done.** `scripts/spike_forward_mode_tier2_renorm.py`
 assembles the covariance matrix's JVP from Tier 2.2's already-validated `kernelGradient` JVP
 building block (`useCRK=False`, no `useGradientRenormalization` -- the simple case
@@ -711,6 +737,124 @@ history flags as the most adjoint-fragile.
 
 ---
 
+### Tier 2.5 -- Result (done, 2026-08-18)
+
+**Deliverable shipped.** `scripts/spike_forward_mode_tier2_crk.py`, green after one shape bug
+found during writing (see "Process notes" below). Gate confirmed:
+`gradcheck_crk_native.py`/`gradcheck_crk_correction_native.py` both still PASS,
+`operation_matrix.py --device cpu` unaffected (`OK=258, HIGH=0, ERR=0, NAN=0` -- identical to
+Tier 2.4's baseline), `pytest tests/` unaffected (119 passed/1 skipped -- this tier added a
+script, touched no production code).
+
+**Math derivation, in the four stages the plan entry's "first concrete step" note called for
+(characterizing `crk_moments.py`'s construction before deriving blind).** CRK's own pipeline
+(`crk/crk_wrapper.py`'s `computeCRKFactors`) chains four functions, each gated independently
+against its own production counterpart's reverse-mode Jacobian before being composed into the
+next:
+
+1. **`crk_volume.py`'s apparent volume, `V_i = 1/(Sum_j W_ij)`, always called with
+   `supportMode=SupportScheme.Gather`** (hardcoded in `crk_wrapper.py`, not a caller-supplied
+   mode) -- i.e. exactly Tier 2.1's single-`h` branch with `h_ij=h_i` always (Gather), plus the
+   reciprocal: `dV_i = -dwsum_i/wsum_i^2`, `dwsum_i = Sum_j[gradW_ij.dx_ij + dW/dh(x_ij,h_i)*dh_i]`.
+   No new kernel math -- Tier 2.0's `sphKernel_`/`sphGradient_`/`sphKernelDkDh_`, unchanged.
+
+2. **`crk_moments.py`'s six accumulators, always called with `supportMode=SupportScheme.Scatter`**
+   (also hardcoded, and *different* from stage 1's Gather -- easy to miss reading the plan alone,
+   only visible by reading `crk_wrapper.py`'s two `OperationProperties` literally). `V_j` here is
+   stage 1's `apparentVolume[j]` -- a *different* quantity from Tier 2.2/2.4's `Vj=mass_j/density_j`
+   despite sharing the letter (CRK's `V` never touches mass or density at all; production code
+   reuses the symbol for two structurally-similar but numerically-unrelated things). Given stage
+   1's `V,dV`, the six accumulators' tangents follow by ordinary product rule through Tier 2.1's
+   kernel-value JVP (`w_ij,dw_ij`, Scatter branch) and Tier 2.2's `kernelGradient` JVP
+   (`gradw_ij,dgradw_ij`, Scatter branch) -- no new kernel math, "just" bookkeeping through six
+   accumulators instead of one. `dm_2dgamma`'s flattened index convention
+   (`gamma*dim*dim+alpha*dim+beta`, confirmed by reading `crk_moments.py`'s literal indexing
+   expression, not assumed) had to be matched exactly in the assembled tensor's axis order for the
+   result to feed correctly into stage 3.
+
+3. **`crk_terms.py`'s `computeCRKTermsWarp` (moments -> A/B/gradA/gradB) uses
+   `torch.autograd.functional.jvp` directly on the production function, not a hand-derived
+   formula -- the plan entry's own "expect the same NaN-grad-class issues CRK's reverse-mode path
+   already hit" caution turned out not to apply here for a specific, checkable reason: this
+   function has ZERO Warp calls in it** (pure `torch.einsum`/`torch.linalg.pinv`/`torch.where`,
+   confirmed by reading the whole file). The validation methodology section's ban on
+   `torch.autograd.functional.jvp` is specifically about Warp-kernel-backed operators, where
+   reading a gradient off a `wp.Tape` isn't itself differentiable, so the double-backward trick
+   silently zeroes out; it says nothing about a plain-PyTorch sub-function that already supports
+   ordinary `torch.autograd.gradcheck` (as `gradcheck_crk_native.py` already proves it does).
+   Verified empirically before relying on it (not just argued): `torch.autograd.functional.jvp`
+   on `computeCRKTermsWarp` alone, fed synthetic well-conditioned moment tensors, matched central
+   finite differences to `~1e-10` (float64, `eps=1e-6`) on every one of A/B/gradA/gradB -- and
+   the full pipeline (stage 1+2 assembled into stage 3) then matched the *production* reverse-mode
+   Jacobian to `1e-15`-`1e-16`. This sidesteps hand-deriving `gradATerm4`'s
+   `'nil,nklm,nmj,nj,ni->nk'`-style four-index tensor contraction (and its structural twins in
+   `gradA`/`gradB`) by hand -- a large amount of error-prone matrix calculus for zero additional
+   correctness margin over what torch's own autodiff already proves exactly, and the same spirit
+   as Tier 2.4 consuming production's own `L`/`num_nbrs` rather than re-deriving them: reuse an
+   already-correct piece rather than re-prove it when reuse is honestly available. `num_nbrs`/
+   `supports` (the function's two non-differentiable/unused-in-body inputs) are taken directly
+   from production's own output, same pattern as every earlier tier's discrete-branch-decision
+   treatment. Test geometries are the same well-conditioned line/grid cases every earlier tier
+   used, so `computeCRKTermsWarp`'s `is_singular`/`num_nbrs<2` masking branch is never engaged --
+   consistent with Tier 2.4's choice not to manufacture a near-singular case on purpose.
+
+4. **`crk/kernel.py`'s `correctGradientCRK`, assembled by direct product rule on its literal
+   four-term formula**, using stage 3's `A,B,gradA,gradB` (and their tangents) as PER-QUERY-i
+   values broadcast over the neighbor loop -- confirmed from `util/stateUtil.py`'s `getCRK_i`
+   (`correctionData.queryA[i]` etc., indexed at `i` only, never `j`) before assuming it, exactly
+   like `fi` in every earlier tier's field-value coefficient -- plus `W_ij,gradW_ij` (and their
+   tangents) from Tier 2.1/2.2's dispatch evaluated at whatever `SupportScheme` the *consuming*
+   operator uses (`SupportScheme.Gather` in this script's test, matching
+   `gradcheck_crk_correction_native.py`). `term4`'s `matmul(wp.transpose(gradBi),x_ij)`
+   contraction (the exact spot `gradcheck_crk_correction_native.py`'s own docstring records a
+   real bug having lived, see that script's header) needed the same first/second-axis care in its
+   JVP: `d(gradBi^T@x_ij) = dgradBi^T@x_ij + gradBi^T@dx_ij`, both terms contracting `gradBi`'s
+   first (component) axis against the `x_ij`/`dx_ij` vector, matched here via
+   `einsum('icl,ijc->ijl', ...)`. The corrected `kernelGradient`+tangent then combine with Tier
+   2.2's `_gradient_weights` (mass/density-based `coeff_ij`, *not* CRK's `A_i/B_i` despite the
+   naming echo) exactly as Tier 2.2/2.4 already do -- no new derivation for that last step, reused
+   verbatim.
+
+**Validation, two independent code paths at each of the four stages (all exact analytic
+derivatives, no finite differences except the one-time Stage-3 bring-up sanity check against
+central finite differences described above):** a hand-assembled dense all-pairs computation at
+each Warp-backed stage (built only from already-validated Tier 2.0-2.2 building blocks) vs.
+`torch.autograd.functional.jacobian` on the corresponding production function, contracted with
+the tangent -- Tier 2.1's reference pattern, applied stage-by-stage rather than only at the very
+end, so a bug in an early stage is caught there rather than surfacing as an unexplained mismatch
+three stages later. Agreed to `rel_err ~1e-15`-`1e-16` at every stage, 1D line of 7 and 2D 3x3
+grid (Stage 4: all four `GradientScheme`s, both dims) -- no tuning or tolerance-loosening needed.
+
+**Process notes.** One bug, a scope/indexing slip rather than a math error: the first version of
+Stage 4's 2D test case sized the frozen field-value tensors (`fv_q`,`fv_r`) using the raw
+`n_per_side` parameter (3) instead of the actual particle count after `grid_case_2d(3)` expands
+it to a 3x3=9-particle grid -- a shape mismatch caught immediately (`RuntimeError`, not a silent
+wrong answer) when broadcasting `coeff_ij` against the field-value tensor. Fixed by reading
+`pos0.shape[0]` after building the case, the same pattern every earlier tier's own `run_*_case`
+helpers already use. No adjoint-level bugs this tier, despite CRK's documented track record
+(`gradcheck_crk_native.py`'s/`gradcheck_crk_correction_native.py`'s own docstrings) of exactly
+this failure class in the *reverse*-mode direction -- plausibly because this tier's stage-by-stage
+gating caught anything of that shape immediately at the stage it would have appeared in, rather
+than needing a from-scratch isolated repro the way the original reverse-mode bugs did.
+
+**Scope note.** `crk_density.py`'s CRK-corrected consistency density (the third return value of
+`computeCRKFactors`, used only as a diagnostic/consistency check, never consumed by
+`correctGradientCRK` or any operator's actual force computation) is NOT covered by this
+deliverable -- `gradcheck_crk_native.py` checks it, but no `correctGradientCRK`-style downstream
+consumer ever reads it, so its JVP is not on the path this plan exists to validate (the path from
+positions/supports to a CRK-corrected *operator* output). A mechanical follow-up if ever needed:
+same four-stage shape, with `computeCRKDensity_Func_i`'s `mDensity/vol1` ratio needing the same
+"return the raw accumulated sum, divide one level up" dynamic-loop treatment `crk_density.py`'s
+own docstring already documents for its reverse-mode path.
+
+**This closes out `warpier_adjoint.md`'s Tier 2 JVP plan.** All of Tier 2.0 (kernel-level
+building blocks) through Tier 2.5 (CRK) are now done -- see "Suggested order and why" below for
+the final scorecard, and "Explicitly out of scope for this plan" for what deliberately remains
+outside this plan's boundary (grad-h/Omega cross-coupling, the `Field`/`ExecutionMode`/torch-jvp
+bridge wiring, and periodic wrap, the last of which was independently verified already correct).
+
+---
+
 ## Explicitly out of scope for this plan
 
 * **Grad-h / Omega adaptive-smoothing-length cross-coupling.** `sphKernelDkDh_` is already validated
@@ -766,8 +910,12 @@ history flags as the most adjoint-fragile.
    kernel-derivative) identity `d(C^-1) = -C^-1(dC)C^-1`, bounded and well-precedented by
    `gradcheck_pinv_native.py`, assembled cleanly on the first attempt from Tier 2.2's
    `kernelGradient` JVP. See the Tier 2.4 "Result" subsection above. NEXT: Tier 2.5.
-4. **Tier 2.5** (CRK) -- NEXT, last, hardest, highest historical bug rate; do only now that
-   2.2/2.4 are both solid, since it depends on both.
+4. **Tier 2.5** (CRK) -- DONE (2026-08-18), last and hardest, as planned. Four gated stages
+   (apparentVolume, moments, `computeCRKTermsWarp`'s A/B/gradA/gradB, `correctGradientCRK`'s
+   product-rule assembly), the middle one obtained via `torch.autograd.functional.jvp` directly
+   rather than hand-derived -- a deliberate, empirically-justified departure since that function
+   has no Warp call in it, so the "silently zero" hazard the plan's own validation methodology
+   warns about does not apply. See the Tier 2.5 "Result" subsection above.
 5. **Tier 2.3** (Laplacian `Naive`) -- DONE (2026-08-18), out of the original numeric order.
    The entry below had recommended asking whether it matters in practice before deriving
    `d(∇²W)/dx`/`d(∇²W)/dh`, since Brookshaw (Tier 2.2) is the scheme the codebase's own comments
@@ -775,6 +923,12 @@ history flags as the most adjoint-fragile.
    adjoint SPH derivation, independent of Tiers 2.4/2.5 (built only on Tier 2.0's `eval_d3kdq3`, not
    on anything from 2.4/2.5), so it did not need to wait its numeric turn. See the Tier 2.3 "Result"
    subsection above.
+
+**All five sub-tiers (2.1-2.5) plus Tier 2.0's building blocks are now done -- this plan's scope is
+complete**, modulo the three items "Explicitly out of scope for this plan" (below) deliberately
+leaves for later or elsewhere: grad-h/Omega cross-coupling, the `Field`/`ExecutionMode`/torch-jvp
+bridge wiring, and periodic minimum-image wrapping (independently verified already correct, not
+part of this plan's derivation work).
 
 Each tier's gate, per `warpier_fields.md`'s established discipline: the new spike script green,
 `pytest tests/` and `scripts/operation_matrix.py` unaffected (these tiers add scripts, not production
