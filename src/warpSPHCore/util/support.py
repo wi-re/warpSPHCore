@@ -97,7 +97,26 @@ def computePairwiseSupport(hx: scalar_t, hy: scalar_t, mode: wp.uint32):
         return (hx + hy) / scalar_t(2.0)
     else:
         return wp.max(hx, hy)
-    
+
+
+@wp.func
+def computePairwiseSupportJVP(hx: scalar_t, hy: scalar_t, dhx: scalar_t, dhy: scalar_t, mode: wp.uint32):
+    """JVP of `computePairwiseSupport` -- ordinary calculus, not kernel math
+    (`warpier_adjoint.md` Tier 2.1). The `else` branch (`max(hx, hy)`) is a
+    genuine subgradient, discontinuous at `hx == hy`; exact away from that
+    kink, same class of forward-branch-boundary case as `pinv`'s rank
+    cutoff (Tier 2.4)."""
+    if mode == wp.static(SupportScheme.Gather.value):
+        return dhx
+    elif mode == wp.static(SupportScheme.Scatter.value):
+        return dhy
+    elif mode == wp.static(SupportScheme.MeanSymmetric.value):
+        return (dhx + dhy) / scalar_t(2.0)
+    else:
+        if hx >= hy:
+            return dhx
+        return dhy
+
 
 @wp.func
 def isInSupport(

@@ -188,16 +188,22 @@ def warpOperationJVP(
     consistentDivergence: bool = False,
 ):
     """The JVP entry point `warpier_forward_mode_plan.md` Phase 2 promotes
-    Tier 1 into: today only value tangents are implemented (an operator is
-    exactly linear and homogeneous in `queryValues`/`referenceValues`, so its
-    JVP w.r.t. them is the same operator relaunched on the tangent arrays in
-    place of the value arrays -- verified by `scripts/spike_forward_mode_tier1.py`
-    and gated by `tests/operations/test_forward_mode_tier1.py`).
+    Tier 1 into, and Phase 4 begins extending for Tier 2:
 
-    The full Tier-2 tangent surface (positions/supports/masses/densities) is
-    already in this signature so Phase 4 extends this entry point instead of
-    replacing it, but every one of those arguments raises `NotImplementedError`
-    until then.
+    * **Tier 1** (value tangents): an operator is exactly linear and
+      homogeneous in `queryValues`/`referenceValues`, so its JVP w.r.t. them
+      is the same operator relaunched on the tangent arrays in place of the
+      value arrays -- verified by `scripts/spike_forward_mode_tier1.py` and
+      gated by `tests/operations/test_forward_mode_tier1.py`.
+    * **Tier 2** (position/support/mass/density tangents): the kernel is
+      genuinely nonlinear in these, so each operator needs a hand-derived
+      JVP (`warpier_adjoint.md`). Only **Density's position/support tangent
+      plus a reference-side mass tangent** is implemented so far
+      (`coreOperations.wp_densityJVP.computeSPHDensityPositionJVP`, gated by
+      `tests/operations/test_forward_mode_tier2_density.py`) -- every other
+      Tier-2 combination (the other five operators; Density's density
+      tangent, which does not exist since Density has no density input)
+      raises `NotImplementedError` naming Phase 4.
     """
     tier2Args = {
         "tangentQueryPositions": tangentQueryPositions, "tangentReferencePositions": tangentReferencePositions,
@@ -206,12 +212,37 @@ def warpOperationJVP(
         "tangentQueryDensities": tangentQueryDensities, "tangentReferenceDensities": tangentReferenceDensities,
     }
     providedTier2 = [name for name, value in tier2Args.items() if value is not None]
+
     if providedTier2:
-        raise NotImplementedError(
-            f"warpOperationJVP: Tier-2 tangent argument(s) {providedTier2} are not "
-            "implemented yet -- warpier_forward_mode_plan.md Phase 4 extends this "
-            "entry point for position/support/mass/density tangents. Only "
-            "tangentQueryValues/tangentReferenceValues (Tier 1) are supported today."
+        isDensityPositionSupportCase = (
+            operationProperties.operation is WarpOperation.Density
+            and tangentQueryValues is None and tangentReferenceValues is None
+            and tangentQueryMasses is None and tangentQueryDensities is None and tangentReferenceDensities is None
+        )
+        if not isDensityPositionSupportCase:
+            raise NotImplementedError(
+                f"warpOperationJVP: Tier-2 tangent argument(s) {providedTier2} are not "
+                f"implemented for {operationProperties.operation} yet -- "
+                "warpier_forward_mode_plan.md Phase 4 implements only Density's "
+                "position/support/(reference-side) mass tangent so far."
+            )
+        if not isinstance(adjacency, AdjacencyList):
+            raise NotImplementedError(
+                "warpOperationJVP: Density's Tier-2 JVP needs the torch-facing "
+                f"AdjacencyList (.i/.j neighbor pairs, what buildVerletList returns), "
+                f"not {type(adjacency)} -- grid/CompactHashMap traversal is not "
+                "implemented for Tier 2 (warpier_forward_mode_plan.md Phase 4)."
+            )
+        nQuery = queryParticles.positions.shape[0]
+        zeroPositions = lambda n: torch.zeros((n, domain.dim), device=queryParticles.positions.device, dtype=queryParticles.positions.dtype)
+        return computeSPHDensityPositionJVP(
+            queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+            tangentQueryPositions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
+            referenceParticles=referenceParticles,
+            tangentReferencePositions=tangentReferencePositions,
+            tangentQuerySupports=tangentQuerySupports,
+            tangentReferenceSupports=tangentReferenceSupports,
+            tangentReferenceMasses=tangentReferenceMasses,
         )
 
     if operationProperties.operation not in _TIER1_JVP_OPERATIONS:

@@ -25,6 +25,7 @@ from .laplacian import sphKernelLaplacian
 from .hessian import sphKernelHessian
 from .kernel import sphKernel, sphKernel_ij
 from .gradient import sphKernelGradient, sphKernelGradient_ij
+from .kernelJVP import sphKernelJVP, sphKernelJVP_ij
 
 __all__.extend([
     'sphKernelDkDh',
@@ -35,4 +36,6 @@ __all__.extend([
     'sphKernel_ij',
     'sphKernelGradient',
     'sphKernelGradient_ij',
+    'sphKernelJVP',
+    'sphKernelJVP_ij',
 ])
