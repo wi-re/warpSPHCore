@@ -9,9 +9,10 @@ validated; this plan is about actually running it, using testbeds in the sibling
 
 ## Status (as of 2026-08-18)
 
-**Phases 1-3 done.** Phase 4 not started. Most of the work landed in the sibling `warpSPH` repo
-(new test files there, not this one), which is easy to lose track of from this document alone --
-recorded here explicitly for that reason.
+**Phases 1-3 done. Phase 4 in progress** (steps 1-2 done, Density-operator scope only -- see its
+own section below for the full breakdown; steps 3-6 not started). Most of the work landed in the
+sibling `warpSPH` repo (new test files there, not this one), which is easy to lose track of from
+this document alone -- recorded here explicitly for that reason.
 
 * **Phase 1 -- done.** `warpSPH/tests/test_forwardModeWave.py` (new), commit `ab28fc9` in
   `warpSPH`. Seeds `du0`/`dv0` via `torch.func.jvp` on the plain-torch Wendland bump formula,
@@ -242,7 +243,47 @@ trial field.
 Files touched: new `warpSPH/tests/test_implicitWaveEquation.py` (or a script promoted to a test
 once stable).
 
-## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting [NOT STARTED]
+## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting [IN PROGRESS: steps 1 (Density only)/2 done 2026-08-18]
+
+**Progress.** Before starting, found and corrected a stale-documentation blocker: `warpier_core.md`
+had claimed the `Field` abstraction was "not started", which would have made a generic Tier-2 API
+depend on unscoped prerequisite work. It was already done (`warpier_fields.md`'s own "Status as of
+2026-08-18": Steps 0/A-J complete, `Field` with a pair-capable `tangent` slot, `StateBundle`, the
+declared `OperatorSpec`/`launchOperator` ABI) -- `warpier_core.md` corrected in `warpSPHCore`
+commit `fe238d5`.
+
+* **Step 1 -- Density only, done.** `sphKernelJVP`/`sphKernelJVP_ij`
+  (`src/warpSPHCore/kernels/kernelJVP.py`) and `computePairwiseSupportJVP`
+  (`util/support.py`) promote Tier 2.1's spike math into real `kernels/` functions.
+  `computeSPHDensityPositionJVP` (`coreOperations/wp_densityJVP.py`) is a production evaluator --
+  one thread per real adjacency-list pair (mirroring `wp_implicitShifting.computeShiftingPairTerms`'s
+  established pattern, since `launchOperator` doesn't support pair-indexed threading), not the
+  spike's dense-all-pairs shortcut -- giving Density's position/support/reference-mass tangent.
+  `warpOperationJVP` dispatches to it for exactly that combination; every other Tier-2 combination
+  (the other five operators; any value or density tangent) still raises `NotImplementedError`.
+  Gated by `tests/operations/test_forward_mode_tier2_density.py` (9 cases, reverse-mode-Jacobian
+  reference, ~1e-6 float32 agreement) plus the usual unaffected-baseline checks (full suite 136
+  passed/1 skipped, `operation_matrix.py --device cpu` OK=258 unchanged, all six
+  `gradcheck_*_native.py` scripts green). `warpSPHCore` commit `b1d798f`.
+  Interpolate/Gradient/Divergence/Curl/Laplacian/renorm/CRK Tier-2 JVPs are **not** done --
+  scoped down to Density because that's what step 2 needed, not attempted for all six operators
+  yet as step 1's own text originally asked.
+* **Step 2 -- done.** Validated standalone against `wp_implicitShifting.py`'s own `J`/`Jw`, exactly
+  as asked: `warpOperationJVP(Density, tangentQueryPositions=<coordinate basis>)` with `omega`
+  passed as the mass channel, one call per spatial dimension, reconstructs `Jw` bit-for-bit
+  identically to the hand-built pairwise-`sphKernelGradient`+`scatter_sum` computation, on a
+  jittered lattice (`warpSPH/tests/test_implicitShiftingGradientJVP.py`, `warpSPH` commit
+  `91b92fb`). Confirms the claim literally: no new derivation was needed for the gradient itself,
+  only for wiring the existing Tier-2.0 building blocks (`sphKernelGradient`'s ingredients) through
+  a JVP-shaped production entry point.
+* **Steps 3-6 -- not started.** Step 3 (`Hess C` as a JVP-of-a-JVP, "the actual experiment") is
+  next; steps 4-6 (swap the shifting matvec, test the self-pair/block-symmetry pitfalls, three-way
+  comparison) depend on it.
+* **A finding while validating step 2, worth carrying into step 6's comparison**: the jittered-
+  lattice implicit-shifting baseline (`warpSPH/tests/test_implicitShifting.py`) this phase's
+  step 4/6 will run against has its own pre-existing GPU-only marginal-stability issue (see this
+  plan's "Status" section above, item 2 under the `test_implicitShifting.py` finding) --
+  unfixed, flagged for whoever runs step 6's comparison.
 
 Goal: wire Tier 2 into `warpOperationJVP`, then build an implicit shifting solve whose `grad C`/
 `Hess C` come from *composed JVPs* instead of `wp_implicitShifting.py`'s hand-rolled per-pair
