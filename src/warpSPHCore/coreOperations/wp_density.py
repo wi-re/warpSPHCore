@@ -143,6 +143,12 @@ def computeSPHDensity_Kernel(
     )
 
 
+_DENSITY_SPEC = OperatorSpec(
+    kernel=computeSPHDensity_Kernel,
+    outputs=(OutputSpec(dtype=lambda ctx, extras: castTorchToWarpAsBuiltins(ctx.query.masses).dtype),),
+)
+
+
 def _computeSPHDensity_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
@@ -161,9 +167,6 @@ def _computeSPHDensity_stateBackend(
     """
     with record_function("warpSPH[Density]"):
         with record_function("warpSPH[Density] - Preprocessing"):
-            outputSize = queryParticles.positions.shape[0]
-            outputDtype = castTorchToWarpAsBuiltins(queryParticles.masses).dtype
-
             operationProperties = OperationProperties(
                 kernel=kernel,
                 operation=WarpOperation.Density,
@@ -172,21 +175,13 @@ def _computeSPHDensity_stateBackend(
             )
 
         with record_function("warpSPH[Density] - Kernel Execution"):
-            result = warpWrapper2(
-                launcher=launch_kernel,
-                kernel=computeSPHDensity_Kernel,
-                outputSizes=outputSize,
-                outputDtypes=outputDtype,
-                defaultStateArguments=(
-                    queryParticles, operationProperties, domain,
-                    None, None,
-                    adjacency,
-                    referenceParticles,
-                    None,
-                    None,
-                    None,
-                ),
-                additionalArguments=(),
+            ctx = SPHContext(
+                query=queryParticles,
+                properties=operationProperties,
+                domain=domain,
+                adjacency=adjacency,
+                reference=referenceParticles,
             )
+            result = launchOperator(_DENSITY_SPEC, ctx)
 
     return result

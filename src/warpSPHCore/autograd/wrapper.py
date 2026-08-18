@@ -6,7 +6,7 @@ from typing import Optional, Union, Tuple
 from .stateAwareWarpFunction import StateAwareWarpFunction
 from .arg_extract import extractStateInfo
 
-def warpWrapper2(
+def _launch(
     launcher,
     kernel,
     outputSizes,
@@ -15,35 +15,13 @@ def warpWrapper2(
     additionalArguments: tuple = (),
     numThreads: Optional[int] = None,
 ):
-    """
-    State-aware autograd wrapper for SPH kernels.
-
-    Unlike the flat-tensor ``warpWrapper``, this variant accepts high-level
-    structured state objects (``ParticleState``, ``CRKState``, etc.) directly.
-    It extracts all torch.Tensors from those structures, routes them through
-    ``StateAwareWarpFunction`` so that gradients are properly tracked, and
-    defers all Warp struct assembly to the autograd forward pass.
-
-    Args:
-        launcher:               Kernel launcher, e.g. ``launch_kernel``.
-        kernel:                 The ``wp.kernel`` to execute.
-        outputSizes:            Output shape passed to the launcher.
-        outputDtypes:           Output Warp dtype(s) passed to the launcher.
-        defaultStateArguments:  Tuple in the fixed state-argument order:
-                                    (queryParticles, operationProperties, domain,
-                                     queryVolumes, referenceVolumes, adjacency,
-                                     referenceParticles, crkState,
-                                     gradHState, renormalizationState)
-        additionalArguments:    Extra per-kernel arguments appended after the
-                                standard struct args.  Any ``torch.Tensor`` entries
-                                will be tracked for gradients; plain Python scalars
-                                and ints are forwarded unchanged.
-        numThreads:             Explicit thread count for wp.launch(). If None,
-                                defaults to outputSizes. Use this when the number
-                                of threads should differ from output size.
-
-    Returns:
-        torch.Tensor or tuple of torch.Tensor – kernel output(s).
+    """Shared engine behind both ``warpWrapper2`` (the untyped, positional
+    legacy entry point) and ``launchOperator`` (Step I, ``operator_spec.py``
+    -- the declared-ABI entry point that resolves an ``OperatorSpec`` /
+    ``SPHContext`` into exactly this call shape). Extracted so the two
+    surfaces cannot drift: same struct assembly, same autograd bridge, same
+    behaviour, differing only in how a caller arrives at these arguments.
+    See warpier_fields.md Section 8 / Step I.
     """
     with record_function("warpWrapper2 [WW2]"):
         # --- extract state tensors and the struct-building closure ---
@@ -91,3 +69,46 @@ def warpWrapper2(
             build_fn, launcher, kernel, outputSizes, outputDtypes,
             *flat_tensors,
         )
+
+
+def warpWrapper2(
+    launcher,
+    kernel,
+    outputSizes,
+    outputDtypes,
+    defaultStateArguments: tuple,
+    additionalArguments: tuple = (),
+    numThreads: Optional[int] = None,
+):
+    """
+    State-aware autograd wrapper for SPH kernels -- the untyped, positional
+    legacy entry point (Section 8.1: a None-padded 10-tuple, re-analysed
+    ``additionalArguments`` every call). Kept as a thin shim over ``_launch``
+    for existing call sites; new code should declare an ``OperatorSpec`` and
+    call ``launchOperator`` instead (``operator_spec.py``, Step I).
+
+    Args:
+        launcher:               Kernel launcher, e.g. ``launch_kernel``.
+        kernel:                 The ``wp.kernel`` to execute.
+        outputSizes:            Output shape passed to the launcher.
+        outputDtypes:           Output Warp dtype(s) passed to the launcher.
+        defaultStateArguments:  Tuple in the fixed state-argument order:
+                                    (queryParticles, operationProperties, domain,
+                                     queryVolumes, referenceVolumes, adjacency,
+                                     referenceParticles, crkState,
+                                     gradHState, renormalizationState)
+        additionalArguments:    Extra per-kernel arguments appended after the
+                                standard struct args.  Any ``torch.Tensor`` entries
+                                will be tracked for gradients; plain Python scalars
+                                and ints are forwarded unchanged.
+        numThreads:             Explicit thread count for wp.launch(). If None,
+                                defaults to outputSizes. Use this when the number
+                                of threads should differ from output size.
+
+    Returns:
+        torch.Tensor or tuple of torch.Tensor – kernel output(s).
+    """
+    return _launch(
+        launcher, kernel, outputSizes, outputDtypes,
+        defaultStateArguments, additionalArguments, numThreads,
+    )

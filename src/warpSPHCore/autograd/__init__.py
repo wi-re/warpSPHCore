@@ -5,6 +5,10 @@ from .stateAwareWarpFunction import StateAwareWarpFunction, warpWrapperStateawar
 from .stateLessWarpFunction import WarpFunctionWrapper, warpWrapper
 from .wrapper import warpWrapper2
 from .scalar_arg import asScalarArg
+from .operator_spec import (
+    OperatorSpec, SPHContext, Corrections, EMPTY_CORRECTIONS,
+    OutputSpec, ExtraSpec, ExtraKind, ShapeOf, ThreadSpec, launchOperator,
+)
 
 __all__ = [
     "extractStateInfo",
@@ -13,6 +17,8 @@ __all__ = [
     "WarpFunctionWrapper", 'warpWrapper',
     "warpWrapper2",
     "asScalarArg",
+    "OperatorSpec", "SPHContext", "Corrections", "EMPTY_CORRECTIONS",
+    "OutputSpec", "ExtraSpec", "ExtraKind", "ShapeOf", "ThreadSpec", "launchOperator",
 ]
 
 from .cache import getCachedDummyTensor, getCachedIdentityMatrices, clearWarpArrayCache, clearKernelArgsCache

@@ -150,6 +150,12 @@ def computeCRKVolume_Kernel(
         outputValues[i] = scalar_t(1.0) / wsum
 
 
+_CRK_VOLUME_SPEC = OperatorSpec(
+    kernel=computeCRKVolume_Kernel,
+    outputs=(OutputSpec(dtype=scalar_t),),
+)
+
+
 def _computeCRKVolume_stateBackend(
     queryParticles: ParticleState,
     operationProperties: OperationProperties,
@@ -164,23 +170,14 @@ def _computeCRKVolume_stateBackend(
     no corrections of its own.
     """
     with record_function("warpSPH[CRKVolume]"):
-        with record_function("warpSPH[CRKVolume] - Preprocessing"):
-            outputSize = queryParticles.positions.shape[0]
-
         with record_function("warpSPH[CRKVolume] - Kernel Execution"):
-            result = warpWrapper2(
-                launcher=launch_kernel,
-                kernel=computeCRKVolume_Kernel,
-                outputSizes=outputSize,
-                outputDtypes=scalar_t,
-                defaultStateArguments=(
-                    queryParticles, operationProperties, domain,
-                    None, None,
-                    adjacency,
-                    referenceParticles,
-                    None, None, None,
-                ),
-                additionalArguments=(),
+            ctx = SPHContext(
+                query=queryParticles,
+                properties=operationProperties,
+                domain=domain,
+                adjacency=adjacency,
+                reference=referenceParticles,
             )
+            result = launchOperator(_CRK_VOLUME_SPEC, ctx)
 
     return result
