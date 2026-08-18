@@ -191,6 +191,20 @@ def computeCovariance_Kernel(
     outputNeighbors[i] = N
 
 
+def _covarianceMatrixDtype(ctx, extras):
+    dim = ctx.query.positions.shape[1]
+    return _get_warp_matrix_dtype(dim, dim, ctx.query.positions.dtype)
+
+
+_COVARIANCE_SPEC = OperatorSpec(
+    kernel=computeCovariance_Kernel,
+    outputs=(
+        OutputSpec(dtype=_covarianceMatrixDtype),
+        OutputSpec(dtype=wp.int32),
+    ),
+)
+
+
 def _computeSPHCovariance_stateBackend(
     queryParticles: ParticleState,
     operationProperties: OperationProperties,
@@ -210,27 +224,19 @@ def _computeSPHCovariance_stateBackend(
     wp_renormalization.py's job, not this function's.
     """
     with record_function("warpSPH[Covariance]"):
-        with record_function("warpSPH[Covariance] - Preprocessing"):
-            queryPositions = queryParticles.positions
-            outputSizes  = [queryPositions.shape[0], queryPositions.shape[0]]
-            outputDtypes = [_get_warp_matrix_dtype(queryPositions.shape[1], queryPositions.shape[1], queryPositions.dtype), wp.int32]
-
         with record_function("warpSPH[Covariance] - Kernel Execution"):
-            C = warpWrapper2(
-                launcher = launch_kernel,
-                kernel   = computeCovariance_Kernel,
-                outputSizes  = outputSizes,
-                outputDtypes = outputDtypes,
-                defaultStateArguments=(
-                    queryParticles, operationProperties, domain,
-                    queryVolumes, referenceVolumes,
-                    adjacency,
-                    referenceParticles,
-                    crkState,
-                    gradHState,
-                    renormalizationState,
-                ),
-                additionalArguments=(
+            ctx = SPHContext(
+                query=queryParticles,
+                properties=operationProperties,
+                domain=domain,
+                adjacency=adjacency,
+                reference=referenceParticles,
+                corrections=Corrections(
+                    volumes=(queryVolumes, referenceVolumes),
+                    crk=crkState,
+                    gradH=gradHState,
+                    renorm=renormalizationState,
                 ),
             )
+            C = launchOperator(_COVARIANCE_SPEC, ctx)
     return C[0] if not returnNumNeighbors else (C[0], C[1])

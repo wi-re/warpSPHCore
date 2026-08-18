@@ -227,6 +227,24 @@ def computeCRKMoments_Kernel(
     output_numNeighbors[i] = numNeighbors
 
 
+def _dimOf(ctx, extras):
+    return ctx.query.positions.shape[1]
+
+
+_CRK_MOMENTS_SPEC = OperatorSpec(
+    kernel=computeCRKMoments_Kernel,
+    outputs=(
+        OutputSpec(dtype=scalar_t),
+        OutputSpec(dtype=lambda ctx, extras: vector(length=_dimOf(ctx, extras), dtype=scalar_t)),
+        OutputSpec(dtype=lambda ctx, extras: matrix(shape=(_dimOf(ctx, extras), _dimOf(ctx, extras)), dtype=scalar_t)),
+        OutputSpec(dtype=lambda ctx, extras: vector(length=_dimOf(ctx, extras), dtype=scalar_t)),
+        OutputSpec(dtype=lambda ctx, extras: matrix(shape=(_dimOf(ctx, extras), _dimOf(ctx, extras)), dtype=scalar_t)),
+        OutputSpec(dtype=lambda ctx, extras: vector(length=_dimOf(ctx, extras) ** 3, dtype=scalar_t)),
+        OutputSpec(dtype=wp.int32),
+    ),
+)
+
+
 def _computeCRKMoments_stateBackend(
     queryParticles: ParticleState,
     operationProperties: OperationProperties,
@@ -245,35 +263,20 @@ def _computeCRKMoments_stateBackend(
     """
     with record_function("warpSPH[CRKMoments]"):
         with record_function("warpSPH[CRKMoments] - Preprocessing"):
-            queryPositions = queryParticles.positions
-            outputSize = queryPositions.shape[0]
-            dim = queryPositions.shape[1]
-
-            outputSizes = [outputSize] * 7
-            outputDtypes = [
-                scalar_t,
-                vector(length=dim, dtype=scalar_t),
-                matrix(shape=(dim, dim), dtype=scalar_t),
-                vector(length=dim, dtype=scalar_t),
-                matrix(shape=(dim, dim), dtype=scalar_t),
-                vector(length=dim**3, dtype=scalar_t),
-                wp.int32,
-            ]
+            dim = queryParticles.positions.shape[1]
 
         with record_function("warpSPH[CRKMoments] - Kernel Execution"):
-            m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma, numNeighbors = warpWrapper2(
-                launcher=launch_kernel,
-                kernel=computeCRKMoments_Kernel,
-                outputSizes=outputSizes,
-                outputDtypes=outputDtypes,
-                defaultStateArguments=(
-                    queryParticles, operationProperties, domain,
-                    queryVolumes, referenceVolumes,
-                    adjacency,
-                    referenceParticles,
-                    None, None, None, # crkState, gradHState, renormalizationState -- moments never apply corrections
-                ),
-                additionalArguments=(),
+            ctx = SPHContext(
+                query=queryParticles,
+                properties=operationProperties,
+                domain=domain,
+                adjacency=adjacency,
+                reference=referenceParticles,
+                corrections=Corrections(volumes=(queryVolumes, referenceVolumes)),
+                # crkState/gradHState/renormalizationState -- moments never apply corrections
+            )
+            m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma, numNeighbors = launchOperator(
+                _CRK_MOMENTS_SPEC, ctx,
             )
 
     return m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma.view(-1, dim, dim, dim), numNeighbors

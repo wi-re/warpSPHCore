@@ -170,6 +170,12 @@ def computeCRKDensity_Kernel(
         outputValues[i] = mDensity / vol1
 
 
+_CRK_DENSITY_SPEC = OperatorSpec(
+    kernel=computeCRKDensity_Kernel,
+    outputs=(OutputSpec(dtype=scalar_t),),
+)
+
+
 def _computeCRKDensity_stateBackend(
     queryParticles: ParticleState,
     operationProperties: OperationProperties,
@@ -185,23 +191,18 @@ def _computeCRKDensity_stateBackend(
     computeCRKMoments/computeCRKTermsWarp.
     """
     with record_function("warpSPH[CRKDensity]"):
-        with record_function("warpSPH[CRKDensity] - Preprocessing"):
-            outputSize = queryParticles.positions.shape[0]
-
         with record_function("warpSPH[CRKDensity] - Kernel Execution"):
-            result = warpWrapper2(
-                launcher=launch_kernel,
-                kernel=computeCRKDensity_Kernel,
-                outputSizes=outputSize,
-                outputDtypes=scalar_t,
-                defaultStateArguments=(
-                    queryParticles, operationProperties, domain,
-                    queryVolumes, referenceVolumes,
-                    adjacency,
-                    referenceParticles,
-                    crkState, None, None,
+            ctx = SPHContext(
+                query=queryParticles,
+                properties=operationProperties,
+                domain=domain,
+                adjacency=adjacency,
+                reference=referenceParticles,
+                corrections=Corrections(
+                    volumes=(queryVolumes, referenceVolumes),
+                    crk=crkState,
                 ),
-                additionalArguments=(),
             )
+            result = launchOperator(_CRK_DENSITY_SPEC, ctx)
 
     return result
