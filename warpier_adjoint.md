@@ -25,6 +25,29 @@ session's `scripts/kernel_sanity_native.py`.
 
 ## Status as of 2026-08-18
 
+**Tier 2.2 (Gradient, Divergence, Curl, Laplacian's Brookshaw scheme) is done.**
+`scripts/spike_forward_mode_tier2_gradient.py` assembles the JVP of `sphKernelGradient_ij`
+itself (a new dispatch function built from Tier 2.0's `sphGradient_`/`sphKernelHessian_`/
+`sphGradientDkDh_`, structurally the SupportScheme-branch twin of Tier 2.1's `dW_ij`
+dispatch), then chain-rules it through each operator's field-value coefficient (shown to be
+the *same* coefficient across all four operators) and, for Laplacian, its `n_ij`/`r_ij`
+regularized-distance algebra. Matches the production reverse-mode Jacobian to float64
+round-off across every GradientScheme x a representative subset of SupportScheme, in 1D and
+2D, for Gradient/Divergence/Curl/Laplacian(Brookshaw). Gate confirmed (all four existing
+`gradcheck_{gradient,divergence,curl,laplacian}_native.py` scripts, `operation_matrix.py
+--device cpu` at `OK=258, HIGH=0, ERR=0, NAN=0` -- identical to Tier 2.1's baseline, and
+`pytest tests/` at 119 passed/1 skipped, all unaffected). Laplacian's Dot/Default schemes
+are explicitly deferred (see the "Tier 2.2 -- Result" subsection). See that subsection for
+the derivation and two findings it surfaced.
+
+**Tier 2.1 (Density, Interpolate) is done.** `scripts/spike_forward_mode_tier2_density.py` assembles
+the two operators' position/support/mass[/density] JVPs from Tier 2.0's validated building blocks
+and matches the production reverse-mode Jacobian to float64 round-off, across every `SupportScheme`
+`sphKernel_ij` actually implements. Gate confirmed (`gradcheck_density_native.py`,
+`gradcheck_interpolate_native.py`, `operation_matrix.py --device cpu`, `pytest tests/` all
+unaffected). See the "Tier 2.1 -- Result" subsection below for the derivation and two pre-existing
+`SupportScheme` code facts it surfaced.
+
 **Tier 2.0 (kernel-level building blocks) is done.** `scripts/kernel_sanity_native.py` validated,
 against `wp.Tape`, every derivative of the raw pairwise kernel that Tier 2 needs to assemble from:
 
@@ -92,6 +115,107 @@ adds a script, touches no production code).
 
 ---
 
+### Tier 2.1 -- Result (done, 2026-08-18)
+
+**Deliverable shipped.** `scripts/spike_forward_mode_tier2_density.py`, green on first full run
+after fixing tensor-index bugs during writing (see "Process notes" below). Gate confirmed:
+`gradcheck_density_native.py` and `gradcheck_interpolate_native.py` both still PASS,
+`operation_matrix.py --device cpu` (default 2D/float32 sweep) is unaffected (`OK=258, HIGH=0,
+ERR=0, NAN=0`), and `pytest tests/` is unaffected (this tier added a script, touched no production
+code, per the Gate above).
+
+**Math derivation, written down precisely (the scope note above was a sketch; this is what the
+code actually required).** Both operators reduce to a sum over neighbors of `(coefficient)_j *
+W_ij`:
+
+```
+Density_i      = Σ_j  m_j                * W_ij
+Interpolate_i  = Σ_j  f_j * V_j           * W_ij ,   V_j = m_j / ρ_j   (f_j frozen: Tier 1)
+```
+
+so the product rule gives the tangent directly once `dW_ij` is known:
+
+```
+dDensity_i     = Σ_j [ dm_j       * W_ij  +  m_j     * dW_ij ]
+dInterpolate_i = Σ_j [ f_j * dV_j * W_ij  +  f_j*V_j * dW_ij ],   dV_j = dm_j/ρ_j - m_j·dρ_j/ρ_j²
+```
+
+`dW_ij` needed case analysis on `SupportScheme`, because `sphKernel_ij` (`kernels/kernel.py`)
+itself branches on it before ever touching a kernel-derivative building block. Reading the actual
+code (not just the plan's one-line sketch) turned up two branches, not one:
+
+* **Single-`h` branch** (`Gather`, `Scatter`, `MeanSymmetric`, and the `PartialSymmetric`/default
+  fallthrough -- see below): `W_ij = sphKernel_(x_ij, h_ij, k)`, so
+  `dW_ij = ∇_x[W](x_ij,h_ij)·dx_ij + dW/dh(x_ij,h_ij)·dh_ij`, with `dx_ij = dx_i - dx_j` and
+  `dh_ij` the JVP of `computePairwiseSupport` (util/support.py) itself -- new, but ordinary
+  calculus, not kernel math:
+  `Gather: dh_ij=dh_i`; `Scatter: dh_ij=dh_j`; `MeanSymmetric: dh_ij=(dh_i+dh_j)/2`;
+  else (max): `dh_ij = dh_i if h_i>=h_j else dh_j` -- a genuine subgradient, discontinuous at
+  `h_i==h_j`, same class of forward-branch-boundary hazard Tier 2.4's plan flags for `pinv`'s rank
+  cutoff. Test data keeps supports away from exact ties.
+* **Two-term-average branch** (`KernelMeanSymmetric`, `SuperSymmetric`):
+  `W_ij = 0.5·(W(x_ij,h_i)+W(x_ij,h_j))`, so
+  `dW_ij = 0.5·[(∇_x[W](x_ij,h_i)+∇_x[W](x_ij,h_j))·dx_ij + dW/dh(x_ij,h_i)·dh_i + dW/dh(x_ij,h_j)·dh_j]`.
+
+**Two pre-existing production-code facts this derivation surfaced** (documented in the script's
+own docstring too; neither is a bug to fix under this plan):
+
+1. **`SuperSymmetric` is provably identical to `KernelMeanSymmetric` at the value level.** The enum
+   docstring (`enumTypes.py`) describes `SuperSymmetric` as `0.5·(W(x_ij,h_i) - W(x_ji,h_j))`
+   (mirroring the *gradient* formula, where `x_ji` vs. `x_ij` genuinely matters because `∇W` is odd
+   in `x`). But `W` is isotropic -- depends only on `|x|` -- so `W(x_ji,h_j) ≡ W(x_ij,h_j)`, and the
+   docstring's `-W(x_ji,h_j)` collapses to `+W(x_ij,h_j)` once evaluated. `sphKernel_ij`'s code,
+   which uses an identical `+` branch for both schemes, is therefore correct, not a copy-paste bug
+   -- the two schemes are mathematically forced to coincide at the value level, and will
+   legitimately diverge only at the gradient level (Tier 2.2), where the odd/even distinction
+   actually bites. The script checks this explicitly (`assert`s both the assembled and the
+   reference JVP agree bit-for-bit between the two schemes) rather than assuming it.
+2. **`PartialSymmetric` is unimplemented at the kernel-value/-gradient level.** Its enum comment
+   promises `f_i·W(h_i) + f_j·W(h_j)` (a field-value-weighted scheme, PESPH-style), and it is the
+   *only* other place it's referenced in the whole `src/` tree: the neighbor-search radius
+   (`radiusSearch/compactHash/{grid,wp_collectNeighbors,wp_countNeighbors}.py`). `sphKernel_ij`
+   and `computePairwiseSupport` have no branch for it at all -- it silently falls through to the
+   `else` (`max(h_i,h_j)`) case, i.e. behaves like an unweighted "largest support wins" scheme, not
+   the documented one. The JVP assembled here matches what the code actually does (tested
+   explicitly, labeled `PartialSymmetric` in the script's output), not the aspirational docstring.
+   Worth flagging to whoever owns `SupportScheme` next, but out of scope to fix here.
+
+**Validation, two independent code paths (both exact analytic derivatives, no finite differences
+anywhere):**
+
+* *Assembled side* -- a hand-written per-pair Warp kernel (`_pair_jvp_1d`/`_pair_jvp_2d`) built
+  only from already-validated `kernel_sanity_native.py` functions (`sphKernel_`, `sphGradient_`,
+  `sphKernelDkDh_`) plus the new `_pairwiseSupportTangent` building block above, summed over a
+  **dense all-pairs loop** rather than the real neighbor list. This is safe, not a shortcut: every
+  building block is exactly zero for `q=|x|/h > 1` (`kernel_sanity_native.py` Section I), so a pair
+  outside the true support radius contributes nothing to either `W_ij` or `dW_ij` regardless of
+  whether it would have appeared in the production adjacency list -- letting the test avoid
+  touching internal `AdjacencyList`/`CompactHashMap` structures entirely.
+* *Reference side* -- `torch.autograd.functional.jacobian` on the actual production
+  `warpOperation(Density/Interpolate)` call (the same reverse-mode path every
+  `gradcheck_*_native.py` script already validates), contracted with the tangent -- Tier 1's
+  reference pattern (`spike_forward_mode_tier1.py`), just differentiating w.r.t.
+  positions/supports/masses[/densities] instead of field values.
+
+Both sides agreed to `rel_err ~ 1e-16` (float64 round-off) across Gather/Scatter/MeanSymmetric/
+KernelMeanSymmetric/SuperSymmetric/PartialSymmetric in 1D, a 2D grid subset, and Interpolate with
+frozen field values -- no tuning or tolerance-loosening needed.
+
+**Process notes (how this actually got built, for the next tier).** Test cases were deliberately
+given *non-uniform* supports (`h_i` perturbed ±15% across particles) -- the first draft used
+`_gradcheck_common.py`'s uniform-`h` `line_case`/`grid_case_2d` unmodified, which made
+Gather/Scatter/MeanSymmetric/KernelMeanSymmetric numerically indistinguishable (`h_i=h_j`
+everywhere collapses every branch above to the same number) and would have silently passed even
+with the branch dispatch wired wrong. Perturbing supports is now the standing pattern for any
+Tier-2.x script that touches `SupportScheme`. The dense-all-pairs-instead-of-real-adjacency
+simplification (above) was a deliberate choice made *before* writing code, not a fallback found
+after struggling with `AdjacencyList` internals -- worth deciding up front for 2.2 as well, since
+it generalizes to any operator whose building blocks are all compactly supported (true of
+everything through Tier 2.4; CRK's moment sums in Tier 2.5 may not have this property and should
+not assume it without checking).
+
+---
+
 ## Tier 2.2 -- Gradient, Divergence, Curl, and Laplacian's Brookshaw/Dot/Default schemes
 
 **Scope.** All four of these route through `computeKernelGradientCRK` (`crk/kernel.py`), which with
@@ -120,6 +244,139 @@ as thin follow-ups once Gradient's is green, since they share the dependency.
 **Gate.** Same as 2.1, plus re-run `gradcheck_gradient_native.py`/`gradcheck_divergence_native.py`/
 `gradcheck_curl_native.py`/`gradcheck_laplacian_native.py` to confirm nothing about how this tier
 probes the kernel accidentally exercises a reverse-mode regression.
+
+---
+
+### Tier 2.2 -- Result (done, 2026-08-18)
+
+**Deliverable shipped.** `scripts/spike_forward_mode_tier2_gradient.py`, green after fixing two
+bugs found during writing (see "Process notes" below). Gate confirmed:
+`gradcheck_gradient_native.py`/`gradcheck_divergence_native.py`/`gradcheck_curl_native.py`/
+`gradcheck_laplacian_native.py` all still PASS, `operation_matrix.py --device cpu` is unaffected
+(`OK=258, HIGH=0, ERR=0, NAN=0` -- identical to Tier 2.1's baseline), and `pytest tests/` is
+unaffected (119 passed, 1 skipped -- this tier added a script, touched no production code).
+
+**Math derivation.** `computeKernelGradientCRK` with `useCRK=False` reduces to
+`kernelGradient = sphKernelGradient_ij(x_ij, hi, hj, ...)` (`kernels/gradient.py`) for all four
+operators -- confirmed by reading `coreOperations/wp_{gradient,divergence,curl,laplacian}.py`, all
+four call it identically. So there is exactly ONE new kernel-level building block this tier needs:
+the JVP of `sphKernelGradient_ij` itself, `d(kernelGradient)/d{x,h}`. Everything downstream is
+ordinary vector calculus, done directly in torch on the dense `(n,n)` pair grid rather than as new
+`@wp.func`s -- a scope simplification the plan's entry didn't spell out but that held up cleanly.
+
+*1. `kernelGradient`'s JVP* (`_kernelGradientJVP` in the script) mirrors `sphKernelGradient_ij`'s
+own three-way `SupportScheme` dispatch, assembled from `sphGradient_`, `sphKernelHessian_`
+(`d(gradW)/dx`, already validated as Tier 2.0's Section G/H deliverable and confirmed to be exactly
+the Jacobian `sphGradient_` needs here -- Tier 2.0's table had flagged it "unused in production";
+this tier is its first real consumer), and `sphGradientDkDh_` (`d(gradW)/dh`, Section J):
+
+```
+KernelMeanSymmetric/SuperSymmetric (provably identical -- see finding 1 below):
+  G_ij  = 0.5*(sphGradient_(x,hi) + sphGradient_(x,hj))
+  dG_ij = 0.5*[ sphKernelHessian_(x,hi)@dx + sphKernelHessian_(x,hj)@dx
+                + sphGradientDkDh_(x,hi)*dhi + sphGradientDkDh_(x,hj)*dhj ]
+else (Gather/Scatter/MeanSymmetric/max-fallback):
+  h_ij = computePairwiseSupport(hi,hj,mode), dh_ij = Tier 2.1's _pairwiseSupportTangent(...)
+  G_ij  = sphGradient_(x,h_ij)
+  dG_ij = sphKernelHessian_(x,h_ij) @ dx + sphGradientDkDh_(x,h_ij)*dh_ij
+```
+
+*2. Field-value coefficient* (ordinary calculus, reused verbatim across all four operators --
+see finding 2): every `GradientScheme` reduces to `coeff_ij = fi*A_ij + fj*B_ij` (fi, fj frozen --
+Tier 1 territory), with `Vj = mass_j/density_j`:
+
+```
+Naive:      A=0,                B=Vj
+Difference: A=-Vj,               B=Vj
+Summation:  A=Vj,                B=Vj
+Symmetric:  A=mass_j/density_i,  B=mass_j*density_i/density_j^2
+```
+
+(A, B differentiated by ordinary product/quotient rule through `mass_j`/`density_i`/`density_j`;
+fi/fj are frozen so contribute no term of their own.) Gradient combines `coeff_ij` with `G_ij` by
+scalar multiplication; Divergence via `dot(coeff_ij, G_ij)` (`dotMode=False`); Curl via the 2D
+scalar cross `G_ij.x*coeff_ij.y - G_ij.y*coeff_ij.x` (`curlProduct`'s exact 2D formula,
+`math/wp_cross.py`) -- all three bilinear in `(coeff_ij, G_ij)`, so `d(coeff*G) = dcoeff*G +
+coeff*dG` by the ordinary product rule, no per-operator re-derivation needed.
+
+*3. Laplacian(Brookshaw)'s regularized-distance chain* (`D_ij = r_ij + eps*h_ij`, `n_ij =
+x_ij/D_ij`, `L_ij = -2*q_ij*dot(G_ij,n_ij)/D_ij`, `eps=1e-8` matching `wp_laplacian.py`'s literal
+constant): `dr_ij = dot(x_ij,dx_ij)/r_ij` off the diagonal; `dh_ij` reuses Tier 2.1's
+`_pairwiseSupportTangent` (`computePairwiseSupport`'s own dispatch is unchanged by this tier);
+`dD_ij = dr_ij + eps*dh_ij`; `dn_ij = (dx_ij - n_ij*dD_ij)/D_ij` (the standard `d(x/D)/dx`
+identity); `dL_ij` follows by the ordinary product/quotient rule through `dot(G,n)/D`.
+
+**Two findings this derivation surfaced (documented in the script's docstring too; neither is a
+bug to fix under this plan):**
+
+1. **`SuperSymmetric` is provably identical to `KernelMeanSymmetric` at the *gradient* level too,
+   not just the value level Tier 2.1 found.** `sphKernelGradient_ij`'s `SuperSymmetric` branch is
+   literally `(sphGradient_(x,hi) - sphGradient_(-x,hj))/2`. `sphGradient_` is odd in its position
+   argument (direction = `normalize(x)`, magnitude depends only on `|x|`), so
+   `sphGradient_(-x,hj) = -sphGradient_(x,hj)`, collapsing the branch to
+   `(sphGradient_(x,hi)+sphGradient_(x,hj))/2` -- bit-for-bit `KernelMeanSymmetric`. The plan's own
+   entry had predicted the opposite ("will legitimately diverge only at the gradient level, where
+   the odd/even distinction actually bites") -- reading the actual code before deriving showed the
+   oddness is exactly what makes the two double-negatives cancel, not what makes them differ. The
+   same argument carries one derivative further: `sphKernelHessian_` (the Jacobian of an odd
+   function) is *even* in `x`, and `sphGradientDkDh_` is *odd* (both confirmed from their closed
+   forms, not assumed), so the identity holds at the JVP level too -- checked explicitly (bit-for-
+   bit `assert`, not just claimed) in the script's own output.
+2. **The exact same field-value coefficient (`B_ij` above) serves as both Gradient's `B` term and
+   Laplacian's `q_ij` weight, for every `GradientScheme`.** `wp_laplacian.py`'s `q_ij` for
+   Naive/Difference/Summation is `(fj-fi)*apparentVolume` (`apparentVolume == Vj == B_Naive`) and
+   for Symmetric is `(fj-fi)*mass_j*density_i/density_j^2` (`== B_Symmetric` exactly). Not
+   rederived independently -- the script computes `B`/`dB` once (in `_gradient_weights`) and reuses
+   it for both Gradient/Divergence/Curl's coefficient and Laplacian's `q_ij`/`dq_ij`.
+
+**Scope note: Laplacian's Dot/Default schemes are NOT covered by this deliverable, despite the
+plan entry's title.** `computeLaplacianDot2`/`computeDotLaplacian` (`math/wp_laplaciandot.py`) do
+per-spatial-component block indexing into the field array (`q_ij[block*dim+k]`) that Brookshaw's
+plain `dot(kernelGradient, n_ij)` doesn't need -- a genuinely separate (if likely mechanical)
+JVP-assembly exercise, not just a formula swap the way Divergence/Curl were thin follow-ups on
+Gradient. Deferred rather than attempted under this tier's time budget; Brookshaw is what
+`wp_laplacian.py`'s own comments treat as the consistent estimator and is the scheme Tier 2.3
+already assumes Tier 2.2 covers, so this does not block the suggested order below. Worth its own
+small follow-up (`Tier 2.2b`, informally) before Tier 2.5 needs a Laplacian JVP under CRK.
+
+**Validation, same two independent code paths as Tier 2.1 (both exact analytic derivatives, no
+finite differences):** a hand-written dense all-pairs per-pair kernel built only from already-
+validated functions, vs. `torch.autograd.functional.jacobian` on the actual production
+`warpOperation` call contracted with the tangent. Agreed to `rel_err ~1e-15` (float64 round-off)
+across all four `GradientScheme`s and a representative `SupportScheme` subset (Gather/Scatter/
+MeanSymmetric/KernelMeanSymmetric/SuperSymmetric/PartialSymmetric for Gradient in 1D, a smaller
+subset for Divergence/Curl/Laplacian and for Gradient's own 2D case -- mirroring Tier 2.1's
+"exhaustive on the cheapest operator, representative subset elsewhere" pattern) -- no tuning or
+tolerance-loosening needed once the two bugs below were fixed.
+
+**Process notes -- two real bugs, both caught by the operator-level comparison exactly as the
+methodology promises (neither would have been caught by a value-only check):**
+
+1. **`SupportScheme` int-vs-enum comparison silently picking the wrong branch.** Every
+   `assembled_*_jvp` function receives `mode` as the raw `SupportScheme.value` int (needed for the
+   warp kernel launch), but Laplacian's new `_h_ij_and_tangent` torch helper compared it against
+   `SupportScheme.Gather` etc. directly -- an int-vs-enum comparison that is always `False` in
+   Python, so it silently fell through to the `else` (max) branch for every mode. This produced a
+   *small* (`~1e-9` relative, not `O(1)`) error rather than an obviously-wrong one, because `h_ij`
+   only enters Laplacian's formula through the tiny `eps=1e-8` regularization term -- a reminder
+   that a silently-wrong branch dispatch does not always announce itself with a large error, and
+   `rel_err ~1e-9` (nine orders above float64 round-off, but still "small-looking") is exactly the
+   kind of near-miss worth treating as a real bug, not a tolerance to loosen. Fixed by coercing
+   `mode = SupportScheme(mode)` at the top of the helper.
+2. **A shape mismatch that produced a spuriously large "error" rather than no error at all** --
+   the opposite failure mode from #1, useful to record for the same reason. Curl's production
+   output shape is `(n,1)` (`wp_curl.py` forces `outputShape=[1]` for a 2D vector-field input,
+   where Gradient/Divergence's outputs are shape `(n,dim)`/`(n,)`), but the assembled side returned
+   shape `(n,)`. Subtracting them in `check()` silently broadcast to an `(n,n)` matrix instead of
+   raising, comparing unrelated elements against each other and reporting `rel_err ~1.4-1.8` for
+   every case -- large enough to look like a real formula bug (and initially mistaken for one; the
+   actual JVP math checked out cleanly on separate inspection) but not large enough (`>1e9`-style)
+   to obviously be a broadcast artifact either, since the underlying per-particle values are `O(1)`.
+   Fixed by having `check()` flatten both sides and assert matching element counts before
+   comparing -- now a genuine shape mismatch raises immediately instead of comparing the wrong
+   elements. Worth carrying into any future Tier-2.x script that touches an operator whose output
+   rank isn't the obvious `(n,)`/`(n,dim)` (Curl's `[1]`-forcing is the only one so far, but
+   Laplacian-Vector or a future CRK-corrected shape could hit the same class of thing).
 
 ---
 
@@ -227,16 +484,41 @@ history flags as the most adjoint-fragile.
   in each Tier-2.x script's domain construction (non-periodic, or particles kept well inside the
   domain) rather than rediscovering it as a spurious failure later.
 
+  This is a genuine, unavoidable non-differentiability at `r=L/2` exactly (the wrap function's
+  *value*, not just its derivative, jumps there -- no adjoint trick recovers a meaningful gradient
+  at that point). It is provably unreachable by any pair that actually contributes to a kernel sum
+  whenever `h < L/2` per periodic axis, which is already the standard periodic-SPH requirement
+  (otherwise a particle self-interacts through its own periodic image, or double-counts a neighbor
+  through two images) -- compactly-supported kernels are exactly zero once `q=r/h>1`, and `h<L/2`
+  keeps that zero-region a strict superset of the boundary's neighborhood. No runtime guard was
+  added for this (`h<L/2` would need pulling `supports`/domain bounds off the device every call --
+  not worth it for a configuration nobody should hit anyway); it's a documented assumption instead.
+
+  **Verified 2026-08-18**, independent of any Tier's math: `scripts/periodic_invariance_check.py`
+  checks that translating a particle by an exact integer multiple of the periodic axis length is
+  physically invisible -- `f(shifted) == f(original)` forward, and the full reverse-mode Jacobian
+  w.r.t. positions/supports/masses[/densities] also matches exactly, for Density/Interpolate/
+  Gradient/Divergence/Curl/Laplacian in 1D and 2D, including pairs that genuinely interact through
+  a periodic image (not just a degenerate non-wrapping case). This exercises both places the wrap
+  is implemented (`buildCompactHashMap`'s pre-hash wrap and `computeDistanceVec`'s per-pair wrap)
+  and confirms they agree with each other and with the existing reverse-mode AD path, everywhere
+  except the known, unreachable-under-`h<L/2` `r=L/2` point. This closes the loop on the assumption
+  every Tier-2.x script's "just avoid periodic domains" workaround depends on: periodicity itself,
+  where this plan doesn't touch it, was already correct.
+
 ---
 
 ## Suggested order and why
 
-1. **Tier 2.1** (Density/Interpolate) -- proves the assembly pattern works at all, zero new kernel
-   math, cheapest possible validation.
-2. **Tier 2.2** (Gradient/Divergence/Curl/Laplacian-non-Naive) -- the highest-value tier: four
-   production operators' base (non-CRK, non-renorm) paths, still zero new kernel math, all built on
-   what Tier 2.0 already validated.
-3. **Tier 2.4** (Renormalization) -- first tier needing genuinely new (matrix-calculus, not
+1. **Tier 2.1** (Density/Interpolate) -- DONE (2026-08-18). Proved the assembly pattern works end
+   to end, zero new kernel math, cheapest possible validation. See the Tier 2.1 "Result" subsection
+   above.
+2. **Tier 2.2** (Gradient/Divergence/Curl/Laplacian-Brookshaw) -- DONE (2026-08-18). The highest-
+   value tier: four production operators' base (non-CRK, non-renorm) paths, still zero new kernel
+   math (one new dispatch function assembled from Tier 2.0's building blocks), all built on what
+   Tier 2.0 already validated. Laplacian's Dot/Default schemes explicitly deferred -- see the Tier
+   2.2 "Result" subsection's scope note. NEXT: Tier 2.4.
+3. **Tier 2.4** (Renormalization) -- NEXT. First tier needing genuinely new (matrix-calculus, not
    kernel-derivative) work, but bounded and well-precedented by `gradcheck_pinv_native.py`.
 4. **Tier 2.5** (CRK) -- last, hardest, highest historical bug rate; do only once 2.2/2.4 are solid
    since it depends on both.
