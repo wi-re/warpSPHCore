@@ -556,13 +556,15 @@ Each step is independently landable, independently revertable, and gated. Steps 
 ordered so that the riskiest change (D/E) lands after the infrastructure that makes it
 testable. Steps 0-B and F are pure wins with no caching risk at all.
 
-## Status as of 2026-08-17
+## Status as of 2026-08-18
 
 **✅ COMPLETE:** Steps 0 (bench harness), A (kinds required), B (Field/nullField/structFor), C (null
 fields wired into `arg_extract.py`), D (view reuse, no-grad path only), E (view reuse, grad path),
 F (`StateBundle`, no-grad path only), G (forward-mode readiness audit -- found and fixed two real
 bugs, see its section), H (real-workload bottleneck audit -- the ~7% end-to-end observation is now
-fully explained; see its results subsection)
+fully explained; see its results subsection), I (declared operator ABI -- `OperatorSpec` /
+`SPHContext` / `launchOperator`, all 9 core call sites ported, `warpWrapper2` reduced to a shim;
+see its own subsection under "Steps I / J" above)
 - Baseline numbers recorded and gate passes
 - Field attachment proven safe; no reference cycles, survives clone, dies with tensor
 - **Design decision used:** Option A (flat_tensors carries `[torch.Tensor | Field]`;
@@ -720,12 +722,22 @@ whole "Status as of 2026-08-17" block plus each Step's own subsection (B through
 touching anything -- they carry the corrections and hazards below, and the numbered lists under
 "Step X notes" are denser than the surrounding prose for a reason.
 
-**What to do next:** Steps I/J (Section 8, the interface break). Step H cleared them explicitly --
-it found no bottleneck needing an architectural change to the core first, and ruled out both
-candidate follow-ons (the integrator buffer pool and the neighbour-list rebuild) on measured
-evidence. Four findings feed Step I directly: move `stateBundle.py` out of `autograd/` and freeze
-`OperationProperties` (Step G), and note that the performance case for the interface break is now
-quantified at ~1 ms/step on a real workload rather than assumed (Step H).
+**Step I is done as of 2026-08-18 (this machine, working tree should be clean at whatever commit
+follows "Step I: port Interpolate/Gradient/Divergence/Curl/Laplacian to launchOperator" -- check
+`git log` rather than trusting this sentence, per the habit established above).** Its own
+subsection is under "Steps I / J" earlier in this section -- read it before touching
+`autograd/operator_spec.py`, any `coreOperations/*.py` backend, or any `crk/*.py` backend; it
+carries the `callable()` vs `types.FunctionType` bug, the GPU-mismatch benchmarking hazard, and why
+each vector-output operator's dtype resolver reads `flatOutputShape` back out of `extras` instead
+of recomputing it.
+
+**What to do next:** Step J (Section 8.4) -- migrate the frontend (`~/dev/warpSPH`)'s 24
+`warpWrapper2` call sites and 65 `warpOperation` sites onto `SPHContext`/`launchOperator`, then
+delete the `warpWrapper2` shim and the `defaultStateArguments` tuple path from this repo. Check
+whether Section 8.4's prerequisite (a `.github/workflows/` in `warpSPH` running its existing
+`tests/`) has been done before starting -- it had not as of Step I landing, and a 65-site migration
+without CI catching a regression automatically is exactly the situation that prerequisite exists to
+prevent.
 
 **Step H's highest-value finding has already been fixed** (in the frontend, `d9ad712`): the
 Kolmogorov forcing's host-side scipy interpolator, 66-68% of host time above 57k particles, is now a
@@ -1422,6 +1434,102 @@ interface they sit behind starts moving. Step I introduces
 `OperatorSpec` / `SPHContext` / `launchOperator` and ports the core, with
 `warpWrapper2` reduced to a shim so the frontend is untouched; Step J migrates the
 frontend's 24 wrapper sites and 65 `warpOperation` sites and deletes the shim.
+
+### Step I -- ✅ DONE (2026-08-18)
+
+**Prerequisites first, per Step H's audit (line ~726 above):** `OperationProperties` is now
+`@dataclass(frozen=True)` -- unblocked by Step G's finding that its one in-place-mutation site
+(`computeRenormalizationMatrices`) was already fixed and confirmed the only such site in either
+repo. `stateBundle.py` moved from `autograd/` to `util/` (next to `fieldRegistry.py`, which it
+already depended on) -- it imports no torch and has nothing to do with the autograd bridge, but
+living under `autograd/` meant importing it dragged `StateAwareWarpFunction` in via that package's
+`__init__.py`. `ExecutionMode` gained an `AUTO` member (`SPHContext.mode`'s default) alongside
+`NONE/REVERSE/FORWARD` -- rejected at the `SPHContext` boundary exactly like `FORWARD` is rejected
+internally by `structFor`/`getStateBundle`; nothing branches on `NONE` vs `REVERSE` yet, so there
+is no behaviour to resolve `AUTO` into beyond that guard, and `structFor`'s existing `KeyError`
+fallback already rejects it cleanly if it ever reaches the struct table directly.
+
+**Machinery:** `autograd/operator_spec.py` -- `OperatorSpec`, `OutputSpec`, `ExtraSpec`/`ExtraKind`,
+`ShapeOf`, `ThreadSpec`, `Corrections`, `SPHContext`, `launchOperator`, matching Section 8.2's
+sketch. `warpWrapper2`'s body (struct extraction + additionalArguments split +
+`StateAwareWarpFunction.apply`) was extracted into a private `_launch` in `wrapper.py`; both
+`warpWrapper2` (kept, now a real one-line shim) and `launchOperator` call it, so the two entry
+points cannot drift apart -- there is exactly one place gradients or struct assembly could go
+wrong, not two parallel implementations to keep in sync.
+
+**All 9 real call sites ported** (Density, CRK volume, CRK density, CRK moments, Covariance,
+Interpolate, Gradient, Divergence, Curl, Laplacian -- 10 kernels, 9 backend functions, `crk_moments`
+is 7-output). `warpWrapper2` is no longer called anywhere in this repo's core; it exists solely for
+the frontend's own call sites, which Step J migrates.
+
+**Section 8.3 corrected against what the code actually does, twice:**
+1. **"Output dtypes resolved at import" holds for 5 of 9 operators, not all of them.** Density,
+   Covariance, and the three CRK operators have output dtypes that depend only on
+   dim/precision/masses-dtype -- genuinely static, or as static as `scalar_t` (the configured
+   precision type) already was. But Interpolate/Gradient/Divergence/Curl/Laplacian's output dtype
+   packs the *runtime* shape of a `queryValues`/`referenceValues` tensor that is not known until
+   call time -- no amount of declaring things earlier makes an unknown-until-called tensor shape a
+   compile-time constant. `OutputSpec.dtype` accordingly accepts a resolver callable
+   (`Callable[[ctx, extras], dtype]`) alongside a literal value; the win for those five operators is
+   that the resolution logic is declared once next to the kernel instead of hand-inlined at each
+   call site, not that the runtime probe disappears. Recorded in `operator_spec.py`'s own docstring,
+   not just here.
+2. **The resolver pattern itself changed mid-port.** Curl and Divergence's output shape depends on
+   the *unflattened* `queryValues.shape[1:]` in a dim/mode-dependent way (Curl: different formula
+   for `dim==3/2/1`; Divergence: `inputShape[1:]` vs `inputShape[:-1]` depending on `dotMode`) that
+   is not recoverable from the flattened `(N, flatInputShape)` tensor a resolver actually receives.
+   Rather than re-deriving each formula a second time inside the resolver (a second place to get it
+   wrong), every one of the five vector-output operators' resolver just reads the already-computed
+   `flatOutputShape` extra straight back out of the `extras` dict passed to `launchOperator` --
+   faithful to the original by construction, immune to shape-formula bugs by not re-implementing the
+   formula at all.
+
+**A real bug caught immediately, the first time `OutputSpec.resolve` ran against a *literal* dtype
+instead of a resolver:** the initial implementation used bare `callable(self.dtype)` to tell a
+resolver function apart from a literal dtype. `scalar_t` (and `wp.int32`, and every other Warp
+dtype) is a *class*, and classes are callable -- `callable(scalar_t)` is `True` -- so CRK volume's
+static `outputDtypes=scalar_t` port crashed immediately (`TypeError: scalar_base.__init__() takes
+from 1 to 2 positional arguments but 3 were given`), caught by `pytest -k crk` on the very next
+call site ported, before the CRK-family port was committed. Fixed by discriminating on
+`types.FunctionType` instead of bare `callable()` -- a resolver is always a plain function/lambda
+declared alongside the `OperatorSpec`, never a type.
+
+**Verification:** full pytest suite (118 passed, 1 skipped) after every call site ported, not just
+at the end. `operation_matrix.py`'s CI-gated sweeps clean on this machine: 2D/float32 (258 OK),
+1D/float32 (282 OK), 2D/float64 (258 OK), 3D/float32-CUDA (258 OK), 0 HIGH/ERR/NAN in every one; the
+`--jitter 0.2` diagnostic sweep reproduces the documented pre-existing 74 OK/184 HIGH exactly (not
+a regression -- matches the number Step G's write-up already pinned against unmodified `HEAD`).
+Frontend (`~/dev/warpSPH`, editable install, so it picked up every change with no reinstall):
+`tests/test_gradcheck_scripts.py` 15/15 passed; `tests/test_physics.py` +
+`tests/test_caseSpec.py` + `tests/test_runner.py` all green (exit 0, no failures in the dot output).
+
+**Performance check, and a hazard worth recording for whoever runs this next:** `nvidia-smi`
+reports this machine's GPU as an RTX 3090 (24 GiB); every `docs/regression/bench_call_overhead_step_*.md`
+number recorded during Steps C-F was measured on a **different card** (an RTX PRO 6000
+Blackwell, per those docs' own header lines) -- comparing this session's ~550-650 us readings
+against those documents' ~150-320 us numbers directly would have read as a 2-4x regression that
+isn't real, just different hardware. Verified properly instead: `git worktree add` a throwaway
+checkout of the pre-Step-I commit (`a5ccf1b`), ran the identical bench there with `PYTHONPATH`
+pointed at the worktree's `src/` (not `pip install -e .`, which rewrites this environment's global
+editable-install pointer and would have left every subsequent command in this same session
+importing from the wrong tree -- caught and undone immediately after it happened once). Pre-Step-I
+(518/625/574 us) and post-Step-I (545/642/622/640 us) fully overlap at dim=2, N=19881, no-grad --
+no measurable regression, consistent with `launchOperator`'s added work (a `dict` build, a handful
+of `isinstance` checks, a tuple comprehension) being negligible next to the ~550+ us this bench's
+"other" bucket already attributes to kernel dispatch and Warp/Tape overhead on this card.
+
+**What Step I is not:** no new caching layer, no change to which struct types get built or what
+gets zeroed on the grad path -- `_launch` is untouched Steps A-H logic, just reachable from two
+entry points now instead of one. `ExecutionMode.AUTO` is declared and rejects `FORWARD`, but
+resolves to nothing else yet; there is no behaviour today for a resolved `NONE` vs `REVERSE` to
+attach to; this is Section 8.2's "home for `ExecutionMode`" being built, not Phase 6 starting early.
+
+**What's left:** Step J -- migrate the frontend's 24 `warpWrapper2` call sites and 65
+`warpOperation` sites onto `SPHContext`/`launchOperator`, module by module, gated on the frontend's
+own gradcheck and physics suites staying green; then delete the `warpWrapper2` shim and the
+`defaultStateArguments` tuple path. Section 8.4's prerequisite for Step J (`warpSPH` CI running its
+existing `tests/`) has not been done -- worth checking whether it still holds before starting, not
+assuming it from this paragraph.
 
 
 # 5. Verification
