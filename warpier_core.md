@@ -321,8 +321,26 @@ All operation-relevant notebooks are ported and accounted for in root (`warp_den
 
 The big remaining piece, in priority order — no re-investigation needed, this is the actual next step:
 
-1. **Phase 3: the `Field` abstraction.** Phases 1 and 5 (structured kernel ABI, traversal consolidation) are done for all 7 operators (Density/Interpolate/Gradient/Divergence/Curl/Laplacian/Covariance) plus CRK. Phase 2 (state consolidation) is informally done — state objects are already semantic (`ParticleState`, `CRKState`, etc.), just torch-native rather than owning a synchronized torch+warp pair. What's not started: `Field` (torch view + cached warp view + dtype/device/shape metadata + dirty/sync flags), which is the prerequisite for both Phase 4 (stop rebuilding kernel structs from scratch in `extractStateInfo` on every call) and Phase 6/7 (forward-mode AD, which needs somewhere to hang tangent storage). Concrete starting point per the plan's own Step 2: a minimal `Field` class with a torch-compatible public surface and a legacy fallback conversion path, wrapping lazily — start by profiling how much of `extractStateInfo`'s per-call cost (`autograd/arg_extract.py`) is actually the repeated `wp.from_torch()`/struct-population work `Field` is meant to eliminate, since that's the concrete win Phase 3 buys and it's worth confirming the size of the win before committing to the abstraction's design.
-2. Forward-mode AD (Phase 6/7) — do not start before (1). It's designed to be "extend `Field` with a tangent slot," not a kernel-by-kernel rewrite; starting it against the current torch-native state objects would mean redoing the work once `Field` lands. Note: Tier 1 (the value-only JVP slice, `warpOperationJVP`) needed no `Field`/struct work at all and has already landed against the current torch-native state objects (`warpier_forward_mode_plan.md` Phase 2, 2026-08-18) — this item is about the Tier-2 (position/support/mass/density tangent) dual-struct work, which is the piece that does need `Field`.
+1. ~~**Phase 3: the `Field` abstraction.**~~ — **done, corrected 2026-08-18 (this section was stale).**
+   It previously said `Field` was "not started"; that was true when first written but `warpier_fields.md`'s own "Status as of 2026-08-18" records Steps 0 and A-J as complete and gated: `Field` (`src/warpSPHCore/dataTypes/field_t.py`) exists, with an
+   `tangent: Optional["Field"] = None` slot built in from day one (Section 3.6 requirement 1 --
+   "pair-capable from day one"), plus `StateBundle`, the declared `OperatorSpec`/`SPHContext`/
+   `launchOperator` ABI (Steps I/J), `ExecutionMode.FORWARD` (declared, and as of Phase 2 aliased onto
+   `REVERSE`'s struct rows for Tier 1), and the null-field registry that doubles as the
+   unseeded-tangent supply (requirement 5). What Steps A-J built is the *primal*-side caching/ABI
+   infrastructure the tangent slot rides on -- the slot itself is still inert (nothing writes into
+   it yet). Read `warpier_fields.md` Section 3.6 and its "Status as of 2026-08-18" section before
+   touching this again; do not re-derive whether `Field` exists.
+2. **Tier-2 forward-mode wiring (Phase 6's remaining piece, `warpier_forward_mode_plan.md` Phase 4).**
+   Tier 1 (the value-only JVP slice, `warpOperationJVP`) needed no new struct/kernel math and has
+   already landed (`warpier_forward_mode_plan.md` Phase 2, 2026-08-18). Tier 2 (position/support/
+   mass/density tangents) does not need `Field` built -- it already is -- but does need two things
+   on top of it that are *not* done yet: (a) the already-derived, already-validated per-operator JVP
+   math (`warpier_adjoint.md` Tiers 2.0-2.5) promoted from throwaway `scripts/spike_forward_mode_tier2_*.py`
+   dense-all-pairs form into real `kernels/` functions, and (b) production JVP kernel/spec pairs
+   (mirroring e.g. `computeSPHDensity_Kernel`) that traverse the real adjacency list and route
+   tangent arrays through the existing `Field.tangent`/`StateBundle` machinery, wired into
+   `warpOperationJVP`. In progress as of 2026-08-18, `warpier_forward_mode_plan.md` Phase 4.
 
 Smaller open items, independent of the above, each already root-caused (no re-investigation needed, just implementation):
 
@@ -545,7 +563,9 @@ Operators should consume semantic information ("positions", "densities", "neighb
 
 # Phase 3 – Introduce a Field Abstraction
 
-## Status: planned in detail — see `warpier_fields.md`
+## Status: done (2026-08-18) — see `warpier_fields.md`'s "Status as of 2026-08-18" (Steps 0, A-J
+## complete and gated). This heading previously said "planned in detail"; corrected in "What's
+## Next" above after that turned out to be stale.
 
 `warpier_fields.md` is the executable plan for Phases 3 and 4, written against the repo
 after `3cdd4e6` and cross-checked against the `warpSPH` frontend. It carries the
