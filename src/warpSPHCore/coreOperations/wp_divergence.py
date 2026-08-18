@@ -186,6 +186,24 @@ def computeSPHDivergenceTensor_Kernel(
     )
 
 
+def _divergenceOutputDtype(ctx, extras):
+    return _get_warp_vector_dtype(int(extras["flatOutputShape"]), extras["queryValuesFlat"].dtype)
+
+
+_DIVERGENCE_SPEC = OperatorSpec(
+    kernel=computeSPHDivergenceTensor_Kernel,
+    outputs=(OutputSpec(dtype=_divergenceOutputDtype),),
+    extras=(
+        ExtraSpec("consistentDivergence", ExtraKind.SCALAR),
+        ExtraSpec("numDims", ExtraKind.SCALAR),
+        ExtraSpec("flatInputShape", ExtraKind.SCALAR),
+        ExtraSpec("flatOutputShape", ExtraKind.SCALAR),
+        ExtraSpec("queryValuesFlat", ExtraKind.TENSOR),
+        ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR),
+    ),
+)
+
+
 def _computeSPHDivergence_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
@@ -219,8 +237,6 @@ def _computeSPHDivergence_stateBackend(
                 flatOutputShape *= d
             numDims = len(inputShape)
 
-            outputDtype = _get_warp_vector_dtype(flatOutputShape, queryValues.dtype)
-
             operationProperties = OperationProperties(
                 kernel=kernel,
                 operation=WarpOperation.Divergence,
@@ -231,25 +247,25 @@ def _computeSPHDivergence_stateBackend(
             )
 
         with record_function("warpSPH[Divergence] - Kernel Execution"):
-            result = warpWrapper2(
-                launcher=launch_kernel,
-                kernel=computeSPHDivergenceTensor_Kernel,
-                outputSizes=outputSize,
-                outputDtypes=outputDtype,
-                defaultStateArguments=(
-                    queryParticles, operationProperties, domain,
-                    queryVolumes, referenceVolumes,
-                    adjacency,
-                    referenceParticles,
-                    crkState,
-                    gradHState,
-                    renormalizationState,
+            ctx = SPHContext(
+                query=queryParticles,
+                properties=operationProperties,
+                domain=domain,
+                adjacency=adjacency,
+                reference=referenceParticles,
+                corrections=Corrections(
+                    volumes=(queryVolumes, referenceVolumes),
+                    crk=crkState, gradH=gradHState, renorm=renormalizationState,
                 ),
-                additionalArguments=(
-                    wp.bool(consistentDivergence),
-                    wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
-                    queryValues.view(-1, flatInputShape), referenceValues.view(-1, flatInputShape),
-                ),
+            )
+            result = launchOperator(
+                _DIVERGENCE_SPEC, ctx,
+                consistentDivergence=wp.bool(consistentDivergence),
+                numDims=wp.int32(numDims),
+                flatInputShape=wp.int32(flatInputShape),
+                flatOutputShape=wp.int32(flatOutputShape),
+                queryValuesFlat=queryValues.view(-1, flatInputShape),
+                referenceValuesFlat=referenceValues.view(-1, flatInputShape),
             )
 
     return result.view(outputSize, *outputShape)

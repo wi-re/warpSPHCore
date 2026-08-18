@@ -159,6 +159,13 @@ def computeSPHInterpolation_Kernel(
     )
 
 
+_INTERPOLATE_SPEC = OperatorSpec(
+    kernel=computeSPHInterpolation_Kernel,
+    outputs=(OutputSpec(dtype=lambda ctx, extras: castTorchToWarpAsBuiltins(extras["referenceValues"]).dtype),),
+    extras=(ExtraSpec("referenceValues", ExtraKind.TENSOR),),
+)
+
+
 def _computeSPHInterpolant_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
@@ -194,9 +201,6 @@ def _computeSPHInterpolant_stateBackend(
                 flat_len = referenceValues[0].numel()
                 referenceValues = referenceValues.reshape(referenceValues.shape[0], flat_len).contiguous()
 
-            outputSize = queryParticles.positions.shape[0]
-            outputDtype = castTorchToWarpAsBuiltins(referenceValues).dtype
-
             operationProperties = OperationProperties(
                 kernel=kernel,
                 operation=WarpOperation.Interpolate,
@@ -205,24 +209,15 @@ def _computeSPHInterpolant_stateBackend(
             )
 
         with record_function("warpSPH[Interpolation] - Kernel Execution"):
-            result = warpWrapper2(
-                launcher=launch_kernel,
-                kernel=computeSPHInterpolation_Kernel,
-                outputSizes=outputSize,
-                outputDtypes=outputDtype,
-                defaultStateArguments=(
-                    queryParticles, operationProperties, domain,
-                    queryVolumes, referenceVolumes,
-                    adjacency,
-                    referenceParticles,
-                    crkState,
-                    None,
-                    None,
-                ),
-                additionalArguments=(
-                    referenceValues,
-                ),
+            ctx = SPHContext(
+                query=queryParticles,
+                properties=operationProperties,
+                domain=domain,
+                adjacency=adjacency,
+                reference=referenceParticles,
+                corrections=Corrections(volumes=(queryVolumes, referenceVolumes), crk=crkState),
             )
+            result = launchOperator(_INTERPOLATE_SPEC, ctx, referenceValues=referenceValues)
 
         if needs_flatten:
             result = result.reshape(result.shape[0], *field_shape)

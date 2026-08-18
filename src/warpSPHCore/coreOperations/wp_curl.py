@@ -180,6 +180,23 @@ def computeSPHCurlTensor_Kernel(
     )
 
 
+def _curlOutputDtype(ctx, extras):
+    return _get_warp_vector_dtype(int(extras["flatOutputShape"]), extras["queryValuesFlat"].dtype)
+
+
+_CURL_SPEC = OperatorSpec(
+    kernel=computeSPHCurlTensor_Kernel,
+    outputs=(OutputSpec(dtype=_curlOutputDtype),),
+    extras=(
+        ExtraSpec("numDims", ExtraKind.SCALAR),
+        ExtraSpec("flatInputShape", ExtraKind.SCALAR),
+        ExtraSpec("flatOutputShape", ExtraKind.SCALAR),
+        ExtraSpec("queryValuesFlat", ExtraKind.TENSOR),
+        ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR),
+    ),
+)
+
+
 def _computeSPHCurl_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
@@ -219,8 +236,6 @@ def _computeSPHCurl_stateBackend(
                 flatOutputShape *= d
             numDims = len(inputShape)
 
-            outputDtype = _get_warp_vector_dtype(flatOutputShape, queryValues.dtype)
-
             operationProperties = OperationProperties(
                 kernel=kernel,
                 operation=WarpOperation.Curl,
@@ -230,24 +245,24 @@ def _computeSPHCurl_stateBackend(
             )
 
         with record_function("warpSPH[Curl] - Kernel Execution"):
-            result = warpWrapper2(
-                launcher=launch_kernel,
-                kernel=computeSPHCurlTensor_Kernel,
-                outputSizes=outputSize,
-                outputDtypes=outputDtype,
-                defaultStateArguments=(
-                    queryParticles, operationProperties, domain,
-                    queryVolumes, referenceVolumes,
-                    adjacency,
-                    referenceParticles,
-                    crkState,
-                    gradHState,
-                    renormalizationState,
+            ctx = SPHContext(
+                query=queryParticles,
+                properties=operationProperties,
+                domain=domain,
+                adjacency=adjacency,
+                reference=referenceParticles,
+                corrections=Corrections(
+                    volumes=(queryVolumes, referenceVolumes),
+                    crk=crkState, gradH=gradHState, renorm=renormalizationState,
                 ),
-                additionalArguments=(
-                    wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
-                    queryValues.view(-1, flatInputShape), referenceValues.view(-1, flatInputShape),
-                ),
+            )
+            result = launchOperator(
+                _CURL_SPEC, ctx,
+                numDims=wp.int32(numDims),
+                flatInputShape=wp.int32(flatInputShape),
+                flatOutputShape=wp.int32(flatOutputShape),
+                queryValuesFlat=queryValues.view(-1, flatInputShape),
+                referenceValuesFlat=referenceValues.view(-1, flatInputShape),
             )
 
     return result.view(outputSize, *outputShape)

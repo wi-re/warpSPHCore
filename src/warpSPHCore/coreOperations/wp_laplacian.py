@@ -225,6 +225,23 @@ def computeSPHLaplacianTensor_Kernel(
     )
 
 
+def _laplacianOutputDtype(ctx, extras):
+    return _get_warp_vector_dtype(int(extras["flatOutputShape"]), extras["queryValuesFlat"].dtype)
+
+
+_LAPLACIAN_SPEC = OperatorSpec(
+    kernel=computeSPHLaplacianTensor_Kernel,
+    outputs=(OutputSpec(dtype=_laplacianOutputDtype),),
+    extras=(
+        ExtraSpec("numDims", ExtraKind.SCALAR),
+        ExtraSpec("flatInputShape", ExtraKind.SCALAR),
+        ExtraSpec("flatOutputShape", ExtraKind.SCALAR),
+        ExtraSpec("queryValuesFlat", ExtraKind.TENSOR),
+        ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR),
+    ),
+)
+
+
 def _computeSPHLaplacian_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
@@ -270,8 +287,6 @@ def _computeSPHLaplacian_stateBackend(
                 flatOutputShape *= d
             numDims = len(inputShape)
 
-            outputDtype = _get_warp_vector_dtype(flatOutputShape, queryValues.dtype)
-
             operationProperties = OperationProperties(
                 kernel=kernel,
                 operation=WarpOperation.Laplacian,
@@ -283,24 +298,24 @@ def _computeSPHLaplacian_stateBackend(
             )
 
         with record_function("warpSPH[Laplacian] - Kernel Execution"):
-            result = warpWrapper2(
-                launcher=launch_kernel,
-                kernel=computeSPHLaplacianTensor_Kernel,
-                outputSizes=outputSize,
-                outputDtypes=outputDtype,
-                defaultStateArguments=(
-                    queryParticles, operationProperties, domain,
-                    queryVolumes, referenceVolumes,
-                    adjacency,
-                    referenceParticles,
-                    crkState,
-                    gradHState,
-                    renormalizationState,
+            ctx = SPHContext(
+                query=queryParticles,
+                properties=operationProperties,
+                domain=domain,
+                adjacency=adjacency,
+                reference=referenceParticles,
+                corrections=Corrections(
+                    volumes=(queryVolumes, referenceVolumes),
+                    crk=crkState, gradH=gradHState, renorm=renormalizationState,
                 ),
-                additionalArguments=(
-                    wp.int32(numDims), wp.int32(flatInputShape), wp.int32(flatOutputShape),
-                    queryValues.view(-1, flatInputShape), referenceValues.view(-1, flatInputShape),
-                ),
+            )
+            result = launchOperator(
+                _LAPLACIAN_SPEC, ctx,
+                numDims=wp.int32(numDims),
+                flatInputShape=wp.int32(flatInputShape),
+                flatOutputShape=wp.int32(flatOutputShape),
+                queryValuesFlat=queryValues.view(-1, flatInputShape),
+                referenceValuesFlat=referenceValues.view(-1, flatInputShape),
             )
 
     return result.view(outputSize, *outputShape)
