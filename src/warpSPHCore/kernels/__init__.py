@@ -20,7 +20,7 @@ __all__.extend([
 #     'eval_packing',
 # ])
 
-from .gradH import sphKernelDkDh
+from .gradH import sphKernelDkDh, sphGradientDkDh
 from .laplacian import sphKernelLaplacian
 from .hessian import sphKernelHessian
 from .kernel import sphKernel, sphKernel_ij
@@ -28,6 +28,7 @@ from .gradient import sphKernelGradient, sphKernelGradient_ij
 
 __all__.extend([
     'sphKernelDkDh',
+    'sphGradientDkDh',
     'sphKernelLaplacian',
     'sphKernelHessian',
     'sphKernel',

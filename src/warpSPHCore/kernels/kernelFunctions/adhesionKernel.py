@@ -26,7 +26,7 @@ def adhesionKernel_d2kdq2(q: scalar_t, dim: wp.int32 = 2):
 @wp.func
 def adhesionKernel_d3kdq3(q: scalar_t, dim: wp.int32 = 2):
     if q > scalar_t(0.5):
-        return (scalar_t(48.0) - scalar_t(32.0) * q) / (scalar_t(4.0) * wp.pow(scalar_t(-4.0) * iPow(q, 2) + scalar_t(6.0) * q - scalar_t(2.0), scalar_t(scalar_t(0.75))) * (scalar_t(2.0) * iPow(q, 2) - scalar_t(3.0) * q + scalar_t(1.0)))
+        return (scalar_t(3.0) * (scalar_t(3.0) - scalar_t(4.0) * q) * (scalar_t(16.0) * iPow(q, 2) - scalar_t(24.0) * q + scalar_t(15.0))) / (scalar_t(32.0) * iPow(scalar_t(2.0) * iPow(q, 2) - scalar_t(3.0) * q + scalar_t(1.0), 2) * wp.pow(scalar_t(-4.0) * iPow(q, 2) + scalar_t(6.0) * q - scalar_t(2.0), scalar_t(scalar_t(0.75))))
     return scalar_t(0.0)
 
 @wp.func

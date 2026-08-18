@@ -23,8 +23,8 @@ def spiky_d3kdq3(q: scalar_t, dim: wp.int32 = 2):
 
 @wp.func
 def spiky_C_d(dim: wp.int32):
-    if dim == 1: return scalar_t(0.25)
-    elif dim == 2: return scalar_t(2.0) / scalar_t(np.pi)
+    if dim == 1: return scalar_t(2.0)
+    elif dim == 2: return scalar_t(10.0) / scalar_t(np.pi)
     else: return scalar_t(15.0) / scalar_t(np.pi)
 
 @wp.func

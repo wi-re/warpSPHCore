@@ -61,7 +61,20 @@ SPIKE_SCRIPTS = [
 ]
 
 
-@pytest.mark.parametrize("script_name", GRADCHECK_SCRIPTS + SPIKE_SCRIPTS)
+# Not a gradcheck either (no torch.autograd involved at all -- pure Warp
+# wp.Tape against the raw @wp.func kernel math in src/warpSPHCore/kernels/,
+# one level below every operator these other scripts exercise). Same
+# subprocess-per-script gate, same precision-baking reason. See its own
+# docstring: this is what caught the ViscosityKernel/CohesionKernel/
+# AdhesionKernel KernelFunctions enum collision, the sphKernelC_d
+# argument-order bug, the Poly6/Spiky 1D+2D normalization-constant bugs, and
+# a wrong AdhesionKernel third-derivative formula -- all fixed alongside it.
+KERNEL_SANITY_SCRIPTS = [
+    "kernel_sanity_native.py",
+]
+
+
+@pytest.mark.parametrize("script_name", GRADCHECK_SCRIPTS + SPIKE_SCRIPTS + KERNEL_SANITY_SCRIPTS)
 def test_gradcheck_script(script_name):
     script_path = SCRIPTS_DIR / script_name
     result = subprocess.run(

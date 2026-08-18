@@ -14,7 +14,7 @@ def sphKernelScale(kernel: wp.int32, dim: wp.int32):
 
 @wp.func
 def sphKernelC_d(kernel: wp.int32, dim: wp.int32):
-    return eval_C_d(kernel, dim)
+    return eval_C_d(dim, kernel)
 
 @wp.func
 def sphKernelN_H(kernel: wp.int32, dim: wp.int32):

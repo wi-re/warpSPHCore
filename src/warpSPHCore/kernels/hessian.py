@@ -17,8 +17,10 @@ def sphKernelHessian_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kern
     r = vectorNorm_warp(x)
     dim = wp.int32(x.length)
     q = r / h
-    eps = scalar_t(1e-5)
-    
+    eps = get_epsilon(r)
+    if q > scalar_t(1.0):
+        return type(wp.outer(x, x))(scalar_t(0.0))
+
     k1 = eval_dkdq(q, dim, kernel)   * eval_C_d(dim, kernel) / iPow(h, dim + 1)
     k2 = eval_d2kdq2(q, dim, kernel) * eval_C_d(dim, kernel) / iPow(h, dim + 2)
     s = (iPow(r, 2) + iPow(eps,2) *iPow(h,2))

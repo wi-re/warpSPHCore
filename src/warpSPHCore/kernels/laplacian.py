@@ -17,7 +17,7 @@ def sphKernelLaplacian_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, ke
     dim = wp.int32(x.length)
     r = vectorNorm_warp(x)
     q = r / h
-    eps = scalar_t(1e-5)
+    eps = get_epsilon(r)
     r_eps = r + eps * h
     
     k1 = eval_dkdq(q, dim, kernel)   * eval_C_d(dim, kernel) / iPow(h, dim + 1)

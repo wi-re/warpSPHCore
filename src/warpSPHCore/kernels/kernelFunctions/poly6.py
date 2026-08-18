@@ -23,8 +23,8 @@ def poly6_d3kdq3(q: scalar_t, dim: wp.int32 = 2):
 
 @wp.func
 def poly6_C_d(dim: wp.int32):
-    if dim == 1: return scalar_t(35.0)/scalar_t(16.0)
-    elif dim == 2: return scalar_t(35.0) / (scalar_t(32.0) * scalar_t(np.pi))
+    if dim == 1: return scalar_t(35.0)/scalar_t(32.0)
+    elif dim == 2: return scalar_t(4.0) / scalar_t(np.pi)
     else: return scalar_t(315.0) / (scalar_t(64.0) * scalar_t(np.pi))
 
 @wp.func

@@ -46,9 +46,9 @@ class KernelFunctions(Enum):
     Wendland4 = 1
     Wendland6 = 2
     Spiky = 21
-    ViscosityKernel = 30
-    CohesionKernel = 31
-    AdhesionKernel = 32
+    ViscosityKernel = 40
+    CohesionKernel = 41
+    AdhesionKernel = 42
 
 class GradientScheme(Enum):
     Naive = 1
