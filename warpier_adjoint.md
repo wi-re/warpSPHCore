@@ -25,6 +25,32 @@ session's `scripts/kernel_sanity_native.py`.
 
 ## Status as of 2026-08-18
 
+**Tier 2.3 (Laplacian's Naive scheme) is done.** This tier's own entry (below) had
+recommended deferring it and asking whether `LaplacianScheme.Naive` matters in
+practice before spending the derivation effort, since Brookshaw (Tier 2.2) is the
+scheme `wp_laplacian.py`'s own comments treat as the consistent estimator and Naive is
+not on any performance-relevant path. Asked; the answer was to derive it anyway, for
+methodological completeness of the adjoint SPH scheme -- Naive calls
+`sphKernelLaplacian` directly (the genuine analytic second-derivative-of-r estimator),
+so stating its Tier-2 JVP completes the adjoint of the SPH Laplacian in general, not
+just the one scheme every current consumer happens to use; Naive is nonetheless a
+real, wired-in scheme (not hypothetical), so this is a genuine adjoint, not a
+derivation of dead code. `scripts/spike_forward_mode_tier2_laplacian_naive.py`
+assembles it from two new kernel-level building blocks (`sphKernelLaplacianGradient_`,
+`sphKernelLaplacianDkDh_`, `kernels/laplacian.py`) validated against `wp.Tape` in
+`kernel_sanity_native.py`'s new Section K, then chain-ruled through
+`sphKernelLaplacian`'s own `SupportScheme` dispatch and Naive's `q_ij` coefficient
+(shown to be the same `B_ij` Tier 2.2 already found for Brookshaw). Matches the
+production reverse-mode Jacobian to float64 round-off across every `GradientScheme` x
+a representative `SupportScheme` subset, in 1D and 2D. Gate confirmed: Section K green
+inside `kernel_sanity_native.py`, the new spike script green,
+`gradcheck_laplacian_native.py` (which already exercises `LaplacianScheme.Naive`)
+still PASSES, `operation_matrix.py --device cpu` unaffected (`OK=258, HIGH=0, ERR=0,
+NAN=0` -- identical baseline), `pytest tests/` unaffected (119 passed/1 skipped). See
+the "Tier 2.3 -- Result" subsection for the derivation and the one genuine structural
+finding it surfaced (`sphKernelLaplacian`'s `SupportScheme` dispatch treats
+`KernelMeanSymmetric` differently from every other Tier-2.x building block).
+
 **Tier 2.2 (Gradient, Divergence, Curl, Laplacian's Brookshaw scheme) is done.**
 `scripts/spike_forward_mode_tier2_gradient.py` assembles the JVP of `sphKernelGradient_ij`
 itself (a new dispatch function built from Tier 2.0's `sphGradient_`/`sphKernelHessian_`/
@@ -409,6 +435,127 @@ treats as the consistent estimator, and Tier 2.2 already covers it.
 
 ---
 
+### Tier 2.3 -- Result (done, 2026-08-18)
+
+**Asked, and answered.** The entry above recommended asking before deriving this --
+asked, and the answer was to do it regardless of production relevance: Naive's
+"uncancelled O(1/h²) residual" makes it a poor *forward*-accuracy choice, but that is
+an orthogonal question from whether its adjoint is worth stating. It is real, wired-in
+kernel math (`wp_laplacian.py`'s Naive branch, exercised by
+`gradcheck_laplacian_native.py`), and completing its Tier-2 JVP is part of writing
+down the adjoint of the SPH Laplacian in general -- the methodological foundation this
+whole plan is building, not just the fast path every current consumer happens to take.
+
+**Deliverable shipped.** Two new kernel-level building blocks in
+`kernels/laplacian.py` (`sphKernelLaplacianGradient_` = `d(sphKernelLaplacian_)/dx`,
+`sphKernelLaplacianDkDh_` = `d(sphKernelLaplacian_)/dh`), a new Section K in
+`kernel_sanity_native.py` validating both against `wp.Tape`, and
+`scripts/spike_forward_mode_tier2_laplacian_naive.py` assembling and validating the
+operator-level JVP. All green on first full run (see "Process notes" below for the one
+subtlety caught along the way -- not a bug, a deliberate design choice verified before
+being relied on). Gate confirmed: `kernel_sanity_native.py` Section K PASS across every
+`SPH_KERNELS` family x dim 1/2/3 x 4 directions, the new spike script PASS across every
+`GradientScheme` x a representative `SupportScheme` subset in 1D/2D,
+`gradcheck_laplacian_native.py` unaffected (still PASSES, including its existing
+`LaplacianScheme.Naive` cases), `operation_matrix.py --device cpu` unaffected
+(`OK=258, HIGH=0, ERR=0, NAN=0`), `pytest tests/` unaffected (119 passed/1 skipped --
+this tier added two `@wp.func`s and two scripts, touched no other production code).
+
+**Math derivation.** `sphKernelLaplacian_(x,h) = s*k2 + t*k1`, where
+`k1 = dW/dr = eval_dkdq(q)*C_d/h^(dim+1)` (`== sphGradient_`'s magnitude),
+`k2 = d2W/dr2 = eval_d2kdq2(q)*C_d/h^(dim+2)` (`== sphKernelHessian_`'s radial factor),
+`s = dot(x,x)/r_eps^2`, `t = -dot(x,x)/r_eps^3 + dim/r_eps`, `r_eps = r + eps*h`,
+`eps = get_epsilon(r)` -- a dtype-only constant (`1e-15` at float64), *not* itself a
+function of `r` or `h`, confirmed by reading `math/wp_eps.py` before assuming it, so
+`d(eps)/dx = d(eps)/dh = 0` throughout and `r_eps`'s only dependence on either is
+through `r` itself. Differentiating by the product rule across `s`, `t`, `k1`, `k2`
+needs one new scalar building block, `k3 = d3W/dr3 = eval_d3kdq3(q)*C_d/h^(dim+3)` --
+exactly the "one more application of the same technique" the plan entry above
+anticipated, using `eval_d3kdq3` (already validated, Section C) for the first time in
+this codebase. The key identity, confirmed from the closed forms before touching
+`wp.Tape` (mirroring how `sphGradientDkDh_`'s docstring derives its own mixed
+partial): differentiating the `k1,k2` ladder shifts it up one rung --
+`dk1/dx = k2*direction`, `dk2/dx = k3*direction`, `dk1/dh = -q*k2 - (dim+1)*k1/h`
+(`== sphGradientDkDh_`'s own scalar magnitude, reused as a cross-check),
+`dk2/dh = -q*k3 - (dim+2)*k2/h` (new, one rung up). Assembled:
+
+```
+d(Laplacian)/dx = k2*ds/dx + k1*dt/dx + (s*k3 + t*k2)*direction
+  ds/dx = 2*r*eps*h/r_eps^3 * direction                       -- O(eps), vanishes as r_eps->r
+  dt/dx = direction*[(3*dot(x,x) - 2*r*r_eps)/r_eps^4 - dim/r_eps^2]
+
+d(Laplacian)/dh = k2*ds/dh + k1*dt/dh - q*(s*k3+t*k2) - (s*(dim+2)*k2 + t*(dim+1)*k1)/h
+  ds/dh = -2*eps*dot(x,x)/r_eps^3
+  dt/dh = 3*eps*dot(x,x)/r_eps^4 - dim*eps/r_eps^2
+```
+
+Cross-checked, before ever running `wp.Tape`, against the `eps->0` textbook closed form
+`Laplacian = k2 + (dim-1)/r*k1` differentiated directly by ordinary calculus (`d/dr[...]
+= k3 - (dim-1)/r^2*k1 + (dim-1)/r*k2`, `d/dh[...] `expands the same way) -- both match
+the bracketed terms above term-for-term once `t -> (dim-1)/r`, `s -> 1`. `r=0`
+(self-pair) needs no special-casing in either function: `direction` comes from
+`vectorNormalize_warp`, which is exactly zero (not NaN) for a zero-length input, so
+every term carrying an explicit `direction` factor vanishes there, and `dot(x,x)=0`
+kills the rest before `r_eps=eps*h` in the denominator can blow anything up. Both
+functions do replicate `sphKernelLaplacian_`'s own `q<eps` cutoff (the value is
+identically zero on that open region, so its derivative is exactly zero there too, not
+merely untested) but make no attempt to differentiate across the discrete jump at
+`q==eps` itself -- a measure-zero point no validation sample lands on, the same
+convention every other Section in `kernel_sanity_native.py` already follows.
+
+**Operator-level assembly.** `wp_laplacian.py`'s Naive branch is
+`laplacian_contribution = q_ij * sphKernelLaplacian(...)`. `sphKernelLaplacian`
+(the `xi/xj/hi/hj` wrapper) has its own two-branch `SupportScheme` dispatch:
+
+```
+SuperSymmetric (explicit):
+  L_ij  = 0.5*(sphKernelLaplacian_(xij,hi) + sphKernelLaplacian_(xij,hj))
+  dL_ij = 0.5*[ dot(LG(xij,hi),dxij) + LDkDh(xij,hi)*dhi
+                + dot(LG(xij,hj),dxij) + LDkDh(xij,hj)*dhj ]
+else (Gather/Scatter/MeanSymmetric/KernelMeanSymmetric/max-fallback):
+  h_ij = computePairwiseSupport(hi,hj,mode), dh_ij = Tier 2.1's _pairwiseSupportTangent(...)
+  L_ij  = sphKernelLaplacian_(xij, h_ij)
+  dL_ij = dot(LG(xij,h_ij),dxij) + LDkDh(xij,h_ij)*dh_ij
+```
+
+`q_ij` is exactly Tier 2.2's `B_ij` again (`wp_laplacian.py`'s `q_ij` depends only on
+`gradientMode`, never on `laplacianMode`) -- not re-derived, reused verbatim, the same
+finding as Tier 2.2 just re-confirmed under a different `laplacianMode`. So
+`L = Sum_j q_ij*L_ij`, `dL = Sum_j (dq_ij*L_ij + q_ij*dL_ij)`.
+
+**One genuine structural finding, not shared with Tier 2.2's Brookshaw scheme.**
+`sphKernelLaplacian`'s `SupportScheme` dispatch has only *two* branches:
+`SuperSymmetric` explicit, everything else (including `KernelMeanSymmetric`) falling
+through to `computePairwiseSupport`'s own dispatch, which has no explicit
+`KernelMeanSymmetric` branch either and so silently lands on the max-fallback `h_ij` --
+a single evaluation, not a two-term average. This is *different* from `sphKernel_ij`
+(Tier 2.1) and `sphKernelGradient_ij` (Tier 2.2), both of which give
+`KernelMeanSymmetric` its own explicit two-term-average branch, structurally identical
+to `SuperSymmetric`'s -- which is exactly why Tier 2.1/2.2 found the two schemes
+provably identical at the value and gradient level. For the Naive Laplacian they are
+*not* identical: `KernelMeanSymmetric` gets the single max-h evaluation,
+`SuperSymmetric` gets the genuine two-term average. Checked explicitly in the script
+(the mirror image of Tier 2.2's "assert identical" check: this one asserts the two
+schemes' assembled JVPs genuinely *differ*, confirmed `PASS`) rather than assumed from
+reading the dispatch code alone. Not a bug -- `sphKernelLaplacian` simply never had a
+`KernelMeanSymmetric` branch added when `sphKernel_ij`/`sphKernelGradient_ij` got
+theirs -- but worth flagging to whoever owns `SupportScheme` dispatch consistency
+next, the same spirit as Tier 2.1's `PartialSymmetric` finding.
+
+**Process note.** No bugs this time (unlike Tier 2.1's tensor-index slips or Tier 2.2's
+int-vs-enum/shape-mismatch pair) -- the `eps->0` cross-check against the textbook
+closed form was done on paper before writing any code and matched term-for-term on
+the first attempt, and both `wp.Tape` (Section K) and the operator-level script
+matched on their first full run too. Worth recording as a data point for the general
+methodology rather than a specific catch: deriving the algebraic cross-check *before*
+touching `wp.Tape`, the discipline every section of `kernel_sanity_native.py` already
+follows, continued to pay off even on the most involved single derivation in this
+plan (the plan's own Tier 2.3 entry had flagged it as such) -- it is cheap relative to
+debugging a `wp.Tape` mismatch after the fact, and here it meant the `wp.Tape` runs
+were confirmations rather than debugging sessions.
+
+---
+
 ## Tier 2.4 -- Renormalization correction
 
 **Scope.** `renorm.py` builds a moment matrix `C` (a `Σ V_j · ∇W_ij ⊗ x_ij`-shaped sum, confirmed by
@@ -522,9 +669,13 @@ history flags as the most adjoint-fragile.
    kernel-derivative) work, but bounded and well-precedented by `gradcheck_pinv_native.py`.
 4. **Tier 2.5** (CRK) -- last, hardest, highest historical bug rate; do only once 2.2/2.4 are solid
    since it depends on both.
-5. **Tier 2.3** (Laplacian `Naive`) -- do only if confirmed to matter; ask before deriving `d(∇²W)/dx`
-   and `d(∇²W)/dh`, since Brookshaw (covered by Tier 2.2) is the scheme the codebase's own comments
-   treat as the consistent one.
+5. **Tier 2.3** (Laplacian `Naive`) -- DONE (2026-08-18), out of the original numeric order.
+   The entry below had recommended asking whether it matters in practice before deriving
+   `d(∇²W)/dx`/`d(∇²W)/dh`, since Brookshaw (Tier 2.2) is the scheme the codebase's own comments
+   treat as the consistent one; asked, and done anyway for the methodological completeness of the
+   adjoint SPH derivation, independent of Tiers 2.4/2.5 (built only on Tier 2.0's `eval_d3kdq3`, not
+   on anything from 2.4/2.5), so it did not need to wait its numeric turn. See the Tier 2.3 "Result"
+   subsection above.
 
 Each tier's gate, per `warpier_fields.md`'s established discipline: the new spike script green,
 `pytest tests/` and `scripts/operation_matrix.py` unaffected (these tiers add scripts, not production

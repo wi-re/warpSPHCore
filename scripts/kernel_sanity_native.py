@@ -154,7 +154,7 @@ from warpSPHCore.kernels.derivative import sphKernelDerivative_
 from warpSPHCore.kernels.properties import sphKernelC_d
 from warpSPHCore.kernels.gradH import sphKernelDkDh_, sphGradientDkDh_
 from warpSPHCore.kernels.hessian import sphKernelHessian_
-from warpSPHCore.kernels.laplacian import sphKernelLaplacian_
+from warpSPHCore.kernels.laplacian import sphKernelLaplacian_, sphKernelLaplacianGradient_, sphKernelLaplacianDkDh_
 from warpSPHCore.kernels.kernelFunctions import (
     wendland2_k, wendland2_dkdq, wendland2_d2kdq2, wendland2_d3kdq3,
     wendland4_k, wendland4_dkdq, wendland4_d2kdq2, wendland4_d3kdq3,
@@ -793,6 +793,111 @@ def section_j_gradient_dkdh() -> bool:
     return ok
 
 
+# --------------------------------------------------------------------------
+# Section K: Tier 2.3 (warpier_adjoint.md) -- d(sphKernelLaplacian_)/dx and
+# /dh, the LaplacianScheme.Naive JVP building blocks, vs. the automatic
+# (wp.Tape) derivative of the already-validated sphKernelLaplacian_ itself.
+# Not on any performance-relevant path (Brookshaw, covered by Section G/H's
+# Hessian-trace relationship plus Tier 2.2, is what wp_laplacian.py's own
+# comments treat as the consistent estimator) -- derived for methodological
+# completeness of the adjoint SPH scheme (Naive is nonetheless a real, wired
+# -in LaplacianScheme, not a hypothetical one; see the module docstrings on
+# kernels/laplacian.py's two new functions). Simpler than Section G/H's per-
+# Jacobian-row loop: sphKernelLaplacian_'s output is a scalar, so a single
+# backward (seed=1, elementwise-independent samples) gives the whole d/dx
+# vector directly, and a second single backward gives the scalar d/dh --
+# exactly Section D/F's pattern, not Section G/H's.
+# --------------------------------------------------------------------------
+
+@wp.kernel
+def _eval_sphKernelLaplacianGradient_1d(x: wp.array(dtype=vec1_t), h: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=vec1_t)):
+    i = wp.tid()
+    out[i] = sphKernelLaplacianGradient_(x[i], h[i], kernel_id)
+
+
+@wp.kernel
+def _eval_sphKernelLaplacianGradient_2d(x: wp.array(dtype=vec2_t), h: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=vec2_t)):
+    i = wp.tid()
+    out[i] = sphKernelLaplacianGradient_(x[i], h[i], kernel_id)
+
+
+@wp.kernel
+def _eval_sphKernelLaplacianGradient_3d(x: wp.array(dtype=vec3_t), h: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=vec3_t)):
+    i = wp.tid()
+    out[i] = sphKernelLaplacianGradient_(x[i], h[i], kernel_id)
+
+
+_SPHLAPLACIANGRAD_BY_DIM = {1: _eval_sphKernelLaplacianGradient_1d, 2: _eval_sphKernelLaplacianGradient_2d, 3: _eval_sphKernelLaplacianGradient_3d}
+
+
+@wp.kernel
+def _eval_sphKernelLaplacianDkDh_1d(x: wp.array(dtype=vec1_t), h: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
+    i = wp.tid()
+    out[i] = sphKernelLaplacianDkDh_(x[i], h[i], kernel_id)
+
+
+@wp.kernel
+def _eval_sphKernelLaplacianDkDh_2d(x: wp.array(dtype=vec2_t), h: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
+    i = wp.tid()
+    out[i] = sphKernelLaplacianDkDh_(x[i], h[i], kernel_id)
+
+
+@wp.kernel
+def _eval_sphKernelLaplacianDkDh_3d(x: wp.array(dtype=vec3_t), h: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
+    i = wp.tid()
+    out[i] = sphKernelLaplacianDkDh_(x[i], h[i], kernel_id)
+
+
+_SPHLAPLACIANDKDH_BY_DIM = {1: _eval_sphKernelLaplacianDkDh_1d, 2: _eval_sphKernelLaplacianDkDh_2d, 3: _eval_sphKernelLaplacianDkDh_3d}
+
+
+def section_k_laplacian_jvp_buildingblocks() -> bool:
+    print("\n=== Section K: sphKernelLaplacianGradient_/sphKernelLaplacianDkDh_ vs. AD of sphKernelLaplacian_ (Tier 2.3) ===")
+    q_samples = np.linspace(0.05, 0.95, 8)
+    h_val = 1.0
+    ok = True
+    for dim in (1, 2, 3):
+        vec_t = VEC_T[dim]
+        n = len(q_samples)
+        for kf in SPH_KERNELS:
+            for direction in _directions(dim):
+                x_np = np.array([q_samples[j] * h_val * direction for j in range(n)])
+                h_np = np.full(n, h_val)
+                seed = wp.array(np.ones(n), dtype=scalar_t, device=DEVICE)
+
+                x = wp.array(x_np, dtype=vec_t, requires_grad=True, device=DEVICE)
+                h = wp.array(h_np, dtype=scalar_t, device=DEVICE)
+                out = wp.zeros(n, dtype=scalar_t, requires_grad=True, device=DEVICE)
+                tape = wp.Tape()
+                with tape:
+                    wp.launch(_SPHLAPLACIAN_BY_DIM[dim], dim=n, inputs=[x, h, kf.value], outputs=[out], device=DEVICE)
+                tape.backward(grads={out: seed})
+                ad_dLdx = x.grad.numpy().copy()
+                tape.zero()
+
+                x2 = wp.array(x_np, dtype=vec_t, device=DEVICE)
+                h2 = wp.array(h_np, dtype=scalar_t, requires_grad=True, device=DEVICE)
+                out2 = wp.zeros(n, dtype=scalar_t, requires_grad=True, device=DEVICE)
+                tape2 = wp.Tape()
+                with tape2:
+                    wp.launch(_SPHLAPLACIAN_BY_DIM[dim], dim=n, inputs=[x2, h2, kf.value], outputs=[out2], device=DEVICE)
+                tape2.backward(grads={out2: seed})
+                ad_dLdh = h2.grad.numpy().copy()
+                tape2.zero()
+
+                x3 = wp.array(x_np, dtype=vec_t, device=DEVICE)
+                h3 = wp.array(h_np, dtype=scalar_t, device=DEVICE)
+                manual_dx = wp.zeros(n, dtype=vec_t, device=DEVICE)
+                wp.launch(_SPHLAPLACIANGRAD_BY_DIM[dim], dim=n, inputs=[x3, h3, kf.value], outputs=[manual_dx], device=DEVICE)
+                manual_dh = wp.zeros(n, dtype=scalar_t, device=DEVICE)
+                wp.launch(_SPHLAPLACIANDKDH_BY_DIM[dim], dim=n, inputs=[x3, h3, kf.value], outputs=[manual_dh], device=DEVICE)
+
+                label = f"dim={dim} {kf.name} dir={np.array2string(direction, precision=2)}"
+                ok &= check(f"{label} d(Laplacian)/dx (AD vs manual)", ad_dLdx, manual_dx.numpy())
+                ok &= check(f"{label} d(Laplacian)/dh (AD vs manual)", ad_dLdh, manual_dh.numpy())
+    return ok
+
+
 def main() -> None:
     wp.init()
 
@@ -806,6 +911,7 @@ def main() -> None:
     ok &= section_gh_hessian_laplacian()
     ok &= section_j_gradient_dkdh()
     ok &= section_i_compact_support_boundary()
+    ok &= section_k_laplacian_jvp_buildingblocks()
 
     print()
     if ok:
