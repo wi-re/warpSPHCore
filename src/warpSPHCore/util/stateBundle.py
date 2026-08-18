@@ -30,7 +30,7 @@ from ..dataTypes.adjacency_t import adjacencyData, gridData
 from ..dataTypes.domain_t import domainData
 from ..dataTypes.field_t import ExecutionMode
 from ..dataTypes.kernelState_t import kernelState
-from ..util.fieldRegistry import structFor
+from .fieldRegistry import structFor
 
 # wa-index -> (bundle attribute, struct field name), in the same order as
 # arg_extract.py's flat tensor index layout (0-35). Indices not listed here

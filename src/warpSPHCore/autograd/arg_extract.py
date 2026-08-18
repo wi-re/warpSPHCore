@@ -6,7 +6,7 @@ from ..dataTypes import *
 from typing import Optional, Union, Tuple
 from .arg_check import *
 from ..radiusSearch import buildCompactHashMap
-from .stateBundle import getStateBundle
+from ..util.stateBundle import getStateBundle
 
 def extractStateInfo(
     queryParticles: ParticleState,

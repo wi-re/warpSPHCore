@@ -23,7 +23,7 @@ import pytest
 import torch
 
 from warpSPHCore import DomainDescription, OperationProperties, ParticleState, radiusSearchCompactHashMap, warpOperation
-from warpSPHCore.autograd.stateBundle import clearStateBundleCache, getStateBundle
+from warpSPHCore.util.stateBundle import clearStateBundleCache, getStateBundle
 from warpSPHCore.enumTypes import KernelFunctions, OperationDirection, SupportScheme, WarpOperation
 
 
