@@ -564,7 +564,10 @@ F (`StateBundle`, no-grad path only), G (forward-mode readiness audit -- found a
 bugs, see its section), H (real-workload bottleneck audit -- the ~7% end-to-end observation is now
 fully explained; see its results subsection), I (declared operator ABI -- `OperatorSpec` /
 `SPHContext` / `launchOperator`, all 9 core call sites ported, `warpWrapper2` reduced to a shim;
-see its own subsection under "Steps I / J" above)
+see its own subsection under "Steps I / J" above), J (frontend migration -- all 24 `warpWrapper2`
+call sites in `warpSPH` ported to `launchOperator`; the 65 `warpOperation` sites needed no change,
+already routed through Step I's ported backends; `warpWrapper2` kept, not deleted, per a scope
+correction found during this step -- see its own subsection)
 - Baseline numbers recorded and gate passes
 - Field attachment proven safe; no reference cycles, survives clone, dies with tensor
 - **Design decision used:** Option A (flat_tensors carries `[torch.Tensor | Field]`;
@@ -731,13 +734,23 @@ carries the `callable()` vs `types.FunctionType` bug, the GPU-mismatch benchmark
 each vector-output operator's dtype resolver reads `flatOutputShape` back out of `extras` instead
 of recomputing it.
 
-**What to do next:** Step J (Section 8.4) -- migrate the frontend (`~/dev/warpSPH`)'s 24
-`warpWrapper2` call sites and 65 `warpOperation` sites onto `SPHContext`/`launchOperator`, then
-delete the `warpWrapper2` shim and the `defaultStateArguments` tuple path from this repo. Check
-whether Section 8.4's prerequisite (a `.github/workflows/` in `warpSPH` running its existing
-`tests/`) has been done before starting -- it had not as of Step I landing, and a 65-site migration
-without CI catching a regression automatically is exactly the situation that prerequisite exists to
-prevent.
+**Step J is done as of 2026-08-18** (this machine; `~/dev/warpSPH` working tree has all 24 module
+files modified, plus one core change to `autograd/operator_spec.py` in this repo -- check `git
+status`/`git log` in both repos rather than trusting this sentence). Read its own subsection under
+"Steps I / J" above before touching `operator_spec.py`'s `numThreads` field, any of the 24 ported
+frontend modules, or the `warpWrapper2` shim -- it carries three corrections against the plan's
+original Step J text: the 65 `warpOperation` sites needed no work (already routed through Step I),
+a real `ThreadSpec`/`numThreads` gap in `OperatorSpec` that `compSPH/balance.py` exposed, and why
+`warpWrapper2` was deliberately *not* deleted (three live non-module callers in `scripts/` across
+both repos). The CI prerequisite (a `.github/workflows/` in `warpSPH`) was explicitly skipped at
+the user's instruction, matching the escape clause Section 8.4 already carried -- gating was done
+by running the existing suites locally instead.
+
+**What to do next:** nothing is scoped or pending in this plan. Both repos' full local suites are
+green (core: 103 passed/1 skipped; frontend: 15/15 gradcheck scripts, 24/24 caseSpec+runner,
+51/51 physics). Nothing has been committed in either repo as part of Step J -- both working trees
+carry uncommitted changes; committing (and, in `warpSPH`, standing up the `.github/workflows/`
+Section 8.4 deferred) are the two loose ends if a future session wants to close them out.
 
 **Step H's highest-value finding has already been fixed** (in the frontend, `d9ad712`): the
 Kolmogorov forcing's host-side scipy interpolator, 66-68% of host time above 57k particles, is now a
@@ -1530,6 +1543,99 @@ own gradcheck and physics suites staying green; then delete the `warpWrapper2` s
 `defaultStateArguments` tuple path. Section 8.4's prerequisite for Step J (`warpSPH` CI running its
 existing `tests/`) has not been done -- worth checking whether it still holds before starting, not
 assuming it from this paragraph.
+
+### Step J -- ✅ DONE (2026-08-18), with two corrections
+
+**CI prerequisite deliberately skipped, at the user's explicit instruction this session.** Section
+8.4's "give `warpSPH` a `.github/workflows/`" prerequisite already carried its own escape clause
+("skip this step as the tests are computationally expensive... especially before this major rework
+is done") -- the user re-confirmed taking that branch rather than standing it up. All gating for
+this step was therefore done by running the frontend's existing suites locally, by hand, at each
+checkpoint (below), not by CI.
+
+**Correction 1 -- the 65 `warpOperation` call sites needed no changes at all.** `warpOperation`
+(`operations.py`) dispatches straight to `_computeSPH*_stateBackend`, and Step I already ported
+every one of those backends (Density, Interpolate, Gradient, Divergence, Curl, Laplacian, Covariance,
+the three CRK operators) onto `launchOperator`. The 65 frontend call sites were already running
+through the new ABI the moment Step I landed; there was nothing left for Step J to touch there. The
+plan's phrasing ("migrate... the 65 `warpOperation` sites") assumed they needed the same treatment as
+the `warpWrapper2` sites -- they didn't, because they sit one layer higher than the ABI boundary Step
+I actually moved.
+
+**The real work: all 24 `warpWrapper2` call sites** (`modules/{liu,dissipation×3,util×2,pressure,crk×2,
+surfaceDetection×3,mdbc,shockCapturing×2,deltaSPH×2,compSPH×3,incompressible,adaptiveSupport×2}`,
+`sample/wp_deltaShift.py`) now declare a module-level `OperatorSpec` next to their kernel and call
+`launchOperator(spec, SPHContext(...), **extras)` instead. Output dtype/shape and `additionalArguments`
+membership (`ExtraKind.TENSOR` vs `SCALAR`) were read straight off each call site's existing
+`outputSizes`/`outputDtypes`/`additionalArguments` construction -- mechanical, not re-derived -- and
+ported one module (or gradcheck-script group) at a time, each gated on that module's own
+`scripts/gradcheck_*.py` script passing before moving to the next. `getCachedDummyTensor`-built
+placeholder tensors already flow through unchanged (Step C's note on `wp_interpolate.py` applies
+identically here: nothing about this port touches how those are constructed).
+
+**Correction 2 -- a real gap in Step I's `OperatorSpec`, found by `compSPH/balance.py`.**
+`computeCompSPHBalanceTermWarp` launches one thread per *query* particle but writes an output shaped
+by the *pair* count (`adjacency.i.shape[0]`), so it passed `numThreads=queryParticles.positions.shape[0]`
+explicitly to `warpWrapper2` -- distinct from `outputSizes`. `launchOperator` had no way to express
+this: `ThreadSpec` only declared `QUERY_COUNT`, and `_launch` was never even called with a `numThreads`
+argument from `operator_spec.py`, so the fallback (`_launch` defaults thread count to the *first
+output's* shape when `numThreads` is `None`) would have silently launched this kernel with the wrong
+thread count -- pair count instead of query count -- had it been ported as-is. Caught by inspection
+before ever running it (same "checked before running" habit as Step F's struct-aliasing hazard), not
+by a failing test. Fixed by adding `OperatorSpec.numThreads: Optional[Callable[[ctx, extras], int]] = None`
+in `autograd/operator_spec.py` -- `None` (every other spec) preserves today's first-output-shape
+fallback exactly; `compSPH/balance.py`'s spec supplies a one-line resolver reading
+`ctx.query.positions.shape[0]`. `crk/accel.py`, `crk/dudt.py`, `compSPH/accel.py`, `compSPH/dudt.py`,
+and `liu/wp_mat.py` all also pass an explicit `numThreads` to `warpWrapper2` today, but in every one
+of those cases the *first* declared output's shape already equals that `numThreads` value (query count,
+or -- for `liu/wp_mat.py`, whose "query" struct is actually `referenceParticles` -- the shape of the
+`queryPositions` extra, resolved via the same per-output shape-resolver mechanism `OutputSpec` already
+had), so the existing fallback covers them correctly without the new field. Only `balance.py` needed it.
+This is a **core** change (`warpSPHCore/autograd/operator_spec.py`), landed and verified (core's own
+103-test suite, 1 skip, green) before continuing the frontend port.
+
+**Correction 3 -- the `warpWrapper2` shim was NOT deleted.** The plan's closing instruction said to
+delete it once the frontend's call sites were migrated; by the time all 24 module sites were ported,
+grep found it still has live, legitimate callers outside that scope: `warpSPH/scripts/gradcheck_scalarArg_dt.py`
+(a canary proving the `asScalarArg` + `wp.array(dtype=scalar_t)` differentiable-scalar mechanism against
+an ad-hoc demo kernel, extensively documented in its own docstring and part of the frontend's
+auto-discovered `GRADCHECK_SCRIPTS`) and, in this repo, `scripts/gradcheck_scalar_arg_native.py` (the
+original version of that same proof) and `scripts/bench_real_workload.py` (Step H's harness). All
+three call `warpWrapper2` directly against one-off demo kernels, not through any of the 24 module
+wrappers -- deleting the shim would have broken three working regression/bench scripts to satisfy a
+"delete when done" instruction written before this was known. `warpWrapper2` stays as a stable,
+tested, lower-level primitive entry point; only the frontend's *production* module wiring moved onto
+`launchOperator`. The `defaultStateArguments` tuple path stays for the same reason -- it's what
+`warpWrapper2` still builds on.
+
+**Verification (2026-08-18, this machine, CPU -- per [[feedback-3d-cpu-perf]] this project's 2D
+gradcheck/physics suites are CPU-appropriate; no 3D workload was run here):**
+* This repo's own suite after the `operator_spec.py` change: `pytest tests/` minus the gradcheck
+  subprocess file, **103 passed, 1 skipped**.
+* Every one of the 13 gradcheck-script groups covering the 24 ported call sites, run standalone
+  immediately after that group's port (not just at the end): `gradcheck_crk.py`, `gradcheck_liu.py`,
+  `gradcheck_util.py`, `gradcheck_wp_surfaceAware.py`, `gradcheck_dissipation.py`,
+  `gradcheck_surfaceDetection.py`, `gradcheck_mdbc.py`, `gradcheck_shockCapturing.py`,
+  `gradcheck_deltaSPH.py`, `gradcheck_compSPH.py` (this is the group that exercises the
+  `numThreads` fix, via `computeCompSPHBalanceTermWarp`'s 12 sub-cases), `gradcheck_adaptiveSupport.py`,
+  `gradcheck_incompressible.py`, `gradcheck_deltaShift.py` -- all green.
+* Full frontend re-run at the end, via `pytest`: `tests/test_gradcheck_scripts.py` **15/15 passed**
+  (auto-discovered, so this also re-ran the two scripts noted in Correction 3 as still using
+  `warpWrapper2` directly, confirming the shim itself is untouched and still correct);
+  `tests/test_caseSpec.py` + `tests/test_runner.py` **24/24 passed**; `tests/test_physics.py`
+  **51/51 passed** (sod shock tube 1D/2D/3D, Taylor-Green vortex, dambreak, Sedov blast, every
+  compressible solver scheme, uniform-lattice density checks).
+* `grep -rln "warpWrapper2(" src` in the frontend now returns nothing outside `warpWrapper2`'s own
+  definition boundary (it isn't defined there, it's imported from core) -- confirms all 24 production
+  call sites moved, none missed.
+
+**What's left:** nothing else scoped to this plan. The frontend's production SPH-operator dispatch
+now runs entirely through `SPHContext`/`launchOperator` (directly for the 24 custom-kernel modules,
+indirectly through `warpOperation` for the 65 standard-operator call sites); `warpWrapper2` remains
+as a deliberately-kept lower-level primitive for demo/bench/canary code, not as frontend production
+wiring. A future session wanting to retire `warpWrapper2` entirely would need to port those three
+remaining `scripts/` call sites too and accept the docstring/provenance churn that involves -- not
+done here because it wasn't asked for and the shim costs nothing to keep.
 
 
 # 5. Verification

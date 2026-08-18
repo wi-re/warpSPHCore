@@ -109,10 +109,14 @@ class ExtraSpec:
 
 
 class ThreadSpec(Enum):
-    """wp.launch thread-count sources. ``QUERY_COUNT`` (the only case any
-    operator needs today) leaves ``numThreads`` unset, so ``_launch``
-    defaults to the first output's resolved shape -- exactly today's
-    behaviour."""
+    """wp.launch thread-count sources. ``QUERY_COUNT`` (the common case)
+    leaves ``numThreads`` unset, so ``_launch`` defaults to the first
+    output's resolved shape -- exactly today's behaviour. Some kernels
+    (e.g. compSPH's pair-indexed balance term) launch one thread per query
+    particle while writing an output shaped by the *pair* count, so the
+    first-output-shape fallback would resolve to the wrong thread count for
+    them -- ``OperatorSpec.numThreads`` is the escape hatch for that case
+    (Section 8.4, Step J)."""
 
     QUERY_COUNT = 0
 
@@ -120,12 +124,20 @@ class ThreadSpec(Enum):
 @dataclass(frozen=True)
 class OperatorSpec:
     """Declared once per kernel, at import time, next to the kernel itself.
-    See warpier_fields.md Section 8.2."""
+    See warpier_fields.md Section 8.2.
+
+    ``numThreads``, when set, is a resolver called as ``(ctx, extras) ->
+    int`` and passed through to ``_launch`` explicitly -- for the rare
+    kernel whose thread count is not the shape of its first output (see
+    ``ThreadSpec``'s docstring). ``None`` (the default) preserves today's
+    behaviour: ``_launch`` derives it from the first output's shape.
+    """
 
     kernel: Any
     outputs: Tuple[OutputSpec, ...]
     extras: Tuple[ExtraSpec, ...] = ()
     threads: ThreadSpec = ThreadSpec.QUERY_COUNT
+    numThreads: Optional[Callable[["SPHContext", Dict[str, Any]], int]] = None
 
 
 @dataclass
@@ -227,4 +239,5 @@ def launchOperator(
         outputDtypes=outputDtypes,
         defaultStateArguments=defaultStateArguments,
         additionalArguments=additionalArguments,
+        numThreads=spec.numThreads(ctx, extras) if spec.numThreads is not None else None,
     )
