@@ -1,18 +1,20 @@
-# Forward-mode evaluation, from the wave equation to moving-particle SPH
+# Forward-mode evaluation: from toy operators to automatic implicit SPH solves
 
 Companion to `warpier_core.md` Phase 6 ("Extend States for Forward-Mode AD", audited-but-not-started
 as of 2026-08-17/18) and `warpier_adjoint.md` (Tiers 2.0-2.5 JVP derivations, all done as of
 2026-08-18). Those two documents established that the *math* for forward-mode SPH is finished and
-validated; this plan is about actually running it, using two testbeds in the sibling `warpSPH`
-repo (`~/dev/warpSPH`) at genuinely different difficulty, and about where that connects to
-`warpSPHIntegrators`'s (`~/dev/warpSPHIntegrators`) own already-scoped implicit-integrator plan.
-Not started -- no code changes have been made yet.
+validated; this plan is about actually running it, using testbeds in the sibling `warpSPH` repo
+(`~/dev/warpSPH`) at increasing difficulty, and about where that connects to `warpSPHIntegrators`'s
+(`~/dev/warpSPHIntegrators`) own already-scoped implicit-integrator plan. Not started -- no code
+changes have been made yet.
 
-## Context
+## Context and motivation
 
 `warpSPHCore`'s adjoint work has two layers:
 
-1. **Reverse-mode (VJP)** is production-complete and battle-tested (`gradcheck_*.py`, `operation_matrix.py`), across both the six core operators and custom frontend kernels built on the same building blocks (e.g. `warpSPH/scripts/gradcheck_deltaShift.py`, see Phase 3 below).
+1. **Reverse-mode (VJP)** is production-complete and battle-tested (`gradcheck_*.py`,
+   `operation_matrix.py`), across both the six core operators and custom frontend kernels built on
+   the same building blocks.
 2. **Forward-mode (JVP)** has had its *math* fully derived and validated in isolated spike
    scripts, but never wired into anything runnable:
    - Tier 1 (tangent w.r.t. field *values*) -- proven trivial: every SPH operator is exactly
@@ -29,234 +31,264 @@ Not started -- no code changes have been made yet.
      (`autograd/operator_spec.py:190`), and `getStateBundle`/`structFor` reject `FORWARD`
      the same way (`util/stateBundle.py:172`, `util/fieldRegistry.py:227`).
 
-**The goal of this plan is a forward-mode mechanism general enough for real SPH, not just for
-one linear toy PDE.** Two testbeds already exist in `warpSPH` at genuinely different difficulty:
+**Why this matters -- and, just as importantly, why *speed* is not the point.** `warpSPH`
+already has two working implicit solvers, both hand-built with no AD of any kind:
 
-- **The wave equation** (`schemes/waveEquation.py`, `tests/test_waveEquation.py`, landed by
-  `1622720 fix wave equation code to serve as demo code for forward mode development`): positions
-  are frozen, adjacency is built once, no CRK/renorm. The PDE
-  `d2u/dt2 = c^2 laplacian(u) - damping*v` is therefore *linear*, and a source's `position`/
-  `magnitude` are already real leaf tensors with a passing reverse-mode gradient-flow test
-  (`WAVE_EQUATION_PLAN.md` step 5). This is the cheap, fast-to-validate starting case -- good for
-  proving the mechanism works end-to-end, but it never exercises a position tangent (Tier 2),
-  because positions never move.
-- **delta-SPH particle shifting** (`modules/shifting/`): a genuinely harder, already-existing
-  case where positions *do* move and the result isn't linear or easily hand-proven. `solveShifting`
-  (`modules/shifting/wrapper.py:47`) iterates: rebuild adjacency at the *current* (moved)
-  positions -> compute a per-particle anti-clustering displacement
-  (`computeDeltaShift`/`computeDeltaShiftWarp`, `modules/shifting/delta.py`,
-  `sample/wp_deltaShift.py`) -> add it to `positions` -> repeat. It is **already
-  reverse-mode gradchecked** w.r.t. positions/supports/masses/densities
-  (`scripts/gradcheck_deltaShift.py`), which makes it an ideal Tier-2 validation target: a
-  ground-truth reverse-mode Jacobian already exists to check a new forward-mode JVP against,
-  on genuinely position-dependent, iteratively-re-neighbored production code -- not a synthetic
-  case built for this plan. There is also an **unimplemented, stubbed-out "implicit" shifting
-  variant** already named in the config (`ShiftingScheme.implicit`,
-  `configurations/moduleConfigurations/shifting.py:21` -- defined but never dispatched on in
-  `wrapper.py`) and a commented-out "alternate implicit-particle-shift path" referenced in
-  DFSPH (`schemes/dfsph.py:8`). This is the concrete, already-scoped landing spot for exactly the
-  kind of implicit, position-solving step the user has in mind -- see Phase 4.
+- **IISPH** (`modules/incompressible/incompressible.py`): relaxed-Jacobi iteration solving for a
+  pressure field that drives predicted density back to rest density.
+- **Implicit particle shifting** (`modules/shifting/implicitShifting.py`,
+  `wp_implicitShifting.py`, `bicgstab.py`, ported from diffSPH): one Newton step on `grad_x C = 0`
+  (the SPH concentration field), with a matrix-free Hessian action fed to a Jacobi-preconditioned
+  BiCGStab. Its Hessian comes from `sphKernel`/`sphKernelGradient`/`sphKernelHessian` called
+  *directly*, per-pair, bypassing `launchOperator`/`OperatorSpec` entirely -- a hand-rolled
+  `wp.kernel`, not a `warpOperation` call.
 
-So the plan below is staged by difficulty, not by repo: Phase 1 proves the mechanism cheaply on
-the linear, frozen-position wave equation; Phase 2 promotes that into a real `warpSPHCore` API
-*designed* to carry position/support tangents even though it doesn't implement them yet; Phase 3
-turns those tangents on and validates them against the harder, moving-particle shifting case;
-Phase 4 is the implicit particle-shift step this all points toward, tying into
-`warpSPHIntegrators`'s own already-scoped implicit-solver plan.
+Both work, and both were genuinely hard to get right: `implicitShifting.py`'s own docstring
+documents two non-obvious fixes needed to port diffSPH's version correctly -- a self-pair term
+that is analytically zero but numerically unstable in the Hessian's near-origin regularization,
+and a block-symmetry subtlety (`Hess(C)`'s off-diagonal block is `-omega_k H_ik`, not the naive
+`omega_j H_ij` placement) that silently solved in the wrong direction until diagnosed against a
+dense finite-difference Hessian. That is exactly the kind of hand-derivation effort a bidirectional
+(forward *and* reverse) adjoint capability should be able to remove: if `warpOperationJVP` (Phase
+2) can hand back an exact position-tangent and, composed with itself, an exact Hessian-vector
+product for any operator, then standing up a new Newton-Krylov SPH solve stops being a
+per-problem derivation exercise and becomes "call the existing operator, ask for its JVP."
+
+**So the goal of every "implicit" phase below is a side-by-side comparison against the existing
+hand-built solvers, graded on correctness and on how little bespoke reasoning the automatic path
+needs -- not on wall-clock speed.** An automatic solve that is 3x slower than `bicgstab.py`'s
+hand-tuned matvec but needs no per-operator Hessian derivation, and doesn't require someone to
+independently rediscover the self-pair/block-symmetry pitfalls above, is a *win* for this plan's
+purposes. Matching or beating the hand-built solvers' performance is explicitly not a goal or a
+gate for any phase here.
 
 ## Phase 1 -- Tangent rollout on the wave-equation testbed (`warpSPH`, no `warpSPHCore` changes)
 
 Goal: a working, tested forward-mode sensitivity `d(u(x,T))/d(source position, magnitude)`,
-cross-checked against the existing backward-mode result. Deliberately the easy case -- it proves
-the plumbing (seed a tangent IC, propagate it, compare to reverse-mode) without yet needing any
-new `warpSPHCore` math, since Tier 1 alone covers it.
+cross-checked against the existing backward-mode result. The cheap starting case -- it proves the
+plumbing (seed a tangent IC, propagate it, compare to reverse-mode) without yet needing any new
+`warpSPHCore` math, since Tier 1 alone covers it (positions are frozen in this scheme).
 
 1. **Seed the tangent initial condition.** `sampleSmoothPointSourceWaveSystem`
    (`src/warpSPH/sample/waveSystem.py:116`) builds `u0` from `_wendlandKernelBump(distances,
-   radius)`, a plain-torch function of `position`/`magnitude` -- already autograd-differentiable
-   (that's what the existing backward test exercises). Get its JVP directly via
-   `torch.func.jvp` (or an explicit product-rule expansion, since the function is a two-line
-   closed form) w.r.t. `position`/`magnitude`, producing `du0` (and `dv0 = 0`, since `v0` doesn't
-   depend on the source in this case).
+   radius)`, a plain-torch function of `position`/`magnitude` -- already autograd-differentiable.
+   Get its JVP via `torch.func.jvp` (or an explicit product-rule expansion) w.r.t.
+   `position`/`magnitude`, producing `du0` (and `dv0 = 0`).
 2. **Run the tangent trajectory.** Add a small driver (new `tests/test_forwardModeWave.py`,
    modeled on `_buildStandingWaveSystem`/`_standingWaveError` in the existing
    `tests/test_waveEquation.py`) that builds two `WaveSystemv3` instances sharing the same
    `adjacency`/`domain`/`dt`/`schemeConfig`/integrator: one on `(u0, v0)`, one on `(du0, dv0)`.
    Step both through the identical integrator/`f_wave_equation` call sequence -- no new
    `warpSPHCore` code involved, since `f_wave_equation` is already linear in `(u, v)` under these
-   settings, so applying it to the tangent state *is* the JVP (this is Tier 1's identity, exercised
-   live rather than on a synthetic 7-particle case).
+   settings, so applying it to the tangent state *is* the JVP.
 3. **Cross-validate against reverse-mode.** Reuse the existing gradient-flow pattern (step 5 of
    `WAVE_EQUATION_PLAN.md`, already in `tests/test_waveEquation.py`): build one more system with
-   `position.requires_grad_()`, run `f_wave_equation` for the same number of steps, sum a scalar
-   probe of `u(T)` at one or more query points, `.backward()`, and compare
-   `probe.grad`-direction-dot-product against `du(T)` at the same probe points from step 2 (a
-   directional-derivative check, since reverse-mode gives the full gradient and forward-mode
-   gives one directional derivative at a time -- contract the reverse gradient with the same
-   perturbation direction used to seed `du0`). Assert agreement to float32/float64 tolerance
-   across a couple of probe points/times and at least two source positions (1D and 2D, matching
-   the existing test's dimension coverage).
-4. **Document the linearity precondition** in the new test/module's docstring: this "tangent =
-   rerun on perturbed IC" trick is valid only because positions/support/adjacency are frozen and
-   CRK/renorm are off; it is a Tier-1-only special case, not the general mechanism -- Phase 3 is
-   where the general (Tier 2) case gets built and proven on a case where this shortcut does not
-   apply.
+   `position.requires_grad_()`, run `f_wave_equation`, sum a scalar probe of `u(T)`, `.backward()`,
+   and compare `probe.grad`-direction-dot-product against `du(T)` at the same probe points (a
+   directional-derivative check, contracting the reverse gradient with the same perturbation
+   direction used to seed `du0`). Assert agreement to float32/float64 tolerance across a couple of
+   probe points/times and at least two source positions (1D and 2D).
+4. **Document the linearity precondition**: this "tangent = rerun on perturbed IC" trick is valid
+   only because positions/support/adjacency are frozen and CRK/renorm are off -- a Tier-1-only
+   special case, not the general mechanism.
 
-Files touched: `warpSPH/tests/test_forwardModeWave.py` (new), possibly a small shared helper
-extracted from `tests/test_waveEquation.py` if the two files end up duplicating system-building
-code -- check for that when writing it rather than pre-deciding.
+Files touched: `warpSPH/tests/test_forwardModeWave.py` (new).
 
 ## Phase 2 -- Promote Tier 1 into a supported `warpSPHCore` API, shaped for Tier 2
 
-Goal: stop requiring every caller to know and hand-apply the "relaunch on the tangent array"
-trick; give it a name, a test, and an `ExecutionMode.FORWARD` path that isn't a blanket
-`NotImplementedError`. **Design the entry point's signature for the general case now** (tangent
-positions/supports/masses/densities as optional arguments) even though only the value-tangent
-path is implemented in this phase -- so Phase 3 extends an existing API instead of replacing it.
+Goal: stop requiring every caller to hand-apply the "relaunch on the tangent array" trick; give it
+a name, a test, and an `ExecutionMode.FORWARD` path that isn't a blanket `NotImplementedError`.
+**Design the entry point's signature for the general case now** (tangent
+positions/supports/masses/densities as optional arguments) even though only the value-tangent path
+is implemented here -- Phase 4 extends an existing API instead of replacing it.
 
 1. **Unblock `FORWARD` at the struct layer**, per `warpier_core.md` Phase 6 Step G finding #1:
    Tier 1 needs no new struct type, so `structFor`'s `FORWARD` rows
-   (`util/fieldRegistry.py:210-222`) can simply alias the existing `REVERSE` rows instead of
-   raising, and `getStateBundle(dim, ExecutionMode.FORWARD)` (`util/stateBundle.py:172`) can hand
-   back the same bundle `REVERSE` uses.
+   (`util/fieldRegistry.py:210-222`) can alias the existing `REVERSE` rows instead of raising, and
+   `getStateBundle(dim, ExecutionMode.FORWARD)` (`util/stateBundle.py:172`) can hand back the same
+   bundle `REVERSE` uses.
 2. **Add a thin, documented JVP entry point** next to `warpOperation`
-   (`src/warpSPHCore/operations.py`), e.g. `warpOperationJVP(..., tangentQueryValues=None,
+   (`src/warpSPHCore/operations.py`): `warpOperationJVP(..., tangentQueryValues=None,
    tangentReferenceValues=None, tangentQueryPositions=None, tangentQuerySupports=None, ...)` --
-   accepting the full Tier-2 tangent surface in its signature from the start. When only the
-   value-tangent arguments are non-`None`, it calls `warpOperation` again with the tangents
-   substituted for `queryValues`/`referenceValues` (Tier 1's entire implementation is "no new
-   math"). When any position/support/mass/density tangent argument is non-`None`, raise
-   `NotImplementedError` naming Tier 2 explicitly -- a real, narrow gap to fill in Phase 3, not a
-   silent wrong answer. Keep `launchOperator`'s explicit `FORWARD` rejection
+   accepting the full Tier-2 tangent surface in its signature from the start. Value-tangent-only
+   calls just re-invoke `warpOperation` with the tangents substituted in (Tier 1's entire
+   implementation). Any position/support/mass/density tangent argument raises `NotImplementedError`
+   naming Tier 2 explicitly, until Phase 4. Keep `launchOperator`'s explicit `FORWARD` rejection
    (`autograd/operator_spec.py:190`) for anything routed outside this entry point.
-3. **Promote the spike into a standing test.** Add `tests/operations/test_forward_mode_tier1.py`
-   asserting the new `warpOperationJVP` reproduces `spike_forward_mode_tier1.py`'s JVP identity
-   on the same small cases, the same way `test_gradcheck_scripts.py` already gates the spike
-   script itself -- this closes the gap between "a script proved it once" and "production code is
-   pinned against regressing it." Include a test that the Tier-2 arguments raise cleanly.
-4. **Update `warpier_core.md`'s Phase 6 status** section to record Tier 1's production landing,
-   and add a backlink from there to Phase 1's wave-equation validation as the first real
-   (non-synthetic) consumer.
+3. **Promote the spike into a standing test.** `tests/operations/test_forward_mode_tier1.py`
+   asserting `warpOperationJVP` reproduces `spike_forward_mode_tier1.py`'s JVP identity, the same
+   way `test_gradcheck_scripts.py` gates the spike script. Include a test that Tier-2 arguments
+   raise cleanly.
+4. **Update `warpier_core.md`'s Phase 6 status** to record Tier 1's production landing.
 
 Files touched: `src/warpSPHCore/operations.py`, `src/warpSPHCore/util/fieldRegistry.py`,
 `src/warpSPHCore/util/stateBundle.py`, `src/warpSPHCore/autograd/operator_spec.py`,
 `tests/operations/test_forward_mode_tier1.py` (new), `warpier_core.md`.
 
-## Phase 3 -- Wire Tier 2, validated on moving-particle shifting
+## Phase 3 -- Goal 1: an implicit wave-equation step, powered entirely by Tier 1
 
-Goal: turn Phase 2's `NotImplementedError` into real position/support tangents, using the
-formulas `warpier_adjoint.md`'s Tiers 2.0-2.5 already derived and gradcheck-matched -- this is
-"wire already-proven formulas," not new derivation, for the six core operators. Validate against
-`solveShifting`/`computeDeltaShiftWarp` (`warpSPH/modules/shifting/`), which moves particles and
-rebuilds adjacency every iteration and already has a reverse-mode reference
-(`scripts/gradcheck_deltaShift.py`) to check the new JVP against.
+Goal: the smallest possible demonstration that a forward-mode JVP bridge is enough to stand up an
+implicit SPH solve with *no per-problem Hessian derivation at all* -- "a single SPH operation and
+its forward mode," as the toy problem this whole plan is meant to motivate.
 
-1. **Extend `warpOperationJVP`** for the six core operators using Tier 2.1/2.2/2.4/2.5's
-   assembled JVPs directly (Density/Interpolate, Gradient/Divergence/Curl/Laplacian-Brookshaw,
-   renormalization, CRK -- Tier 2.3's Laplacian-Naive JVP is lower priority per its own writeup).
-   Gate against the corresponding `gradcheck_*_native.py` scripts and `operation_matrix.py`, same
-   pattern as every prior tier.
-2. **`computeDeltaShiftWarp` is not one of the six core operators** -- it's a custom
-   `@wp.func`/`@wp.kernel` in `warpSPH` (`sample/wp_deltaShift.py`) built on the same shared
-   building blocks (`computeKernelCRK` for `w_ij`, and implicitly a kernel gradient) but with its
-   own accumulated math (`sum_j [m_j/(rho_i+rho_j)] * [1+R*(w_ij/W_0)^n] * gradW_ij`). Its Tier-2
-   JVP is therefore its own (mechanical) derivation, following Tier 2.1's playbook exactly:
-   chain-rule this specific expression through the already-validated kernel-value/-gradient JVP
-   building blocks (Tier 2.0/2.1/2.2), rather than assuming the built-in Density operator's JVP
-   applies. Land it as a `warpSPH`-side script mirroring `scripts/spike_forward_mode_tier2_*.py`'s
-   shape, validated against `gradcheck_deltaShift.py`'s existing reverse-mode reference exactly
-   the way every `warpier_adjoint.md` tier validates against its own `gradcheck_*_native.py`.
-3. **Chain one `solveShifting` iteration's tangent, then several.** Unlike Phase 1's linear wave
-   equation, this is genuinely nonlinear and re-neighbors every iteration, so the "just rerun the
-   same primal code on a tangent IC" shortcut does not apply: each iteration's tangent has to be
-   propagated through that iteration's actual JVP (position tangent in, updated position tangent
-   out), the way a real tangent-linear model works. Validate first for a single iteration
-   (`iters=1`, matching `computeDeltaShift`'s own per-call signature) against
-   `gradcheck_deltaShift.py`'s Jacobian, then for a short multi-iteration `solveShifting` run,
-   confirming the chained tangent still matches a reverse-mode `.backward()` through the same
-   multi-iteration rollout.
+Because positions stay frozen in the wave-equation scheme, an implicit step's residual is *linear*
+in the unknown `u^{n+1}` (the PDE itself is linear) -- Newton's method degenerates to exactly one
+linear solve, and the "Jacobian" the solve needs is just the Laplacian operator itself acting on a
+trial field.
+
+1. **Pick a scheme.** Backward Euler first (simplest, unconditionally stable, matches
+   `warpSPHIntegrators/NOTES.md` §3.6's "tableau only" DIRK entries); implicit midpoint as a
+   follow-up once backward Euler works, since `NOTES.md` §3.3 flags it as strictly better for a
+   velocity-dependent force (this scheme's `-damping*v` term) and it's the same shape of stage
+   equation.
+2. **Matvec = `warpOperationJVP`, nothing else.** The stage system `(I - a*dt^2*c^2*Laplacian) *
+   u = rhs` is solved with CG (the operator should be symmetric for a fixed neighbourhood under
+   `SupportScheme.SuperSymmetric` -- verify this empirically on the test case rather than assume
+   it, and fall back to BiCGStab, reusing `warpSPH/modules/shifting/bicgstab.py`'s existing
+   generic solver, if it isn't). Each CG matvec is exactly one
+   `warpOperationJVP(Laplacian, tangentQueryValues=p)` call from Phase 2 -- no hand-derived
+   Jacobian, no finite differences.
+3. **Validate two ways**: (a) against the existing explicit `f_wave_equation` rollout at a small
+   `dt` where both should agree closely, and (b) a convergence check mirroring
+   `tests/test_waveEquation.py`'s standing-wave closed-form comparison, confirming the implicit
+   scheme's own expected order.
+4. **Write up what this did and didn't need.** The point worth recording explicitly: no Hessian
+   was hand-derived, no per-operator matvec was written -- the existing `warpOperationJVP` from
+   Phase 2 *is* the matvec. Contrast this in one paragraph with `wp_implicitShifting.py`'s
+   from-scratch Hessian derivation (Phase 4 makes the contrast direct on a harder case).
+
+Files touched: new `warpSPH/tests/test_implicitWaveEquation.py` (or a script promoted to a test
+once stable).
+
+## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting
+
+Goal: wire Tier 2 into `warpOperationJVP`, then build an implicit shifting solve whose `grad C`/
+`Hess C` come from *composed JVPs* instead of `wp_implicitShifting.py`'s hand-rolled per-pair
+kernel, and compare three ways: explicit shift (`computeDeltaShift`), the existing hand-built
+implicit shift (`computeImplicitShift`), and this new automatic one. This is the goal-2 comparison
+the user asked for, and the one place in this plan where "how much derivation did this need"
+is the headline result, not just a number matching to float64 round-off.
+
+1. **Extend `warpOperationJVP`** for the six core operators using Tier 2.1/2.2/2.4/2.5's already
+   assembled JVPs (Density/Interpolate, Gradient/Divergence/Curl/Laplacian-Brookshaw,
+   renormalization, CRK). Gate against the corresponding `gradcheck_*_native.py` scripts and
+   `operation_matrix.py`, same pattern as every prior tier in `warpier_adjoint.md`.
+2. **`grad C` is exactly Tier 2.1's Density-operator position JVP.** `C_i = sum_j omega_j * W_ij`
+   is `Density_i = sum_j m_j * W_ij` with `omega` standing in for mass -- so
+   `warpOperationJVP(Density, tangentQueryPositions=v)` (with `omega` passed as the mass channel)
+   *is* `grad C . v` with no new derivation. Validate this identity first, standalone, against
+   `wp_implicitShifting.py`'s `J` output.
+3. **`Hess C . v` is a JVP of that JVP** ("Tier-2-squared"): differentiate
+   `warpOperationJVP(Density, tangentQueryPositions=v)` itself w.r.t. positions in the direction
+   `v` again. Whether this composes cleanly through the existing bridge or needs a small explicit
+   second-order helper is exactly the kind of thing to discover by trying it, not to
+   pre-design -- this step is the actual experiment. Validate against `wp_implicitShifting.py`'s
+   `H` output on the same case.
+4. **Swap the matvec, keep the solver.** `bicgstab.py`'s `bicgstabSolve` already takes a plain
+   `matvec` closure -- feed it the composed-JVP Hessian action instead of
+   `_multiplyLaplacianBlock`'s hand-assembled one, everything else in `computeImplicitShift`
+   (preconditioner, boundary masking, relaxation) unchanged. Run both on the same jittered-lattice
+   test case `implicitShifting.py`'s own docstring describes, and confirm the two solves converge
+   to the same equilibrium shift.
+5. **Specifically test the two pitfalls the hand port hit**, since they're the concrete evidence
+   for this phase's actual point: does the composed-JVP Hessian handle the self-pair (`i==j`,
+   zero separation) case correctly without a manual drop, the way the hand version needed one? Is
+   the resulting operator symmetric without anyone having to work out the `-omega_k H_ik`
+   off-diagonal sign by hand? Report both findings explicitly, whichever way they come out -- if
+   the automatic path reproduces the same pitfalls, that's worth knowing too, and changes how much
+   of a win "automatic" actually is here.
+6. **Compare, three ways, on correctness and on effort/robustness, not speed**: `computeDeltaShift`
+   (explicit baseline), `computeImplicitShift` (hand Hessian + BiCGStab), and the new
+   automatic-JVP + BiCGStab solve. Report equilibrium shift agreement between the two implicit
+   solves, and qualitatively how each was built (lines of hand-derived math vs. composed calls to
+   an existing bridge) -- that comparison, not a timing table, is the deliverable.
 
 Files touched: `src/warpSPHCore/operations.py` (Tier-2 branch of `warpOperationJVP`), new
-`warpSPH/scripts/spike_forward_mode_shift_tier2.py`, new
-`warpSPH/tests/test_forwardModeShifting.py`.
+`warpSPH/modules/shifting/implicitShiftingAutomatic.py` (or a script, if it doesn't need to be
+production code yet), new `warpSPH/tests/test_implicitShiftingComparison.py`.
 
-## Phase 4 -- Toward an implicit particle-shift step
+## Phase 5 -- Goal 3: the incompressible wrapper already exists
 
-Not implemented in this plan -- the concrete, already-scoped next target once Phase 3 lands.
-`ShiftingScheme.implicit` exists as a named-but-unwired enum value
-(`configurations/moduleConfigurations/shifting.py:21`; `wrapper.py` never dispatches on it), and
-`schemes/dfsph.py:8` references a commented-out "alternate implicit-particle-shift path" -- both
-are real, already-recognized gaps for exactly the kind of implicit, position-solving step the
-delta-SPH shift currently approximates by explicit fixed-point iteration.
+Not a task -- a pointer, so it isn't accidentally rebuilt. `systems/incompressible.py` +
+`modules/incompressible/incompressible.py` already wrap the compressible/WCSPH momentum equation
+with an IISPH pressure solve (relaxed-Jacobi iteration on the density-error residual,
+`solveIncompressible`). "Wrap the explicit WCSPH/compressible scheme into an incompressible
+wrapper" is already done; what Phase 6 (below) adds is an *alternative* implicit solver to compare
+it against, not a rebuild of the wrapping itself.
 
-This is *not* a blank slate -- `warpSPHIntegrators` (`~/dev/warpSPHIntegrators`, the library
-`WaveSystemv3`'s and the compressible/incompressible schemes' `integrator.function(...)` already
-calls) has a detailed, empirically-verified implicit/multistep plan sitting in its own
-`NOTES.md` §3 ("Multistep and implicit methods"), independent of anything in this plan. Read it
-in full before designing anything here; the load-bearing points:
+## Phase 6 -- Goal 4: automatic vs. IISPH for incompressibility (future, separate plan)
+
+Not scoped in detail here -- flagged as the natural next target once Phase 4 proves the
+automatic-Hessian pattern out on the smaller shifting case, and deliberately kept out of this
+plan's near-term scope because it's a materially bigger lift: coupled pressure/velocity DOFs
+across the whole domain (not one scalar field per particle), boundary and free-surface handling,
+and EOS coupling that shifting's pure-geometry objective doesn't have.
+
+The shape would mirror Phase 4: an automatic Newton-Krylov pressure-Poisson solve built from
+composed `warpOperationJVP` calls (the pressure-gradient/divergence operators already exist as
+core operators, so no new operator-level derivation should be needed, only composition), compared
+against `solveIncompressible`'s existing IISPH relaxed-Jacobi iteration -- again on correctness and
+on how much bespoke pressure-solver machinery the automatic path avoids, not on iteration count or
+wall-clock time. `warpSPHIntegrators/NOTES.md` §3.4's solver ladder (Picard -> JFNK-with-FD ->
+exact-JVP -> user `solve_linear`) is the right frame for where this sits: IISPH is closer to rung
+1 (fixed-point relaxation), the hand-built implicit shift is rung 4 (user-supplied, exact,
+hand-derived), and this goal is asking what rung 3 (exact JVP matvecs, general-purpose) actually
+costs and buys once it exists. Scope this as its own plan once Phase 4's findings are in.
+
+## `warpSPHIntegrators` context (read before scoping Phase 3 or Phase 6 further)
+
+`warpSPHIntegrators` (`~/dev/warpSPHIntegrators`, the library every scheme's
+`integrator.function(...)` already calls) has a detailed, empirically-verified implicit/multistep
+plan in its own `NOTES.md` §3 ("Multistep and implicit methods"), independent of anything in this
+plan. Read it in full before building Phase 3's implicit wave-equation driver or scoping Phase 6;
+the load-bearing points:
 
 - **§3.0-3.1**: because this simulation never re-sorts particles and carries its neighbour list
   through the state (revalidated cheaply, not rebuilt), the two objections that normally make
   implicit SPH expensive don't apply here -- "one RHS evaluation = one neighbour rebuild" is
-  false, and a DIRK stage solve needs no new state algebra (it reuses the library's existing
-  `initializeNewState`/`applyStateUpdate`/`updateStep` primitives as-is; a ~60-line probe already
-  reaches full order). Note `solveShifting` *does* rebuild adjacency every iteration
-  (`wrapper.py:75`) -- worth checking whether that rebuild-per-iteration is actually load-bearing
-  for shifting specifically (particles can move far enough per shift to change neighbors) or
-  could adopt the same revalidate-don't-rebuild pattern before assuming §3.0's cost argument
-  carries over unchanged.
-- **§3.3**: implicit midpoint (Gauss-Legendre, s=1) is flagged as the single highest-value
-  addition -- symplectic, A-stable, and holds order 2 for a velocity-dependent force.
-- **§3.4 "Newton without forward-mode AD"** is the section most directly relevant to Phase 3's
-  bridge: it concludes Newton's stage solve does **not** require forward-mode AD at all -- a
-  finite-difference directional derivative `J*v ~= (f(Y+eps*v)-f(Y))/eps` drives it to
-  `dt*omega = 1000` with no autodiff of any kind, because only Jacobian-*vector* products are
-  ever needed (never a full Jacobian, intractable at particle count). Its recommended solver
-  ladder is (1) fixed-count Picard -- non-stiff, no AD, covers the primary use case, (2) JFNK with
-  FD matvecs -- stiff, backend-agnostic, (3) exact matvecs via `torch.func.jvp`/a native JVP -- "a
-  speed and robustness optimisation, **not** a capability gate", (4) a user-supplied
-  `solve_linear`. Phase 2/3's `warpOperationJVP` is exactly rung 3 of that ladder for the parts
-  of a residual that route through `warpSPHCore` operators (including, for an implicit particle
-  shift, the position tangent Phase 3 lands) -- a real accelerant, not a prerequisite.
-- **§3.8** lays out a phased effort estimate entirely within `warpSPHIntegrators`, gated on
-  nothing from `warpSPHCore`: Phase 0 (shared groundwork, ~5-6 d) -> Phase 2 (DIRK driver +
-  fixed-count Picard solver + implicit midpoint/backward Euler/trapezoidal/SDIRK2/TR-BDF2,
-  ~4-5 d) -> Phase 1 (explicit multistep, ~2-3 d) -- "~2 weeks total, then stop and reassess."
+  false, and a DIRK stage solve needs no new state algebra (a ~60-line probe over the library's
+  existing `initializeNewState`/`applyStateUpdate`/`updateStep` primitives already reaches full
+  order). Phase 3 could use this driver directly instead of a bespoke CG loop, once it exists as a
+  registered scheme -- worth checking at that point rather than assuming a hand-rolled loop is
+  the final form.
+- **§3.4 "Newton without forward-mode AD"** concludes Newton's stage solve does **not** require
+  forward-mode AD at all -- FD directional derivatives are enough for the non-stiff regime this
+  codebase mostly lives in. Its solver ladder: (1) fixed-count Picard, (2) JFNK with FD matvecs,
+  (3) exact matvecs via `torch.func.jvp`/a native JVP -- "a speed and robustness optimisation,
+  **not** a capability gate", (4) a user-supplied `solve_linear`. This plan's Phases 3/4/6 are
+  building rung 3 generically and comparing it against existing rung-4 (shifting) and rung-1
+  (IISPH) implementations already in production -- the "automatic vs. hand-built, on ease not
+  speed" framing above is exactly what makes rung 3 worth having even though the ladder's own
+  text says it's optional.
+- **§3.8**'s phased effort estimate (Phase 0 groundwork ~5-6 d -> DIRK+Picard driver ~4-5 d ->
+  explicit multistep ~2-3 d, "~2 weeks total") is entirely within `warpSPHIntegrators`, gated on
+  nothing from `warpSPHCore` -- worth scoping as its own small piece of work if Phase 3 wants the
+  registered driver rather than a one-off script.
 
-The actionable next step here, once picked up, is to scope a dedicated plan against
-`warpSPHIntegrators/NOTES.md` §3's roadmap with `ShiftingScheme.implicit` (or DFSPH's shelved
-path) as the concrete target -- using this plan's Phase 3 `warpOperationJVP` as an optional matvec
-accelerant per §3.4 rung 3, and the fixed-point Picard iteration already at the heart of
-`solveShifting` today as evidence the non-stiff case is already halfway implemented in spirit,
-just not yet driven by a proper Newton/DIRK stage solve.
+## Explicitly out of scope for this plan
 
-## Explicitly out of scope for this plan (flagged, not attempted)
-
-- **Tier 2 for operators/schemes beyond the six core ones and delta-shift** (e.g. the momentum
-  equation, pressure solves, mDBC, surface detection) -- Phase 3 proves the mechanism generalizes
-  past the frozen-position wave equation, but does not attempt every consumer in the codebase.
-- **Actually implementing `ShiftingScheme.implicit` or the DFSPH implicit path** (Phase 4) -- scope
-  it as its own plan against `warpSPHIntegrators/NOTES.md` §3 once Phase 3 lands.
-- **Adaptive/variable time-stepping interaction with forward mode** -- not touched by any phase
-  here; the wave equation and shifting testbeds both use a fixed `dt` per run.
+- **Actually registering an implicit scheme in `warpSPHIntegrators`** (vs. a standalone script
+  for Phase 3) -- `NOTES.md` §3.8's own phased plan, pick up separately if Phase 3's findings
+  justify it.
+- **Phase 6's full implementation** -- explicitly deferred to its own plan.
+- **Tier 2 for operators beyond the six core ones and the shifting comparison** (momentum
+  equation, mDBC, surface detection, etc.).
+- **Performance tuning or optimization of any automatic path** -- correctness and ease of
+  construction are this plan's success criteria; speed is not graded anywhere in it.
 
 ## Verification
 
-- Phase 1: `pytest tests/test_forwardModeWave.py` in `warpSPH` (new test), plus confirm the
-  existing `pytest tests/test_waveEquation.py` and `pytest tests/test_physics.py -k wave` are
-  unaffected (no production code changed in this phase).
-- Phase 2: `python scripts/spike_forward_mode_tier1.py` still green in `warpSPHCore`; new
+- Phase 1: `pytest tests/test_forwardModeWave.py` in `warpSPH`; existing
+  `tests/test_waveEquation.py` / `tests/test_physics.py -k wave` unaffected.
+- Phase 2: `python scripts/spike_forward_mode_tier1.py` green; new
   `pytest tests/operations/test_forward_mode_tier1.py` green; `pytest tests/` and
   `python scripts/operation_matrix.py --device cpu` unaffected (baseline `OK=258, HIGH=0, ERR=0,
-  NAN=0`, per every prior tier's gate in `warpier_adjoint.md`); re-run the six
-  `gradcheck_*_native.py` scripts to confirm nothing about the new `FORWARD`-mode struct aliasing
-  regresses the reverse-mode path.
-- Phase 3: `pytest tests/test_forwardModeShifting.py` in `warpSPH`; `python
-  scripts/gradcheck_deltaShift.py` still passes in `warpSPH` (reference untouched); the six
-  `gradcheck_*_native.py` scripts and `operation_matrix.py --device cpu` in `warpSPHCore`
-  unaffected; re-run Phase 1's wave-equation test to confirm Tier 1's path is unaffected by
-  Tier 2 landing alongside it.
-- End-to-end: re-run Phase 1's cross-validation test after Phase 2 lands, swapping its hand-rolled
-  "call `f_wave_equation` twice" trick for the new `warpOperationJVP` where convenient, to confirm
-  the production entry point and the manual trick agree (they should be identical by
-  construction, but worth asserting explicitly).
+  NAN=0`); the six `gradcheck_*_native.py` scripts unaffected.
+- Phase 3: new implicit-wave test passes its convergence/agreement checks; existing wave-equation
+  tests unaffected.
+- Phase 4: new shifting-comparison test passes; `python scripts/gradcheck_deltaShift.py` and
+  `tests/test_implicitShifting.py` (the existing hand-built solver's own tests) unaffected; the
+  six `gradcheck_*_native.py` scripts and `operation_matrix.py --device cpu` in `warpSPHCore`
+  unaffected.
+- End-to-end: re-run Phase 1's cross-validation after Phase 2 lands, swapping its hand-rolled
+  double-rollout for `warpOperationJVP` where convenient, confirming they agree.
