@@ -1,0 +1,262 @@
+# Tier-2 JVP wiring for the remaining five core SPH operators
+
+## Context
+
+`warpier_forward_mode_plan.md` Phase 4 originally called for extending `warpOperationJVP` to
+all six core operators (Density/Interpolate, Gradient/Divergence/Curl/Laplacian), but was scoped
+down to Density only because that's what the implicit-shifting comparison (Phase 4's actual goal)
+needed. The math for every operator was still fully derived and validated in `warpier_adjoint.md`
+Tiers 2.1-2.5, and prototyped in dense-all-pairs form in `scripts/spike_forward_mode_tier2_*.py` —
+none of that was wasted, it just never got promoted to production. The user flagged this gap after
+Phase 4 was marked done and asked to close it: wire Tier-2 JVP support for the remaining five
+operators into `warpOperationJVP`, matching Density's existing production pattern. Scope choice
+(user-selected): **JVP only** — no Hessian-vector products beyond Density's existing one, and no
+CRK/renormalization correction paths (Tiers 2.4/2.5 stay out of scope, cleanly rejected).
+
+Two rounds of research (three parallel Explore agents, then a Plan agent) already extracted the
+exact formulas from the spike scripts, the exact structure of each operator's existing production
+kernel, and the exact test-file conventions to mirror. This document is that synthesis, reviewed
+and finalized against the source files before execution. Written to the repo (not just the local
+plan-mode scratch file) because this is expected to span multiple sessions.
+
+## Status: not started (plan finalized 2026-08-19)
+
+## Approach
+
+Mirror `coreOperations/wp_densityJVP.py`'s existing pattern for every new operator: a `@wp.kernel`
+launched **one thread per real adjacency-list pair** (not the spike's dense all-pairs shortcut),
+producing per-pair values into flat arrays, then a `torch.index_add_` scatter-reduce in Python to
+assemble the per-query-particle result — bypassing `OperatorSpec`/`launchOperator` (which only
+supports per-query-particle thread counts), the same way `wp_implicitShifting.computeShiftingPairTerms`
+already does in the sibling `warpSPH` repo.
+
+**Key finding that changes the file layout from "one file per operator":** Gradient, Divergence,
+Curl, and Laplacian(Brookshaw) all consume the *exact same* pairwise `∇W_ij` JVP (confirmed
+byte-identical in the spike, `warpier_adjoint.md` Tier 2.2 finding 2) — only the downstream
+coefficient/combination step differs, and that step is pure torch, no warp. So there is exactly
+**one** new shared per-pair warp kernel for those four operators, not four independent ones.
+
+### Step 0 — refactor shared boilerplate out of `wp_densityJVP.py`, plus a differentiability diagnostic
+
+`_buildParticleSoA`/`_buildDomainState`/`_buildKernelState` (currently private to
+`wp_densityJVP.py`) move to a new `coreOperations/_jvpCommon.py`, extended with an optional
+`densities` argument (Density's own dummy-zero path stays default). `wp_densityJVP.py` is updated
+to import from it — pure extract-function, no logic change. Verify with
+`pytest tests/operations/test_forward_mode_tier2_density.py` before touching anything else, so
+every later step builds on an already-proven-identical shared module instead of re-proving it six
+times.
+
+**Also part of this step, before building anything new (see "Lookouts" item 2 below for the full
+reasoning): a small standalone diagnostic checking whether `computeSPHDensityPositionJVP`'s output
+carries a gradient back to its own inputs under standard torch autograd** (`positions.requires_grad_()`,
+call the JVP, `.backward()` the summed output, check `positions.grad`). This determines, once, up
+front, whether the pair-indexed-kernel pattern every new operator in this plan reuses is reverse-mode
+differentiable through torch at all — relevant to anyone composing these JVP calls into a larger
+differentiable solve (e.g. an implicit timestepper) and wanting to backprop through it. Record the
+answer in this file's status section either way; if it's "not differentiable" (suspected, not yet
+confirmed), that's inherited from Phase 4 step 1's own design choice (bare `wp.launch`, bypassing
+`launchOperator`'s autograd-tape wrapper, because that ABI doesn't support pair-indexed threading),
+not a new problem this plan introduces or needs to fix.
+
+### Step 1 — extend `warpOperationJVP`'s signature and generalize its dispatch
+
+`operations.py`'s `warpOperationJVP` currently has no way to pass **frozen** field values
+(`fi`/`fj`) through for the Tier-2 branch — it only has `tangentQueryValues`/`tangentReferenceValues`
+(Tier-1's tangent-of-values), and Density never needed plain values since it has no value input at
+all. Add `queryValues=None, referenceValues=None` to the signature, consulted only inside the
+Tier-2 (`providedTier2`) branch; raise `ValueError` if they're passed on a pure Tier-1 call (a
+caller who passes them there almost certainly meant Tier-2 and forgot a tangent argument).
+
+Replace the single `isDensityPositionSupportCase` special-case with a small per-operator dispatch
+table (`_TIER2_OPERATIONS = (Density, Interpolate, Gradient, Divergence, Curl, Laplacian)`).
+**Density's existing branch is left as literally the same code, unmoved and unedited** — this is
+the one piece of this plan with zero tolerance for behavior drift, so it's not routed through any
+new shared helper. The new value-having-operator branch adds one shared validation block (see
+"scope boundaries" below) before dispatching to each operator's `computeSPH<Op>PositionJVP`.
+
+Gate: `test_forward_mode_tier2_density.py`'s existing 9 cases (including both `NotImplementedError`
+tests) pass unmodified.
+
+### Step 2 — Interpolate (Tier 2.1's other operator, cheapest, no new kernel math)
+
+`coreOperations/wp_interpolateJVP.py`: `computeSPHInterpolatePositionJVP`. Reuses the *existing*
+`sphKernelJVP` (`kernels/kernelJVP.py`) — same `(W_ij, dW_ij)` per-pair computation `wp_densityJVP.py`
+already launches, factored into a tiny shared pair-kernel launcher both files call (in
+`_jvpCommon.py` or a small adjacent module) so `wp_densityJVP.py` is refactored to reuse it too.
+Formula: `dInterpolate_i = sum_j fj*(dVj*W_ij + Vj*dW_ij)`, `Vj = mass_j/density_j`,
+`dVj = dmass_j/density_j - mass_j*ddensity_j/density_j^2`. Proves the new `queryValues`/
+`referenceValues` plumbing end to end on the simplest possible case before building anything on
+top of it.
+
+### Step 3 — shared `∇W_ij` JVP building block
+
+New `@wp.func sphKernelGradientJVP_ij`/`sphKernelGradientJVP` in `kernels/kernelJVP.py`, directly
+below `sphKernelJVP_ij`/`sphKernelJVP` — byte-for-byte the spike's already-validated
+`_kernelGradientJVP` (KernelMeanSymmetric/SuperSymmetric two-term-average branch via
+`sphGradient_`/`sphKernelHessian_`/`sphGradientDkDh_`; everything else via
+`computePairwiseSupport`/`computePairwiseSupportJVP`'s single-`h` branch). New
+`coreOperations/wp_kernelGradientJVP.py`: one shared `@wp.kernel`, one thread per adjacency pair,
+producing `(G_ij, dG_ij)` flat `(numPairs, dim)` tensors — the single new warp kernel launch shared
+by the next four operators.
+
+### Steps 4-6 — Gradient, Divergence, Curl (thin, parallel-buildable)
+
+Each a new `coreOperations/wp_<op>JVP.py`, pure-torch coefficient assembly on top of step 3's
+shared pair kernel — no new `@wp.kernel` in any of these three files. Shared
+`_gradientWeights(mass_j, density_i, density_j, dmass_j, ddensity_i, ddensity_j, scheme)` (the
+`GradientScheme`-dispatched `A`/`B`/`dA`/`dB` table from `warpier_adjoint.md` Tier 2.2) lives once
+in `_jvpCommon.py`, reused by all three plus Laplacian:
+
+```
+Naive: A=0, B=Vj  |  Difference: A=-Vj, B=Vj  |  Summation: A=Vj, B=Vj
+Symmetric: A=mass_j/density_i, B=mass_j*density_i/density_j^2
+```
+
+`coeff_ij = fi*A_ij + fj*B_ij` (fi/fj frozen), combined as: Gradient `sum_j coeff_ij * G_ij`;
+Divergence `sum_j dot(coeff_ij, G_ij)` (dotMode=False only); Curl (2D only)
+`sum_j [G_ij.x*coeff_ij.y - G_ij.y*coeff_ij.x]`, matching `wp_curl.py`'s `[1]`-output-shape
+convention.
+
+### Step 7 — Laplacian (Brookshaw scheme)
+
+`coreOperations/wp_laplacianJVP.py`: `computeSPHLaplacianBrookshawPositionJVP`. Reuses step 3's
+shared pair kernel and `_gradientWeights`, adds the regularized-distance chain on top (pure torch,
+ordinary calculus): `q_ij=(fj-fi)*B_ij`, `D_ij=r_ij+eps*h_ij` (`eps=1e-8`), `n_ij=x_ij/D_ij`,
+`L_ij=-2*q_ij*dot(G_ij,n_ij)/D_ij`, with `dr_ij`, `dD_ij`, `dn_ij` chain-ruled through ordinarily.
+
+### Step 8 (stretch, do last, optional) — Laplacian (Naive scheme)
+
+Only if steps 0-7 land cleanly with time to spare — not required to call "Laplacian" done for this
+plan's six-operator scope, since Brookshaw is what `wp_laplacian.py` itself treats as the
+consistent estimator. If attempted: new `sphKernelLaplacianJVP_ij`/`sphKernelLaplacianJVP` in
+`kernels/kernelJVP.py`, built from the *already-production* `sphKernelLaplacian_`/
+`sphKernelLaplacianGradient_`/`sphKernelLaplacianDkDh_` (`kernels/laplacian.py`, landed under Tier
+2.3, confirmed present). Same `_gradientWeights`-derived `q_ij`, different `L_ij`/`dL_ij` source.
+Note the *already-documented* dispatch asymmetry: `sphKernelLaplacian`'s `SupportScheme` dispatch
+gives `KernelMeanSymmetric` the *max-fallback* branch, not a two-term average like Brookshaw's —
+carry this into the test as an explicit "these two schemes genuinely differ here" regression check
+(the spike already does this), not a bug to "fix."
+
+## Scope boundaries (raise `NotImplementedError`/`ValueError`, enforced centrally in step 1's dispatch)
+
+Every new operator branch checks these before dispatching, so individual `wp_<op>JVP.py` files stay
+focused on the math (mirroring `wp_densityJVP.py`, which has no internal validation of its own):
+
+- `crkState`, `renormalizationState`, or `gradHState` provided → raise (Tiers 2.4/2.5 and grad-h
+  coupling are all out of scope for this pass).
+- `queryVolumes`/`referenceVolumes` provided → raise (the derived formulas always use
+  `mass_j/density_j` directly, never a volume override).
+- `tangentQueryValues`/`tangentReferenceValues` provided alongside Tier-2 tangents → raise
+  (`fi`/`fj` must be frozen; combined Tier-1+Tier-2 was never derived).
+- `tangentQueryMasses` provided → raise (no formula has an `m_i` term — matches Density's existing
+  check).
+- Divergence: `divergenceDotMode=True` or `consistentDivergence=True` → raise (neither is in the
+  derived math; guessing a semantics for either risks a plausible-looking wrong answer).
+- Curl: `domain.dim != 2` → raise (1D and 3D both undecided by the spike; don't special-case 1D's
+  trivial-zero case without deriving it).
+- Laplacian: `laplacianMode not in (Brookshaw, Naive)` or `positiveDivergence=True` → raise
+  (Dot/Default explicitly deferred by Tier 2.2's own "Result" section; `positiveDotProduct`'s extra
+  term isn't in the derived formula).
+
+## Tests
+
+One new file per operator in `tests/operations/`, cloning `test_forward_mode_tier2_density.py`'s
+structure exactly: jittered (±15%) non-uniform supports (needed to disambiguate `SupportScheme`
+dispatch, per that file's own documented rationale), `torch.autograd.functional.jacobian`-based
+reference contracted with the tangent (never `torch.autograd.functional.jvp` — silently zero
+through the warp/`wp.Tape` bridge, per every prior tier's documented gotcha), `rtol=1e-3,
+atol=1e-5`, `SupportScheme`/`GradientScheme` parametrization mirroring each spike's own case
+matrix. Each file also tests its own scope-boundary rejections (CRK/renorm/gradH/volumes, plus the
+operator-specific ones from above).
+
+`test_forward_mode_tier2_density.py::test_otherOperators_tier2_still_raise` currently hardcodes
+Gradient as "still raises" — update it incrementally as each operator lands (repoint at whichever
+operator is still pending), rather than leaving it silently vacuous or deleting it outright; once
+all five land it can be retired or repointed at Covariance (which stays out of scope throughout).
+
+## Verification (run after every step, not just at the end)
+
+```bash
+pytest tests/operations/test_forward_mode_tier2_<newly-landed-op>.py -v
+pytest tests/operations/test_forward_mode_tier2_density.py -v   # must stay green throughout
+pytest tests/operations/test_forward_mode_tier1.py -v           # unaffected by the signature change
+pytest tests/                                                    # baseline: 136 passed / 1 skipped
+python scripts/operation_matrix.py --device cpu                  # baseline: OK=258, HIGH=0, ERR=0, NAN=0
+python scripts/gradcheck_<op>_native.py                          # for every operator touched, reverse-mode unaffected
+```
+
+Use this repo's `gradcheck`/`operation-matrix` skills for the last two rather than ad hoc
+invocation. After all steps land, update `warpier_forward_mode_plan.md` with a new dated status
+entry recording what shipped (mirroring every prior phase's own documentation discipline) — this
+is new work beyond Phase 4's original scope, so it gets its own entry rather than silently
+reopening Phase 4.
+
+## Critical files
+
+- `src/warpSPHCore/operations.py` — `warpOperationJVP`'s signature + dispatch (step 1)
+- `src/warpSPHCore/coreOperations/wp_densityJVP.py` — existing pattern to mirror; refactored in step 0
+- `src/warpSPHCore/coreOperations/_jvpCommon.py` — new shared helpers (step 0), `_gradientWeights` (steps 4-7)
+- `src/warpSPHCore/kernels/kernelJVP.py` — new `sphKernelGradientJVP`/`_ij` (step 3), optional `sphKernelLaplacianJVP`/`_ij` (step 8)
+- `src/warpSPHCore/coreOperations/wp_interpolateJVP.py`, `wp_kernelGradientJVP.py`, `wp_gradientJVP.py`, `wp_divergenceJVP.py`, `wp_curlJVP.py`, `wp_laplacianJVP.py` — new, steps 2-7
+- `tests/operations/test_forward_mode_tier2_{interpolate,gradient,divergence,curl,laplacian_brookshaw}.py` — new
+- `warpier_forward_mode_plan.md` — new status entry once done
+
+## Lookouts — explicitly deferred, don't lose track of these
+
+**1. HVP for the other five operators.** This plan is JVP-only by user choice (Density already has
+`warpOperationHVP`; nothing else will after this plan). Not widely needed today — the only current
+consumer is the implicit-shifting comparison, which only ever touches Density — but if a future
+Newton-style solve needs `Hess(Gradient/Divergence/Curl/Laplacian/Interpolate) @ v`, the pattern to
+reuse is already established and documented: generic torch-level composition (`torch.func.jvp`
+applied twice, nested `torch.autograd.forward_ad`) does **not** work through a warp-kernel-backed
+function in this codebase (confirmed for Density, `wp_densityHVP.py`'s own docstring: immediate
+`RuntimeError` from one path, a silently-dropped tangent from the other) — the fix each time is a
+small hand-written "second-order helper" that differentiates the JVP's own formula once more by
+hand (which for Density needed zero new kernel math, just reusing `sphKernelHessian`). Whoever
+picks this up should expect the same shape of work per operator, not assume it composes for free.
+
+**2. Differentiability of the JVP bridge itself, through standard torch autograd — needs an
+empirical check, not an assumption, before this plan is considered fully verified.** The scenario
+that matters: someone builds an implicit timestepper's Newton solve out of `warpOperationJVP`/
+`warpOperationHVP` calls (this plan's whole point), then wants to differentiate *through that
+solve* — either forward-mode again (composing a further JVP, which HVP already shows is not free,
+per lookout 1) or reverse-mode (an ordinary `.backward()` call reaching back through the solve to
+whatever produced its inputs, e.g. for training/calibration). Reverse-mode differentiability
+through the solve requires every JVP call inside it to itself carry a valid autograd graph back to
+its own inputs — and there's a concrete reason to suspect it currently doesn't:
+`wp_densityJVP.py`'s pair-indexed kernel launch is a **bare `wp.launch`**, deliberately bypassing
+`OperatorSpec`/`launchOperator` (Phase 4 step 1's own documented reason: that ABI only supports
+per-query-particle thread counts, not pair-indexed threading) — and `launchOperator`'s reverse-mode
+support comes from wrapping kernel launches in a `torch.autograd.Function` that records a
+`wp.Tape` (`StateAwareWarpFunction`, referenced in `wp_densityHVP.py`'s own docstring for a related
+but distinct reason). A bare `wp.launch` outside that wrapper does not register any autograd node,
+so `W_t`/`dW_t` (and therefore `dDensity`) likely carry **no** gradient back to
+`queryParticles.positions`/`tangentQueryPositions`/etc. through ordinary PyTorch autograd today —
+only the plain-torch mass-tangent indexing (`massJ = referenceParticles.masses[adjacency.j.long()]`
+etc.) would show up as differentiable, everything routed through the warp kernel would not.
+**This has not been empirically confirmed yet, only reasoned from reading the code** — the very
+first thing to do under this plan (fold into Step 0, before building anything new) is a small
+diagnostic test: build `positions`/`tangentQueryPositions` with `requires_grad=True`, call the
+*existing* `computeSPHDensityPositionJVP`, sum its output, call `.backward()`, and check whether
+`positions.grad`/`tangentQueryPositions.grad` are populated or `None`. Establish the answer once,
+up front, on the one operator that already exists, rather than each new operator's test rediscovering
+it independently. If (as suspected) the answer is "not differentiable this way": that's an inherited
+limitation of Phase 4 step 1's own design choice (pair-indexed threading bypassing `launchOperator`),
+not a regression this plan introduces, and not something this plan needs to fix (fixing it would mean
+wrapping every new `wp_<op>JVP.py` function in its own `torch.autograd.Function`+`wp.Tape`, a real
+design task of its own) — but it must be written down prominently (this plan's status section, and
+eventually `warpier_forward_mode_plan.md`) rather than left for a future confused user building a
+differentiable implicit timestepper to rediscover the hard way. A user who needs that today would
+need `torch.func` functional transforms (`torch.func.grad`/`vjp` composed around the *whole* Newton
+solve as a black box, not autograd through its internals) or a hand-written custom
+`torch.autograd.Function` around the solve — flag both as the practical workarounds if the
+diagnostic confirms the gap.
+
+## Source research (for whoever picks this up)
+
+This plan was synthesized from three parallel Explore-agent research passes (spike-script
+formulas, production coreOperations kernel structure, test/gradcheck conventions) and one Plan
+agent design pass, all run against this repo's state as of 2026-08-19. If resuming this work in a
+new session, re-reading `warpier_adjoint.md` Tiers 2.1-2.2 and `coreOperations/wp_densityJVP.py` +
+`kernels/kernelJVP.py` is enough to reconstruct the same context from scratch if needed — nothing
+in this plan depends on information that isn't already in the repo.
