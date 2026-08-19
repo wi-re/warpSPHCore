@@ -36,7 +36,7 @@ from warpSPHCore import (
     radiusSearchCompactHashMap,
 )
 from warpSPHCore.coreOperations.wp_densityHVP import _computeSPHDensityHVP_PairKernel
-from warpSPHCore.coreOperations.wp_densityJVP import _buildParticleSoA, _buildDomainState, _buildKernelState
+from warpSPHCore.coreOperations._jvpCommon import buildParticleSoA as _buildParticleSoA, buildDomainState as _buildDomainState, buildKernelState as _buildKernelState
 from warpSPHCore.enumTypes import SupportScheme, KernelFunctions
 from warpSPHCore.type_config import scalar_t
 from warpSPHCore.util import castTorchToWarp, allocateTorchWarp

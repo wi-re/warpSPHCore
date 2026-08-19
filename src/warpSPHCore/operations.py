@@ -169,6 +169,26 @@ _TIER1_JVP_OPERATIONS = (
     WarpOperation.Curl, WarpOperation.Laplacian,
 )
 
+# Operators Tier 2 (`warpier_tier2_operators_plan.md`) covers at all -- Density
+# (position/support/mass tangent, no queryValues/referenceValues) plus the
+# five value-having operators (position/support tangent with frozen
+# fi/fj values). Covariance is not in this set: no Tier-2 formula was ever
+# derived for it, so it always falls through to the generic "not in Tier-2
+# scope" NotImplementedError below, same as before this plan.
+_TIER2_OPERATIONS = (
+    WarpOperation.Density, WarpOperation.Interpolate, WarpOperation.Gradient,
+    WarpOperation.Divergence, WarpOperation.Curl, WarpOperation.Laplacian,
+)
+
+# Populated incrementally as `warpier_tier2_operators_plan.md`'s steps 2-7
+# land each operator's `computeSPH<Op>PositionJVP`. An operator in
+# `_TIER2_OPERATIONS` but not yet a key here still raises NotImplementedError
+# (the plan's own gate: `test_otherOperators_tier2_still_raise` gets
+# repointed at whichever operator is still pending as each one lands).
+_TIER2_VALUE_DISPATCH = {
+    WarpOperation.Interpolate: computeSPHInterpolatePositionJVP,
+}
+
 
 def warpOperationJVP(
     queryParticles: ParticleState,
@@ -179,6 +199,7 @@ def warpOperationJVP(
     tangentQuerySupports: Optional[torch.Tensor] = None, tangentReferenceSupports: Optional[torch.Tensor] = None,
     tangentQueryMasses: Optional[torch.Tensor] = None, tangentReferenceMasses: Optional[torch.Tensor] = None,
     tangentQueryDensities: Optional[torch.Tensor] = None, tangentReferenceDensities: Optional[torch.Tensor] = None,
+    queryValues: Optional[torch.Tensor] = None, referenceValues: Optional[torch.Tensor] = None,
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None,
     referenceParticles: Optional[ParticleState] = None,
@@ -188,7 +209,8 @@ def warpOperationJVP(
     consistentDivergence: bool = False,
 ):
     """The JVP entry point `warpier_forward_mode_plan.md` Phase 2 promotes
-    Tier 1 into, and Phase 4 begins extending for Tier 2:
+    Tier 1 into, and Phase 4 / `warpier_tier2_operators_plan.md` extend for
+    Tier 2:
 
     * **Tier 1** (value tangents): an operator is exactly linear and
       homogeneous in `queryValues`/`referenceValues`, so its JVP w.r.t. them
@@ -197,13 +219,17 @@ def warpOperationJVP(
       gated by `tests/operations/test_forward_mode_tier1.py`.
     * **Tier 2** (position/support/mass/density tangents): the kernel is
       genuinely nonlinear in these, so each operator needs a hand-derived
-      JVP (`warpier_adjoint.md`). Only **Density's position/support tangent
-      plus a reference-side mass tangent** is implemented so far
+      JVP (`warpier_adjoint.md`). Density's position/support tangent plus a
+      reference-side mass tangent
       (`coreOperations.wp_densityJVP.computeSPHDensityPositionJVP`, gated by
-      `tests/operations/test_forward_mode_tier2_density.py`) -- every other
-      Tier-2 combination (the other five operators; Density's density
-      tangent, which does not exist since Density has no density input)
-      raises `NotImplementedError` naming Phase 4.
+      `tests/operations/test_forward_mode_tier2_density.py`) was Phase 4's
+      scope. `warpier_tier2_operators_plan.md` is extending this to the
+      five value-having operators' own position/support tangent (with
+      **frozen** `queryValues`/`referenceValues`, i.e. `fi`/`fj` held fixed
+      -- combined Tier-1+Tier-2 was never derived), landing them one at a
+      time in `_TIER2_VALUE_DISPATCH`; whichever haven't landed yet still
+      raise `NotImplementedError`. Density's density tangent does not exist
+      (Density has no density input) and never will.
     """
     tier2Args = {
         "tangentQueryPositions": tangentQueryPositions, "tangentReferencePositions": tangentReferencePositions,
@@ -214,35 +240,140 @@ def warpOperationJVP(
     providedTier2 = [name for name, value in tier2Args.items() if value is not None]
 
     if providedTier2:
-        isDensityPositionSupportCase = (
-            operationProperties.operation is WarpOperation.Density
-            and tangentQueryValues is None and tangentReferenceValues is None
-            and tangentQueryMasses is None and tangentQueryDensities is None and tangentReferenceDensities is None
-        )
-        if not isDensityPositionSupportCase:
+        if operationProperties.operation not in _TIER2_OPERATIONS:
             raise NotImplementedError(
                 f"warpOperationJVP: Tier-2 tangent argument(s) {providedTier2} are not "
                 f"implemented for {operationProperties.operation} yet -- "
-                "warpier_forward_mode_plan.md Phase 4 implements only Density's "
-                "position/support/(reference-side) mass tangent so far."
+                "warpier_forward_mode_plan.md Phase 4 / warpier_tier2_operators_plan.md "
+                "cover only Density and the five value-having operators."
+            )
+
+        if operationProperties.operation is WarpOperation.Density:
+            # Left literally unmoved/unedited from before this dispatch table existed
+            # (warpier_tier2_operators_plan.md Step 1: zero tolerance for behavior drift here).
+            isDensityPositionSupportCase = (
+                tangentQueryValues is None and tangentReferenceValues is None
+                and tangentQueryMasses is None and tangentQueryDensities is None and tangentReferenceDensities is None
+            )
+            if not isDensityPositionSupportCase:
+                raise NotImplementedError(
+                    f"warpOperationJVP: Tier-2 tangent argument(s) {providedTier2} are not "
+                    f"implemented for {operationProperties.operation} yet -- "
+                    "warpier_forward_mode_plan.md Phase 4 implements only Density's "
+                    "position/support/(reference-side) mass tangent so far."
+                )
+            if not isinstance(adjacency, AdjacencyList):
+                raise NotImplementedError(
+                    "warpOperationJVP: Density's Tier-2 JVP needs the torch-facing "
+                    f"AdjacencyList (.i/.j neighbor pairs, what buildVerletList returns), "
+                    f"not {type(adjacency)} -- grid/CompactHashMap traversal is not "
+                    "implemented for Tier 2 (warpier_forward_mode_plan.md Phase 4)."
+                )
+            nQuery = queryParticles.positions.shape[0]
+            zeroPositions = lambda n: torch.zeros((n, domain.dim), device=queryParticles.positions.device, dtype=queryParticles.positions.dtype)
+            return computeSPHDensityPositionJVP(
+                queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+                tangentQueryPositions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
+                referenceParticles=referenceParticles,
+                tangentReferencePositions=tangentReferencePositions,
+                tangentQuerySupports=tangentQuerySupports,
+                tangentReferenceSupports=tangentReferenceSupports,
+                tangentReferenceMasses=tangentReferenceMasses,
+            )
+
+        # The five value-having operators: scope boundaries enforced centrally here
+        # (warpier_tier2_operators_plan.md's "Scope boundaries" section) so individual
+        # wp_<op>JVP.py files stay focused on the math, mirroring wp_densityJVP.py
+        # (which has no internal validation of its own).
+        if crkState is not None or renormalizationState is not None or gradHState is not None:
+            raise NotImplementedError(
+                "warpOperationJVP: Tier-2 does not support crkState/renormalizationState/"
+                "gradHState (CRK/renormalization correction and grad-h coupling are out "
+                "of scope for warpier_tier2_operators_plan.md)."
+            )
+        if queryVolumes is not None or referenceVolumes is not None:
+            raise NotImplementedError(
+                "warpOperationJVP: Tier-2 does not support queryVolumes/referenceVolumes "
+                "-- the derived formulas always use mass_j/density_j directly, never a "
+                "volume override."
+            )
+        if tangentQueryValues is not None or tangentReferenceValues is not None:
+            raise NotImplementedError(
+                "warpOperationJVP: Tier-2 tangent argument(s) alongside "
+                "tangentQueryValues/tangentReferenceValues are not supported -- fi/fj "
+                "must be frozen (queryValues/referenceValues), combined Tier-1+Tier-2 "
+                "was never derived."
+            )
+        if tangentQueryMasses is not None:
+            raise NotImplementedError(
+                "warpOperationJVP: Tier-2 does not support tangentQueryMasses for "
+                "value-having operators -- no derived formula has an m_i term."
+            )
+        if operationProperties.operation is WarpOperation.Divergence and (
+            operationProperties.divergenceDotMode or consistentDivergence
+        ):
+            raise NotImplementedError(
+                "warpOperationJVP: Tier-2 Divergence does not support divergenceDotMode "
+                "or consistentDivergence -- neither is in the derived math."
+            )
+        if operationProperties.operation is WarpOperation.Curl and domain.dim != 2:
+            raise NotImplementedError(
+                "warpOperationJVP: Tier-2 Curl is only implemented for domain.dim == 2 "
+                "-- 1D and 3D are both undecided by the spike."
+            )
+        if operationProperties.operation is WarpOperation.Laplacian and (
+            operationProperties.laplacianMode not in (LaplacianScheme.Brookshaw, LaplacianScheme.Naive)
+            or operationProperties.positiveDivergence
+        ):
+            raise NotImplementedError(
+                "warpOperationJVP: Tier-2 Laplacian only supports laplacianMode "
+                "Brookshaw/Naive, and not positiveDivergence -- Dot/Default are "
+                "explicitly deferred and positiveDotProduct's extra term isn't in the "
+                "derived formula."
+            )
+
+        dispatchFn = _TIER2_VALUE_DISPATCH.get(operationProperties.operation)
+        if dispatchFn is None:
+            raise NotImplementedError(
+                f"warpOperationJVP: Tier-2 tangent argument(s) {providedTier2} are not "
+                f"implemented for {operationProperties.operation} yet -- "
+                "warpier_tier2_operators_plan.md hasn't landed this operator."
             )
         if not isinstance(adjacency, AdjacencyList):
             raise NotImplementedError(
-                "warpOperationJVP: Density's Tier-2 JVP needs the torch-facing "
-                f"AdjacencyList (.i/.j neighbor pairs, what buildVerletList returns), "
-                f"not {type(adjacency)} -- grid/CompactHashMap traversal is not "
-                "implemented for Tier 2 (warpier_forward_mode_plan.md Phase 4)."
+                "warpOperationJVP: Tier-2 JVP needs the torch-facing AdjacencyList "
+                f"(.i/.j neighbor pairs, what buildVerletList returns), not "
+                f"{type(adjacency)} -- grid/CompactHashMap traversal is not implemented "
+                "for Tier 2 (warpier_tier2_operators_plan.md)."
             )
         nQuery = queryParticles.positions.shape[0]
         zeroPositions = lambda n: torch.zeros((n, domain.dim), device=queryParticles.positions.device, dtype=queryParticles.positions.dtype)
-        return computeSPHDensityPositionJVP(
-            queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+        # Not every value-having operator's computeSPH<Op>PositionJVP needs every
+        # kwarg (e.g. Interpolate has no tangentQueryDensities/gradientMode/
+        # laplacianMode term at all -- query-side density never enters its formula)
+        # -- only pass what each operator's own formula actually uses, so each
+        # function's signature stays exactly what its own formula needs (mirroring
+        # wp_densityJVP.py, no unused parameters).
+        dispatchKwargs = dict(
             tangentQueryPositions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
             referenceParticles=referenceParticles,
             tangentReferencePositions=tangentReferencePositions,
             tangentQuerySupports=tangentQuerySupports,
             tangentReferenceSupports=tangentReferenceSupports,
             tangentReferenceMasses=tangentReferenceMasses,
+            tangentReferenceDensities=tangentReferenceDensities,
+            queryValues=queryValues,
+            referenceValues=referenceValues,
+        )
+        if operationProperties.operation is not WarpOperation.Interpolate:
+            dispatchKwargs["tangentQueryDensities"] = tangentQueryDensities
+        if operationProperties.operation in (WarpOperation.Gradient, WarpOperation.Divergence, WarpOperation.Curl):
+            dispatchKwargs["gradientMode"] = operationProperties.gradientMode
+        if operationProperties.operation is WarpOperation.Laplacian:
+            dispatchKwargs["laplacianMode"] = operationProperties.laplacianMode
+        return dispatchFn(
+            queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+            **dispatchKwargs,
         )
 
     if operationProperties.operation not in _TIER1_JVP_OPERATIONS:

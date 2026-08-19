@@ -19,7 +19,81 @@ kernel, and the exact test-file conventions to mirror. This document is that syn
 and finalized against the source files before execution. Written to the repo (not just the local
 plan-mode scratch file) because this is expected to span multiple sessions.
 
-## Status: not started (plan finalized 2026-08-19)
+## Status: in progress (plan finalized 2026-08-19)
+
+**Step 0 done (2026-08-19).** `_buildParticleSoA`/`_buildDomainState`/`_buildKernelState` extracted
+from `wp_densityJVP.py` into `coreOperations/_jvpCommon.py` (`buildParticleSoA`/`buildDomainState`/
+`buildKernelState`, public names since more than one module now imports them), with an added
+optional `densities` argument. `wp_densityJVP.py` and `wp_densityHVP.py` both updated to import from
+there instead of defining/duplicating; `tests/operations/test_forward_mode_tier2_density_hvp_self_pair.py`
+(which reached into `wp_densityJVP.py`'s former private names directly) updated the same way. Pure
+extract-function — `test_forward_mode_tier2_density.py`'s 9 cases and
+`test_forward_mode_tier2_density_hvp_self_pair.py` both pass unmodified; full suite still
+139 passed / 1 skipped.
+
+**Differentiability diagnostic done (2026-08-19), confirms the suspicion in Lookout 2:**
+`scripts/diagnostic_tier2_jvp_reverse_mode.py` builds `positions`/`tangentQueryPositions` with
+`requires_grad=True`, calls `computeSPHDensityPositionJVP`, and checks connectivity with
+`torch.autograd.grad(..., allow_unused=True)` (the unambiguous check — plain `.backward()` followed
+by inspecting `.grad is None` gave a misleading intermediate result during this check: an
+all-zero-but-non-None tensor for a leaf that undergoes `.contiguous()` but is never otherwise
+consumed, which looks like "connected with zero gradient" but is not; `allow_unused=True` sidesteps
+that ambiguity by returning `None` per-tensor for anything the graph never actually reaches). Result:
+`positions` and `tangentQueryPositions` are **not** reachable (`None`) — confirmed not
+reverse-mode-differentiable through the bare-`wp.launch` path, exactly as reasoned. Only
+`tangentReferenceMasses` (routed through plain-torch indexing, `tangentReferenceMasses[adjacency.j.long()]`,
+never touching the warp kernel) is reachable, and its gradient is nonzero. This is an inherited
+limitation of Phase 4 step 1's own design choice (bare `wp.launch` bypassing `launchOperator`'s
+`wp.Tape`-backed autograd wrapper), not a regression introduced by this plan — see Lookout 2 for the
+practical workarounds to flag if this becomes load-bearing for someone later.
+
+**Step 1 done (2026-08-19).** `operations.py`'s `warpOperationJVP` gained `queryValues=None,
+referenceValues=None`, consulted only inside the Tier-2 branch. `isDensityPositionSupportCase` is
+now the Density-only sub-branch of a per-operator dispatch on `_TIER2_OPERATIONS = (Density,
+Interpolate, Gradient, Divergence, Curl, Laplacian)`; Density's own code is byte-for-byte the same
+as before (unmoved, unedited). The five value-having operators get one shared validation block (all
+seven scope-boundary checks from this doc's "Scope boundaries" section) before consulting a new
+`_TIER2_VALUE_DISPATCH` dict, populated incrementally by steps 2/4-7; empty for now, so all five
+still raise `NotImplementedError` naming `warpier_tier2_operators_plan.md`. Gate:
+`test_forward_mode_tier2_density.py`'s 9 cases (incl. `test_otherOperators_tier2_still_raise`,
+still pointed at Gradient) and `test_forward_mode_tier1.py`'s 8 cases all pass unmodified; full
+suite still 139 passed / 1 skipped.
+
+**Step 2 done (2026-08-19), pulling forward the shared pair-kernel launcher part of Step 3.**
+Before building Interpolate, the per-pair `(W_ij, dW_ij)` `@wp.kernel` (previously private to
+`wp_densityJVP.py` as `_computeSPHDensityJVP_PairKernel`) moved to `_jvpCommon.py` as
+`_sphKernelJVP_PairKernel` + a `launchPairKernelJVP` wrapper (SoA-building is unaffected, still via
+`buildParticleSoA`/etc.); `wp_densityJVP.py` now calls `launchPairKernelJVP` instead of launching its
+own copy -- byte-identical kernel body, pure extract-function. (Step 3's own remaining scope --
+`sphKernelGradientJVP`/`_ij` in `kernels/kernelJVP.py`, the `∇W_ij` JVP Gradient/Divergence/Curl/
+Laplacian share -- is unrelated to this and still pending.)
+
+New `coreOperations/wp_interpolateJVP.py`: `computeSPHInterpolatePositionJVP`, formula
+`dInterpolate_i = sum_j fj*(dVj*W_ij + Vj*dW_ij)`, `Vj = mass_j/density_j`,
+`dVj = dmass_j/density_j - mass_j*ddensity_j/density_j^2`, `fj` (`referenceValues`) frozen. Takes
+`tangentReferenceDensities` (new tangent, not used by Density) since `Vj` depends on
+`referenceParticles.densities`; has no `tangentQueryDensities`/`queryValues`/`gradientMode`/
+`laplacianMode` at all (Interpolate's formula has no query-side field or density term) -- this
+surfaced a gap in Step 1's dispatch call, fixed by making `operations.py`'s `dispatchKwargs`
+construction conditional per-operator rather than one fixed kwarg set for all five (see Step 1's
+code comment). `computeSPHInterpolatePositionJVP` also explicitly rejects a provided `queryValues`
+(`ValueError`, not silent ignore) since production `warpOperation(Interpolate)` never reads a
+query-side field either. Registered in `coreOperations/__init__.py` and wired into
+`operations.py`'s `_TIER2_VALUE_DISPATCH`.
+
+New `tests/operations/test_forward_mode_tier2_interpolate.py` (12 cases, cloning the Density test's
+structure): 1D `SupportScheme`-parametrized + 2D Jacobian-reference matches (density obtained by
+calling production `warpOperation(Density)` once and then treated as an independent frozen input
+with its own tangent, exactly like `tangentReferenceMasses` -- not literally re-derived from
+positions inside the Jacobian, matching the JVP's own contract), plus rejection tests for
+non-`AdjacencyList` adjacency, Tier-1+Tier-2 combination, missing `referenceValues`, a provided
+`queryValues`, `tangentQueryMasses`, and `queryVolumes`. All pass. `test_otherOperators_tier2_still_raise`
+left pointed at Gradient (unchanged -- still correctly pending). Full suite: 151 passed / 1 skipped
+(was 139; +12 for this file). `operation_matrix.py --device cpu --ci --verbose` baseline unchanged:
+OK=258, HIGH=0, ERR=0, NAN=0.
+
+Next: Step 3's remaining scope (`sphKernelGradientJVP` in `kernels/kernelJVP.py`), then Steps 4-6
+(Gradient/Divergence/Curl) and Step 7 (Laplacian Brookshaw).
 
 ## Approach
 
@@ -200,6 +274,7 @@ reopening Phase 4.
 - `src/warpSPHCore/coreOperations/wp_interpolateJVP.py`, `wp_kernelGradientJVP.py`, `wp_gradientJVP.py`, `wp_divergenceJVP.py`, `wp_curlJVP.py`, `wp_laplacianJVP.py` — new, steps 2-7
 - `tests/operations/test_forward_mode_tier2_{interpolate,gradient,divergence,curl,laplacian_brookshaw}.py` — new
 - `warpier_forward_mode_plan.md` — new status entry once done
+- `scripts/diagnostic_tier2_jvp_reverse_mode.py` — new, step 0's differentiability diagnostic (done)
 
 ## Lookouts — explicitly deferred, don't lose track of these
 

@@ -118,7 +118,7 @@ from ..enumTypes import *
 from ..util import castTorchToWarp, allocateTorchWarp
 from ..kernels.hessian import sphKernelHessian
 from ..util.stateUtil import getParticle
-from .wp_densityJVP import _buildParticleSoA, _buildDomainState, _buildKernelState
+from ._jvpCommon import buildParticleSoA as _buildParticleSoA, buildDomainState as _buildDomainState, buildKernelState as _buildKernelState
 
 __all__ = ['computeSPHDensityPositionHVP']
 

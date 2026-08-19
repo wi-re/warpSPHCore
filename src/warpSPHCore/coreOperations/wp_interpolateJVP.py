@@ -1,28 +1,19 @@
-"""Tier-2 position/support/mass-tangent JVP of the Density operator
-(`warpier_forward_mode_plan.md` Phase 4, `warpier_adjoint.md` Tier 2.1):
-`dDensity_i = sum_j [ dm_j * W_ij + m_j * dW_ij ]`, `dW_ij` from
-`kernels.kernelJVP.sphKernelJVP`.
+"""Tier-2 position/support/mass/density-tangent JVP of the Interpolate
+operator (`warpier_tier2_operators_plan.md` Step 2, `warpier_adjoint.md`
+Tier 2.1): `dInterpolate_i = sum_j fj * (dVj * W_ij + Vj * dW_ij)`, with
+`Vj = mass_j / density_j`, `dVj = dmass_j/density_j - mass_j*ddensity_j/density_j^2`,
+`fj` (`referenceValues`) held **frozen** -- combined Tier-1 (value tangent)
++ Tier-2 was never derived, matching every other Tier-2 operator's scope.
 
-Launches one thread per neighbor *pair* `(i, j)`, not one per query particle
--- like `wp_implicitShifting.computeShiftingPairTerms` in the `warpSPH`
-frontend (which this mirrors field-for-field), because the result feeds a
-`scatter_sum`-based assembly (Phase 4's `grad C`/matvec use), not a
-per-particle-only consumer. `OperatorSpec`/`launchOperator` only supports
-per-query-particle thread counts, so this bypasses that machinery the same
-way `computeShiftingPairTerms` already does, rather than duplicating its
-reasoning.
-
-Scope: position and support tangents on both query and reference roles, plus
-a reference-side mass tangent (`dm_j`) -- the terms Tier 2.1's formula
-actually has. No query-side mass tangent (`Density_i` has no `m_i` term) and
-no density tangent (Density has no `queryValues`/`referenceValues`/density
-input at all). Field-value tangents are Tier 1's `warpOperationJVP`, not
-this.
+Reuses `_jvpCommon.launchPairKernelJVP`'s pair-indexed `(W_ij, dW_ij)`
+kernel (same one `wp_densityJVP.py` launches) -- no new `@wp.kernel` here,
+this is the plan's proof that the shared per-pair kernel and the new
+`queryValues`/`referenceValues` plumbing in `warpOperationJVP` compose
+correctly, on the cheapest operator that needs both.
 """
 
 from typing import Optional
 import torch
-import warp as wp
 
 from ..type_config import *
 from ..dataTypes import *
@@ -35,10 +26,10 @@ from ._jvpCommon import (
     launchPairKernelJVP as _launchPairKernelJVP,
 )
 
-__all__ = ['computeSPHDensityPositionJVP']
+__all__ = ['computeSPHInterpolatePositionJVP']
 
 
-def computeSPHDensityPositionJVP(
+def computeSPHInterpolatePositionJVP(
     queryParticles: ParticleState,
     domain: DomainDescription,
     kernel: KernelFunctions,
@@ -50,13 +41,24 @@ def computeSPHDensityPositionJVP(
     tangentQuerySupports: Optional[torch.Tensor] = None,
     tangentReferenceSupports: Optional[torch.Tensor] = None,
     tangentReferenceMasses: Optional[torch.Tensor] = None,
+    tangentReferenceDensities: Optional[torch.Tensor] = None,
+    queryValues: Optional[torch.Tensor] = None,
+    referenceValues: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
-    """`dDensity_i`, shape `[numParticles]`. `adjacency` is the torch-facing
-    `AdjacencyList` (`.i`/`.j` flat neighbor pairs -- what `buildVerletList`
-    returns and what every `warpOperation` call in this codebase already
-    threads through), not the warp-side struct `launchOperator` builds
-    internally.
+    """`dInterpolate_i`, shape `[numParticles, *referenceValues.shape[1:]]`.
+    `referenceValues` (`fj`) is required and frozen (no tangent on it --
+    that would be Tier 1). `queryValues` (`fi`) is not part of Interpolate's
+    formula at all (mirroring `_computeSPHInterpolant_stateBackend`, which
+    never reads a query-side field either) and must not be provided.
     """
+    if referenceValues is None:
+        raise ValueError("computeSPHInterpolatePositionJVP: referenceValues (frozen fj) is required.")
+    if queryValues is not None:
+        raise ValueError(
+            "computeSPHInterpolatePositionJVP: Interpolate has no queryValues (fi) term "
+            "-- only referenceValues (fj) is used, matching warpOperation(Interpolate)."
+        )
+
     referenceParticles = referenceParticles if referenceParticles is not None else queryParticles
     dim = domain.dim
     device, dtype = queryParticles.positions.device, queryParticles.positions.dtype
@@ -70,6 +72,7 @@ def computeSPHDensityPositionJVP(
     tangentQuerySupports = tangentQuerySupports if tangentQuerySupports is not None else zerosScalar(nQuery)
     tangentReferenceSupports = tangentReferenceSupports if tangentReferenceSupports is not None else zerosScalar(nRef)
     tangentReferenceMasses = tangentReferenceMasses if tangentReferenceMasses is not None else zerosScalar(nRef)
+    tangentReferenceDensities = tangentReferenceDensities if tangentReferenceDensities is not None else zerosScalar(nRef)
 
     queryState = _buildParticleSoA(dim, queryParticles.positions, queryParticles.supports, queryParticles.masses)
     referenceState = _buildParticleSoA(dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses)
@@ -86,10 +89,21 @@ def computeSPHDensityPositionJVP(
         domainState, kernelProperties, edgeI, edgeJ,
     )
 
-    massJ = referenceParticles.masses[adjacency.j.long()]
-    dMassJ = tangentReferenceMasses[adjacency.j.long()]
-    pairContribution = dMassJ * W_t + massJ * dW_t
+    iIdx = adjacency.i.long()
+    jIdx = adjacency.j.long()
+    massJ = referenceParticles.masses[jIdx]
+    densityJ = referenceParticles.densities[jIdx]
+    dMassJ = tangentReferenceMasses[jIdx]
+    dDensityJ = tangentReferenceDensities[jIdx]
 
-    dDensity = torch.zeros(nQuery, device=device, dtype=dtype)
-    dDensity.index_add_(0, adjacency.i.long(), pairContribution)
-    return dDensity
+    Vj = massJ / densityJ
+    dVj = dMassJ / densityJ - massJ * dDensityJ / densityJ ** 2
+    coeff = dVj * W_t + Vj * dW_t  # [numPairs]
+
+    fj = referenceValues[jIdx]  # [numPairs, *fieldShape]
+    coeff = coeff.reshape((coeff.shape[0],) + (1,) * (fj.dim() - 1))
+    pairContribution = fj * coeff
+
+    dInterpolate = torch.zeros((nQuery,) + tuple(fj.shape[1:]), device=device, dtype=dtype)
+    dInterpolate.index_add_(0, iIdx, pairContribution)
+    return dInterpolate
