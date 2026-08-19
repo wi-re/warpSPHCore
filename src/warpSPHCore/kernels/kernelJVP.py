@@ -27,7 +27,8 @@ from ..dataTypes.domain_t import domainData
 from ..dataTypes.kernelState_t import kernelState
 from .kernel import sphKernel_
 from .gradient import sphGradient_
-from .gradH import sphKernelDkDh_
+from .gradH import sphKernelDkDh_, sphGradientDkDh_
+from .hessian import sphKernelHessian_
 
 
 @wp.func
@@ -78,3 +79,65 @@ def sphKernelJVP(
                        # discontinuity is out of scope (warpier_adjoint.md
                        # Tier 2.1), matching sphKernelJVP_ij's own scope.
     return sphKernelJVP_ij(xij, hi, hj, dxij, dhi, dhj, kernelProperties, domainState)
+
+
+@wp.func
+def sphKernelGradientJVP_ij(
+    xij: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
+    dxij: vector(dtype=scalar_t, length=dim_t),
+    dhi: scalar_t,
+    dhj: scalar_t,
+    kernelProperties: kernelState,
+    domainState: domainData,
+):
+    """JVP of `sphKernelGradient_ij` (`kernels/gradient.py`), i.e.
+    `d(nabla_i W_ij)/d{x,h}` (`warpier_adjoint.md` Tier 2.2): mirrors that
+    function's three-way `SupportScheme` dispatch byte-for-byte, built
+    entirely from already-validated Tier 2.0 building blocks (`sphGradient_`,
+    `sphKernelHessian_` = `d(sphGradient_)/dx`, `sphGradientDkDh_` =
+    `d(sphGradient_)/dh`) plus `computePairwiseSupport`/
+    `computePairwiseSupportJVP` for the non-KernelMeanSymmetric/SuperSymmetric
+    branches. Validated in dense all-pairs form by
+    `scripts/spike_forward_mode_tier2_gradient.py`'s `_kernelGradientJVP`
+    (`rel_err ~1e-9` in float64 against `warpOperation`'s own reverse-mode
+    Jacobian, for every `GradientScheme`/`SupportScheme` combination) --
+    ported here byte-for-byte (only the vector/matrix types are the
+    module's fixed `dim_t`/`scalar_t` rather than the spike's generic `Any`,
+    matching every other function in this file)."""
+    if kernelProperties.supportMode == wp.static(SupportScheme.KernelMeanSymmetric.value) or kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value):
+        Gi = sphGradient_(xij, hi, kernelProperties.kernelFunction)
+        Gj = sphGradient_(xij, hj, kernelProperties.kernelFunction)
+        Hi = sphKernelHessian_(xij, hi, kernelProperties.kernelFunction)
+        Hj = sphKernelHessian_(xij, hj, kernelProperties.kernelFunction)
+        dGdhi = sphGradientDkDh_(xij, hi, kernelProperties.kernelFunction)
+        dGdhj = sphGradientDkDh_(xij, hj, kernelProperties.kernelFunction)
+        G = (Gi + Gj) * scalar_t(0.5)
+        dG = (matmul(Hi, dxij) + matmul(Hj, dxij) + dGdhi * dhi + dGdhj * dhj) * scalar_t(0.5)
+        return G, dG
+    hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
+    dhij = computePairwiseSupportJVP(hi, hj, dhi, dhj, kernelProperties.supportMode)
+    G = sphGradient_(xij, hij, kernelProperties.kernelFunction)
+    H = sphKernelHessian_(xij, hij, kernelProperties.kernelFunction)
+    dGdh = sphGradientDkDh_(xij, hij, kernelProperties.kernelFunction)
+    dG = matmul(H, dxij) + dGdh * dhij
+    return G, dG
+
+
+@wp.func
+def sphKernelGradientJVP(
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
+    dxi: vector(dtype=scalar_t, length=dim_t),
+    dxj: vector(dtype=scalar_t, length=dim_t),
+    dhi: scalar_t,
+    dhj: scalar_t,
+    kernelProperties: kernelState,
+    domainState: domainData,
+):
+    xij = computeDistanceVec(xi, xj, domainState)
+    dxij = dxi - dxj
+    return sphKernelGradientJVP_ij(xij, hi, hj, dxij, dhi, dhj, kernelProperties, domainState)

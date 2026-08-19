@@ -187,6 +187,12 @@ _TIER2_OPERATIONS = (
 # repointed at whichever operator is still pending as each one lands).
 _TIER2_VALUE_DISPATCH = {
     WarpOperation.Interpolate: computeSPHInterpolatePositionJVP,
+    WarpOperation.Gradient: computeSPHGradientPositionJVP,
+    WarpOperation.Divergence: computeSPHDivergencePositionJVP,
+    WarpOperation.Curl: computeSPHCurlPositionJVP,
+    # Brookshaw only -- Naive/Dot/Default are rejected before reaching this
+    # table by the laplacianMode scope-boundary check above.
+    WarpOperation.Laplacian: computeSPHLaplacianBrookshawPositionJVP,
 }
 
 
@@ -367,7 +373,10 @@ def warpOperationJVP(
         )
         if operationProperties.operation is not WarpOperation.Interpolate:
             dispatchKwargs["tangentQueryDensities"] = tangentQueryDensities
-        if operationProperties.operation in (WarpOperation.Gradient, WarpOperation.Divergence, WarpOperation.Curl):
+        # Laplacian's q_ij reuses Gradient's own B/dB (warpier_adjoint.md Tier 2.2
+        # finding 2), so it needs gradientMode too, not just laplacianMode.
+        if operationProperties.operation in (WarpOperation.Gradient, WarpOperation.Divergence,
+                                              WarpOperation.Curl, WarpOperation.Laplacian):
             dispatchKwargs["gradientMode"] = operationProperties.gradientMode
         if operationProperties.operation is WarpOperation.Laplacian:
             dispatchKwargs["laplacianMode"] = operationProperties.laplacianMode

@@ -18,7 +18,7 @@ from ..enumTypes import supportSchemeToUint
 from ..kernels.kernelJVP import sphKernelJVP
 from ..util.stateUtil import getParticle
 
-__all__ = ['buildParticleSoA', 'buildDomainState', 'buildKernelState', 'launchPairKernelJVP']
+__all__ = ['buildParticleSoA', 'buildDomainState', 'buildKernelState', 'launchPairKernelJVP', 'gradientWeights']
 
 _SoA_BY_DIM = {1: particleDataSoA_1, 2: particleDataSoA_2, 3: particleDataSoA_3}
 
@@ -110,3 +110,42 @@ def launchPairKernelJVP(
         device=edgeI.device,
     )
     return W_t, dW_t
+
+
+def gradientWeights(
+    massJ: torch.Tensor, densityI: torch.Tensor, densityJ: torch.Tensor,
+    dMassJ: torch.Tensor, dDensityI: torch.Tensor, dDensityJ: torch.Tensor,
+    scheme: GradientScheme,
+):
+    """`coeff_ij = fi*A_ij + fj*B_ij` (`fi`/`fj` frozen -- Tier 1 territory,
+    contribute no term of their own here), `A`/`B`/`dA`/`dB` per
+    `warpier_adjoint.md` Tier 2.2. Shared by Gradient/Divergence/Curl (their
+    own `coeff_ij`) and Laplacian(Brookshaw) (`B` doubles as `q_ij`'s
+    coefficient, `warpier_adjoint.md` Tier 2.2 finding 2 -- not a coincidence,
+    not re-derived independently). All six inputs and both outputs are flat
+    `[numPairs]` (already indexed by `adjacency.i`/`.j`), unlike the
+    `scripts/spike_forward_mode_tier2_gradient.py` this ports, which worked
+    on the dense `(n,n)` all-pairs grid -- the formulas are otherwise
+    identical."""
+    Vj = massJ / densityJ
+    dVj = dMassJ / densityJ - massJ * dDensityJ / densityJ ** 2
+
+    if scheme == GradientScheme.Naive:
+        A, dA = torch.zeros_like(Vj), torch.zeros_like(Vj)
+        B, dB = Vj, dVj
+    elif scheme == GradientScheme.Difference:
+        A, dA = -Vj, -dVj
+        B, dB = Vj, dVj
+    elif scheme == GradientScheme.Summation:
+        A, dA = Vj, dVj
+        B, dB = Vj, dVj
+    elif scheme == GradientScheme.Symmetric:
+        A = massJ / densityI
+        dA = dMassJ / densityI - massJ * dDensityI / densityI ** 2
+        B = massJ * densityI / densityJ ** 2
+        dB = (dMassJ * densityI / densityJ ** 2
+              + massJ * dDensityI / densityJ ** 2
+              - 2.0 * massJ * densityI * dDensityJ / densityJ ** 3)
+    else:
+        raise ValueError(f"gradientWeights: unsupported GradientScheme {scheme}")
+    return A, B, dA, dB

@@ -19,6 +19,10 @@ from .wp_gradient import _computeSPHGradient_stateBackend
 from .wp_densityJVP import computeSPHDensityPositionJVP
 from .wp_densityHVP import computeSPHDensityPositionHVP
 from .wp_interpolateJVP import computeSPHInterpolatePositionJVP
+from .wp_gradientJVP import computeSPHGradientPositionJVP
+from .wp_divergenceJVP import computeSPHDivergencePositionJVP
+from .wp_curlJVP import computeSPHCurlPositionJVP
+from .wp_laplacianJVP import computeSPHLaplacianBrookshawPositionJVP
 
 __all__ = [
     "_computeSPHCovariance_stateBackend",
@@ -31,4 +35,8 @@ __all__ = [
     "computeSPHDensityPositionJVP",
     "computeSPHDensityPositionHVP",
     "computeSPHInterpolatePositionJVP",
+    "computeSPHGradientPositionJVP",
+    "computeSPHDivergencePositionJVP",
+    "computeSPHCurlPositionJVP",
+    "computeSPHLaplacianBrookshawPositionJVP",
 ]

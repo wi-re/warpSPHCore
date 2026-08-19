@@ -17,6 +17,11 @@ separate future plan, per its own section below. Most of the work landed in the 
 repo (new test files there, not this one), which is easy to lose track of from this document alone
 -- recorded here explicitly for that reason.
 
+**Also done, new scope beyond the original four phases:** Tier-2 JVP for the five operators Phase 4
+left out (Interpolate/Gradient/Divergence/Curl/Laplacian-Brookshaw) -- see the dedicated section
+below ("Tier-2 JVP for the remaining five operators") and its companion document
+`warpier_tier2_operators_plan.md` for full detail.
+
 * **Phase 1 -- done.** `warpSPH/tests/test_forwardModeWave.py` (new), commit `ab28fc9` in
   `warpSPH`. Seeds `du0`/`dv0` via `torch.func.jvp` on the plain-torch Wendland bump formula,
   rolls a primal and a tangent system through the identical explicit-Euler `f_wave_equation`
@@ -590,6 +595,47 @@ HVP branch, steps 1-3), new `warpSPH/modules/shifting/implicitShiftingAutomatic.
 `warpSPH/tests/test_implicitShiftingGradientJVP.py`/`test_implicitShiftingHessianJVP.py`/
 `test_implicitShiftingComparison.py` (steps 2/3, step 5's added symmetry check, and step 4/6's
 comparisons respectively).
+
+## Tier-2 JVP for the remaining five operators [DONE 2026-08-19] -- new scope beyond Phase 4
+
+Phase 4 above scoped its Tier-2 JVP work to Density only (step 1's own note: "extending
+`warpOperationJVP` to all six core operators... was scoped down to Density only"). The user flagged
+this gap after Phase 4 was marked done and asked to close it, tracked in its own document,
+`warpier_tier2_operators_plan.md` (not a Phase of this plan -- written separately since it was
+expected to span multiple sessions, and does not touch the `warpSPH`/`warpSPHIntegrators` testbeds
+this plan's Phases 1-4/6 are about).
+
+**Summary (full detail in that document's own Status section):** wired Tier-2 (position/support/
+mass/density tangent) JVP support into `warpOperationJVP` for Interpolate, Gradient, Divergence,
+Curl, and Laplacian(Brookshaw) -- matching Density's existing production pattern (pair-indexed
+`wp.launch`, bypassing `launchOperator`, `torch.index_add_` scatter-assembly). Scope: JVP only, no
+Hessian-vector products beyond Density's existing one, no CRK/renormalization correction paths, and
+(within Laplacian) Brookshaw only, not Naive/Dot/Default. New shared `sphKernelGradientJVP` in
+`kernels/kernelJVP.py` (the `∇W_ij` JVP Gradient/Divergence/Curl/Laplacian all share) ported
+byte-for-byte from `scripts/spike_forward_mode_tier2_gradient.py`'s already-validated
+`_kernelGradientJVP` (`warpier_adjoint.md` Tier 2.2). Two real bugs found and fixed during
+verification, both in the new dispatch-wiring code, not the ported math (re-confirmed correct by
+re-running the spike script unchanged) -- see the other document for both.
+
+Verification: `pytest tests/` 233 passed/1 skipped (was 136/1 before this work);
+`operation_matrix.py --device cpu --ci --verbose` unchanged (OK=258, HIGH=0, ERR=0, NAN=0);
+`pytest tests/operations/test_gradcheck_scripts.py` (all 17 reverse-mode AD scripts) all PASS.
+
+Files touched: `src/warpSPHCore/operations.py` (`warpOperationJVP`'s dispatch table),
+`src/warpSPHCore/kernels/kernelJVP.py` (new `sphKernelGradientJVP`), new
+`src/warpSPHCore/coreOperations/{_jvpCommon,wp_interpolateJVP,wp_kernelGradientJVP,wp_gradientJVP,
+wp_divergenceJVP,wp_curlJVP,wp_laplacianJVP}.py`, new
+`tests/operations/test_forward_mode_tier2_{interpolate,gradient,divergence,curl,laplacian_brookshaw}.py`,
+new `scripts/diagnostic_tier2_jvp_reverse_mode.py`. All in `warpSPHCore`, none in `warpSPH`/
+`warpSPHIntegrators` -- unlike Phases 1-4, this work never left the operator-library layer.
+
+**Not done, by design:** Laplacian's Naive scheme (optional/stretch scope, explicitly rejected
+rather than attempted); HVP for the five newly-landed operators (out of scope by user's original
+choice, same open item as Phase 4's own Lookout 1); the reverse-mode-through-the-JVP-bridge gap
+Phase 4 step 1 already had (Density's pair-indexed `wp.launch` bypasses `launchOperator`'s
+autograd-tape wrapper) is now five operators wider, not newly introduced -- see
+`warpier_tier2_operators_plan.md`'s own Lookout 2 for the empirical confirmation and practical
+workarounds.
 
 ## Phase 5 -- Goal 3: the incompressible wrapper already exists
 

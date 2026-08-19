@@ -92,8 +92,107 @@ left pointed at Gradient (unchanged -- still correctly pending). Full suite: 151
 (was 139; +12 for this file). `operation_matrix.py --device cpu --ci --verbose` baseline unchanged:
 OK=258, HIGH=0, ERR=0, NAN=0.
 
-Next: Step 3's remaining scope (`sphKernelGradientJVP` in `kernels/kernelJVP.py`), then Steps 4-6
-(Gradient/Divergence/Curl) and Step 7 (Laplacian Brookshaw).
+**Step 3 done (2026-08-19).** `sphKernelGradientJVP_ij`/`sphKernelGradientJVP` added to
+`kernels/kernelJVP.py`, directly below `sphKernelJVP_ij`/`sphKernelJVP` -- ported byte-for-byte
+from `scripts/spike_forward_mode_tier2_gradient.py`'s already-validated `_kernelGradientJVP`
+(`rel_err ~1e-9` in float64 there, re-confirmed by re-running the spike unchanged: still all-PASS),
+only swapping the spike's generic `vector(dtype=scalar_t, length=Any)` for this file's fixed
+`vector(dtype=scalar_t, length=dim_t)` convention. New `coreOperations/wp_kernelGradientJVP.py`:
+one shared `@wp.kernel` (`_sphKernelGradientJVP_PairKernel`), one thread per adjacency pair,
+`launchPairKernelGradientJVP` producing `(G_ij, dG_ij)` flat `(numPairs, dim)` tensors.
+
+**Pitfall hit and fixed:** the output kernel arguments were first declared
+`wp.array(dtype=vec_t)` using `type_config.vec_t` -- but `vec_t = vector(length=dim_t, dtype=scalar_t)`
+resolves to a length-`Any` (ungrounded) vector type whenever `warpSPHCore_DIM` isn't pinned via env
+var (the default in this repo/test suite), which Warp rejects at kernel-launch time
+(`TypeError: ... cannot be generic, got array(ndim=1, dtype=vec0f)`). Fixed by declaring `outG`/
+`outDG` as `wp.array(dtype=Any)` instead (matching every other dimension-generic production kernel,
+e.g. `wp_gradient.py`'s `outputValues`) and allocating concrete `(numPairs, dim)` torch tensors cast
+via `castTorchToWarpAsBuiltins` (which resolves the concrete vector width from the tensor's own
+shape, the same way `buildParticleSoA` already does for `positions`) rather than from a fixed
+constant. `launchPairKernelGradientJVP` therefore takes explicit `dim`/`device`/`dtype` args.
+
+New `_jvpCommon.gradientWeights(massJ, densityI, densityJ, dMassJ, dDensityI, dDensityJ, scheme)`:
+the `GradientScheme`-dispatched `(A, B, dA, dB)` table from `warpier_adjoint.md` Tier 2.2, operating
+on flat `[numPairs]` tensors (the spike's dense-`(n,n)` version, re-expressed).
+
+**Steps 4-6 done (2026-08-19).** New `coreOperations/wp_gradientJVP.py`/`wp_divergenceJVP.py`/
+`wp_curlJVP.py` (`computeSPHGradientPositionJVP`/`computeSPHDivergencePositionJVP`/
+`computeSPHCurlPositionJVP`), each pure-torch coefficient assembly on top of Step 3's shared pair
+kernel and `gradientWeights` -- no new `@wp.kernel` in any of the three. Curl returns shape
+`[numParticles, 1]` matching `wp_curl.py`'s own `[1]`-forced 2D output convention; rejects
+`domain.dim != 2` (centralized in `operations.py`, not the function itself). Divergence rejects
+`divergenceDotMode=True`/`consistentDivergence=True` (centralized).
+
+**Step 7 done (2026-08-19).** New `coreOperations/wp_laplacianJVP.py`
+(`computeSPHLaplacianBrookshawPositionJVP`): `q_ij=(fj-fi)*B_ij` (`B` from `gradientWeights`, same
+coefficient as Gradient's `B` term -- not re-derived), the regularized-distance chain
+(`D_ij=r_ij+eps*h_ij`, `n_ij=x_ij/D_ij`, `L_ij=-2*q_ij*dot(G_ij,n_ij)/D_ij`) ported from the spike.
+Explicitly rejects `laplacianMode != Brookshaw` inside the function itself (not just centrally) --
+see "Real bug found and fixed" below for why this guard turned out to be load-bearing. Step 8
+(Naive scheme) was **not attempted** -- left as the optional/stretch scope the plan always called it,
+now enforced as an explicit `NotImplementedError` rather than silently mis-computing.
+
+**Two real bugs found and fixed during verification (both in `operations.py`'s dispatch wiring, not
+the ported kernel math itself -- the math was re-confirmed correct by re-running the spike script
+unchanged before any of this new code existed):**
+
+1. **`gradientMode` was never threaded through to Laplacian's dispatch call**, only `laplacianMode`
+   -- so `computeSPHLaplacianBrookshawPositionJVP` silently used its own default
+   (`GradientScheme.Symmetric`) regardless of what `operationProperties.gradientMode` actually was.
+   This is exactly the kind of "silently pick the wrong branch" bug `warpier_adjoint.md` Tier 2.2's
+   own "Process notes" warned about for this class of dispatch code (a near-identical
+   int-vs-enum comparison bug was caught the same way while writing the spike). Caught by the
+   Jacobian-reference test suite: only `GradientScheme.Symmetric` cases passed (15/20 Laplacian
+   cases failed, `rel_err` large, not a rounding-scale miss) -- every other scheme silently got
+   Symmetric's math instead of its own. Fixed by adding `WarpOperation.Laplacian` to the
+   `gradientMode`-forwarding condition in `operations.py`'s dispatch-kwargs construction.
+2. **The centralized scope-boundary check allows `LaplacianScheme.Naive` through to dispatch**
+   (per this doc's own "Scope boundaries" section, written before Step 7 was implemented, on the
+   assumption a future Step 8 might land it) **but Step 8 was never built.** Without a guard,
+   `computeSPHLaplacianBrookshawPositionJVP` would have silently computed Brookshaw's answer for a
+   caller who asked for `Naive` -- caught before it could ship, not by a failing test (there wasn't
+   one yet), by re-reading the scope-boundary logic against what was actually implemented while
+   writing this status entry. Fixed by adding an explicit `laplacianMode is not Brookshaw` rejection
+   inside `computeSPHLaplacianBrookshawPositionJVP` itself.
+
+**Test files added:** `tests/operations/test_forward_mode_tier2_{interpolate,gradient,divergence,
+curl,laplacian_brookshaw}.py` (12/36/20/17/25 cases respectively -- Gradient and Laplacian sweep all
+four `GradientScheme`s across a representative `SupportScheme` subset in both 1D and 2D, mirroring
+the spike's own "exhaustive on the cheapest operator, representative subset elsewhere" pattern;
+Divergence/Curl use a smaller `SupportScheme` subset per `warpier_adjoint.md`'s own validation
+scope). `test_forward_mode_tier2_density.py::test_otherOperators_tier2_still_raise` repointed at
+`WarpOperation.Covariance` (the plan's own suggested target once all five value-having operators
+land -- Covariance has no Tier-2 formula and never will).
+
+## Status: all core scope done (2026-08-19)
+
+Density, Interpolate, Gradient, Divergence, Curl, and Laplacian(Brookshaw) are all wired into
+`warpOperationJVP`'s Tier-2 branch and covered by Jacobian-reference tests. Full verification:
+
+- `pytest tests/`: **233 passed, 1 skipped** (was 136/1 baseline before this plan; +97 net new,
+  spread across the new test files plus a handful of pre-existing tests this plan's refactors
+  touched, e.g. the HVP self-pair test's import).
+- `python scripts/operation_matrix.py --device cpu --ci --verbose`: **OK=258, HIGH=0, ERR=0, NAN=0**
+  -- unchanged from every prior tier's baseline (no production kernel math was touched, only new
+  files added and `wp_densityJVP.py`/`wp_densityHVP.py`'s imports refactored).
+  - `pytest tests/operations/test_gradcheck_scripts.py` (all 17 gradcheck/spike subprocess
+  scripts, covering every operator's reverse-mode AD path): **all PASS** -- reverse-mode
+  unaffected by this plan's forward-mode-only additions.
+- `scripts/spike_forward_mode_tier2_gradient.py` re-run standalone: still all-PASS (re-confirms the
+  math this plan ported was correct before porting; the two bugs found were both in this plan's own
+  new dispatch-wiring code, not inherited from the spike).
+
+**Not done, by design:** Step 8 (Laplacian's Naive scheme) -- optional/stretch scope per the plan's
+own text, correctly rejected with `NotImplementedError` rather than silently attempted. HVP for the
+five newly-landed operators -- out of scope by user's original choice (JVP only), see Lookout 1
+below, unchanged. The differentiability-through-reverse-mode gap (Lookout 2) is unchanged by this
+work -- it was already true of Density's existing pair-indexed-kernel pattern, and every new
+operator in this plan reuses that exact same bare-`wp.launch` pattern, so the gap is now five
+operators wider, not newly introduced.
+
+`warpier_forward_mode_plan.md` updated with a new dated status entry recording this plan's
+completion, per this doc's own "Verification" section.
 
 ## Approach
 

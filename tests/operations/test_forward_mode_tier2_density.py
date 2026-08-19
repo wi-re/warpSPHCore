@@ -185,12 +185,17 @@ def test_densityPositionJVP_rejects_combination_with_value_tangent():
 
 
 def test_otherOperators_tier2_still_raise():
+    # Density, Interpolate, Gradient, Divergence, Curl, and Laplacian(Brookshaw)
+    # are all implemented now (warpier_tier2_operators_plan.md steps 0-7) --
+    # Covariance is the one operator that stays out of Tier-2 scope throughout
+    # (no Tier-2 formula was ever derived for it), so it's what's left to prove
+    # "still not implemented" here, per the plan's own "Tests" section.
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)
     kinds = torch.zeros(positions.shape[0], dtype=torch.int32, device=DEVICE)
     p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
     adjacency = radiusSearchCompactHashMap(p0, domain, mode=SupportScheme.Gather)
-    props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Gradient,
+    props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Covariance,
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll)
     with pytest.raises(NotImplementedError, match="Tier-2"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
