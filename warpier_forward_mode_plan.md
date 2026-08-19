@@ -9,10 +9,13 @@ validated; this plan is about actually running it, using testbeds in the sibling
 
 ## Status (as of 2026-08-19)
 
-**Phases 1-3 done. Phase 4 in progress** (steps 1-4 done, Density-operator scope only -- see its
-own section below for the full breakdown; steps 5-6 mostly pre-empted/next, see that section).
-Most of the work landed in the sibling `warpSPH` repo (new test files there, not this one), which
-is easy to lose track of from this document alone -- recorded here explicitly for that reason.
+**Phases 1-4 done** (Phase 4 scoped to the Density operator only throughout -- see its own section
+below for the full step-by-step breakdown, including step 5's pitfall checks and step 6's
+three-way comparison). Phase 5 was never a task to begin with (a pointer to already-existing
+code, confirmed still accurate). Phase 6 remains explicitly out of this plan's near-term scope, a
+separate future plan, per its own section below. Most of the work landed in the sibling `warpSPH`
+repo (new test files there, not this one), which is easy to lose track of from this document alone
+-- recorded here explicitly for that reason.
 
 * **Phase 1 -- done.** `warpSPH/tests/test_forwardModeWave.py` (new), commit `ab28fc9` in
   `warpSPH`. Seeds `du0`/`dv0` via `torch.func.jvp` on the plain-torch Wendland bump formula,
@@ -335,7 +338,7 @@ trial field.
 Files touched: new `warpSPH/tests/test_implicitWaveEquation.py` (or a script promoted to a test
 once stable).
 
-## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting [IN PROGRESS: steps 1 (Density only)/2/3/4 done 2026-08-18/19]
+## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting [DONE 2026-08-19: steps 1-6, Density operator only]
 
 **Progress.** Before starting, found and corrected a stale-documentation blocker: `warpier_core.md`
 had claimed the `Field` abstraction was "not started", which would have made a generic Tier-2 API
@@ -463,13 +466,39 @@ commit `fe238d5`.
   start. Not chased further as a fix here (out of this plan's scope either way), but it's the first
   concrete data point for step 5's "does the automatic path reproduce the same pitfalls" question,
   worth carrying into step 5/6's own writeup rather than re-discovering there.
-* **Steps 5-6 -- not started.** Step 5 (deliberately probe the self-pair/block-symmetry pitfalls)
-  is largely pre-empted by the correction above: the composed-JVP matvec needs no self-pair
-  special-casing at all (a positive finding, not a pitfall reproduced), and the block-symmetry sign
-  falls out of the same translation-invariance identity automatically rather than needing separate
-  discovery -- step 5 is now mostly a writeup of that, plus step 4's marginal-stability finding, not
-  new experimentation. Step 6 (three-way comparison against `computeDeltaShift` too, plus the
-  effort/robustness writeup) is next.
+* **Step 5 -- done.** Both pitfalls the hand port hit are now checked explicitly, not just inferred
+  from step 3/4's bit-close agreement with a known-good reference:
+  - **Self-pair handling: no special-casing needed, confirmed rather than assumed.** Already
+    established during step 3's correction above -- `implicitShiftingAutomatic.py`'s matvec calls
+    `warpOperationHVP` with `tangentQueryPositions == tangentReferencePositions` (the same particle
+    moving in both roles), and that shared-tangent construction's own `(v_i - v_i) = 0` factor
+    annihilates the self term automatically, independent of whether the underlying kernel Hessian
+    building block drops it (`tests/operations/test_forward_mode_tier2_density_hvp_self_pair.py`,
+    `warpSPHCore`, makes this bitwise-no-op claim explicit). No manual `pairMask`-style exclusion
+    was written anywhere in `implicitShiftingAutomatic.py` -- contrast `implicitShifting.py`'s hand
+    port, which needed one (`_buildDiagBlock`'s `selfMask`) and, per the module's own docstring,
+    originally shipped with the *wrong reason* for needing it.
+  - **Block symmetry: checked directly on the composed operator, not inferred.** Added
+    `test_automaticHessianMatvec_isSymmetric` (`warpSPH/tests/test_implicitShiftingHessianJVP.py`)
+    -- two independent random direction vectors `a`/`b`, `<matvec(a), b>` vs. `<a, matvec(b)>`
+    through `implicitShiftingAutomatic.py`'s own matvec closure, agreeing to `rtol=1e-4` in
+    float32. No `-omega_k H_ik` off-diagonal sign was derived or written anywhere in the automatic
+    path (contrast `implicitShifting.py`'s module docstring, which spends several paragraphs
+    deriving exactly that sign by hand, and records that an earlier attempt which skipped it "would
+    make `Hess(C)` nonsymmetric"). The composed JVP-of-a-JVP's single fused expression
+    (`HVP_i = sum_j omega_j H_ij @ (v_i - v_j)`) has no separate diagonal/off-diagonal construction
+    step for a sign convention to go wrong in -- symmetry is a consequence of differentiating the
+    same scalar-valued `C` twice by construction, not something that had to be independently gotten
+    right.
+
+  **Both findings land the same way**: the automatic path does not reproduce either pitfall,
+  because the JVP-of-a-JVP composition sidesteps the specific place in a hand-derived assembly
+  where each pitfall lives (an explicit per-pair loop needing an explicit exclusion; an explicit
+  block layout needing an explicit sign). This is a genuine win for "how much bespoke reasoning the
+  automatic path needs" -- not a wash, and not because the pitfalls turned out to be easy in
+  hindsight (the hand-built code's own docstring shows they weren't: one was misdiagnosed once
+  before the correct explanation was found, the other silently produced wrong results before being
+  caught against a dense finite-difference Hessian).
 * **A finding while validating step 2, resolved for production by Status item 4, still relevant to
   step 6's comparison design.** The jittered-lattice implicit-shifting baseline
   (`warpSPH/tests/test_implicitShifting.py`) this phase's step 4/6 runs against had a marginal-
@@ -480,6 +509,40 @@ commit `fe238d5`.
   explicit opt-in, per `implicitShifting.py`/`configurations/moduleConfigurations/shifting.py`),
   not against whatever `wrapper.solveShifting` now defaults to, since `legacyPairwise` is what
   production robustness actually needs and has no automatic-JVP counterpart to compare against.
+* **Step 6 -- done.** `test_threeWayShiftComparison_allRelaxTowardUniformDensity`
+  (`warpSPH/tests/test_implicitShiftingComparison.py`) runs `computeDeltaShift` (explicit baseline),
+  `computeImplicitShift` (hand-built Hessian, `exactHessian` mode), and
+  `computeImplicitShiftAutomatic` (composed-JVP Hessian, same mode) from the same jittered-lattice
+  starting state, 8 outer relaxation iterations each (rebuilding adjacency and re-evaluating density
+  every step, same pattern as step 4's own convergence test). **Correctness**: all three reduce
+  relative density-std substantially (explicit to `<0.85x` its initial value over the window,
+  visibly slower as expected for a first-order CFL-clamped scheme -- reaches `<0.6x` only over
+  `test_implicitShifting.py`'s longer 25-iteration window; both implicit solves to `<0.7x`), and the
+  two implicit solves land within the same `<0.1x`-of-initial equilibrium-agreement bound step 4's
+  own standalone test uses, confirming that agreement isn't an artifact of running the two implicit
+  solves in isolation from the explicit baseline. **Effort/robustness, the actual headline
+  deliverable**: `computeImplicitShiftAutomatic` (`implicitShiftingAutomatic.py`, 140 lines) needs
+  no per-pair kernel math file at all -- every SPH-specific quantity is a call into
+  `warpSPHCore.warpOperationJVP`/`warpOperationHVP` (Density's position JVP/HVP, `omega` standing in
+  for mass), the only hand-written logic left being Newton-solver bookkeeping generic across any
+  operator (boundary row zeroing, preconditioner-diagonal extraction, matvec closure shape) that
+  `warpOperationJVP`/`HVP` don't and shouldn't provide. `computeImplicitShift`
+  (`implicitShifting.py`, 312 lines, most of it the derivation/evidence-trail docstring quoted
+  throughout this plan) needs that *same* bookkeeping, plus a dedicated 108-line hand-rolled `wp.kernel`
+  (`wp_implicitShifting.computeShiftingPairTerms`) computing per-pair kernel gradient/Hessian terms
+  directly via `sphKernelGradient`/`sphKernelHessian`, plus the two pitfalls step 5 confirms the
+  automatic path never had to face: an explicit self-pair exclusion (misdiagnosed once, per the
+  module docstring, before the real reason was found) and an explicit, independently-verified
+  off-diagonal sign flip (silently wrong before being caught against a dense finite-difference
+  Hessian). **This is the plan's central deliverable, restated plainly**: the automatic path reaches
+  the same operator, verified multiple independent ways (steps 2/3's standalone JVP/HVP-vs-hand-built
+  agreement, step 4's single-step and multi-step solve agreement, step 5's direct symmetry check,
+  and now step 6's three-way relaxation comparison), while needing zero problem-specific kernel
+  derivation -- the exact tradeoff this plan's "Context and motivation" section predicted before any
+  of Phase 4 was built. `legacyPairwise` (Status item 4) is the separate, already-resolved answer to
+  making implicit shifting robust from a random start in production, outside what a general-purpose
+  JVP/HVP bridge targeting the true Hessian was ever meant to solve -- noted once more here since
+  it's the natural question a reader reaches this comparison already primed to ask.
 
 Goal: wire Tier 2 into `warpOperationJVP`, then build an implicit shifting solve whose `grad C`/
 `Hess C` come from *composed JVPs* instead of `wp_implicitShifting.py`'s hand-rolled per-pair
@@ -522,9 +585,11 @@ is the headline result, not just a number matching to float64 round-off.
    solves, and qualitatively how each was built (lines of hand-derived math vs. composed calls to
    an existing bridge) -- that comparison, not a timing table, is the deliverable.
 
-Files touched: `src/warpSPHCore/operations.py` (Tier-2 branch of `warpOperationJVP`), new
-`warpSPH/modules/shifting/implicitShiftingAutomatic.py` (or a script, if it doesn't need to be
-production code yet), new `warpSPH/tests/test_implicitShiftingComparison.py`.
+Files touched: `src/warpSPHCore/operations.py`/`autograd/`/`coreOperations/` (the Tier-2 Density JVP/
+HVP branch, steps 1-3), new `warpSPH/modules/shifting/implicitShiftingAutomatic.py`, new
+`warpSPH/tests/test_implicitShiftingGradientJVP.py`/`test_implicitShiftingHessianJVP.py`/
+`test_implicitShiftingComparison.py` (steps 2/3, step 5's added symmetry check, and step 4/6's
+comparisons respectively).
 
 ## Phase 5 -- Goal 3: the incompressible wrapper already exists
 
@@ -605,9 +670,12 @@ the load-bearing points:
   NAN=0`); the six `gradcheck_*_native.py` scripts unaffected.
 - Phase 3: new implicit-wave test passes its convergence/agreement checks; existing wave-equation
   tests unaffected.
-- Phase 4: new shifting-comparison test passes; `python scripts/gradcheck_deltaShift.py` and
-  `tests/test_implicitShifting.py` (the existing hand-built solver's own tests) unaffected; the
-  six `gradcheck_*_native.py` scripts and `operation_matrix.py --device cpu` in `warpSPHCore`
-  unaffected.
+- Phase 4: `pytest tests/test_implicitShiftingGradientJVP.py tests/test_implicitShiftingHessianJVP.py
+  tests/test_implicitShiftingComparison.py` (steps 2/3/5's standalone JVP/HVP-vs-hand-built and
+  symmetry checks, step 4/6's single-step/multi-step/three-way comparisons) green;
+  `python scripts/gradcheck_deltaShift.py` and `tests/test_implicitShifting.py` (the existing
+  hand-built solver's own tests) unaffected; the six `gradcheck_*_native.py` scripts and
+  `operation_matrix.py --device cpu` in `warpSPHCore` unaffected. Confirmed 2026-08-19 on CPU
+  (`CUDA_VISIBLE_DEVICES=""`): all of the above pass.
 - End-to-end: re-run Phase 1's cross-validation after Phase 2 lands, swapping its hand-rolled
   double-rollout for `warpOperationJVP` where convenient, confirming they agree.
