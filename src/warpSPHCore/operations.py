@@ -262,6 +262,53 @@ def warpOperationJVP(
     )
 
 
+def warpOperationHVP(
+    queryParticles: ParticleState,
+    operationProperties: OperationProperties,
+    domain: DomainDescription,
+    tangentQueryPositions: torch.Tensor,
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None,
+    referenceParticles: Optional[ParticleState] = None,
+    tangentReferencePositions: Optional[torch.Tensor] = None,
+):
+    """The Hessian-vector-product entry point `warpier_forward_mode_plan.md`
+    Phase 4 Step 3 adds alongside `warpOperationJVP`: `Hess(op)_i @ v`,
+    obtained by differentiating `warpOperationJVP`'s own position tangent
+    once more in the same direction `v` -- "a JVP of that JVP".
+
+    Only Density's position Hessian is implemented so far
+    (`coreOperations.wp_densityHVP.computeSPHDensityPositionHVP`), matching
+    `warpOperationJVP`'s own current Tier-2 scope. It is a **separate entry
+    point**, not a `warpOperationJVP` option, because generic torch-level
+    composition (`torch.func.jvp` twice, or nested
+    `torch.autograd.forward_ad`) does not work for a warp-kernel-backed
+    function in this codebase -- tried first, see `wp_densityHVP.py`'s
+    module docstring for what actually happens (an immediate `RuntimeError`
+    from one path, a silently dropped tangent from the other). This is the
+    hand-written "small explicit second-order helper" the plan flagged as
+    the fallback.
+    """
+    if operationProperties.operation is not WarpOperation.Density:
+        raise NotImplementedError(
+            f"warpOperationHVP: only Density's position Hessian is implemented "
+            f"so far ({operationProperties.operation} is not); "
+            "warpier_forward_mode_plan.md Phase 4 Step 3."
+        )
+    if not isinstance(adjacency, AdjacencyList):
+        raise NotImplementedError(
+            "warpOperationHVP: Density's Hessian-vector product needs the "
+            f"torch-facing AdjacencyList (.i/.j neighbor pairs, what "
+            f"buildVerletList returns), not {type(adjacency)} -- grid/"
+            "CompactHashMap traversal is not implemented here."
+        )
+    return computeSPHDensityPositionHVP(
+        queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+        tangentQueryPositions=tangentQueryPositions,
+        referenceParticles=referenceParticles,
+        tangentReferencePositions=tangentReferencePositions,
+    )
+
+
 def sphOperation_warp(
     queryPositions, referencePositions,
     querySupports, referenceSupports,
@@ -347,4 +394,5 @@ __all__ = [
     "sphOperation_warp",
     "warpOperation",
     "warpOperationJVP",
+    "warpOperationHVP",
 ]

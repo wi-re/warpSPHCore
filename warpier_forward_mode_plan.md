@@ -7,10 +7,10 @@ validated; this plan is about actually running it, using testbeds in the sibling
 (`~/dev/warpSPH`) at increasing difficulty, and about where that connects to `warpSPHIntegrators`'s
 (`~/dev/warpSPHIntegrators`) own already-scoped implicit-integrator plan.
 
-## Status (as of 2026-08-18)
+## Status (as of 2026-08-19)
 
-**Phases 1-3 done. Phase 4 in progress** (steps 1-2 done, Density-operator scope only -- see its
-own section below for the full breakdown; steps 3-6 not started). Most of the work landed in the
+**Phases 1-3 done. Phase 4 in progress** (steps 1-3 done, Density-operator scope only -- see its
+own section below for the full breakdown; steps 4-6 not started). Most of the work landed in the
 sibling `warpSPH` repo (new test files there, not this one), which is easy to lose track of from
 this document alone -- recorded here explicitly for that reason.
 
@@ -243,7 +243,7 @@ trial field.
 Files touched: new `warpSPH/tests/test_implicitWaveEquation.py` (or a script promoted to a test
 once stable).
 
-## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting [IN PROGRESS: steps 1 (Density only)/2 done 2026-08-18]
+## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting [IN PROGRESS: steps 1 (Density only)/2/3 done 2026-08-18/19]
 
 **Progress.** Before starting, found and corrected a stale-documentation blocker: `warpier_core.md`
 had claimed the `Field` abstraction was "not started", which would have made a generic Tier-2 API
@@ -276,9 +276,48 @@ commit `fe238d5`.
   `91b92fb`). Confirms the claim literally: no new derivation was needed for the gradient itself,
   only for wiring the existing Tier-2.0 building blocks (`sphKernelGradient`'s ingredients) through
   a JVP-shaped production entry point.
-* **Steps 3-6 -- not started.** Step 3 (`Hess C` as a JVP-of-a-JVP, "the actual experiment") is
-  next; steps 4-6 (swap the shifting matvec, test the self-pair/block-symmetry pitfalls, three-way
-  comparison) depend on it.
+* **Step 3 -- done.** `Hess(Density) @ v` ("the actual experiment") is now a production entry
+  point: `computeSPHDensityPositionHVP` (`coreOperations/wp_densityHVP.py`), dispatched to by a
+  new `warpOperationHVP` sibling to `warpOperationJVP` (`operations.py`). **Finding: composing
+  this generically through torch does not work, confirmed by trying it first, not assumed.**
+  `torch.func.jvp` applied twice over `computeSPHDensityPositionJVP` errors immediately
+  (`RuntimeError: Cannot access data pointer of Tensor that doesn't have storage` -- functorch's
+  dual tensors have no real storage for `wp.from_torch` to view), and nested
+  `torch.autograd.forward_ad.make_dual`/`dual_level` runs but silently returns `tangent=None` --
+  the same failure mode `spike_forward_mode_tier1.py` already found one order lower for
+  `StateAwareWarpFunction` (no `jvp()` ever registered), sharper here since
+  `computeSPHDensityPositionJVP` isn't wrapped in a `torch.autograd.Function` at all, forward or
+  reverse. `torch.autograd.functional.hessian`'s usual double-backward HVP trick is equally out --
+  `StateAwareWarpFunction.backward()` reads a `wp.Tape`, which isn't itself differentiable (same
+  root cause `spike_forward_mode_tier1.py` flagged for `torch.autograd.functional.jvp`'s
+  double-backward variant). So Step 3 needed the "small explicit second-order helper" the plan
+  flagged as the fallback -- but that helper turned out to need **zero new kernel math**: the
+  closed form `HVP_i = sum_j m_j * H_ij @ (v_i - v_j)` falls out of differentiating
+  `computeSPHDensityPositionJVP`'s own `dW_ij = ∇W_ij · dx_ij` formula once more by hand, and
+  `H_ij` is exactly `kernels.hessian.sphKernelHessian` -- an existing, already-validated Tier-2.0
+  building block (`warpier_adjoint.md`'s own building-blocks table), previously only consumed by
+  `warpSPH`'s hand-rolled `wp_implicitShifting.py`. Validated two independent ways: (a)
+  `scripts/spike_forward_mode_tier2_density_hvp.py` (float64 subprocess, gated in
+  `test_gradcheck_scripts.py`'s `SPIKE_SCRIPTS`) checks it against
+  finite-differencing `computeSPHDensityPositionJVP` itself along `v` (a different formula, no
+  `sphKernelHessian` involved), agreeing to ~1e-9 relative on Gather/Scatter/MeanSymmetric/
+  SuperSymmetric in 1D and 2D; (b) `warpSPH/tests/test_implicitShiftingHessianJVP.py` (new, `warpSPH`
+  commit pending) checks it bit-close against `wp_implicitShifting.py`'s own hand-built `H`/
+  `_multiplyLaplacianBlock` matvec on the same jittered-lattice case Step 2 used, passing at
+  `rtol=1e-4` on first run. Two scope notes carried forward, not fixed here: `sphKernelHessian`
+  itself only special-cases `SuperSymmetric`'s two-term-average branch, not
+  `KernelMeanSymmetric`'s (both get it in `sphKernelJVP_ij`'s first-order dispatch) -- a
+  pre-existing gap in that Tier-2.0 building block, silently inherited by both
+  `wp_implicitShifting.py` (sidesteps it by always using `Gather`) and this new function, flagged
+  in the spike script rather than fixed; and self-pairs (`i==j`) are dropped by hand before
+  assembly in `computeSPHDensityPositionHVP`, the same way `computeImplicitShift` needs to for its
+  own Hessian -- i.e. the composed-JVP route did **not** turn out to need this hand-holding any
+  less than the hand-built version does, a first data point for step 5's own question, not yet
+  step 5 itself (this was needed just to get step 3's own numbers to agree, not a deliberate test
+  of the pitfall).
+* **Steps 4-6 -- not started.** Step 4 (swap the shifting matvec, keep the solver) is next; step 5
+  (deliberately probe the self-pair/block-symmetry pitfalls, building on step 3's finding above)
+  and step 6 (three-way comparison) depend on it.
 * **A finding while validating step 2, worth carrying into step 6's comparison**: the jittered-
   lattice implicit-shifting baseline (`warpSPH/tests/test_implicitShifting.py`) this phase's
   step 4/6 will run against has its own pre-existing GPU-only marginal-stability issue (see this

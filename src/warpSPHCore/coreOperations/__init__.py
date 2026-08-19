@@ -17,6 +17,7 @@ from .wp_laplacian import _computeSPHLaplacian_stateBackend
 from .wp_divergence import _computeSPHDivergence_stateBackend
 from .wp_gradient import _computeSPHGradient_stateBackend
 from .wp_densityJVP import computeSPHDensityPositionJVP
+from .wp_densityHVP import computeSPHDensityPositionHVP
 
 __all__ = [
     "_computeSPHCovariance_stateBackend",
@@ -27,4 +28,5 @@ __all__ = [
     "_computeSPHDivergence_stateBackend",
     "_computeSPHGradient_stateBackend",
     "computeSPHDensityPositionJVP",
+    "computeSPHDensityPositionHVP",
 ]
