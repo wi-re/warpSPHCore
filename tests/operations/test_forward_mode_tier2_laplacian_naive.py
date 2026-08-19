@@ -1,9 +1,15 @@
 """In-process standing test for `warpOperationJVP`'s Tier-2 Laplacian
-(Brookshaw scheme) branch (`warpier_tier2_operators_plan.md` Step 7,
-`warpier_adjoint.md` Tier 2.2): asserts `computeSPHLaplacianBrookshawPositionJVP`
+(Naive scheme) branch (`warpier_tier2_operators_plan.md` Step 8,
+`warpier_adjoint.md` Tier 2.3): asserts `computeSPHLaplacianNaivePositionJVP`
 matches a reverse-mode-Jacobian reference on the production
-`warpOperation(Laplacian, laplacianMode=Brookshaw)` call, same pattern as
-`test_forward_mode_tier2_gradient.py`.
+`warpOperation(Laplacian, laplacianMode=Naive)` call, same pattern as
+`test_forward_mode_tier2_laplacian_brookshaw.py`.
+
+Also checks the genuine structural finding `warpier_adjoint.md` Tier 2.3
+surfaced: unlike Tier 2.1/2.2's kernel value/gradient, `sphKernelLaplacian`
+never gained an explicit `KernelMeanSymmetric` branch, so KernelMeanSymmetric
+and SuperSymmetric give genuinely *different* results here (not identical,
+as they are for every other operator in this plan).
 """
 
 from __future__ import annotations
@@ -74,7 +80,7 @@ def _check_jacobian_reference(positions, supports, masses, domain, adjacency, mo
 
     props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Laplacian,
                                 supportMode=mode, operationMode=OperationDirection.AllToAll,
-                                gradientMode=scheme, laplacianMode=LaplacianScheme.Brookshaw)
+                                gradientMode=scheme, laplacianMode=LaplacianScheme.Naive)
 
     def f(pos, sup, mass, density):
         p = ParticleState(positions=pos, supports=sup, masses=mass, densities=density, kinds=kinds)
@@ -106,11 +112,12 @@ def _check_jacobian_reference(positions, supports, masses, domain, adjacency, mo
         queryValues=queryValues, referenceValues=referenceValues,
     )
     torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
+    return assembled
 
 
 @pytest.mark.parametrize("scheme", list(GradientScheme))
-@pytest.mark.parametrize("mode", [SupportScheme.Gather, SupportScheme.MeanSymmetric])
-def test_laplacianBrookshawPositionJVP_matches_jacobian_reference_1d(mode, scheme):
+@pytest.mark.parametrize("mode", [SupportScheme.Gather, SupportScheme.MeanSymmetric, SupportScheme.SuperSymmetric])
+def test_laplacianNaivePositionJVP_matches_jacobian_reference_1d(mode, scheme):
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)
     n = positions.shape[0]
@@ -121,8 +128,8 @@ def test_laplacianBrookshawPositionJVP_matches_jacobian_reference_1d(mode, schem
 
 
 @pytest.mark.parametrize("scheme", list(GradientScheme))
-@pytest.mark.parametrize("mode", [SupportScheme.Gather, SupportScheme.MeanSymmetric, SupportScheme.KernelMeanSymmetric])
-def test_laplacianBrookshawPositionJVP_matches_jacobian_reference_2d(mode, scheme):
+@pytest.mark.parametrize("mode", [SupportScheme.Gather, SupportScheme.MeanSymmetric])
+def test_laplacianNaivePositionJVP_matches_jacobian_reference_2d(mode, scheme):
     positions, supports, masses = _grid_case_2d()
     domain = _make_domain(dim=2)
     n = positions.shape[0]
@@ -130,6 +137,22 @@ def test_laplacianBrookshawPositionJVP_matches_jacobian_reference_2d(mode, schem
     p0_forAdjacency = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
     adjacency = radiusSearchCompactHashMap(p0_forAdjacency, domain, mode=SupportScheme.Gather)
     _check_jacobian_reference(positions, supports, masses, domain, adjacency, mode, scheme)
+
+
+def test_laplacianNaivePositionJVP_kernelMeanSymmetric_differs_from_superSymmetric():
+    # warpier_adjoint.md Tier 2.3's structural finding: sphKernelLaplacian never got
+    # an explicit KernelMeanSymmetric branch, so (unlike every other operator in this
+    # plan) the two schemes are NOT identical here -- the mirror image of Tier 2.2's
+    # "assert identical" check.
+    positions, supports, masses = _line_case()
+    domain = _make_domain(dim=1)
+    n = positions.shape[0]
+    kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
+    p0_forAdjacency = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
+    adjacency = radiusSearchCompactHashMap(p0_forAdjacency, domain, mode=SupportScheme.KernelMeanSymmetric)
+    kms = _check_jacobian_reference(positions, supports, masses, domain, adjacency, SupportScheme.KernelMeanSymmetric, GradientScheme.Naive)
+    ss = _check_jacobian_reference(positions, supports, masses, domain, adjacency, SupportScheme.SuperSymmetric, GradientScheme.Naive)
+    assert not torch.allclose(kms, ss, atol=1e-6), "KernelMeanSymmetric and SuperSymmetric should genuinely differ for the Naive Laplacian JVP"
 
 
 def _minimal_case():
@@ -143,40 +166,14 @@ def _minimal_case():
     p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
     props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Laplacian,
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll,
-                                gradientMode=GradientScheme.Symmetric, laplacianMode=LaplacianScheme.Brookshaw)
+                                gradientMode=GradientScheme.Symmetric, laplacianMode=LaplacianScheme.Naive)
     queryValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
     referenceValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
     return positions, p0, domain, adjacency, props, queryValues, referenceValues
 
 
-def test_laplacianBrookshawPositionJVP_rejects_missing_values():
+def test_laplacianNaivePositionJVP_rejects_missing_values():
     positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
     with pytest.raises(ValueError, match="queryValues"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
                          tangentQueryPositions=torch.zeros_like(positions))
-
-
-@pytest.mark.parametrize("mode", [LaplacianScheme.Dot, LaplacianScheme.Default])
-def test_laplacianPositionJVP_rejects_unimplemented_modes(mode):
-    # Naive is implemented too now (test_forward_mode_tier2_laplacian_naive.py) --
-    # only Dot/Default remain genuinely out of Tier-2 scope.
-    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
-    otherProps = OperationProperties(kernel=KERNEL, operation=WarpOperation.Laplacian,
-                                     supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll,
-                                     gradientMode=GradientScheme.Symmetric, laplacianMode=mode)
-    with pytest.raises(NotImplementedError, match="Tier-2"):
-        warpOperationJVP(p0, otherProps, domain, adjacency=adjacency,
-                         tangentQueryPositions=torch.zeros_like(positions),
-                         queryValues=qv, referenceValues=rv)
-
-
-def test_laplacianBrookshawPositionJVP_rejects_positiveDivergence():
-    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
-    posDivProps = OperationProperties(kernel=KERNEL, operation=WarpOperation.Laplacian,
-                                      supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll,
-                                      gradientMode=GradientScheme.Symmetric, laplacianMode=LaplacianScheme.Brookshaw,
-                                      positiveDivergence=True)
-    with pytest.raises(NotImplementedError, match="Tier-2"):
-        warpOperationJVP(p0, posDivProps, domain, adjacency=adjacency,
-                         tangentQueryPositions=torch.zeros_like(positions),
-                         queryValues=qv, referenceValues=rv)

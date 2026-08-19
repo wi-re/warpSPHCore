@@ -1,23 +1,39 @@
 """Tier-2 position/support/mass/density-tangent JVP of the Laplacian
-operator's Brookshaw scheme (`warpier_tier2_operators_plan.md` Step 7,
-`warpier_adjoint.md` Tier 2.2): `q_ij = (fj-fi)*B_ij` (`B` from
-`_jvpCommon.gradientWeights` -- literally the same coefficient as Gradient's
-`B` term, not re-derived), `D_ij = r_ij + eps*h_ij` (`eps=1e-8`, matching
-`wp_laplacian.py`'s literal constant), `n_ij = x_ij/D_ij`,
-`L_ij = -2*q_ij*dot(G_ij,n_ij)/D_ij`; the regularized-distance chain
-(`dr_ij`, `dD_ij`, `dn_ij`, `dL_ij`) is ordinary calculus on top of
-`wp_kernelGradientJVP`'s shared `(G_ij, dG_ij)` pair kernel -- Naive/Dot/
-Default `laplacianMode`s are out of scope, enforced centrally in
-`operations.py`.
+operator's Brookshaw and Naive schemes (`warpier_tier2_operators_plan.md`
+Steps 7/8, `warpier_adjoint.md` Tiers 2.2/2.3). Dot/Default `laplacianMode`s
+are out of scope, enforced centrally in `operations.py`.
+
+**Brookshaw** (`computeSPHLaplacianBrookshawPositionJVP`): `q_ij =
+(fj-fi)*B_ij` (`B` from `_jvpCommon.gradientWeights` -- literally the same
+coefficient as Gradient's `B` term, not re-derived), `D_ij = r_ij +
+eps*h_ij` (`eps=1e-8`, matching `wp_laplacian.py`'s literal constant),
+`n_ij = x_ij/D_ij`, `L_ij = -2*q_ij*dot(G_ij,n_ij)/D_ij`; the
+regularized-distance chain (`dr_ij`, `dD_ij`, `dn_ij`, `dL_ij`) is ordinary
+calculus on top of `wp_kernelGradientJVP`'s shared `(G_ij, dG_ij)` pair
+kernel.
+
+**Naive** (`computeSPHLaplacianNaivePositionJVP`): `q_ij` is the exact same
+`B_ij` again (`wp_laplacian.py`'s `q_ij` depends only on `gradientMode`,
+never `laplacianMode` -- Tier 2.2's finding, re-confirmed by Tier 2.3 under
+this scheme), but `L_ij`/`dL_ij` come from `sphKernelLaplacianJVP`
+(`kernels/kernelJVP.py`, the actual analytic second-derivative-of-r
+estimator's own JVP) instead of Brookshaw's gradient-based `n_ij/D_ij`
+estimator -- a genuinely different per-pair kernel launch, `L = sum_j
+q_ij*L_ij`, `dL = sum_j (dq_ij*L_ij + q_ij*dL_ij)`.
+
+`computeSPHLaplacianPositionJVP` is the thin dispatcher `operations.py`
+actually registers (`_TIER2_VALUE_DISPATCH[WarpOperation.Laplacian]`),
+picking between the two by `laplacianMode`.
 """
 
-from typing import Optional
+from typing import Any, Optional
 import torch
+import warp as wp
 
 from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
-from ..util import castTorchToWarp
+from ..util import castTorchToWarp, allocateTorchWarp
 from ._jvpCommon import (
     buildParticleSoA as _buildParticleSoA,
     buildDomainState as _buildDomainState,
@@ -25,8 +41,14 @@ from ._jvpCommon import (
     gradientWeights as _gradientWeights,
 )
 from .wp_kernelGradientJVP import launchPairKernelGradientJVP as _launchPairKernelGradientJVP
+from ..kernels.kernelJVP import sphKernelLaplacianJVP
+from ..util.stateUtil import getParticle
 
-__all__ = ['computeSPHLaplacianBrookshawPositionJVP']
+__all__ = [
+    'computeSPHLaplacianPositionJVP',
+    'computeSPHLaplacianBrookshawPositionJVP',
+    'computeSPHLaplacianNaivePositionJVP',
+]
 
 _LAPLACIAN_EPS = 1e-8  # matches wp_laplacian.py's literal constant, not get_epsilon(r)
 
@@ -69,26 +91,15 @@ def computeSPHLaplacianBrookshawPositionJVP(
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
-    laplacianMode: LaplacianScheme = LaplacianScheme.Brookshaw,
 ) -> torch.Tensor:
-    """`dLaplacian_i`, shape `[numParticles]`. `queryValues`/
-    `referenceValues` (`fi`/`fj`, scalar fields) are required and frozen.
-    `queryParticles.densities`/`referenceParticles.densities` must already
-    hold real values, same requirement as `computeSPHGradientPositionJVP`.
-
-    `laplacianMode` must be `Brookshaw` -- `operations.py`'s centralized
-    scope check lets `Naive` reach this function too (Tier 2.3's "genuinely
-    new kernel math" scheme, `warpier_adjoint.md`), but `warpier_tier2_operators_plan.md`'s
-    Step 8 (Naive) is optional/stretch scope and was not implemented, so it
-    is rejected here rather than silently computing Brookshaw's answer for a
-    caller who asked for Naive.
+    """`dLaplacian_i`, shape `[numParticles]`, Brookshaw scheme specifically
+    (see `computeSPHLaplacianNaivePositionJVP` for Naive; `computeSPHLaplacianPositionJVP`
+    is the dispatcher between the two that `operations.py` actually calls).
+    `queryValues`/`referenceValues` (`fi`/`fj`, scalar fields) are required
+    and frozen. `queryParticles.densities`/`referenceParticles.densities`
+    must already hold real values, same requirement as
+    `computeSPHGradientPositionJVP`.
     """
-    if laplacianMode is not LaplacianScheme.Brookshaw:
-        raise NotImplementedError(
-            f"computeSPHLaplacianBrookshawPositionJVP: Tier-2 laplacianMode={laplacianMode} "
-            "is not implemented -- warpier_tier2_operators_plan.md Step 8 (Naive) was left "
-            "as optional/stretch scope and was not built. Only Brookshaw is implemented."
-        )
     if queryValues is None or referenceValues is None:
         raise ValueError(
             "computeSPHLaplacianBrookshawPositionJVP: queryValues and "
@@ -177,3 +188,177 @@ def computeSPHLaplacianBrookshawPositionJVP(
     dLaplacian = torch.zeros(nQuery, device=device, dtype=dtype)
     dLaplacian.index_add_(0, iIdx, dL)
     return dLaplacian
+
+
+@wp.kernel
+def _sphKernelLaplacianJVP_PairKernel(
+    queryState: Any,
+    referenceState: Any,
+    queryTangentState: Any,
+    referenceTangentState: Any,
+    domainState: domainData,
+    kernelProperties: kernelState,
+    edgeI: wp.array(dtype=wp.int64),
+    edgeJ: wp.array(dtype=wp.int64),
+    outL: wp.array(dtype=scalar_t),
+    outDL: wp.array(dtype=scalar_t),
+):
+    e = wp.tid()
+    if e >= edgeI.shape[0]:
+        return
+    i = wp.int32(edgeI[e])
+    j = wp.int32(edgeJ[e])
+
+    xi, hi, _mi, _rhoi, _ki = getParticle(queryState, i)
+    xj, hj, _mj, _rhoj, _kj = getParticle(referenceState, j)
+    dxi, dhi, _dmi, _drhoi, _dki = getParticle(queryTangentState, i)
+    dxj, dhj, _dmj, _drhoj, _dkj = getParticle(referenceTangentState, j)
+
+    L, dL = sphKernelLaplacianJVP(xi, xj, hi, hj, dxi, dxj, dhi, dhj, kernelProperties, domainState)
+    outL[e] = L
+    outDL[e] = dL
+
+
+def _launchPairKernelLaplacianJVP(
+    queryState, referenceState, queryTangentState, referenceTangentState,
+    domainState: domainData, kernelProperties: kernelState,
+    edgeI, edgeJ,
+):
+    """One thread per adjacency pair, producing the pairwise `(L_ij, dL_ij)`
+    JVP (`d(sphKernelLaplacian)/d{x,h}`) as flat `[numPairs]` torch tensors
+    -- Naive's own per-pair kernel launch (distinct from Brookshaw's shared
+    `(G_ij, dG_ij)` launch in `wp_kernelGradientJVP.py`, since Naive uses the
+    analytic second-derivative-of-r estimator directly rather than a
+    gradient-based one). Structurally identical to `_jvpCommon.launchPairKernelJVP`
+    (both produce a `[numPairs]` scalar pair), just calling `sphKernelLaplacianJVP`
+    instead of `sphKernelJVP` -- kept local to this file rather than promoted
+    to `_jvpCommon.py` since Naive is its only consumer.
+    """
+    numPairs = edgeI.shape[0]
+    L_t, L_w = allocateTorchWarp(numPairs, scalar_t, edgeI.device)
+    dL_t, dL_w = allocateTorchWarp(numPairs, scalar_t, edgeI.device)
+
+    wp.launch(
+        _sphKernelLaplacianJVP_PairKernel,
+        dim=numPairs,
+        inputs=[queryState, referenceState, queryTangentState, referenceTangentState,
+                domainState, kernelProperties, edgeI, edgeJ, L_w, dL_w],
+        device=edgeI.device,
+    )
+    return L_t, dL_t
+
+
+def computeSPHLaplacianNaivePositionJVP(
+    queryParticles: ParticleState,
+    domain: DomainDescription,
+    kernel: KernelFunctions,
+    supportMode: SupportScheme,
+    adjacency: AdjacencyList,
+    tangentQueryPositions: torch.Tensor,
+    referenceParticles: Optional[ParticleState] = None,
+    tangentReferencePositions: Optional[torch.Tensor] = None,
+    tangentQuerySupports: Optional[torch.Tensor] = None,
+    tangentReferenceSupports: Optional[torch.Tensor] = None,
+    tangentReferenceMasses: Optional[torch.Tensor] = None,
+    tangentQueryDensities: Optional[torch.Tensor] = None,
+    tangentReferenceDensities: Optional[torch.Tensor] = None,
+    queryValues: Optional[torch.Tensor] = None,
+    referenceValues: Optional[torch.Tensor] = None,
+    gradientMode: GradientScheme = GradientScheme.Symmetric,
+) -> torch.Tensor:
+    """`dLaplacian_i`, shape `[numParticles]`, Naive scheme
+    (`warpier_tier2_operators_plan.md` Step 8, `warpier_adjoint.md` Tier
+    2.3): `q_ij = (fj-fi)*B_ij` (same `B` as Brookshaw, `gradientMode`-
+    dispatched, not `laplacianMode`-dispatched -- Tier 2.2's finding,
+    re-confirmed here), `L = sum_j q_ij*L_ij`, `dL = sum_j (dq_ij*L_ij +
+    q_ij*dL_ij)`, `(L_ij, dL_ij)` from `sphKernelLaplacianJVP`
+    (`kernels/kernelJVP.py`)."""
+    if queryValues is None or referenceValues is None:
+        raise ValueError(
+            "computeSPHLaplacianNaivePositionJVP: queryValues and "
+            "referenceValues (frozen fi/fj) are both required."
+        )
+
+    referenceParticles = referenceParticles if referenceParticles is not None else queryParticles
+    dim = domain.dim
+    device, dtype = queryParticles.positions.device, queryParticles.positions.dtype
+    nQuery = queryParticles.positions.shape[0]
+    nRef = referenceParticles.positions.shape[0]
+
+    zerosVec = lambda n: torch.zeros((n, dim), device=device, dtype=dtype)
+    zerosScalar = lambda n: torch.zeros(n, device=device, dtype=dtype)
+
+    tangentReferencePositions = tangentReferencePositions if tangentReferencePositions is not None else zerosVec(nRef)
+    tangentQuerySupports = tangentQuerySupports if tangentQuerySupports is not None else zerosScalar(nQuery)
+    tangentReferenceSupports = tangentReferenceSupports if tangentReferenceSupports is not None else zerosScalar(nRef)
+    tangentReferenceMasses = tangentReferenceMasses if tangentReferenceMasses is not None else zerosScalar(nRef)
+    tangentQueryDensities = tangentQueryDensities if tangentQueryDensities is not None else zerosScalar(nQuery)
+    tangentReferenceDensities = tangentReferenceDensities if tangentReferenceDensities is not None else zerosScalar(nRef)
+
+    queryState = _buildParticleSoA(dim, queryParticles.positions, queryParticles.supports, queryParticles.masses)
+    referenceState = _buildParticleSoA(dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses)
+    queryTangentState = _buildParticleSoA(dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery))
+    referenceTangentState = _buildParticleSoA(dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses)
+    domainState = _buildDomainState(domain)
+    kernelProperties = _buildKernelState(kernel, supportMode)
+
+    edgeI = castTorchToWarp(adjacency.i)
+    edgeJ = castTorchToWarp(adjacency.j)
+
+    L_t, dL_t = _launchPairKernelLaplacianJVP(
+        queryState, referenceState, queryTangentState, referenceTangentState,
+        domainState, kernelProperties, edgeI, edgeJ,
+    )
+
+    iIdx = adjacency.i.long()
+    jIdx = adjacency.j.long()
+    massJ = referenceParticles.masses[jIdx]
+    densityI = queryParticles.densities[iIdx]
+    densityJ = referenceParticles.densities[jIdx]
+    dMassJ = tangentReferenceMasses[jIdx]
+    dDensityI = tangentQueryDensities[iIdx]
+    dDensityJ = tangentReferenceDensities[jIdx]
+
+    _, B, _, dB = _gradientWeights(massJ, densityI, densityJ, dMassJ, dDensityI, dDensityJ, gradientMode)
+
+    fi = queryValues[iIdx]
+    fj = referenceValues[jIdx]
+    q = (fj - fi) * B
+    dq = (fj - fi) * dB
+
+    pairContribution = dq * L_t + q * dL_t
+
+    dLaplacian = torch.zeros(nQuery, device=device, dtype=dtype)
+    dLaplacian.index_add_(0, iIdx, pairContribution)
+    return dLaplacian
+
+
+def computeSPHLaplacianPositionJVP(
+    queryParticles: ParticleState,
+    domain: DomainDescription,
+    kernel: KernelFunctions,
+    supportMode: SupportScheme,
+    adjacency: AdjacencyList,
+    tangentQueryPositions: torch.Tensor,
+    laplacianMode: LaplacianScheme = LaplacianScheme.Brookshaw,
+    **kwargs,
+) -> torch.Tensor:
+    """Dispatcher `operations.py` actually registers in `_TIER2_VALUE_DISPATCH`
+    -- routes to `computeSPHLaplacianBrookshawPositionJVP`/
+    `computeSPHLaplacianNaivePositionJVP` by `laplacianMode`. Dot/Default are
+    rejected before reaching here (`operations.py`'s own centralized scope
+    check); any other value is a defensive fallback, not expected to be
+    reachable."""
+    if laplacianMode is LaplacianScheme.Brookshaw:
+        return computeSPHLaplacianBrookshawPositionJVP(
+            queryParticles, domain, kernel, supportMode, adjacency, tangentQueryPositions, **kwargs,
+        )
+    elif laplacianMode is LaplacianScheme.Naive:
+        return computeSPHLaplacianNaivePositionJVP(
+            queryParticles, domain, kernel, supportMode, adjacency, tangentQueryPositions, **kwargs,
+        )
+    raise NotImplementedError(
+        f"computeSPHLaplacianPositionJVP: Tier-2 laplacianMode={laplacianMode} is not "
+        "implemented -- only Brookshaw and Naive are (warpier_tier2_operators_plan.md "
+        "Steps 7/8)."
+    )

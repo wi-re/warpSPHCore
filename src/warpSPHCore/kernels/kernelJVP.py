@@ -29,6 +29,7 @@ from .kernel import sphKernel_
 from .gradient import sphGradient_
 from .gradH import sphKernelDkDh_, sphGradientDkDh_
 from .hessian import sphKernelHessian_
+from .laplacian import sphKernelLaplacian_, sphKernelLaplacianGradient_, sphKernelLaplacianDkDh_
 
 
 @wp.func
@@ -141,3 +142,70 @@ def sphKernelGradientJVP(
     xij = computeDistanceVec(xi, xj, domainState)
     dxij = dxi - dxj
     return sphKernelGradientJVP_ij(xij, hi, hj, dxij, dhi, dhj, kernelProperties, domainState)
+
+
+@wp.func
+def sphKernelLaplacianJVP_ij(
+    xij: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
+    dxij: vector(dtype=scalar_t, length=dim_t),
+    dhi: scalar_t,
+    dhj: scalar_t,
+    kernelProperties: kernelState,
+    domainState: domainData,
+):
+    """JVP of `sphKernelLaplacian` (`kernels/laplacian.py`), i.e.
+    `d(sphKernelLaplacian)/d{x,h}` (`warpier_adjoint.md` Tier 2.3): mirrors
+    that function's own **two-branch** `SupportScheme` dispatch (SuperSymmetric
+    explicit, everything else -- including `KernelMeanSymmetric` -- falling
+    through to `computePairwiseSupport`'s own max-fallback dispatch), NOT the
+    three-branch KernelMeanSymmetric/SuperSymmetric-together dispatch
+    `sphKernelJVP_ij`/`sphKernelGradientJVP_ij` use above -- `sphKernelLaplacian`
+    itself never gained an explicit `KernelMeanSymmetric` branch when those two
+    did (`warpier_adjoint.md` Tier 2.3's own structural finding: the two
+    schemes are provably identical for the kernel value/gradient but *not*
+    for the Naive Laplacian). Built from `sphKernelLaplacianGradient_`
+    (`d(sphKernelLaplacian_)/dx`) and `sphKernelLaplacianDkDh_`
+    (`d(sphKernelLaplacian_)/dh`), both already validated against `wp.Tape`
+    (`kernel_sanity_native.py` Section K). Ported byte-for-byte from
+    `scripts/spike_forward_mode_tier2_laplacian_naive.py`'s already-validated
+    `_kernelLaplacianJVP` (`rel_err ~1e-9` in float64 against `warpOperation`'s
+    own reverse-mode Jacobian, for every `GradientScheme`/`SupportScheme`
+    combination, including the KernelMeanSymmetric-vs-SuperSymmetric
+    genuinely-differ check)."""
+    if kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value):
+        Li = sphKernelLaplacian_(xij, hi, kernelProperties.kernelFunction)
+        Lj = sphKernelLaplacian_(xij, hj, kernelProperties.kernelFunction)
+        L = (Li + Lj) * scalar_t(0.5)
+        Gi = sphKernelLaplacianGradient_(xij, hi, kernelProperties.kernelFunction)
+        Gj = sphKernelLaplacianGradient_(xij, hj, kernelProperties.kernelFunction)
+        DhI = sphKernelLaplacianDkDh_(xij, hi, kernelProperties.kernelFunction)
+        DhJ = sphKernelLaplacianDkDh_(xij, hj, kernelProperties.kernelFunction)
+        dL = (wp.dot(Gi, dxij) + DhI * dhi + wp.dot(Gj, dxij) + DhJ * dhj) * scalar_t(0.5)
+        return L, dL
+    hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
+    dhij = computePairwiseSupportJVP(hi, hj, dhi, dhj, kernelProperties.supportMode)
+    L = sphKernelLaplacian_(xij, hij, kernelProperties.kernelFunction)
+    G = sphKernelLaplacianGradient_(xij, hij, kernelProperties.kernelFunction)
+    Dh = sphKernelLaplacianDkDh_(xij, hij, kernelProperties.kernelFunction)
+    dL = wp.dot(G, dxij) + Dh * dhij
+    return L, dL
+
+
+@wp.func
+def sphKernelLaplacianJVP(
+    xi: vector(dtype=scalar_t, length=dim_t),
+    xj: vector(dtype=scalar_t, length=dim_t),
+    hi: scalar_t,
+    hj: scalar_t,
+    dxi: vector(dtype=scalar_t, length=dim_t),
+    dxj: vector(dtype=scalar_t, length=dim_t),
+    dhi: scalar_t,
+    dhj: scalar_t,
+    kernelProperties: kernelState,
+    domainState: domainData,
+):
+    xij = computeDistanceVec(xi, xj, domainState)
+    dxij = dxi - dxj
+    return sphKernelLaplacianJVP_ij(xij, hi, hj, dxij, dhi, dhj, kernelProperties, domainState)

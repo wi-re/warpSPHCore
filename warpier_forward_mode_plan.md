@@ -18,9 +18,9 @@ repo (new test files there, not this one), which is easy to lose track of from t
 -- recorded here explicitly for that reason.
 
 **Also done, new scope beyond the original four phases:** Tier-2 JVP for the five operators Phase 4
-left out (Interpolate/Gradient/Divergence/Curl/Laplacian-Brookshaw) -- see the dedicated section
-below ("Tier-2 JVP for the remaining five operators") and its companion document
-`warpier_tier2_operators_plan.md` for full detail.
+left out (Interpolate/Gradient/Divergence/Curl/Laplacian), including Laplacian's optional/stretch
+Naive scheme as a follow-up -- see the dedicated section below ("Tier-2 JVP for the remaining five
+operators") and its companion document `warpier_tier2_operators_plan.md` for full detail.
 
 * **Phase 1 -- done.** `warpSPH/tests/test_forwardModeWave.py` (new), commit `ab28fc9` in
   `warpSPH`. Seeds `du0`/`dv0` via `torch.func.jvp` on the plain-torch Wendland bump formula,
@@ -607,32 +607,44 @@ this plan's Phases 1-4/6 are about).
 
 **Summary (full detail in that document's own Status section):** wired Tier-2 (position/support/
 mass/density tangent) JVP support into `warpOperationJVP` for Interpolate, Gradient, Divergence,
-Curl, and Laplacian(Brookshaw) -- matching Density's existing production pattern (pair-indexed
-`wp.launch`, bypassing `launchOperator`, `torch.index_add_` scatter-assembly). Scope: JVP only, no
-Hessian-vector products beyond Density's existing one, no CRK/renormalization correction paths, and
-(within Laplacian) Brookshaw only, not Naive/Dot/Default. New shared `sphKernelGradientJVP` in
-`kernels/kernelJVP.py` (the `∇W_ij` JVP Gradient/Divergence/Curl/Laplacian all share) ported
-byte-for-byte from `scripts/spike_forward_mode_tier2_gradient.py`'s already-validated
-`_kernelGradientJVP` (`warpier_adjoint.md` Tier 2.2). Two real bugs found and fixed during
-verification, both in the new dispatch-wiring code, not the ported math (re-confirmed correct by
-re-running the spike script unchanged) -- see the other document for both.
+Curl, and both Laplacian schemes (Brookshaw, then Naive as a follow-up once the core plan landed --
+see below) -- matching Density's existing production pattern (pair-indexed `wp.launch`, bypassing
+`launchOperator`, `torch.index_add_` scatter-assembly). Scope: JVP only, no Hessian-vector products
+beyond Density's existing one, no CRK/renormalization correction paths, Laplacian's Dot/Default
+schemes excluded (never derived by `warpier_adjoint.md` at all). New shared `sphKernelGradientJVP`
+in `kernels/kernelJVP.py` (the `∇W_ij` JVP Gradient/Divergence/Curl/Laplacian(Brookshaw) share)
+ported byte-for-byte from `scripts/spike_forward_mode_tier2_gradient.py`'s already-validated
+`_kernelGradientJVP` (`warpier_adjoint.md` Tier 2.2); a second new `sphKernelLaplacianJVP` for
+Naive, ported from `scripts/spike_forward_mode_tier2_laplacian_naive.py`'s `_kernelLaplacianJVP`
+(`warpier_adjoint.md` Tier 2.3) -- note its dispatch is structurally different (two-branch, not
+three-branch) from every other Tier-2 kernel-derivative function in this work, a real finding
+Tier 2.3 had already surfaced, re-confirmed by a dedicated regression test. Two real bugs found and
+fixed during verification of the core (Brookshaw-scoped) plan, both in the new dispatch-wiring code,
+not the ported math (re-confirmed correct by re-running the spikes unchanged) -- see the other
+document for both.
 
-Verification: `pytest tests/` 233 passed/1 skipped (was 136/1 before this work);
-`operation_matrix.py --device cpu --ci --verbose` unchanged (OK=258, HIGH=0, ERR=0, NAN=0);
+**Naive was picked up as a follow-up** after the core plan (Density/Interpolate/Gradient/Divergence/
+Curl/Laplacian-Brookshaw) was done and verified -- the plan's own Step 8 had left it as optional/
+stretch scope, but the math was already fully derived and validated (Tier 2.3, done 2026-08-18), so
+completing it was porting, not deriving.
+
+Verification (final, after Naive): `pytest tests/` 254 passed/1 skipped (was 136/1 before this
+work); `operation_matrix.py --device cpu --ci --verbose` unchanged (OK=258, HIGH=0, ERR=0, NAN=0);
 `pytest tests/operations/test_gradcheck_scripts.py` (all 17 reverse-mode AD scripts) all PASS.
 
 Files touched: `src/warpSPHCore/operations.py` (`warpOperationJVP`'s dispatch table),
-`src/warpSPHCore/kernels/kernelJVP.py` (new `sphKernelGradientJVP`), new
+`src/warpSPHCore/kernels/kernelJVP.py` (new `sphKernelGradientJVP`, `sphKernelLaplacianJVP`), new
 `src/warpSPHCore/coreOperations/{_jvpCommon,wp_interpolateJVP,wp_kernelGradientJVP,wp_gradientJVP,
 wp_divergenceJVP,wp_curlJVP,wp_laplacianJVP}.py`, new
-`tests/operations/test_forward_mode_tier2_{interpolate,gradient,divergence,curl,laplacian_brookshaw}.py`,
-new `scripts/diagnostic_tier2_jvp_reverse_mode.py`. All in `warpSPHCore`, none in `warpSPH`/
-`warpSPHIntegrators` -- unlike Phases 1-4, this work never left the operator-library layer.
+`tests/operations/test_forward_mode_tier2_{interpolate,gradient,divergence,curl,laplacian_brookshaw,
+laplacian_naive}.py`, new `scripts/diagnostic_tier2_jvp_reverse_mode.py`. All in `warpSPHCore`, none
+in `warpSPH`/`warpSPHIntegrators` -- unlike Phases 1-4, this work never left the operator-library
+layer.
 
-**Not done, by design:** Laplacian's Naive scheme (optional/stretch scope, explicitly rejected
-rather than attempted); HVP for the five newly-landed operators (out of scope by user's original
-choice, same open item as Phase 4's own Lookout 1); the reverse-mode-through-the-JVP-bridge gap
-Phase 4 step 1 already had (Density's pair-indexed `wp.launch` bypasses `launchOperator`'s
+**Not done, by design:** HVP for the six newly-landed operators (out of scope by user's original
+choice, same open item as Phase 4's own Lookout 1); Laplacian's Dot/Default schemes (never derived,
+see above); the reverse-mode-through-the-JVP-bridge gap Phase 4 step 1 already had (Density's
+pair-indexed `wp.launch` bypasses `launchOperator`'s
 autograd-tape wrapper) is now five operators wider, not newly introduced -- see
 `warpier_tier2_operators_plan.md`'s own Lookout 2 for the empirical confirmation and practical
 workarounds.

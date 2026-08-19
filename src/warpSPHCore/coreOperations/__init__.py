@@ -22,7 +22,11 @@ from .wp_interpolateJVP import computeSPHInterpolatePositionJVP
 from .wp_gradientJVP import computeSPHGradientPositionJVP
 from .wp_divergenceJVP import computeSPHDivergencePositionJVP
 from .wp_curlJVP import computeSPHCurlPositionJVP
-from .wp_laplacianJVP import computeSPHLaplacianBrookshawPositionJVP
+from .wp_laplacianJVP import (
+    computeSPHLaplacianPositionJVP,
+    computeSPHLaplacianBrookshawPositionJVP,
+    computeSPHLaplacianNaivePositionJVP,
+)
 
 __all__ = [
     "_computeSPHCovariance_stateBackend",
@@ -38,5 +42,7 @@ __all__ = [
     "computeSPHGradientPositionJVP",
     "computeSPHDivergencePositionJVP",
     "computeSPHCurlPositionJVP",
+    "computeSPHLaplacianPositionJVP",
     "computeSPHLaplacianBrookshawPositionJVP",
+    "computeSPHLaplacianNaivePositionJVP",
 ]

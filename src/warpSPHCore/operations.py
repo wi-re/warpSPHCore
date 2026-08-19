@@ -190,9 +190,11 @@ _TIER2_VALUE_DISPATCH = {
     WarpOperation.Gradient: computeSPHGradientPositionJVP,
     WarpOperation.Divergence: computeSPHDivergencePositionJVP,
     WarpOperation.Curl: computeSPHCurlPositionJVP,
-    # Brookshaw only -- Naive/Dot/Default are rejected before reaching this
-    # table by the laplacianMode scope-boundary check above.
-    WarpOperation.Laplacian: computeSPHLaplacianBrookshawPositionJVP,
+    # Brookshaw and Naive (warpier_tier2_operators_plan.md Steps 7/8) -- Dot/Default
+    # are rejected before reaching this table by the laplacianMode scope-boundary
+    # check above. computeSPHLaplacianPositionJVP dispatches between the two by
+    # laplacianMode itself.
+    WarpOperation.Laplacian: computeSPHLaplacianPositionJVP,
 }
 
 

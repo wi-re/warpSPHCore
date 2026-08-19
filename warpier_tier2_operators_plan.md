@@ -19,7 +19,8 @@ kernel, and the exact test-file conventions to mirror. This document is that syn
 and finalized against the source files before execution. Written to the repo (not just the local
 plan-mode scratch file) because this is expected to span multiple sessions.
 
-## Status: in progress (plan finalized 2026-08-19)
+## Status: all scope done, including the optional stretch item (plan finalized 2026-08-19,
+completed 2026-08-19 -- see the bottom "Status" section for the final summary)
 
 **Step 0 done (2026-08-19).** `_buildParticleSoA`/`_buildDomainState`/`_buildKernelState` extracted
 from `wp_densityJVP.py` into `coreOperations/_jvpCommon.py` (`buildParticleSoA`/`buildDomainState`/
@@ -165,31 +166,60 @@ scope). `test_forward_mode_tier2_density.py::test_otherOperators_tier2_still_rai
 `WarpOperation.Covariance` (the plan's own suggested target once all five value-having operators
 land -- Covariance has no Tier-2 formula and never will).
 
-## Status: all core scope done (2026-08-19)
+**Step 8 done (2026-08-19), the optional/stretch item, attempted after all.** After the core plan
+(Steps 0-7) landed, the user asked to keep going, so Laplacian's Naive scheme was picked up too --
+`warpier_adjoint.md` Tier 2.3 had already fully derived and validated the math
+(`scripts/spike_forward_mode_tier2_laplacian_naive.py`, done 2026-08-18), so this was porting, not
+deriving. New `sphKernelLaplacianJVP_ij`/`sphKernelLaplacianJVP` in `kernels/kernelJVP.py`, ported
+byte-for-byte from the spike's `_kernelLaplacianJVP`, built on `kernels/laplacian.py`'s already-
+production `sphKernelLaplacianGradient_`/`sphKernelLaplacianDkDh_`. **Mirrors `sphKernelLaplacian`'s
+own two-branch `SupportScheme` dispatch (SuperSymmetric explicit, everything else -- including
+KernelMeanSymmetric -- falling through to the max-fallback), not the three-branch KernelMeanSymmetric/
+SuperSymmetric-together dispatch every other Tier-2 kernel-derivative function in this plan uses** --
+`warpier_adjoint.md` Tier 2.3's own structural finding, re-confirmed by a dedicated test
+(`test_laplacianNaivePositionJVP_kernelMeanSymmetric_differs_from_superSymmetric`, asserts the two
+schemes' assembled JVPs genuinely *differ* here, unlike everywhere else in this plan).
 
-Density, Interpolate, Gradient, Divergence, Curl, and Laplacian(Brookshaw) are all wired into
-`warpOperationJVP`'s Tier-2 branch and covered by Jacobian-reference tests. Full verification:
+`wp_laplacianJVP.py` restructured: `computeSPHLaplacianBrookshawPositionJVP`/
+`computeSPHLaplacianNaivePositionJVP` are now scheme-specific (neither takes `laplacianMode`
+anymore), with a new `computeSPHLaplacianPositionJVP` dispatcher between them by `laplacianMode` --
+this is the one `operations.py`'s `_TIER2_VALUE_DISPATCH[WarpOperation.Laplacian]` actually
+registers. Naive's own per-pair `(L_ij, dL_ij)` kernel launcher lives locally in `wp_laplacianJVP.py`
+(not promoted to a shared module) since Naive is its only consumer, structurally identical to
+`_jvpCommon.launchPairKernelJVP` otherwise.
 
-- `pytest tests/`: **233 passed, 1 skipped** (was 136/1 baseline before this plan; +97 net new,
-  spread across the new test files plus a handful of pre-existing tests this plan's refactors
-  touched, e.g. the HVP self-pair test's import).
+New `tests/operations/test_forward_mode_tier2_laplacian_naive.py` (21 cases): `GradientScheme` x a
+`SupportScheme` subset in 1D/2D (matching the spike's own coverage), the KernelMeanSymmetric-vs-
+SuperSymmetric divergence check, and a missing-`queryValues` rejection.
+`test_forward_mode_tier2_laplacian_brookshaw.py`'s old "Naive still raises" case removed from its
+now-renamed `test_laplacianPositionJVP_rejects_unimplemented_modes` (Dot/Default only).
+
+## Status: all scope done, including the optional stretch item (2026-08-19)
+
+Density, Interpolate, Gradient, Divergence, Curl, and **both** Laplacian schemes (Brookshaw, Naive)
+are all wired into `warpOperationJVP`'s Tier-2 branch and covered by Jacobian-reference tests. Full
+verification:
+
+- `pytest tests/`: **254 passed, 1 skipped** (was 136/1 baseline before this plan).
 - `python scripts/operation_matrix.py --device cpu --ci --verbose`: **OK=258, HIGH=0, ERR=0, NAN=0**
   -- unchanged from every prior tier's baseline (no production kernel math was touched, only new
   files added and `wp_densityJVP.py`/`wp_densityHVP.py`'s imports refactored).
-  - `pytest tests/operations/test_gradcheck_scripts.py` (all 17 gradcheck/spike subprocess
-  scripts, covering every operator's reverse-mode AD path): **all PASS** -- reverse-mode
-  unaffected by this plan's forward-mode-only additions.
-- `scripts/spike_forward_mode_tier2_gradient.py` re-run standalone: still all-PASS (re-confirms the
-  math this plan ported was correct before porting; the two bugs found were both in this plan's own
-  new dispatch-wiring code, not inherited from the spike).
+- `pytest tests/operations/test_gradcheck_scripts.py` (all 17 gradcheck/spike subprocess scripts,
+  covering every operator's reverse-mode AD path): **all PASS** -- reverse-mode unaffected by this
+  plan's forward-mode-only additions.
+- `scripts/spike_forward_mode_tier2_gradient.py` and `scripts/spike_forward_mode_tier2_laplacian_naive.py`
+  both re-run standalone: still all-PASS (re-confirms the math this plan ported was correct before
+  porting; the two bugs found were both in this plan's own new dispatch-wiring code, not inherited
+  from either spike).
 
-**Not done, by design:** Step 8 (Laplacian's Naive scheme) -- optional/stretch scope per the plan's
-own text, correctly rejected with `NotImplementedError` rather than silently attempted. HVP for the
-five newly-landed operators -- out of scope by user's original choice (JVP only), see Lookout 1
-below, unchanged. The differentiability-through-reverse-mode gap (Lookout 2) is unchanged by this
-work -- it was already true of Density's existing pair-indexed-kernel pattern, and every new
-operator in this plan reuses that exact same bare-`wp.launch` pattern, so the gap is now five
-operators wider, not newly introduced.
+**Not done, by design:** HVP for the six newly-landed operators -- out of scope by user's original
+choice (JVP only), see Lookout 1 below, unchanged. Laplacian's Dot/Default schemes -- never derived
+by `warpier_adjoint.md` at all (Tier 2.2's own scope note: they need per-spatial-component block
+indexing `computeLaplacianDot2`/`computeDotLaplacian` don't share with Brookshaw/Naive, "a genuinely
+separate... JVP-assembly exercise"), correctly rejected. The differentiability-through-reverse-mode
+gap (Lookout 2) is unchanged by this work -- it was already true of Density's existing pair-indexed-
+kernel pattern, and every new operator in this plan reuses that exact same bare-`wp.launch` pattern,
+so the gap is now six operators wider, not newly introduced.
 
 `warpier_forward_mode_plan.md` updated with a new dated status entry recording this plan's
 completion, per this doc's own "Verification" section.
@@ -369,15 +399,15 @@ reopening Phase 4.
 - `src/warpSPHCore/operations.py` — `warpOperationJVP`'s signature + dispatch (step 1)
 - `src/warpSPHCore/coreOperations/wp_densityJVP.py` — existing pattern to mirror; refactored in step 0
 - `src/warpSPHCore/coreOperations/_jvpCommon.py` — new shared helpers (step 0), `_gradientWeights` (steps 4-7)
-- `src/warpSPHCore/kernels/kernelJVP.py` — new `sphKernelGradientJVP`/`_ij` (step 3), optional `sphKernelLaplacianJVP`/`_ij` (step 8)
-- `src/warpSPHCore/coreOperations/wp_interpolateJVP.py`, `wp_kernelGradientJVP.py`, `wp_gradientJVP.py`, `wp_divergenceJVP.py`, `wp_curlJVP.py`, `wp_laplacianJVP.py` — new, steps 2-7
-- `tests/operations/test_forward_mode_tier2_{interpolate,gradient,divergence,curl,laplacian_brookshaw}.py` — new
-- `warpier_forward_mode_plan.md` — new status entry once done
+- `src/warpSPHCore/kernels/kernelJVP.py` — `sphKernelGradientJVP`/`_ij` (step 3), `sphKernelLaplacianJVP`/`_ij` (step 8, done)
+- `src/warpSPHCore/coreOperations/wp_interpolateJVP.py`, `wp_kernelGradientJVP.py`, `wp_gradientJVP.py`, `wp_divergenceJVP.py`, `wp_curlJVP.py`, `wp_laplacianJVP.py` — new, steps 2-8
+- `tests/operations/test_forward_mode_tier2_{interpolate,gradient,divergence,curl,laplacian_brookshaw,laplacian_naive}.py` — new
+- `warpier_forward_mode_plan.md` — new status entry (done)
 - `scripts/diagnostic_tier2_jvp_reverse_mode.py` — new, step 0's differentiability diagnostic (done)
 
 ## Lookouts — explicitly deferred, don't lose track of these
 
-**1. HVP for the other five operators.** This plan is JVP-only by user choice (Density already has
+**1. HVP for the other six operators.** This plan is JVP-only by user choice (Density already has
 `warpOperationHVP`; nothing else will after this plan). Not widely needed today — the only current
 consumer is the implicit-shifting comparison, which only ever touches Density — but if a future
 Newton-style solve needs `Hess(Gradient/Divergence/Curl/Laplacian/Interpolate) @ v`, the pattern to
