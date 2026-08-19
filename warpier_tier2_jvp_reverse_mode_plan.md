@@ -23,6 +23,18 @@ inside an ordinary PyTorch backprop graph — e.g. a Newton-style implicit solve
 `warpOperationJVP` calls, where the *solve's own* gradient (w.r.t. whatever produced its inputs)
 needs to flow back through every JVP call inside it.
 
+**Sequencing note, added after `warpier_tier2_jvp_csr_backend_plan.md` was written (2026-08-19,
+also not started): read that plan before starting this one.** It ports the Tier-2 JVP kernels off
+the pair-indexed (COO) launch shape this plan is designing a bridge *for*, onto the same
+per-query-particle (CSR) shape every primal operator already uses — which already fits
+`extractStateInfo`'s existing convention almost exactly. If that port happens first, this plan's own
+"three bespoke pair-kernel `build_fn` closures" shrinks to "extend `extractStateInfo` with two more
+struct slots (tangent query/reference state)," reusing its existing adjacency/grid-traversal
+machinery entirely rather than duplicating it for a kernel shape about to be replaced. Building the
+bespoke pair-indexed bridge this plan describes below is still fully valid and unblocked if the CSR
+port hasn't happened yet or won't happen soon — just worth checking which order is intended before
+investing in either.
+
 **Scope: JVP only, not HVP.** `wp_densityHVP.py` has the identical bare-`wp.launch` gap and its own
 docstring documents *why* composing it generically failed (`torch.func.jvp` errors outright,
 `forward_ad.make_dual` silently drops the tangent) — but HVP is a second-order object (a JVP of a

@@ -481,6 +481,18 @@ the full derivative. Has its own dedicated plan, `warpier_tier2_combined_jvp_pla
 ground truth, all six operators) that combining is exact summation of the already-existing Tier-1 and
 Tier-2 paths, not new derivation work.
 
+**4. COO (pair-indexed) vs. CSR (per-query-particle) backend.** Every Tier-2 JVP kernel launches one
+warp thread per adjacency *pair* and reduces to per-query-particle results via `torch.index_add_` in
+Python -- unlike every primal operator, which threads per query particle and accumulates in-kernel
+with no atomics and no `O(numPairs)` intermediate memory. Flagged by the user (same review pass as
+Lookout 3) as a real memory/atomics cost worth fixing, but explicitly a *later*, purely-backend
+"porting" step -- correctness first, this after. Has its own dedicated plan,
+`warpier_tier2_jvp_csr_backend_plan.md` (written 2026-08-19, not started), which also flags a
+sequencing interaction with Lookout 2's reverse-mode-bridge plan worth reading before starting either:
+doing the CSR port first would shrink the reverse-mode plan's own bespoke `build_fn` work
+considerably, since CSR kernels would already fit `extractStateInfo`'s existing per-query-particle
+convention.
+
 ## Source research (for whoever picks this up)
 
 This plan was synthesized from three parallel Explore-agent research passes (spike-script
