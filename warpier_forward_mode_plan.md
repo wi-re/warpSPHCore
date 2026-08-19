@@ -9,10 +9,10 @@ validated; this plan is about actually running it, using testbeds in the sibling
 
 ## Status (as of 2026-08-19)
 
-**Phases 1-3 done. Phase 4 in progress** (steps 1-3 done, Density-operator scope only -- see its
-own section below for the full breakdown; steps 4-6 not started). Most of the work landed in the
-sibling `warpSPH` repo (new test files there, not this one), which is easy to lose track of from
-this document alone -- recorded here explicitly for that reason.
+**Phases 1-3 done. Phase 4 in progress** (steps 1-4 done, Density-operator scope only -- see its
+own section below for the full breakdown; steps 5-6 mostly pre-empted/next, see that section).
+Most of the work landed in the sibling `warpSPH` repo (new test files there, not this one), which
+is easy to lose track of from this document alone -- recorded here explicitly for that reason.
 
 * **Phase 1 -- done.** `warpSPH/tests/test_forwardModeWave.py` (new), commit `ab28fc9` in
   `warpSPH`. Seeds `du0`/`dv0` via `torch.func.jvp` on the plain-torch Wendland bump formula,
@@ -138,6 +138,50 @@ re-running, same failure) turned out to be flaky. Two separate issues, only the 
      radius, loosening tolerances, more outer/fewer inner iterations) all involve real design
      choices about `computeImplicitShift` this plan didn't set out to make; flagged for whoever
      picks this up next, same as (2).
+
+4. **Root cause found and *fixed* for production, in `warpSPH` (2026-08-19), independently of
+   (2)/(3) above -- see `warpSPH/docs/regression/implicit_shifting_operator_choice.md` for the
+   full derivation and evidence trail.** (2) and (3) explain why a *given* Newton step's inner
+   BiCGStab solve often fails to converge (frozen-adjacency ill-posedness, an unchecked solver
+   status); this finding is one level up, about the linear *operator* itself: `exactHessian` (the
+   mathematically true Newton Hessian this plan's Phase 4 targets and validates against) has a
+   **configuration-dependent, structurally unbounded diagonal** -- `sum_{j != i} omega_j H_ij`
+   accumulates one large kernel-curvature term per nearby neighbor, unbounded on a crowded/
+   near-coincident configuration (exactly what "fully random initial positions" produces) and
+   near-singular on a sparse one. That is an *inherent* property of the exact Hessian on this
+   objective, confirmed by directly sweeping relaxation factors 0.1-1.0 with step-clamping active
+   and finding `exactHessian` still stalls/oscillates from random starts regardless -- not a bug
+   any of (2)'s GPU-nondeterminism framing or (3)'s solver-status/frozen-adjacency framing would
+   fix, since both were diagnosing *symptoms* of using an inherently ill-conditioned-far-from-
+   equilibrium operator, not the operator choice itself. **The fix**: `legacyPairwise` -- the
+   *other* matrix this codebase already carried (a byte-for-byte port of diffSPH's original
+   `getShiftingMatrices`, and, per the regression doc's source-paper comparison, what the IIPS
+   paper this module implements actually derives and solves, not `exactHessian` -- the paper's own
+   Eq. (17)-(18)/(30)-(37) collapse a diagonal case that needs the opposite sign convention into
+   the same rule used off-diagonal, landing on `legacyPairwise`'s layout, not `exactHessian`'s) --
+   has a **fixed, configuration-independent diagonal** (`omega * H(0,h)`, the kernel's own
+   curvature at zero separation) and degrades gracefully instead of blowing up. Now the production
+   default (`configurations/moduleConfigurations/shifting.py`); `test_implicitShifting.py`'s
+   `test_implicitShiftingConvergesFromFullyRandomPositions` pins it directly against a stress case
+   `exactHessian` cannot pass.
+
+   **What this changes for Phase 4, and what it doesn't.** Phase 4's `warpOperationJVP`/
+   `warpOperationHVP` compute `Hess(C)` -- the actual mathematical Newton Hessian -- by design, so
+   they are validated against `exactHessian` specifically (`test_implicitShiftingComparison.py`,
+   `test_implicitShiftingHessianJVP.py`); there is no autodiff counterpart to cross-check against
+   for `legacyPairwise`, since it isn't an actual Hessian of anything (see the regression doc's
+   "Practical notes for picking a mode"). So the automatic path *correctly* inherits
+   `exactHessian`'s far-from-equilibrium conditioning behavior -- that is expected agreement with
+   the mathematical object it targets, not a defect in the JVP composition, and step 4's marginal-
+   stability finding above should be read in that light rather than as an open robustness gap in
+   the automatic path itself. What *does* change: this plan's step 6 comparison (`computeDeltaShift`
+   vs. the hand-built implicit shift vs. the automatic one) should compare the automatic path
+   against `computeImplicitShift` running in `exactHessian` mode specifically (not against
+   production's new `legacyPairwise` default, which the automatic path has no equivalent for and
+   was never meant to reproduce) -- an apples-to-apples comparison of two ways to compute the same
+   operator, with `legacyPairwise` noted as the separate, orthogonal, already-resolved production
+   answer to "how do I make implicit shifting robust from a random start," outside what a
+   general-purpose `warpOperationJVP`/`HVP` bridge is trying to solve.
 
 ## Context and motivation
 
@@ -405,10 +449,17 @@ commit `fe238d5`.
   tracking within ~6e-5 of each other at every step. **Not glossed over**: pushing past 8
   iterations on this same seed/case, the two histories start diverging by iteration ~12 (automatic
   jumps back up while hand-built keeps relaxing smoothly) -- consistent with, and further evidence
-  for, this plan's own already-documented finding (Status section above, and
-  `implicitShifting.py`'s own docstring) that `implicitRelaxation=0.1`'s undamped-per-step Newton
-  iteration is only marginally stable regardless of which matvec drives it; not chased further
-  here since fixing that robustness gap is explicitly out of this plan's scope, but it's the first
+  for, this plan's own already-documented finding (Status section above, items 2/3) that
+  `implicitRelaxation=0.1`'s undamped-per-step Newton iteration is only marginally stable
+  regardless of which matvec drives it, on the `jitter=0.1` case these tests use. **Status item 4
+  (2026-08-19, found after this bullet was first written) sharpens why**: both matvecs here are
+  computing `exactHessian`, and `exactHessian` has a structurally unbounded/near-singular diagonal
+  far from equilibrium -- an inherent property of the exact Newton Hessian on this objective, not a
+  robustness gap specific to either implementation. `legacyPairwise` (now the production default,
+  bounded diagonal, no autodiff counterpart to compare against) is the actual fix for production
+  robustness; it's simply not what this step is comparing, since the point here is two ways to
+  compute the *same* (`exactHessian`) operator, not to make the shifter converge from a random
+  start. Not chased further as a fix here (out of this plan's scope either way), but it's the first
   concrete data point for step 5's "does the automatic path reproduce the same pitfalls" question,
   worth carrying into step 5/6's own writeup rather than re-discovering there.
 * **Steps 5-6 -- not started.** Step 5 (deliberately probe the self-pair/block-symmetry pitfalls)
@@ -418,11 +469,16 @@ commit `fe238d5`.
   discovery -- step 5 is now mostly a writeup of that, plus step 4's marginal-stability finding, not
   new experimentation. Step 6 (three-way comparison against `computeDeltaShift` too, plus the
   effort/robustness writeup) is next.
-* **A finding while validating step 2, worth carrying into step 6's comparison**: the jittered-
-  lattice implicit-shifting baseline (`warpSPH/tests/test_implicitShifting.py`) this phase's
-  step 4/6 will run against has its own pre-existing GPU-only marginal-stability issue (see this
-  plan's "Status" section above, item 2 under the `test_implicitShifting.py` finding) --
-  unfixed, flagged for whoever runs step 6's comparison.
+* **A finding while validating step 2, resolved for production by Status item 4, still relevant to
+  step 6's comparison design.** The jittered-lattice implicit-shifting baseline
+  (`warpSPH/tests/test_implicitShifting.py`) this phase's step 4/6 runs against had a marginal-
+  stability issue (Status items 2/3) since narrowed and, for *production* shifting, fixed: the
+  default operator is now `legacyPairwise` (Status item 4), which does not exhibit it.
+  `exactHessian` still does, inherently -- so step 6's comparison should run
+  `computeImplicitShift`/`computeImplicitShiftAutomatic` in `exactHessian` mode specifically (an
+  explicit opt-in, per `implicitShifting.py`/`configurations/moduleConfigurations/shifting.py`),
+  not against whatever `wrapper.solveShifting` now defaults to, since `legacyPairwise` is what
+  production robustness actually needs and has no automatic-JVP counterpart to compare against.
 
 Goal: wire Tier 2 into `warpOperationJVP`, then build an implicit shifting solve whose `grad C`/
 `Hess C` come from *composed JVPs* instead of `wp_implicitShifting.py`'s hand-rolled per-pair
