@@ -243,7 +243,7 @@ trial field.
 Files touched: new `warpSPH/tests/test_implicitWaveEquation.py` (or a script promoted to a test
 once stable).
 
-## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting [IN PROGRESS: steps 1 (Density only)/2/3 done 2026-08-18/19]
+## Phase 4 -- Goal 2: automatic vs. hand-built implicit particle shifting [IN PROGRESS: steps 1 (Density only)/2/3/4 done 2026-08-18/19]
 
 **Progress.** Before starting, found and corrected a stale-documentation blocker: `warpier_core.md`
 had claimed the `Field` abstraction was "not started", which would have made a generic Tier-2 API
@@ -315,9 +315,33 @@ commit `fe238d5`.
   less than the hand-built version does, a first data point for step 5's own question, not yet
   step 5 itself (this was needed just to get step 3's own numbers to agree, not a deliberate test
   of the pitfall).
-* **Steps 4-6 -- not started.** Step 4 (swap the shifting matvec, keep the solver) is next; step 5
-  (deliberately probe the self-pair/block-symmetry pitfalls, building on step 3's finding above)
-  and step 6 (three-way comparison) depend on it.
+* **Step 4 -- done.** `warpSPH/modules/shifting/implicitShiftingAutomatic.py`'s new
+  `computeImplicitShiftAutomatic` is a drop-in replacement for `computeImplicitShift` (same
+  signature, same `bicgstabSolve` call, same boundary/relaxation/initializer handling) with `grad
+  C`/`Hess C . v` sourced entirely from `warpOperationJVP`/`warpOperationHVP` (one call per
+  coordinate direction for the RHS and the Jacobi-preconditioner diagonal, one general call per
+  matvec) instead of `wp_implicitShifting.py`'s hand-rolled per-pair kernel +
+  `torch.einsum`/`scatter_sum` assembly -- no `sphKernelGradient`/`sphKernelHessian` call and no
+  hand-derived block-symmetry sign anywhere in the new file. Validated two ways
+  (`warpSPH/tests/test_implicitShiftingComparison.py`, new): a single Newton step from the same
+  starting state agrees with the hand-built solve to `rtol=1e-3` (both solves are handed an
+  equivalent linear system, so this mostly exercises `bicgstabSolve` itself, not new math); 8
+  outer relaxation iterations (rebuilding the adjacency each step, mirroring
+  `wrapper.solveShifting`'s own loop) drive both to matching density-uniformity equilibria,
+  tracking within ~6e-5 of each other at every step. **Not glossed over**: pushing past 8
+  iterations on this same seed/case, the two histories start diverging by iteration ~12 (automatic
+  jumps back up while hand-built keeps relaxing smoothly) -- consistent with, and further evidence
+  for, this plan's own already-documented finding (Status section above, and
+  `implicitShifting.py`'s own docstring) that `implicitRelaxation=0.1`'s undamped-per-step Newton
+  iteration is only marginally stable regardless of which matvec drives it; not chased further
+  here since fixing that robustness gap is explicitly out of this plan's scope, but it's the first
+  concrete data point for step 5's "does the automatic path reproduce the same pitfalls" question,
+  worth carrying into step 5/6's own writeup rather than re-discovering there.
+* **Steps 5-6 -- not started.** Step 5 (deliberately probe the self-pair/block-symmetry pitfalls --
+  step 3 already found the self-pair drop was still needed by hand, and step 4 found a matching
+  marginal-stability sensitivity; formalize both plus the block-symmetry check) and step 6
+  (three-way comparison against `computeDeltaShift` too, plus the effort/robustness writeup) are
+  next.
 * **A finding while validating step 2, worth carrying into step 6's comparison**: the jittered-
   lattice implicit-shifting baseline (`warpSPH/tests/test_implicitShifting.py`) this phase's
   step 4/6 will run against has its own pre-existing GPU-only marginal-stability issue (see this
