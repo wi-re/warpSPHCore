@@ -219,7 +219,8 @@ indexing `computeLaplacianDot2`/`computeDotLaplacian` don't share with Brookshaw
 separate... JVP-assembly exercise"), correctly rejected. The differentiability-through-reverse-mode
 gap (Lookout 2) is unchanged by this work -- it was already true of Density's existing pair-indexed-
 kernel pattern, and every new operator in this plan reuses that exact same bare-`wp.launch` pattern,
-so the gap is now six operators wider, not newly introduced.
+so the gap is now six operators wider, not newly introduced. **Now has its own dedicated plan,
+`warpier_tier2_jvp_reverse_mode_plan.md` (written 2026-08-19, not started) -- see Lookout 2 below.**
 
 `warpier_forward_mode_plan.md` updated with a new dated status entry recording this plan's
 completion, per this doc's own "Verification" section.
@@ -455,6 +456,15 @@ need `torch.func` functional transforms (`torch.func.grad`/`vjp` composed around
 solve as a black box, not autograd through its internals) or a hand-written custom
 `torch.autograd.Function` around the solve — flag both as the practical workarounds if the
 diagnostic confirms the gap.
+
+**Update (2026-08-19): this gap now has its own dedicated implementation plan,
+`warpier_tier2_jvp_reverse_mode_plan.md`.** The diagnostic above confirmed the gap empirically
+(see this doc's Status section); the follow-up plan researched the existing autograd bridge
+(`autograd/stateAwareWarpFunction.py`/`arg_extract.py`) in depth and found the fix is narrower than
+this lookout originally feared — `StateAwareWarpFunction` itself is already fully generic (not tied
+to `OperatorSpec`'s per-query-particle-threaded ABI), so the actual work is three new small
+extraction/`build_fn` closures (one per shared pair-kernel ABI: `(W,dW)`, `(G,dG)`, `(L,dL)`) reusing
+the existing bridge unmodified, not a from-scratch wrapper. Not started as of this writing.
 
 ## Source research (for whoever picks this up)
 

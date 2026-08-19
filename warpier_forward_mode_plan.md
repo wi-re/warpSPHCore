@@ -644,10 +644,13 @@ layer.
 **Not done, by design:** HVP for the six newly-landed operators (out of scope by user's original
 choice, same open item as Phase 4's own Lookout 1); Laplacian's Dot/Default schemes (never derived,
 see above); the reverse-mode-through-the-JVP-bridge gap Phase 4 step 1 already had (Density's
-pair-indexed `wp.launch` bypasses `launchOperator`'s
-autograd-tape wrapper) is now five operators wider, not newly introduced -- see
-`warpier_tier2_operators_plan.md`'s own Lookout 2 for the empirical confirmation and practical
-workarounds.
+pair-indexed `wp.launch` bypasses `launchOperator`'s autograd-tape wrapper) is now six operators
+wider, not newly introduced -- see `warpier_tier2_operators_plan.md`'s own Lookout 2 for the
+empirical confirmation. **This gap now has its own dedicated implementation plan,
+`warpier_tier2_jvp_reverse_mode_plan.md` (written 2026-08-19, not started)** -- the user asked to
+close it, and research found the existing autograd bridge (`StateAwareWarpFunction`) is already
+generic enough to reuse unmodified; only three new pair-kernel-specific extraction closures are
+needed, one per shared pair-kernel ABI.
 
 ## Phase 5 -- Goal 3: the incompressible wrapper already exists
 
