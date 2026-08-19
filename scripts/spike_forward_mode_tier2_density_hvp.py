@@ -52,7 +52,7 @@ import torch
 import warp as wp
 
 from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, line_case, grid_case_2d, make_domain
-from warpSPHCore import OperationProperties, ParticleState, warpOperationHVP
+from warpSPHCore import DomainDescription, OperationProperties, ParticleState, radiusSearchCompactHashMap, warpOperation, warpOperationHVP
 from warpSPHCore.coreOperations import computeSPHDensityPositionJVP
 from warpSPHCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
 
@@ -89,6 +89,54 @@ def fd_hvp_reference(pos0, sup0, mass0, domain, adjacency, kinds, mode, v, dim, 
         gm = g(pos0 - eps * v)
         reference[:, a] = (gp - gm) / (2 * eps)
     return reference
+
+
+def reverse_mode_self_hessian_check(h=1.0, x0=0.3):
+    """A single particle's own self-density contribution, differentiated by
+    `warpOperation`'s production reverse-mode path (gradcheck-validated,
+    routes `d(vectorNorm_warp)/dx` through `math/wp_normalize.py`'s manually
+    -written eps-guarded adjoints, not a naive automatic one -- exactly the
+    kind of `x/|x|` expression that would otherwise divide by zero at `r=0`).
+    Cross-checks the chain-rule identity `computeSPHDensityPositionHVP`'s
+    docstring derives (the self term's true contribution to `d^2 C_i/dx_i^2`
+    is exactly zero, not `sphKernelHessian`'s `-15`-ish value at `r=0`) via a
+    completely independent numerical route: two single reverse-mode backward
+    passes at nearby points, finite-differenced -- never a genuine
+    double-backward through the same graph, so immune to the NaN hazard a
+    naive from-scratch double-backward attempt would hit differentiating a
+    normalized direction a second time without the matching manual adjoint.
+    """
+    domain = DomainDescription(min=torch.tensor([-10.0], dtype=DTYPE, device=DEVICE),
+                               max=torch.tensor([10.0], dtype=DTYPE, device=DEVICE),
+                               periodic=torch.tensor([False], device=DEVICE), dim=1)
+    props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Density,
+                                supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll)
+
+    def self_density(x):
+        positions = x.view(1, 1)
+        supports = torch.tensor([h], dtype=DTYPE, device=DEVICE)
+        masses = torch.tensor([1.0], dtype=DTYPE, device=DEVICE)
+        kinds = torch.zeros(1, dtype=torch.int32, device=DEVICE)
+        p = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
+        adjacency = radiusSearchCompactHashMap(p, domain, mode=SupportScheme.Gather)
+        return warpOperation(p, props, domain, adjacency=adjacency)[0]
+
+    def rev_grad(xval):
+        xg = xval.clone().requires_grad_(True)
+        val = self_density(xg)
+        g, = torch.autograd.grad(val, xg)
+        return g
+
+    x0 = torch.tensor(x0, dtype=DTYPE, device=DEVICE)
+    grad0 = rev_grad(x0)
+    eps = 1e-5
+    fdHessian = (rev_grad(x0 + eps) - rev_grad(x0 - eps)) / (2 * eps)
+
+    gradOk = float(grad0.abs()) <= 1e-10
+    hessOk = float(fdHessian.abs()) <= 1e-4  # FD truncation, not round-off
+    print(f"  [{'PASS' if gradOk else 'FAIL'}] {'reverse-mode self-gradient == 0':55s} value={float(grad0):.3e}")
+    print(f"  [{'PASS' if hessOk else 'FAIL'}] {'FD-of-reverse-mode self-Hessian == 0 (not -15ish)':55s} value={float(fdHessian):.3e}")
+    return gradOk and hessOk
 
 
 def run_case(n, dim, mode: SupportScheme, seed=0):
@@ -139,6 +187,9 @@ def main():
     for mode in (SupportScheme.Gather, SupportScheme.MeanSymmetric):
         assembled, reference = run_case(3, 2, mode)
         ok &= check(f"Hess(Density) @ v ({mode.name})", assembled, reference)
+
+    print("\nReverse-mode cross-check of the self-pair-drop identity:")
+    ok &= reverse_mode_self_hessian_check()
 
     print()
     if ok:

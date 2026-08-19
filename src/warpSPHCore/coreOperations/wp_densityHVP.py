@@ -58,6 +58,31 @@ is required to match that hand-built reference's own (correct) `diagBlock`
 -- keeping the self term there produces a different, wrong answer. Both
 checks live in `tests/operations/test_forward_mode_tier2_density_hvp_self_pair.py`.
 
+**A third, independent confirmation, from the reverse-mode side.** A single
+particle's own self-density contribution, differentiated by `warpOperation`'s
+*production*, gradcheck-validated reverse-mode path (which routes the needed
+`d(vectorNorm_warp)/dx` through `math/wp_normalize.py`'s manually-written,
+eps-guarded `@wp.func_grad` adjoints, not a naive automatic one -- the
+gradient of a normalized direction is exactly the kind of `x/|x|` expression
+that would otherwise divide by zero at `r=0`), gives an exact `0.0` reverse
+gradient at any position (matching the notebook's own "Kernel Gradients:
+... -0." finding), and finite-differencing *that* gradient across a small
+step gives exactly `0.0` for the self-Hessian too -- not `sphKernelHessian`'s
+`-15.0`. This matches the chain-rule identity above (`0.0`, not `-15.0`, is
+the true total second derivative) via a completely independent numerical
+route: single reverse-mode backward passes at two nearby points, finite
+differenced, never a genuine double-backward through the same graph.
+**This also sharpens why composing an HVP via double-backward would be
+dangerous, not just unavailable** (see below): `vectorNorm_warp`'s adjoint
+itself calls `vectorNormalize_warp` (the guarded `x/|x|`), which has its
+*own* manual adjoint built from `norm_hess_warp` specifically so that
+differentiating a normalized direction a second time stays finite at `r=0`
+instead of hitting the same `0/0` a naive automatic second derivative would.
+Nothing in this module relies on that machinery -- `sphKernelHessian` is a
+closed-form analytic formula, not a differentiated adjoint -- but it is the
+concrete mechanism a from-scratch double-backward attempt would have to get
+right, and silently corrupting it into NaN is an easy way to fail quietly.
+
 Restricted to the position-only case (support/mass tangents frozen, i.e.
 `dh=0` on both differentiation orders) to match `sphKernelHessian`'s own
 scope, so this is directly comparable term-for-term to
