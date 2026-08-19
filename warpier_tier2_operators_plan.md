@@ -351,7 +351,12 @@ focused on the math (mirroring `wp_densityJVP.py`, which has no internal validat
 - `queryVolumes`/`referenceVolumes` provided → raise (the derived formulas always use
   `mass_j/density_j` directly, never a volume override).
 - `tangentQueryValues`/`tangentReferenceValues` provided alongside Tier-2 tangents → raise
-  (`fi`/`fj` must be frozen; combined Tier-1+Tier-2 was never derived).
+  (`fi`/`fj` must be frozen; combined Tier-1+Tier-2 was never derived). **Update (2026-08-19): this
+  restriction now has its own dedicated plan to lift it, `warpier_tier2_combined_jvp_plan.md` — the
+  user flagged that a real caller wants one function that returns the *full* JVP rather than having
+  to know about this Tier-1/Tier-2 split at all, and empirical checks during that plan's drafting
+  confirmed the combination is exact summation of the two already-existing paths (no new derivation
+  needed) for all six operators. Not started as of this writing.**
 - `tangentQueryMasses` provided → raise (no formula has an `m_i` term — matches Density's existing
   check).
 - Divergence: `divergenceDotMode=True` or `consistentDivergence=True` → raise (neither is in the
@@ -465,6 +470,16 @@ this lookout originally feared — `StateAwareWarpFunction` itself is already fu
 to `OperatorSpec`'s per-query-particle-threaded ABI), so the actual work is three new small
 extraction/`build_fn` closures (one per shared pair-kernel ABI: `(W,dW)`, `(G,dG)`, `(L,dL)`) reusing
 the existing bridge unmodified, not a from-scratch wrapper. Not started as of this writing.
+
+**3. Combined Tier-1 + Tier-2 JVP (`fi`/`fj` no longer frozen).** Flagged by the user after this plan
+shipped, from reading `wp_interpolateJVP.py`: forcing a caller to choose value-tangents *or*
+geometry-tangents, never both, doesn't match how a real caller thinks about "the JVP" of an operator
+-- and it isn't documented that `computeSPH<Op>PositionJVP` returns only the geometry-tangent
+*partial* contribution (values held at their primal, non-tangent value), which is easy to mistake for
+the full derivative. Has its own dedicated plan, `warpier_tier2_combined_jvp_plan.md` (written
+2026-08-19, not started) — empirically confirmed there (against `torch.autograd.functional.jacobian`
+ground truth, all six operators) that combining is exact summation of the already-existing Tier-1 and
+Tier-2 paths, not new derivation work.
 
 ## Source research (for whoever picks this up)
 
