@@ -91,6 +91,54 @@ re-running, same failure) turned out to be flaky. Two separate issues, only the 
    for it (at minimum, prefer CPU or a lower relaxation factor for that comparison's own
    stability, independent of whatever the automatic-JVP path needs).
 
+3. **Found, not fixed, root cause narrowed considerably during Phase 4 step 3/4 review (2026-08-19)
+   -- (2)'s "CUDA nondeterminism" framing was likely a secondary trigger, not the root cause.**
+   Two compounding issues, both confirmed directly rather than inferred:
+
+   - **`computeImplicitShift` (and `computeImplicitShiftAutomatic`, which faithfully copied the
+     pattern) never checks `bicgstabSolve`'s returned status.** `xk, solverIters, convergence =
+     bicgstabSolve(...)` is called and `solverIters` is discarded -- a `-10`/`-11`/`-12`
+     breakdown/divergence-threshold bailout (see `bicgstab.py`) still hands back whatever partial
+     `xk` the solver had at that point, used exactly as if it were converged. (Smaller,
+     compounding bug found alongside: `bicgstabSolve`'s own `tol` parameter is dead code -- only
+     `rtol * |b|` ever sets the convergence floor.)
+   - **The inner BiCGStab solve for a single Newton step frequently does not converge in the first
+     place, and this is an ill-posedness effect, not noise -- confirmed with the exact experiment
+     suggested during review: fix everything else and sweep only the initial jitter amount.**
+     `computeImplicitShift`'s Newton step linearizes `grad C = 0` at a *frozen* adjacency (the
+     neighbor list is not rebuilt mid-solve, by design -- see `warpSPHIntegrators` context below).
+     Finding the equilibrium particle distribution is a genuinely global problem: as a particle's
+     position changes during the solve, its true connectivity changes too, but the frozen-adjacency
+     linear model can't see that -- so the further the current state is from the relaxed
+     equilibrium, the worse a local model the frozen matvec/RHS is, and the harder BiCGStab's job
+     becomes. Swept jitter from `0.0` to `0.2` (particle-spacing units) on the same nx=16 2D
+     jittered-lattice case Phase 4 steps 3/4 use, everything else held fixed (`SuperSymmetric`
+     adjacency, `Gather` kernel evaluation, the production `D_excl`-diagonal Jacobi preconditioner,
+     default tolerances): at `jitter=0.0` (ideal Cartesian grid) the solve is trivial (`|b| ~ 1e-6`,
+     immediate `rho`-breakdown exit -- correctly, nothing to solve); at `jitter=0.005` it runs the
+     full 64 iterations and lands at `rel_resid ~ 2e-3`, reasonably close; from `jitter=0.01`
+     upward it hits the `xk`-exceeds-threshold bailout (`-12`) essentially immediately every time,
+     with the *raw* (unconverged) residual growing monotonically with jitter (`rel_resid` from
+     0.075 at `jitter=0.01` to 0.39 at `jitter=0.15` to 2.9 at `jitter=0.2`). Every test in this
+     plan that exercises `computeImplicitShift`/`computeImplicitShiftAutomatic` (Phase 4 steps 3/4,
+     and the pre-existing `test_shiftingConvergesToUniformDensity`) uses `jitter=0.1` -- squarely in
+     the "essentially never converges within a single step" regime. What actually makes those tests
+     pass regardless is `implicitRelaxation=0.1`'s heavy per-step damping averaging out many
+     individual bad/non-converged steps over an *outer* relaxation loop, closer to a heavily damped
+     descent than a true Newton method -- which is also exactly why (2)'s instability is
+     "marginal" rather than constant: it's one damped, noisy trajectory among many, and whether a
+     given run's noise happens to still net a density-std decrease is not fully deterministic
+     regardless of GPU/CPU. **Consequence for this plan's own comparisons**: Phase 4 steps 3/4's
+     agreement between the automatic-JVP and hand-built paths is still meaningful evidence they
+     compute the *same operator* (both are compared under identically-imperfect solver conditions,
+     including this one), but neither should be read as "the implicit shift Newton solve converges
+     properly" -- it doesn't, on the jitter level these tests (and the pre-existing test suite) use.
+     Not fixed here: candidate directions (checking `solverIters` and falling back on failure,
+     rebuilding the adjacency mid-solve or capping the trust region to the frozen-adjacency's valid
+     radius, loosening tolerances, more outer/fewer inner iterations) all involve real design
+     choices about `computeImplicitShift` this plan didn't set out to make; flagged for whoever
+     picks this up next, same as (2).
+
 ## Context and motivation
 
 `warpSPHCore`'s adjoint work has two layers:
