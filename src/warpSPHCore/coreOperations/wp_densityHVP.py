@@ -2,10 +2,61 @@
 (`warpier_forward_mode_plan.md` Phase 4 Step 3, "`Hess C . v` is a JVP of
 that JVP"): differentiate `computeSPHDensityPositionJVP`'s own position
 tangent once more, in the same direction. Concretely this reduces to
-`HVP_i = sum_j m_j * H_ij @ (v_i - v_j)`, `H_ij` the pairwise kernel Hessian
-`kernels.hessian.sphKernelHessian` already computes -- **no new kernel math**,
-the same callback Tier 2.1's own derivation made for the first-order JVP
-(`warpier_adjoint.md` Tier 2.1 "Building blocks needed").
+`HVP_i = sum_{j != i} m_j * H_ij @ (tangentQuery_i - tangentReference_j)`,
+`H_ij` the pairwise kernel Hessian `kernels.hessian.sphKernelHessian` already
+computes -- **no new kernel math**, the same callback Tier 2.1's own
+derivation made for the first-order JVP (`warpier_adjoint.md` Tier 2.1
+"Building blocks needed").
+
+**Self-pairs (`j == i`) are always excluded, and this is an exact identity,
+not a numerical-safety fallback -- correcting a claim that turned out to be
+wrong (see below).** `C_i = sum_j m_j * W(x_i - x_j, h_ij)` depends on `x_i`
+through *two* channels once `j = i`: the term's own `x_i` argument, and the
+fact that its `x_j` argument is *also* `x_i` for that one term. Writing
+`f(x) = W(x - x, h) = W(0, h)` for the self term as a function of the single
+shared position variable makes this explicit: `f` is a constant (an SPH
+particle's distance to itself is exactly zero everywhere in configuration
+space, not just at the evaluation point), so `f'(x) = f''(x) = 0`
+*identically*, for any kernel. Expanding via the chain rule on
+`g(a, b) = W(a - b, h)` (treating the two occurrences of `x_i` as temporarily
+independent, `a` and `b`, then setting `a = b = x_i`) makes *why* explicit:
+translation invariance forces `d g/db = -dg/da` and `d^2g/(da db) = -d^2g/da^2
+= -d^2g/db^2`, so `f''(x) = g_aa + 2 g_ab + g_bb = H(0,h) - 2 H(0,h) + H(0,h)
+= 0` -- an exact cancellation for *any* finite `H(0,h)`, independent of its
+value. Dropping the self term when assembling `d^2 C_i / dx_i^2` is therefore
+exactly correct, not an approximation -- it is not there in the first place,
+because the self term never truly varies with the single shared variable
+`x_i`, only with the two independent arguments `sphKernelHessian(x_i, x_j,
+...)` is evaluated against before they happen to coincide. (The same
+identity is *also* why `d(grad_i C)/dx_k = -m_k H_ik` for `k != i` carries a
+minus sign relative to the diagonal block, per
+`wp_implicitShifting.py`'s docstring -- both are the same translation-
+invariance fact, not two unrelated pitfalls.)
+
+**This module's own earlier docstring, and `wp_implicitShifting.py`'s
+(warpSPH), both previously claimed instead that `sphKernelHessian`'s value at
+`r=0` is itself "numerically unstable" or "an arbitrary value" there, and
+that *that* instability was why self-pairs get dropped. That claim is false**
+-- `sphKernelHessian`'s near-origin regularization branch returns a
+well-defined, finite, physically meaningful value at `r=0` (the kernel's own
+curvature at its peak; confirmed directly, `wp_kernels.ipynb` in this repo's
+root evaluates it at the exact midpoint of a 1023-particle line and finds a
+smooth, continuous `-15.0`, matching its `-14.88` neighbors either side to
+three digits -- not noise). The *value* was never the problem; the identity
+above is why it still has to be excluded from this particular sum regardless
+of how well-behaved it is. Verified two ways this doesn't leave a live gap:
+(1) for the physically meaningful case `tangentQueryPositions ==
+tangentReferencePositions` (the same particle moving in both roles, what
+Phase 4 step 4's shifting matvec actually calls this with), the self term's
+own `(tangentQuery_i - tangentReference_i) = 0` factor makes it contribute
+exactly zero to the *pairwise-product* sum too, so keeping vs. dropping it
+is a bitwise no-op there (checked directly, not just argued); (2) for the
+deliberately asymmetric case Phase 4 step 4's `implicitShiftingAutomatic.py`
+uses to isolate `implicitShifting._buildSystem`'s own `diagBlock`
+(`tangentQueryPositions = e_d`, `tangentReferencePositions = 0`), dropping
+is required to match that hand-built reference's own (correct) `diagBlock`
+-- keeping the self term there produces a different, wrong answer. Both
+checks live in `tests/operations/test_forward_mode_tier2_density_hvp_self_pair.py`.
 
 Restricted to the position-only case (support/mass tangents frozen, i.e.
 `dh=0` on both differentiation orders) to match `sphKernelHessian`'s own
@@ -86,7 +137,7 @@ def computeSPHDensityPositionHVP(
     particle population, matching implicit shifting's own usage).
 
     Mirrors `wp_implicitShifting._multiplyLaplacianBlock`'s math exactly
-    (`sum_j m_j * H_ij @ (v_i - v_j)`) but is assembled from warpSPHCore's
+    (`sum_{j != i} m_j * H_ij @ (v_i - v_j)`) but is assembled from warpSPHCore's
     own Tier-2.0 `sphKernelHessian` building block through this package's
     adjacency/domain/particle-state conventions, rather than warpSPH's
     hand-rolled per-pair kernel.
@@ -121,12 +172,11 @@ def computeSPHDensityPositionHVP(
     )
 
     ii, jj = adjacency.i.long(), adjacency.j.long()
-    # Self-pairs (i == j) contribute zero analytically -- a particle's
-    # distance to itself is identically zero regardless of where it moves --
-    # but sphKernelHessian's near-origin regularization branch is
-    # numerically unstable there rather than exactly zero. Same hazard
-    # `wp_implicitShifting.computeImplicitShift`'s own docstring documents;
-    # dropped before assembly for the same reason, not a new finding.
+    # Self-pairs (i == j) are excluded exactly, not as a numerical-safety
+    # measure -- see this module's docstring for the translation-invariance
+    # identity (H(0,h) - 2*H(0,h) + H(0,h) = 0) showing the self term's true
+    # contribution to d^2 C_i/dx_i^2 is zero for any finite H(0,h), including
+    # sphKernelHessian's own well-defined value there.
     pairMask = ii != jj
     ii, jj, H_t = ii[pairMask], jj[pairMask], H_t[pairMask]
 

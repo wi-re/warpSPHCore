@@ -311,10 +311,36 @@ commit `fe238d5`.
   `wp_implicitShifting.py` (sidesteps it by always using `Gather`) and this new function, flagged
   in the spike script rather than fixed; and self-pairs (`i==j`) are dropped by hand before
   assembly in `computeSPHDensityPositionHVP`, the same way `computeImplicitShift` needs to for its
-  own Hessian -- i.e. the composed-JVP route did **not** turn out to need this hand-holding any
-  less than the hand-built version does, a first data point for step 5's own question, not yet
-  step 5 itself (this was needed just to get step 3's own numbers to agree, not a deliberate test
-  of the pitfall).
+  own Hessian.
+
+  **Correction (2026-08-19), prompted by a check against `wp_kernels.ipynb`'s direct plot of the
+  kernel Hessian.** The self-pair drop -- both here and in `wp_implicitShifting.py`'s own
+  pre-existing code, whose reasoning this was copied from uncritically -- was originally documented
+  as a numerical-safety measure ("`sphKernelHessian`'s near-origin regularization branch is
+  numerically unstable... rather than exactly zero"). **That explanation was wrong.**
+  `sphKernelHessian` returns a well-defined, finite, physically meaningful value at `r=0` (the
+  kernel's own curvature at its peak -- `wp_kernels.ipynb` finds a smooth `-15.0` there for
+  `Wendland2`, continuous with its `-14.88` neighbors either side, not noise). The drop is still
+  correct, but for an *exact identity*, not a numerical hazard: `C_i`'s self term
+  (`W(x_i-x_i,h_ii) = W(0,h_ii)`) is a constant as a function of the one shared position variable
+  `x_i`, so its contribution to `d^2 C_i/dx_i^2` is identically zero for *any* finite `H(0,h)`
+  (chain-rule expansion: `H(0,h) - 2H(0,h) + H(0,h) = 0`) -- the same translation-invariance fact
+  that produces the off-diagonal block's minus sign, not a separate pitfall. Both `wp_densityHVP.py`
+  and `implicitShifting.py`'s docstrings were rewritten with the corrected derivation; a new
+  standing test (`tests/operations/test_forward_mode_tier2_density_hvp_self_pair.py`, `warpSPHCore`)
+  checks it two ways: keeping vs. dropping self-pairs is a bitwise no-op for the shared-tangent case
+  Phase 4's own matvec actually uses (the self term's own `(v_i-v_i)=0` factor already kills it,
+  independent of the drop), and is *required* (changes the answer) for the asymmetric
+  diagBlock-isolation construction `implicitShiftingAutomatic.py` uses. **Revises the "did not turn
+  out to need this hand-holding any less" framing this bullet originally had**: for the matvec
+  itself, the composed-JVP route needs *no* self-pair special-casing at all (verified, not
+  assumed) -- the hand-built `_multiplyLaplacianBlock` needed an explicit `pairMask` up front
+  because it builds `diagBlock` and the off-diagonal sum as two separate tensors before combining
+  them (where the cancellation isn't automatic), while the composed formula's single fused
+  `sum_j H_ij @ (v_i-v_j)` cancels the self term on its own. The drop is only load-bearing in this
+  codebase's own diagBlock-isolation helper (used solely for the Jacobi-preconditioner diagonal),
+  a genuinely different, narrower need than "the Hessian is unsafe at the self-pair" -- a positive
+  data point for step 5's question, in the automatic path's favor, not a neutral one.
 * **Step 4 -- done.** `warpSPH/modules/shifting/implicitShiftingAutomatic.py`'s new
   `computeImplicitShiftAutomatic` is a drop-in replacement for `computeImplicitShift` (same
   signature, same `bicgstabSolve` call, same boundary/relaxation/initializer handling) with `grad
@@ -337,11 +363,13 @@ commit `fe238d5`.
   here since fixing that robustness gap is explicitly out of this plan's scope, but it's the first
   concrete data point for step 5's "does the automatic path reproduce the same pitfalls" question,
   worth carrying into step 5/6's own writeup rather than re-discovering there.
-* **Steps 5-6 -- not started.** Step 5 (deliberately probe the self-pair/block-symmetry pitfalls --
-  step 3 already found the self-pair drop was still needed by hand, and step 4 found a matching
-  marginal-stability sensitivity; formalize both plus the block-symmetry check) and step 6
-  (three-way comparison against `computeDeltaShift` too, plus the effort/robustness writeup) are
-  next.
+* **Steps 5-6 -- not started.** Step 5 (deliberately probe the self-pair/block-symmetry pitfalls)
+  is largely pre-empted by the correction above: the composed-JVP matvec needs no self-pair
+  special-casing at all (a positive finding, not a pitfall reproduced), and the block-symmetry sign
+  falls out of the same translation-invariance identity automatically rather than needing separate
+  discovery -- step 5 is now mostly a writeup of that, plus step 4's marginal-stability finding, not
+  new experimentation. Step 6 (three-way comparison against `computeDeltaShift` too, plus the
+  effort/robustness writeup) is next.
 * **A finding while validating step 2, worth carrying into step 6's comparison**: the jittered-
   lattice implicit-shifting baseline (`warpSPH/tests/test_implicitShifting.py`) this phase's
   step 4/6 will run against has its own pre-existing GPU-only marginal-stability issue (see this
