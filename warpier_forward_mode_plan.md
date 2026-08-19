@@ -368,7 +368,7 @@ commit `fe238d5`.
   `91b92fb`). Confirms the claim literally: no new derivation was needed for the gradient itself,
   only for wiring the existing Tier-2.0 building blocks (`sphKernelGradient`'s ingredients) through
   a JVP-shaped production entry point.
-* **Step 3 -- done.** `Hess(Density) @ v` ("the actual experiment") is now a production entry
+* **Step 3 -- done** (`warpSPHCore` commit `41bedde`). `Hess(Density) @ v` ("the actual experiment") is now a production entry
   point: `computeSPHDensityPositionHVP` (`coreOperations/wp_densityHVP.py`), dispatched to by a
   new `warpOperationHVP` sibling to `warpOperationJVP` (`operations.py`). **Finding: composing
   this generically through torch does not work, confirmed by trying it first, not assumed.**
@@ -394,7 +394,7 @@ commit `fe238d5`.
   finite-differencing `computeSPHDensityPositionJVP` itself along `v` (a different formula, no
   `sphKernelHessian` involved), agreeing to ~1e-9 relative on Gather/Scatter/MeanSymmetric/
   SuperSymmetric in 1D and 2D; (b) `warpSPH/tests/test_implicitShiftingHessianJVP.py` (new, `warpSPH`
-  commit pending) checks it bit-close against `wp_implicitShifting.py`'s own hand-built `H`/
+  commit `174c9be`, correction in `938636d`) checks it bit-close against `wp_implicitShifting.py`'s own hand-built `H`/
   `_multiplyLaplacianBlock` matvec on the same jittered-lattice case Step 2 used, passing at
   `rtol=1e-4` on first run. Two scope notes carried forward, not fixed here: `sphKernelHessian`
   itself only special-cases `SuperSymmetric`'s two-term-average branch, not
@@ -405,7 +405,8 @@ commit `fe238d5`.
   assembly in `computeSPHDensityPositionHVP`, the same way `computeImplicitShift` needs to for its
   own Hessian.
 
-  **Correction (2026-08-19), prompted by a check against `wp_kernels.ipynb`'s direct plot of the
+  **Correction (2026-08-19, `warpSPHCore` commits `7ce776c`/`4bbb505`/`2d0b3ac`/`461d470`), prompted
+  by a check against `wp_kernels.ipynb`'s direct plot of the
   kernel Hessian.** The self-pair drop -- both here and in `wp_implicitShifting.py`'s own
   pre-existing code, whose reasoning this was copied from uncritically -- was originally documented
   as a numerical-safety measure ("`sphKernelHessian`'s near-origin regularization branch is
@@ -441,7 +442,7 @@ commit `fe238d5`.
   matvec) instead of `wp_implicitShifting.py`'s hand-rolled per-pair kernel +
   `torch.einsum`/`scatter_sum` assembly -- no `sphKernelGradient`/`sphKernelHessian` call and no
   hand-derived block-symmetry sign anywhere in the new file. Validated two ways
-  (`warpSPH/tests/test_implicitShiftingComparison.py`, new): a single Newton step from the same
+  (`warpSPH/tests/test_implicitShiftingComparison.py`, new, `warpSPH` commit `4baa905`): a single Newton step from the same
   starting state agrees with the hand-built solve to `rtol=1e-3` (both solves are handed an
   equivalent linear system, so this mostly exercises `bicgstabSolve` itself, not new math); 8
   outer relaxation iterations (rebuilding the adjacency each step, mirroring
