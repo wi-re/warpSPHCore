@@ -1,5 +1,5 @@
 """In-process standing test for `warpOperationJVP` (`warpier_forward_mode_plan.md`
-Phase 2): asserts it reproduces `scripts/spike_forward_mode_tier1.py`'s Tier-1
+Phase 2): asserts it reproduces `scripts/spike_forward_mode_tier1.py`'s value
 JVP identity for each of the five value-consuming operators, the same way
 `test_gradcheck_scripts.py` gates the spike script itself as a subprocess.
 
@@ -144,7 +144,13 @@ def test_forwardOperationJVP_matches_jacobian_reference_2d_vector(operation):
                         gradient_mode=GradientScheme.Difference)
 
 
-def test_forwardOperationJVP_rejects_tier2_position_tangent():
+def test_forwardOperationJVP_combines_value_and_geometry_tangent():
+    # warpier_tier2_combined_jvp_plan.md: a value tangent alongside a
+    # geometry tangent is no longer rejected -- it's the sum of the value
+    # JVP and geometry JVP paths called independently (each already exact/
+    # tested on its own here and in test_forward_mode_geometry_jvp_gradient.py's
+    # own jacobian-based "combined" coverage; this is a lighter-weight
+    # identity check, not a duplicate of that jacobian derivation).
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)
     particles, adjacency = _build_adjacency(positions, supports, masses, domain)
@@ -152,10 +158,25 @@ def test_forwardOperationJVP_rejects_tier2_position_tangent():
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll,
                                 gradientMode=GradientScheme.Naive)
     n = positions.shape[0]
-    with pytest.raises(NotImplementedError, match="Tier-2"):
-        warpOperationJVP(particles, props, domain,
-                         tangentQueryValues=torch.zeros(n, dtype=DTYPE, device=DEVICE),
-                         tangentQueryPositions=torch.zeros_like(positions), adjacency=adjacency)
+
+    torch.manual_seed(0)
+    queryValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
+    referenceValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
+    dq = torch.randn(n, dtype=DTYPE, device=DEVICE)
+    dr = torch.randn(n, dtype=DTYPE, device=DEVICE)
+    dpos = torch.randn_like(positions)
+
+    tier2Only = warpOperationJVP(particles, props, domain, adjacency=adjacency,
+                                 tangentQueryPositions=dpos,
+                                 queryValues=queryValues, referenceValues=referenceValues)
+    tier1Only = warpOperationJVP(particles, props, domain, adjacency=adjacency,
+                                 tangentQueryValues=dq, tangentReferenceValues=dr,
+                                 queryValues=queryValues, referenceValues=referenceValues)
+    combined = warpOperationJVP(particles, props, domain, adjacency=adjacency,
+                                tangentQueryPositions=dpos,
+                                tangentQueryValues=dq, tangentReferenceValues=dr,
+                                queryValues=queryValues, referenceValues=referenceValues)
+    torch.testing.assert_close(combined, tier2Only + tier1Only, rtol=0, atol=0)
 
 
 def test_forwardOperationJVP_rejects_operations_without_a_value_input():
@@ -165,6 +186,6 @@ def test_forwardOperationJVP_rejects_operations_without_a_value_input():
     props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Density,
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll)
     n = positions.shape[0]
-    with pytest.raises(NotImplementedError, match="Tier 1 is only defined"):
+    with pytest.raises(NotImplementedError, match="value JVP is only defined"):
         warpOperationJVP(particles, props, domain,
                          tangentQueryValues=torch.zeros(n, dtype=DTYPE, device=DEVICE), adjacency=adjacency)

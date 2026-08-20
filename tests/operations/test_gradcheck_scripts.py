@@ -59,7 +59,7 @@ GRADCHECK_SCRIPTS = [
 
 # Also kept as a standing gate for a different reason: no exact in-process
 # reference exists for computeSPHDensityPositionHVP (Phase 4 step 3, "Hess C
-# . v is a JVP of that JVP") the way test_forward_mode_tier2_density.py has
+# . v is a JVP of that JVP") the way test_forward_mode_geometry_jvp_density.py has
 # one for the first-order JVP -- torch.autograd.functional.hessian would
 # need double-backward through StateAwareWarpFunction's own backward(),
 # which reads a non-differentiable wp.Tape (see wp_densityHVP.py's module

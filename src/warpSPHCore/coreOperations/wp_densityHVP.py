@@ -1,6 +1,6 @@
 """Hessian-vector product of the Density operator w.r.t. positions
 (`warpier_forward_mode_plan.md` Phase 4 Step 3, "`Hess C . v` is a JVP of
-that JVP"): differentiate `computeSPHDensityPositionJVP`'s own position
+that JVP"): differentiate `computeSPHDensityGeometryJVP`'s own position
 tangent once more, in the same direction. Concretely this reduces to
 `HVP_i = sum_{j != i} m_j * H_ij @ (tangentQuery_i - tangentReference_j)`,
 `H_ij` the pairwise kernel Hessian `kernels.hessian.sphKernelHessian` already
@@ -92,9 +92,9 @@ the comparison baseline this exists to validate against
 
 **Composing this via generic torch machinery does not work, tried first.**
 `torch.func.jvp` applied twice, or `torch.autograd.forward_ad.make_dual`/
-`dual_level` nested, over `computeSPHDensityPositionJVP` cannot propagate a
+`dual_level` nested, over `computeSPHDensityGeometryJVP` cannot propagate a
 second tangent through a `wp.launch`-backed function in this codebase:
-`computeSPHDensityPositionJVP` is not wrapped in a `torch.autograd.Function`
+`computeSPHDensityGeometryJVP` is not wrapped in a `torch.autograd.Function`
 at all (unlike `warpOperation`'s `StateAwareWarpFunction`, which has no
 `jvp()` registered either -- see `scripts/spike_forward_mode_tier1.py`'s own
 finding for the *first*-order case: `torch.autograd.forward_ad` silently

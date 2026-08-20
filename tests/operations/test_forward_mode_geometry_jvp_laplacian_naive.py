@@ -1,9 +1,9 @@
-"""In-process standing test for `warpOperationJVP`'s Tier-2 Laplacian
+"""In-process standing test for `warpOperationJVP`'s geometry JVP Laplacian
 (Naive scheme) branch (`warpier_tier2_operators_plan.md` Step 8,
-`warpier_adjoint.md` Tier 2.3): asserts `computeSPHLaplacianNaivePositionJVP`
+`warpier_adjoint.md` Tier 2.3): asserts `computeSPHLaplacianNaiveGeometryJVP`
 matches a reverse-mode-Jacobian reference on the production
 `warpOperation(Laplacian, laplacianMode=Naive)` call, same pattern as
-`test_forward_mode_tier2_laplacian_brookshaw.py`.
+`test_forward_mode_geometry_jvp_laplacian_brookshaw.py`.
 
 Also checks the genuine structural finding `warpier_adjoint.md` Tier 2.3
 surfaced: unlike Tier 2.1/2.2's kernel value/gradient, `sphKernelLaplacian`
@@ -115,9 +115,71 @@ def _check_jacobian_reference(positions, supports, masses, domain, adjacency, mo
     return assembled
 
 
+def _check_combined_jacobian_reference(positions, supports, masses, domain, adjacency, mode, scheme):
+    # warpier_tier2_combined_jvp_plan.md: geometry tangent + value tangent
+    # together should equal the geometry JVP and value JVP contributions summed.
+    n = positions.shape[0]
+    kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
+    densities = _densities_for(positions, supports, masses, kinds, domain, adjacency)
+    torch.manual_seed(hash(("combined", mode, scheme)) % (2 ** 31))
+    queryValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
+    referenceValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
+
+    props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Laplacian,
+                                supportMode=mode, operationMode=OperationDirection.AllToAll,
+                                gradientMode=scheme, laplacianMode=LaplacianScheme.Naive)
+
+    def f(pos, sup, mass, density, qval, rval):
+        p = ParticleState(positions=pos, supports=sup, masses=mass, densities=density, kinds=kinds)
+        return warpOperation(p, props, domain, adjacency=adjacency, queryValues=qval, referenceValues=rval)
+
+    pos0 = positions.clone().requires_grad_(True)
+    sup0 = supports.clone().requires_grad_(True)
+    mass0 = masses.clone().requires_grad_(True)
+    density0 = densities.clone().requires_grad_(True)
+    qval0 = queryValues.clone().requires_grad_(True)
+    rval0 = referenceValues.clone().requires_grad_(True)
+
+    dpos = torch.randn_like(positions)
+    dsup = torch.randn_like(supports) * 0.1
+    dmass = torch.randn_like(masses)
+    ddensity = torch.randn_like(densities) * 0.1
+    dqval = torch.randn_like(queryValues)
+    drval = torch.randn_like(referenceValues)
+
+    J = torch.autograd.functional.jacobian(f, (pos0, sup0, mass0, density0, qval0, rval0), vectorize=False)
+    out = f(pos0, sup0, mass0, density0, qval0, rval0).detach()
+    acc = torch.zeros(out.numel(), dtype=DTYPE, device=DEVICE)
+    for Jk, vk in zip(J, (dpos, dsup, dmass, ddensity, dqval, drval)):
+        acc = acc + Jk.reshape(out.numel(), -1) @ vk.reshape(-1)
+    reference = acc.reshape(out.shape)
+
+    p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
+    assembled = warpOperationJVP(
+        p0, props, domain, adjacency=adjacency,
+        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
+        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
+        tangentReferenceMasses=dmass, tangentQueryDensities=ddensity, tangentReferenceDensities=ddensity,
+        tangentQueryValues=dqval, tangentReferenceValues=drval,
+        queryValues=queryValues, referenceValues=referenceValues,
+    )
+    torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
+
+
+@pytest.mark.parametrize("scheme", list(GradientScheme))
+def test_laplacianNaiveGeometryJVP_combined_matches_jacobian_reference_2d(scheme):
+    positions, supports, masses = _grid_case_2d()
+    domain = _make_domain(dim=2)
+    n = positions.shape[0]
+    kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
+    p0_forAdjacency = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
+    adjacency = radiusSearchCompactHashMap(p0_forAdjacency, domain, mode=SupportScheme.Gather)
+    _check_combined_jacobian_reference(positions, supports, masses, domain, adjacency, SupportScheme.Gather, scheme)
+
+
 @pytest.mark.parametrize("scheme", list(GradientScheme))
 @pytest.mark.parametrize("mode", [SupportScheme.Gather, SupportScheme.MeanSymmetric, SupportScheme.SuperSymmetric])
-def test_laplacianNaivePositionJVP_matches_jacobian_reference_1d(mode, scheme):
+def test_laplacianNaiveGeometryJVP_matches_jacobian_reference_1d(mode, scheme):
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)
     n = positions.shape[0]
@@ -129,7 +191,7 @@ def test_laplacianNaivePositionJVP_matches_jacobian_reference_1d(mode, scheme):
 
 @pytest.mark.parametrize("scheme", list(GradientScheme))
 @pytest.mark.parametrize("mode", [SupportScheme.Gather, SupportScheme.MeanSymmetric])
-def test_laplacianNaivePositionJVP_matches_jacobian_reference_2d(mode, scheme):
+def test_laplacianNaiveGeometryJVP_matches_jacobian_reference_2d(mode, scheme):
     positions, supports, masses = _grid_case_2d()
     domain = _make_domain(dim=2)
     n = positions.shape[0]
@@ -139,7 +201,7 @@ def test_laplacianNaivePositionJVP_matches_jacobian_reference_2d(mode, scheme):
     _check_jacobian_reference(positions, supports, masses, domain, adjacency, mode, scheme)
 
 
-def test_laplacianNaivePositionJVP_kernelMeanSymmetric_differs_from_superSymmetric():
+def test_laplacianNaiveGeometryJVP_kernelMeanSymmetric_differs_from_superSymmetric():
     # warpier_adjoint.md Tier 2.3's structural finding: sphKernelLaplacian never got
     # an explicit KernelMeanSymmetric branch, so (unlike every other operator in this
     # plan) the two schemes are NOT identical here -- the mirror image of Tier 2.2's
@@ -172,19 +234,36 @@ def _minimal_case():
     return positions, p0, domain, adjacency, props, queryValues, referenceValues
 
 
-def test_laplacianNaivePositionJVP_rejects_missing_values():
+def test_laplacianNaiveGeometryJVP_rejects_missing_values():
     positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
     with pytest.raises(ValueError, match="queryValues"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
                          tangentQueryPositions=torch.zeros_like(positions))
 
 
-def test_laplacianNaivePositionJVP_grid_traversal_matches_adjacency_traversal():
-    # computeSPHLaplacianNaivePositionJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
-    # also supports grid (CompactHashMap) traversal, unlike warpOperationJVP's
-    # own centralized AdjacencyList-only gate -- exercised here via a direct
-    # import.
-    from warpSPHCore.coreOperations import computeSPHLaplacianNaivePositionJVP
+def test_laplacianNaiveGeometryJVP_geometryOnly_unchanged_when_combination_allowed():
+    # Regression guard (warpier_tier2_combined_jvp_plan.md step 5): the
+    # geometry-only path (no value tangent supplied) must return exactly
+    # what it did before the combined path was added.
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    dpos = torch.zeros_like(positions)
+    viaJVP = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              tangentQueryPositions=dpos, queryValues=qv, referenceValues=rv)
+    from warpSPHCore.coreOperations import computeSPHLaplacianNaiveGeometryJVP
+    direct = computeSPHLaplacianNaiveGeometryJVP(
+        p0, domain, props.kernel, props.supportMode, adjacency,
+        tangentQueryPositions=dpos, queryValues=qv, referenceValues=rv,
+        gradientMode=props.gradientMode,
+    )
+    torch.testing.assert_close(viaJVP, direct, rtol=0, atol=0)
+
+
+def test_laplacianNaiveGeometryJVP_grid_traversal_matches_adjacency_traversal():
+    # computeSPHLaplacianNaiveGeometryJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
+    # also supports grid (CompactHashMap) traversal -- exercised here via a
+    # direct import against the low-level function, independent of
+    # warpOperationJVP.
+    from warpSPHCore.coreOperations import computeSPHLaplacianNaiveGeometryJVP
 
     positions, supports, masses = _grid_case_2d()
     domain = _make_domain(dim=2)
@@ -215,7 +294,7 @@ def test_laplacianNaivePositionJVP_grid_traversal_matches_adjacency_traversal():
         queryValues=queryValues, referenceValues=referenceValues,
         gradientMode=GradientScheme.Symmetric,
     )
-    viaAdjacency = computeSPHLaplacianNaivePositionJVP(adjacency=adjacency, **common)
-    viaGrid = computeSPHLaplacianNaivePositionJVP(adjacency=hashMap, **common)
+    viaAdjacency = computeSPHLaplacianNaiveGeometryJVP(adjacency=adjacency, **common)
+    viaGrid = computeSPHLaplacianNaiveGeometryJVP(adjacency=hashMap, **common)
 
     torch.testing.assert_close(viaGrid, viaAdjacency, rtol=1e-5, atol=1e-6)

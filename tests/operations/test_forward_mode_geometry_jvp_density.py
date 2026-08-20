@@ -1,6 +1,6 @@
-"""In-process standing test for `warpOperationJVP`'s Tier-2 Density branch
+"""In-process standing test for `warpOperationJVP`'s geometry JVP Density branch
 (`warpier_forward_mode_plan.md` Phase 4, `warpier_adjoint.md` Tier 2.1):
-asserts `computeSPHDensityPositionJVP` (dispatched to for Density's
+asserts `computeSPHDensityGeometryJVP` (dispatched to for Density's
 position/support/mass tangent) matches a reverse-mode-Jacobian reference on
 the production `warpOperation(Density)` call, the same reference-construction
 pattern `spike_forward_mode_tier1.py`/`spike_forward_mode_tier2_density.py`
@@ -75,7 +75,7 @@ def _grid_case_2d(n_per_side: int = 3, spacing: float = 0.4):
     SupportScheme.Gather, SupportScheme.Scatter, SupportScheme.MeanSymmetric,
     SupportScheme.KernelMeanSymmetric, SupportScheme.SuperSymmetric,
 ])
-def test_densityPositionJVP_matches_jacobian_reference_1d(mode):
+def test_densityGeometryJVP_matches_jacobian_reference_1d(mode):
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)
     kinds = torch.zeros(positions.shape[0], dtype=torch.int32, device=DEVICE)
@@ -116,7 +116,7 @@ def test_densityPositionJVP_matches_jacobian_reference_1d(mode):
     torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
 
 
-def test_densityPositionJVP_matches_jacobian_reference_2d():
+def test_densityGeometryJVP_matches_jacobian_reference_2d():
     positions, supports, masses = _grid_case_2d()
     domain = _make_domain(dim=2)
     kinds = torch.zeros(positions.shape[0], dtype=torch.int32, device=DEVICE)
@@ -156,20 +156,26 @@ def test_densityPositionJVP_matches_jacobian_reference_2d():
     torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
 
 
-def test_densityPositionJVP_rejects_nonAdjacencyList():
+def test_densityGeometryJVP_none_adjacency_matches_explicit():
+    # warpOperationJVP builds a CompactHashMap when adjacency=None, same as
+    # warpOperation's own primal path (autograd/arg_extract.py Section 4) --
+    # the CSR-ported geometry JVP kernels traverse a grid directly, so this
+    # is no longer restricted to a pre-built AdjacencyList.
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)
     kinds = torch.zeros(positions.shape[0], dtype=torch.int32, device=DEVICE)
     p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
+    adjacency = radiusSearchCompactHashMap(p0, domain, mode=SupportScheme.Gather)
     props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Density,
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll)
-    n = positions.shape[0]
-    with pytest.raises(NotImplementedError, match="AdjacencyList"):
-        warpOperationJVP(p0, props, domain, adjacency=None,
-                         tangentQueryPositions=torch.zeros_like(positions))
+    torch.manual_seed(7)
+    dpos = torch.randn_like(positions)
+    viaExplicit = warpOperationJVP(p0, props, domain, adjacency=adjacency, tangentQueryPositions=dpos)
+    viaNone = warpOperationJVP(p0, props, domain, adjacency=None, tangentQueryPositions=dpos)
+    torch.testing.assert_close(viaNone, viaExplicit, rtol=1e-4, atol=1e-5)
 
 
-def test_densityPositionJVP_rejects_combination_with_value_tangent():
+def test_densityGeometryJVP_rejects_combination_with_value_tangent():
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)
     kinds = torch.zeros(positions.shape[0], dtype=torch.int32, device=DEVICE)
@@ -178,19 +184,19 @@ def test_densityPositionJVP_rejects_combination_with_value_tangent():
     props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Density,
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll)
     n = positions.shape[0]
-    with pytest.raises(NotImplementedError, match="Tier-2"):
+    with pytest.raises(NotImplementedError, match="geometry JVP"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
                          tangentQueryPositions=torch.zeros_like(positions),
                          tangentQueryValues=torch.zeros(n, dtype=DTYPE))
 
 
-def test_densityPositionJVP_grid_traversal_matches_adjacency_traversal():
-    # computeSPHDensityPositionJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
-    # also supports grid (CompactHashMap) traversal, unlike warpOperationJVP's
-    # own centralized AdjacencyList-only gate above -- exercised here via a
-    # direct import, since warpOperationJVP itself still rejects non-AdjacencyList
-    # adjacency (test_densityPositionJVP_rejects_nonAdjacencyList).
-    from warpSPHCore.coreOperations import computeSPHDensityPositionJVP
+def test_densityGeometryJVP_grid_traversal_matches_adjacency_traversal():
+    # computeSPHDensityGeometryJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
+    # also supports grid (CompactHashMap) traversal -- exercised here via a
+    # direct import against the low-level function (warpOperationJVP itself
+    # also accepts a CompactHashMap now, see
+    # test_densityGeometryJVP_none_adjacency_matches_explicit).
+    from warpSPHCore.coreOperations import computeSPHDensityGeometryJVP
 
     positions, supports, masses = _grid_case_2d()
     domain = _make_domain(dim=2)
@@ -211,17 +217,17 @@ def test_densityPositionJVP_grid_traversal_matches_adjacency_traversal():
         tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
         tangentReferenceMasses=dmass,
     )
-    viaAdjacency = computeSPHDensityPositionJVP(adjacency=adjacency, **common)
-    viaGrid = computeSPHDensityPositionJVP(adjacency=hashMap, **common)
+    viaAdjacency = computeSPHDensityGeometryJVP(adjacency=adjacency, **common)
+    viaGrid = computeSPHDensityGeometryJVP(adjacency=hashMap, **common)
 
     torch.testing.assert_close(viaGrid, viaAdjacency, rtol=1e-5, atol=1e-6)
 
 
-def test_otherOperators_tier2_still_raise():
+def test_otherOperators_geometryJVP_still_raise():
     # Density, Interpolate, Gradient, Divergence, Curl, and Laplacian(Brookshaw)
     # are all implemented now (warpier_tier2_operators_plan.md steps 0-7) --
-    # Covariance is the one operator that stays out of Tier-2 scope throughout
-    # (no Tier-2 formula was ever derived for it), so it's what's left to prove
+    # Covariance is the one operator that stays out of geometry JVP scope throughout
+    # (no geometry JVP formula was ever derived for it), so it's what's left to prove
     # "still not implemented" here, per the plan's own "Tests" section.
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)
@@ -230,6 +236,6 @@ def test_otherOperators_tier2_still_raise():
     adjacency = radiusSearchCompactHashMap(p0, domain, mode=SupportScheme.Gather)
     props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Covariance,
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll)
-    with pytest.raises(NotImplementedError, match="Tier-2"):
+    with pytest.raises(NotImplementedError, match="geometry JVP"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
                          tangentQueryPositions=torch.zeros_like(positions))

@@ -1,4 +1,4 @@
-"""Tier-2 position/support/mass/density-tangent JVP of the Curl operator, 2D
+"""Geometry-tangent JVP of the Curl operator, 2D
 only (`warpier_tier2_operators_plan.md` Step 6, `warpier_adjoint.md` Tier
 2.2): `dCurl_i = sum_j [ G_ij.x*dcoeff_ij.y - G_ij.y*dcoeff_ij.x +
 dG_ij.x*coeff_ij.y - dG_ij.y*coeff_ij.x ]` (the product-rule expansion of
@@ -37,7 +37,7 @@ from ._jvpCommon import (
     buildNullCorrectionData as _buildNullCorrectionData,
 )
 
-__all__ = ['computeSPHCurlPositionJVP']
+__all__ = ['computeSPHCurlGeometryJVP']
 
 
 # ---------------------------------------------------------------------------
@@ -182,7 +182,7 @@ def computeSPHCurlJVP_Kernel(
     )
 
 
-def computeSPHCurlPositionJVP(
+def computeSPHCurlGeometryJVP(
     queryParticles: ParticleState,
     domain: DomainDescription,
     kernel: KernelFunctions,
@@ -202,17 +202,27 @@ def computeSPHCurlPositionJVP(
 ) -> torch.Tensor:
     """`dCurl_i`, shape `[numParticles, 1]` (matching production
     `warpOperation(Curl)`'s own `[1]`-forced output shape for a 2D
-    vector-field input, `wp_curl.py`). `queryValues`/`referenceValues`
-    (`fi`/`fj`, `[numParticles, 2]` vector fields) are required and frozen.
-    `queryParticles.densities`/`referenceParticles.densities` must already
-    hold real values, same requirement as `computeSPHGradientPositionJVP`.
-    `adjacency` is an `AdjacencyList` or `CompactHashMap`.
+    vector-field input, `wp_curl.py`).
+
+    This is the geometry/mass/density-tangent **partial** contribution to
+    Curl's JVP -- `queryValues`/`referenceValues` are held at their
+    **primal** (non-tangent) value here. It is **not** the full derivative
+    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
+    relaunched with the tangent value arrays) for that, or call
+    `warpOperationJVP` directly, which sums both automatically
+    (`warpier_tier2_combined_jvp_plan.md`).
+
+    `queryValues`/`referenceValues` (`fi`/`fj`, `[numParticles, 2]` vector
+    fields) are required and frozen here. `queryParticles.densities`/
+    `referenceParticles.densities` must already hold real values, same
+    requirement as `computeSPHGradientGeometryJVP`. `adjacency` is an
+    `AdjacencyList` or `CompactHashMap`.
     """
     if domain.dim != 2:
-        raise ValueError("computeSPHCurlPositionJVP: only domain.dim == 2 is implemented.")
+        raise ValueError("computeSPHCurlGeometryJVP: only domain.dim == 2 is implemented.")
     if queryValues is None or referenceValues is None:
         raise ValueError(
-            "computeSPHCurlPositionJVP: queryValues and referenceValues "
+            "computeSPHCurlGeometryJVP: queryValues and referenceValues "
             "(frozen fi/fj) are both required."
         )
 

@@ -6,7 +6,7 @@
 (`coreOperations/wp_densityHVP.py`, dispatched to by `warpOperationHVP`)
 claims `HVP_i = sum_j m_j * H_ij @ (v_i - v_j)`, `H_ij` the already-validated
 Tier-2.0 `kernels.hessian.sphKernelHessian` building block -- obtained by
-differentiating `computeSPHDensityPositionJVP`'s own position-tangent
+differentiating `computeSPHDensityGeometryJVP`'s own position-tangent
 formula (`dW_ij = ∇W_ij · dx_ij`) a second time, analytically, rather than
 by any torch-level `torch.func.jvp`/`forward_ad` composition (tried first;
 does not work through a warp-kernel-backed function in this codebase -- see
@@ -18,7 +18,7 @@ end to end against an *independent* code path:
                               tangentReferencePositions=0) ]|_{t=0}
            for each coordinate direction a, finite-differenced in t.
 
-The reference calls `computeSPHDensityPositionJVP` (Tier 2.1's own
+The reference calls `computeSPHDensityGeometryJVP` (Tier 2.1's own
 production function, a *different* formula than the Hessian-based one this
 script is checking) at `primal +/- eps*v`, central-differenced -- an
 independent check because it never touches `sphKernelHessian` at all, only
@@ -53,7 +53,7 @@ import warp as wp
 
 from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, line_case, grid_case_2d, make_domain
 from warpSPHCore import DomainDescription, OperationProperties, ParticleState, radiusSearchCompactHashMap, warpOperation, warpOperationHVP
-from warpSPHCore.coreOperations import computeSPHDensityPositionJVP
+from warpSPHCore.coreOperations import computeSPHDensityGeometryJVP
 from warpSPHCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
 
 TOL = 1e-6  # float64, one side finite-differenced -- truncation-limited, not round-off
@@ -69,7 +69,7 @@ def check(name, assembled, reference):
 
 
 def fd_hvp_reference(pos0, sup0, mass0, domain, adjacency, kinds, mode, v, dim, eps=EPS):
-    """Independent reference: central-difference `computeSPHDensityPositionJVP`
+    """Independent reference: central-difference `computeSPHDensityGeometryJVP`
     (a first-order-only formula) along `v`, one coordinate direction at a
     time -- see module docstring for why this reconstructs `HVP_i[a]`
     exactly rather than some other contraction."""
@@ -82,7 +82,7 @@ def fd_hvp_reference(pos0, sup0, mass0, domain, adjacency, kinds, mode, v, dim, 
 
         def g(x):
             p = ParticleState(positions=x, supports=sup0, masses=mass0, densities=None, kinds=kinds)
-            return computeSPHDensityPositionJVP(p, domain, KERNEL, mode, adjacency,
+            return computeSPHDensityGeometryJVP(p, domain, KERNEL, mode, adjacency,
                                                 tangentQueryPositions=ea, tangentReferencePositions=zero)
 
         gp = g(pos0 + eps * v)

@@ -1,9 +1,11 @@
-"""Tier-2 position/support/mass/density-tangent JVP of the Interpolate
+"""Geometry-tangent JVP of the Interpolate
 operator (`warpier_tier2_operators_plan.md` Step 2, `warpier_adjoint.md`
 Tier 2.1): `dInterpolate_i = sum_j fj * (dVj * W_ij + Vj * dW_ij)`, with
 `Vj = mass_j / density_j`, `dVj = dmass_j/density_j - mass_j*ddensity_j/density_j^2`,
-`fj` (`referenceValues`) held **frozen** -- combined Tier-1 (value tangent)
-+ Tier-2 was never derived, matching every other Tier-2 operator's scope.
+`fj` (`referenceValues`) held **frozen** here -- this is the geometry-tangent
+**partial** contribution only; `warpOperationJVP` sums it with the
+value-tangent (value JVP) contribution when both are supplied
+(`warpier_tier2_combined_jvp_plan.md`).
 
 CSR (per-query-particle) launch shape (`warpier_tier2_jvp_csr_backend_plan.md`
 Step 2): same canonical structured kernel ABI shape as `wp_interpolate.py`'s
@@ -11,7 +13,7 @@ Step 2): same canonical structured kernel ABI shape as `wp_interpolate.py`'s
 Density's proven `sphKernelJVP`-per-neighbor building block plus this
 operator's own `Vj`/`dVj` coefficient, no `GradientScheme`-style branching
 either. Unlike the primal kernel, `correctionData.useVolume`/`.useCRK` are
-never read here (Tier-2 JVP has no CRK/volume support, enforced centrally in
+never read here (the geometry JVP has no CRK/volume support, enforced centrally in
 `operations.py`), so `Vj` is always `mass_j/density_j`, not the CRK-generic
 primal formula. Also supports grid (`CompactHashMap`) traversal. Replaced
 the original pair-indexed (COO) implementation once proven numerically
@@ -39,7 +41,7 @@ from ._jvpCommon import (
     buildNullCorrectionData as _buildNullCorrectionData,
 )
 
-__all__ = ['computeSPHInterpolatePositionJVP']
+__all__ = ['computeSPHInterpolateGeometryJVP']
 
 
 @wp.func
@@ -171,7 +173,7 @@ def computeSPHInterpolateJVP_Kernel(
     )
 
 
-def computeSPHInterpolatePositionJVP(
+def computeSPHInterpolateGeometryJVP(
     queryParticles: ParticleState,
     domain: DomainDescription,
     kernel: KernelFunctions,
@@ -188,16 +190,25 @@ def computeSPHInterpolatePositionJVP(
     referenceValues: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """`dInterpolate_i`, shape `[numParticles, *referenceValues.shape[1:]]`.
+
+    This is the geometry/mass/density-tangent **partial** contribution to
+    Interpolate's JVP -- `referenceValues` is held at its **primal**
+    (non-tangent) value here. It is **not** the full derivative on its own;
+    add the value-tangent (value JVP) contribution (`warpOperation` relaunched
+    with the tangent value array) for that, or call `warpOperationJVP`
+    directly, which sums both automatically
+    (`warpier_tier2_combined_jvp_plan.md`).
+
     `referenceValues` (`fj`) is required and frozen (no tangent on it --
-    that would be Tier 1). `queryValues` (`fi`) is not part of Interpolate's
+    that would be the value JVP). `queryValues` (`fi`) is not part of Interpolate's
     formula at all and must not be provided. `adjacency` is an `AdjacencyList`
     or `CompactHashMap`.
     """
     if referenceValues is None:
-        raise ValueError("computeSPHInterpolatePositionJVP: referenceValues (frozen fj) is required.")
+        raise ValueError("computeSPHInterpolateGeometryJVP: referenceValues (frozen fj) is required.")
     if queryValues is not None:
         raise ValueError(
-            "computeSPHInterpolatePositionJVP: Interpolate has no queryValues (fi) term "
+            "computeSPHInterpolateGeometryJVP: Interpolate has no queryValues (fi) term "
             "-- only referenceValues (fj) is used, matching warpOperation(Interpolate)."
         )
 

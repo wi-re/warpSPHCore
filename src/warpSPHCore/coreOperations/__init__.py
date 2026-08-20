@@ -16,16 +16,16 @@ from .wp_interpolate import _computeSPHInterpolant_stateBackend
 from .wp_laplacian import _computeSPHLaplacian_stateBackend
 from .wp_divergence import _computeSPHDivergence_stateBackend
 from .wp_gradient import _computeSPHGradient_stateBackend
-from .wp_densityJVP import computeSPHDensityPositionJVP
+from .wp_densityJVP import computeSPHDensityGeometryJVP
 from .wp_densityHVP import computeSPHDensityPositionHVP
-from .wp_interpolateJVP import computeSPHInterpolatePositionJVP
-from .wp_gradientJVP import computeSPHGradientPositionJVP
-from .wp_divergenceJVP import computeSPHDivergencePositionJVP
-from .wp_curlJVP import computeSPHCurlPositionJVP
+from .wp_interpolateJVP import computeSPHInterpolateGeometryJVP
+from .wp_gradientJVP import computeSPHGradientGeometryJVP
+from .wp_divergenceJVP import computeSPHDivergenceGeometryJVP
+from .wp_curlJVP import computeSPHCurlGeometryJVP
 from .wp_laplacianJVP import (
-    computeSPHLaplacianPositionJVP,
-    computeSPHLaplacianBrookshawPositionJVP,
-    computeSPHLaplacianNaivePositionJVP,
+    computeSPHLaplacianGeometryJVP,
+    computeSPHLaplacianBrookshawGeometryJVP,
+    computeSPHLaplacianNaiveGeometryJVP,
 )
 
 __all__ = [
@@ -36,13 +36,13 @@ __all__ = [
     "_computeSPHLaplacian_stateBackend",
     "_computeSPHDivergence_stateBackend",
     "_computeSPHGradient_stateBackend",
-    "computeSPHDensityPositionJVP",
+    "computeSPHDensityGeometryJVP",
     "computeSPHDensityPositionHVP",
-    "computeSPHInterpolatePositionJVP",
-    "computeSPHGradientPositionJVP",
-    "computeSPHDivergencePositionJVP",
-    "computeSPHCurlPositionJVP",
-    "computeSPHLaplacianPositionJVP",
-    "computeSPHLaplacianBrookshawPositionJVP",
-    "computeSPHLaplacianNaivePositionJVP",
+    "computeSPHInterpolateGeometryJVP",
+    "computeSPHGradientGeometryJVP",
+    "computeSPHDivergenceGeometryJVP",
+    "computeSPHCurlGeometryJVP",
+    "computeSPHLaplacianGeometryJVP",
+    "computeSPHLaplacianBrookshawGeometryJVP",
+    "computeSPHLaplacianNaiveGeometryJVP",
 ]

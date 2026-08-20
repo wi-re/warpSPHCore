@@ -1,9 +1,9 @@
-"""In-process standing test for `warpOperationJVP`'s Tier-2 Divergence
+"""In-process standing test for `warpOperationJVP`'s geometry JVP Divergence
 branch (`warpier_tier2_operators_plan.md` Step 5, `warpier_adjoint.md` Tier
-2.2): asserts `computeSPHDivergencePositionJVP` matches a reverse-mode-
+2.2): asserts `computeSPHDivergenceGeometryJVP` matches a reverse-mode-
 Jacobian reference on the production `warpOperation(Divergence)` call
-(`divergenceDotMode=False`, the only mode in Tier-2 scope), same pattern as
-`test_forward_mode_tier2_gradient.py`.
+(`divergenceDotMode=False`, the only mode in geometry JVP scope), same pattern as
+`test_forward_mode_geometry_jvp_gradient.py`.
 """
 
 from __future__ import annotations
@@ -99,9 +99,72 @@ def _check_jacobian_reference(positions, supports, masses, domain, adjacency, mo
     torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
 
 
+def _check_combined_jacobian_reference(positions, supports, masses, domain, adjacency, mode, scheme):
+    # warpier_tier2_combined_jvp_plan.md: geometry tangent + value tangent
+    # together should equal the geometry JVP and value JVP contributions summed.
+    n = positions.shape[0]
+    dim = positions.shape[1]
+    kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
+    densities = _densities_for(positions, supports, masses, kinds, domain, adjacency)
+    torch.manual_seed(hash(("combined", mode, scheme)) % (2 ** 31))
+    queryValues = torch.randn(n, dim, dtype=DTYPE, device=DEVICE)
+    referenceValues = torch.randn(n, dim, dtype=DTYPE, device=DEVICE)
+
+    props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Divergence,
+                                supportMode=mode, operationMode=OperationDirection.AllToAll,
+                                gradientMode=scheme, divergenceDotMode=False)
+
+    def f(pos, sup, mass, density, qval, rval):
+        p = ParticleState(positions=pos, supports=sup, masses=mass, densities=density, kinds=kinds)
+        return warpOperation(p, props, domain, adjacency=adjacency, queryValues=qval, referenceValues=rval)
+
+    pos0 = positions.clone().requires_grad_(True)
+    sup0 = supports.clone().requires_grad_(True)
+    mass0 = masses.clone().requires_grad_(True)
+    density0 = densities.clone().requires_grad_(True)
+    qval0 = queryValues.clone().requires_grad_(True)
+    rval0 = referenceValues.clone().requires_grad_(True)
+
+    dpos = torch.randn_like(positions)
+    dsup = torch.randn_like(supports) * 0.1
+    dmass = torch.randn_like(masses)
+    ddensity = torch.randn_like(densities) * 0.1
+    dqval = torch.randn_like(queryValues)
+    drval = torch.randn_like(referenceValues)
+
+    J = torch.autograd.functional.jacobian(f, (pos0, sup0, mass0, density0, qval0, rval0), vectorize=False)
+    out = f(pos0, sup0, mass0, density0, qval0, rval0).detach()
+    acc = torch.zeros(out.numel(), dtype=DTYPE, device=DEVICE)
+    for Jk, vk in zip(J, (dpos, dsup, dmass, ddensity, dqval, drval)):
+        acc = acc + Jk.reshape(out.numel(), -1) @ vk.reshape(-1)
+    reference = acc.reshape(out.shape)
+
+    p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
+    assembled = warpOperationJVP(
+        p0, props, domain, adjacency=adjacency,
+        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
+        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
+        tangentReferenceMasses=dmass, tangentQueryDensities=ddensity, tangentReferenceDensities=ddensity,
+        tangentQueryValues=dqval, tangentReferenceValues=drval,
+        queryValues=queryValues, referenceValues=referenceValues,
+    )
+    torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
+
+
+@pytest.mark.parametrize("scheme", list(GradientScheme))
+def test_divergenceGeometryJVP_combined_matches_jacobian_reference_2d(scheme):
+    positions, supports, masses = _grid_case_2d()
+    domain = _make_domain(dim=2)
+    n = positions.shape[0]
+    kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
+    p0_forAdjacency = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
+    adjacency = radiusSearchCompactHashMap(p0_forAdjacency, domain, mode=SupportScheme.Gather)
+    _check_combined_jacobian_reference(positions, supports, masses, domain, adjacency, SupportScheme.Gather, scheme)
+
+
 @pytest.mark.parametrize("scheme", list(GradientScheme))
 @pytest.mark.parametrize("mode", [SupportScheme.Gather, SupportScheme.MeanSymmetric, SupportScheme.KernelMeanSymmetric])
-def test_divergencePositionJVP_matches_jacobian_reference_2d(mode, scheme):
+def test_divergenceGeometryJVP_matches_jacobian_reference_2d(mode, scheme):
     positions, supports, masses = _grid_case_2d()
     domain = _make_domain(dim=2)
     n = positions.shape[0]
@@ -128,49 +191,66 @@ def _minimal_case():
     return positions, p0, domain, adjacency, props, queryValues, referenceValues
 
 
-def test_divergencePositionJVP_rejects_missing_values():
+def test_divergenceGeometryJVP_rejects_missing_values():
     positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
     with pytest.raises(ValueError, match="queryValues"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
                          tangentQueryPositions=torch.zeros_like(positions))
 
 
-def test_divergencePositionJVP_rejects_dotMode():
+def test_divergenceGeometryJVP_rejects_dotMode():
     positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
     dotProps = OperationProperties(kernel=KERNEL, operation=WarpOperation.Divergence,
                                    supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll,
                                    gradientMode=GradientScheme.Symmetric, divergenceDotMode=True)
-    with pytest.raises(NotImplementedError, match="Tier-2"):
+    with pytest.raises(NotImplementedError, match="geometry JVP"):
         warpOperationJVP(p0, dotProps, domain, adjacency=adjacency,
                          tangentQueryPositions=torch.zeros_like(positions),
                          queryValues=qv, referenceValues=rv)
 
 
-def test_divergencePositionJVP_rejects_consistentDivergence():
+def test_divergenceGeometryJVP_rejects_consistentDivergence():
     positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
-    with pytest.raises(NotImplementedError, match="Tier-2"):
+    with pytest.raises(NotImplementedError, match="geometry JVP"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
                          tangentQueryPositions=torch.zeros_like(positions),
                          consistentDivergence=True,
                          queryValues=qv, referenceValues=rv)
 
 
-def test_divergencePositionJVP_rejects_tangentQueryMasses():
+def test_divergenceGeometryJVP_geometryOnly_unchanged_when_combination_allowed():
+    # Regression guard (warpier_tier2_combined_jvp_plan.md step 5): the
+    # geometry-only path (no value tangent supplied) must return exactly
+    # what it did before the combined path was added.
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    dpos = torch.zeros_like(positions)
+    viaJVP = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              tangentQueryPositions=dpos, queryValues=qv, referenceValues=rv)
+    from warpSPHCore.coreOperations import computeSPHDivergenceGeometryJVP
+    direct = computeSPHDivergenceGeometryJVP(
+        p0, domain, props.kernel, props.supportMode, adjacency,
+        tangentQueryPositions=dpos, queryValues=qv, referenceValues=rv,
+        gradientMode=props.gradientMode,
+    )
+    torch.testing.assert_close(viaJVP, direct, rtol=0, atol=0)
+
+
+def test_divergenceGeometryJVP_rejects_tangentQueryMasses():
     positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
     n = positions.shape[0]
-    with pytest.raises(NotImplementedError, match="Tier-2"):
+    with pytest.raises(NotImplementedError, match="geometry JVP"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
                          tangentQueryPositions=torch.zeros_like(positions),
                          tangentQueryMasses=torch.zeros(n, dtype=DTYPE),
                          queryValues=qv, referenceValues=rv)
 
 
-def test_divergencePositionJVP_grid_traversal_matches_adjacency_traversal():
-    # computeSPHDivergencePositionJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
-    # also supports grid (CompactHashMap) traversal, unlike warpOperationJVP's
-    # own centralized AdjacencyList-only gate -- exercised here via a direct
-    # import.
-    from warpSPHCore.coreOperations import computeSPHDivergencePositionJVP
+def test_divergenceGeometryJVP_grid_traversal_matches_adjacency_traversal():
+    # computeSPHDivergenceGeometryJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
+    # also supports grid (CompactHashMap) traversal -- exercised here via a
+    # direct import against the low-level function, independent of
+    # warpOperationJVP.
+    from warpSPHCore.coreOperations import computeSPHDivergenceGeometryJVP
 
     positions, supports, masses = _grid_case_2d()
     domain = _make_domain(dim=2)
@@ -202,7 +282,7 @@ def test_divergencePositionJVP_grid_traversal_matches_adjacency_traversal():
         queryValues=queryValues, referenceValues=referenceValues,
         gradientMode=GradientScheme.Symmetric,
     )
-    viaAdjacency = computeSPHDivergencePositionJVP(adjacency=adjacency, **common)
-    viaGrid = computeSPHDivergencePositionJVP(adjacency=hashMap, **common)
+    viaAdjacency = computeSPHDivergenceGeometryJVP(adjacency=adjacency, **common)
+    viaGrid = computeSPHDivergenceGeometryJVP(adjacency=hashMap, **common)
 
     torch.testing.assert_close(viaGrid, viaAdjacency, rtol=1e-5, atol=1e-6)

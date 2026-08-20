@@ -1,4 +1,4 @@
-"""Tier-2 position/support/mass-tangent JVP of the Density operator
+"""Geometry-tangent JVP of the Density operator
 (`warpier_forward_mode_plan.md` Phase 4, `warpier_adjoint.md` Tier 2.1):
 `dDensity_i = sum_j [ dm_j * W_ij + m_j * dW_ij ]`, `dW_ij` from
 `kernels.kernelJVP.sphKernelJVP`.
@@ -20,8 +20,8 @@ Scope: position and support tangents on both query and reference roles, plus
 a reference-side mass tangent (`dm_j`) -- the terms Tier 2.1's formula
 actually has. No query-side mass tangent (`Density_i` has no `m_i` term) and
 no density tangent (Density has no `queryValues`/`referenceValues`/density
-input at all). Field-value tangents are Tier 1's `warpOperationJVP`, not
-this.
+input at all). Field-value tangents are the value JVP's `warpOperationJVP`
+path, not this.
 """
 
 from typing import Any, Optional
@@ -44,7 +44,7 @@ from ._jvpCommon import (
     buildNullCorrectionData as _buildNullCorrectionData,
 )
 
-__all__ = ['computeSPHDensityPositionJVP']
+__all__ = ['computeSPHDensityGeometryJVP']
 
 
 @wp.func
@@ -163,7 +163,7 @@ def computeSPHDensityJVP_Kernel(
     )
 
 
-def computeSPHDensityPositionJVP(
+def computeSPHDensityGeometryJVP(
     queryParticles: ParticleState,
     domain: DomainDescription,
     kernel: KernelFunctions,
@@ -181,6 +181,13 @@ def computeSPHDensityPositionJVP(
     returns and what every `warpOperation` call in this codebase already
     threads through) or a `CompactHashMap`, not the warp-side struct
     `launchOperator` builds internally.
+
+    Unlike the five value-having operators' `computeSPH<Op>GeometryJVP`,
+    this is never a **partial** contribution: Density has no
+    `queryValues`/`referenceValues` input at all (it reads
+    `queryParticles.masses`/densities directly), so there is no value-JVP
+    piece to add on top -- this function's return value already is
+    Density's full JVP (`warpier_tier2_combined_jvp_plan.md`).
     """
     referenceParticles = referenceParticles if referenceParticles is not None else queryParticles
     dim = domain.dim

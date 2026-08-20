@@ -1,9 +1,9 @@
-"""Tier-2 position/support/mass/density-tangent JVP of the Divergence
+"""Geometry-tangent JVP of the Divergence
 operator (`warpier_tier2_operators_plan.md` Step 5, `warpier_adjoint.md`
 Tier 2.2): `dDivergence_i = sum_j [ dot(dcoeff_ij, G_ij) + dot(coeff_ij,
 dG_ij) ]`, `coeff_ij = fi*A_ij + fj*B_ij` (`fi`/`fj` = frozen vector-valued
 `queryValues`/`referenceValues`), `dotMode=False` only (`divergenceDotMode`
-is out of Tier-2 scope, enforced centrally in `operations.py`).
+is out of geometry-JVP scope, enforced centrally in `operations.py`).
 
 CSR (per-query-particle) launch shape (`warpier_tier2_jvp_csr_backend_plan.md`
 Step 3): same `_jvpCommon.gradientWeightsJVP` coefficient building block
@@ -36,7 +36,7 @@ from ._jvpCommon import (
     buildNullCorrectionData as _buildNullCorrectionData,
 )
 
-__all__ = ['computeSPHDivergencePositionJVP']
+__all__ = ['computeSPHDivergenceGeometryJVP']
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ def computeSPHDivergenceJVP_Kernel(
     )
 
 
-def computeSPHDivergencePositionJVP(
+def computeSPHDivergenceGeometryJVP(
     queryParticles: ParticleState,
     domain: DomainDescription,
     kernel: KernelFunctions,
@@ -199,16 +199,25 @@ def computeSPHDivergencePositionJVP(
     referenceValues: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
-    """`dDivergence_i`, shape `[numParticles]`. `queryValues`/
-    `referenceValues` (`fi`/`fj`, `[numParticles, dim]` vector fields) are
-    required and frozen. `queryParticles.densities`/
+    """`dDivergence_i`, shape `[numParticles]`.
+
+    This is the geometry/mass/density-tangent **partial** contribution to
+    Divergence's JVP -- `queryValues`/`referenceValues` are held at their
+    **primal** (non-tangent) value here. It is **not** the full derivative
+    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
+    relaunched with the tangent value arrays) for that, or call
+    `warpOperationJVP` directly, which sums both automatically
+    (`warpier_tier2_combined_jvp_plan.md`).
+
+    `queryValues`/`referenceValues` (`fi`/`fj`, `[numParticles, dim]` vector
+    fields) are required and frozen here. `queryParticles.densities`/
     `referenceParticles.densities` must already hold real values, same
-    requirement as `computeSPHGradientPositionJVP`. `adjacency` is an
+    requirement as `computeSPHGradientGeometryJVP`. `adjacency` is an
     `AdjacencyList` or `CompactHashMap`.
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
-            "computeSPHDivergencePositionJVP: queryValues and referenceValues "
+            "computeSPHDivergenceGeometryJVP: queryValues and referenceValues "
             "(frozen fi/fj) are both required."
         )
 

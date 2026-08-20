@@ -1,5 +1,5 @@
 """Step-0 diagnostic for `warpier_tier2_operators_plan.md` (Lookout 2): does
-`computeSPHDensityPositionJVP`'s output carry a gradient back to its own
+`computeSPHDensityGeometryJVP`'s output carry a gradient back to its own
 inputs under ordinary reverse-mode torch autograd?
 
 The suspicion (reasoned from code, not yet measured): the pair-indexed
@@ -22,7 +22,7 @@ wp.init()
 
 from warpSPHCore import AdjacencyList, DomainDescription, ParticleState, radiusSearchCompactHashMap
 from warpSPHCore.enumTypes import SupportScheme, KernelFunctions
-from warpSPHCore.coreOperations.wp_densityJVP import computeSPHDensityPositionJVP
+from warpSPHCore.coreOperations.wp_densityJVP import computeSPHDensityGeometryJVP
 
 DEVICE = torch.device("cpu")
 DTYPE = torch.float32
@@ -52,7 +52,7 @@ def main():
 
     p = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
 
-    dDensity = computeSPHDensityPositionJVP(
+    dDensity = computeSPHDensityGeometryJVP(
         p, domain, KERNEL, SupportScheme.Gather, adjacency,
         tangentQueryPositions=tangentQueryPositions,
         tangentReferenceMasses=tangentReferenceMasses,

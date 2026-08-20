@@ -1,4 +1,4 @@
-"""Tier-2 position/support/mass/density-tangent JVP of the Gradient operator
+"""Geometry-tangent JVP of the Gradient operator
 (`warpier_tier2_operators_plan.md` Step 4, `warpier_adjoint.md` Tier 2.2):
 `dGradient_i = sum_j [ dcoeff_ij*G_ij + coeff_ij*dG_ij ]`, `coeff_ij =
 fi*A_ij + fj*B_ij` (`fi`/`fj` = frozen `queryValues`/`referenceValues`),
@@ -9,7 +9,7 @@ CSR (per-query-particle) launch shape (`warpier_tier2_jvp_csr_backend_plan.md`
 Step 3, first of "the shared-(G,dG) four"): the `A`/`B`/`dA`/`dB`
 coefficient/combination step lives in the kernel body via
 `_jvpCommon.gradientWeightsJVP`, mirroring the primal `wp_gradient.py`
-kernel's own per-`GradientScheme` branching. Tier-2 JVP's scope is scalar
+kernel's own per-`GradientScheme` branching. The geometry JVP.s scope is scalar
 `fi`/`fj` only (no CRK/volume/grad-h, no vector- or higher-rank fields), so
 unlike primal `wp_gradient.py`'s generic `outerTensorProduct`/
 `flatOutputShape` machinery, the output here is always exactly a
@@ -42,7 +42,7 @@ from ._jvpCommon import (
     buildNullCorrectionData as _buildNullCorrectionData,
 )
 
-__all__ = ['computeSPHGradientPositionJVP']
+__all__ = ['computeSPHGradientGeometryJVP']
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +187,7 @@ def computeSPHGradientJVP_Kernel(
     )
 
 
-def computeSPHGradientPositionJVP(
+def computeSPHGradientGeometryJVP(
     queryParticles: ParticleState,
     domain: DomainDescription,
     kernel: KernelFunctions,
@@ -205,17 +205,26 @@ def computeSPHGradientPositionJVP(
     referenceValues: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
-    """`dGradient_i`, shape `[numParticles, dim]`. `queryValues`/
-    `referenceValues` (`fi`/`fj`, scalar fields) are required and frozen (no
-    tangent on them -- that would be Tier 1, never derived combined with
-    Tier 2). `queryParticles.densities`/`referenceParticles.densities` must
-    already hold real (non-dummy) values -- `coeff_ij` depends on them
-    directly, same requirement as `computeSPHInterpolatePositionJVP`.
-    `adjacency` is an `AdjacencyList` or `CompactHashMap`.
+    """`dGradient_i`, shape `[numParticles, dim]`.
+
+    This is the geometry/mass/density-tangent **partial** contribution to
+    Gradient's JVP -- `queryValues`/`referenceValues` are held at their
+    **primal** (non-tangent) value here. It is **not** the full derivative
+    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
+    relaunched with the tangent value arrays) for that, or call
+    `warpOperationJVP` directly, which sums both automatically
+    (`warpier_tier2_combined_jvp_plan.md`).
+
+    `queryValues`/`referenceValues` (`fi`/`fj`, scalar fields) are required
+    and frozen (no tangent on them here). `queryParticles.densities`/
+    `referenceParticles.densities` must already hold real (non-dummy) values
+    -- `coeff_ij` depends on them directly, same requirement as
+    `computeSPHInterpolateGeometryJVP`. `adjacency` is an `AdjacencyList` or
+    `CompactHashMap`.
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
-            "computeSPHGradientPositionJVP: queryValues and referenceValues "
+            "computeSPHGradientGeometryJVP: queryValues and referenceValues "
             "(frozen fi/fj) are both required."
         )
 

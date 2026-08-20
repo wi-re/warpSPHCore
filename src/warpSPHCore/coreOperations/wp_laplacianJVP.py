@@ -1,4 +1,4 @@
-"""Tier-2 position/support/mass/density-tangent JVP of the Laplacian
+"""Geometry-tangent JVP of the Laplacian
 operator's Brookshaw and Naive schemes (`warpier_tier2_operators_plan.md`
 Steps 7/8, `warpier_adjoint.md` Tiers 2.2/2.3). Dot/Default `laplacianMode`s
 are out of scope, enforced centrally in `operations.py`.
@@ -6,7 +6,7 @@ are out of scope, enforced centrally in `operations.py`.
 CSR (per-query-particle) launch shape (`warpier_tier2_jvp_csr_backend_plan.md`
 Steps 3/4):
 
-**Brookshaw** (`computeSPHLaplacianBrookshawPositionJVP`): `q_ij =
+**Brookshaw** (`computeSPHLaplacianBrookshawGeometryJVP`): `q_ij =
 (fj-fi)*B_ij` (`B` from `_jvpCommon.gradientWeightsJVP` -- literally the same
 coefficient as Gradient's `B` term, not re-derived), `D_ij = r_ij +
 eps*h_ij` (`eps=1e-8`, matching `wp_laplacian.py`'s literal constant),
@@ -18,7 +18,7 @@ already-validated building blocks `wp_laplacian.py`'s own primal kernel uses
 (`computeDistanceVec`/`safe_sqrt`/`computePairwiseSupport`), plus
 `computePairwiseSupportJVP` for the tangent.
 
-**Naive** (`computeSPHLaplacianNaivePositionJVP`): `q_ij` is the exact same
+**Naive** (`computeSPHLaplacianNaiveGeometryJVP`): `q_ij` is the exact same
 `B_ij` again (`wp_laplacian.py`'s `q_ij` depends only on `gradientMode`,
 never `laplacianMode` -- Tier 2.2's finding, re-confirmed by Tier 2.3 under
 this scheme), but `L_ij`/`dL_ij` come from `sphKernelLaplacianJVP`
@@ -26,8 +26,8 @@ this scheme), but `L_ij`/`dL_ij` come from `sphKernelLaplacianJVP`
 estimator's own JVP) instead of Brookshaw's gradient-based `n_ij/D_ij`
 estimator, `L = sum_j q_ij*L_ij`, `dL = sum_j (dq_ij*L_ij + q_ij*dL_ij)`.
 
-`computeSPHLaplacianPositionJVP` is the thin dispatcher `operations.py`
-actually registers (`_TIER2_VALUE_DISPATCH[WarpOperation.Laplacian]`),
+`computeSPHLaplacianGeometryJVP` is the thin dispatcher `operations.py`
+actually registers (`_GEOMETRY_JVP_DISPATCH[WarpOperation.Laplacian]`),
 picking between the two by `laplacianMode`.
 
 Both schemes also support grid (`CompactHashMap`) traversal, via the same
@@ -61,9 +61,9 @@ from ._jvpCommon import (
 from ..kernels.kernelJVP import sphKernelGradientJVP, sphKernelLaplacianJVP
 
 __all__ = [
-    'computeSPHLaplacianPositionJVP',
-    'computeSPHLaplacianBrookshawPositionJVP',
-    'computeSPHLaplacianNaivePositionJVP',
+    'computeSPHLaplacianGeometryJVP',
+    'computeSPHLaplacianBrookshawGeometryJVP',
+    'computeSPHLaplacianNaiveGeometryJVP',
 ]
 
 _LAPLACIAN_EPS = 1e-8  # matches wp_laplacian.py's literal constant, not get_epsilon(r)
@@ -234,7 +234,7 @@ def computeSPHLaplacianBrookshawJVP_Kernel(
     )
 
 
-def computeSPHLaplacianBrookshawPositionJVP(
+def computeSPHLaplacianBrookshawGeometryJVP(
     queryParticles: ParticleState,
     domain: DomainDescription,
     kernel: KernelFunctions,
@@ -253,17 +253,26 @@ def computeSPHLaplacianBrookshawPositionJVP(
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `[numParticles]`, Brookshaw scheme specifically
-    (see `computeSPHLaplacianNaivePositionJVP` for Naive; `computeSPHLaplacianPositionJVP`
+    (see `computeSPHLaplacianNaiveGeometryJVP` for Naive; `computeSPHLaplacianGeometryJVP`
     is the dispatcher between the two that `operations.py` actually calls).
+
+    This is the geometry/mass/density-tangent **partial** contribution to
+    Laplacian's JVP -- `queryValues`/`referenceValues` are held at their
+    **primal** (non-tangent) value here. It is **not** the full derivative
+    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
+    relaunched with the tangent value arrays) for that, or call
+    `warpOperationJVP` directly, which sums both automatically
+    (`warpier_tier2_combined_jvp_plan.md`).
+
     `queryValues`/`referenceValues` (`fi`/`fj`, scalar fields) are required
-    and frozen. `queryParticles.densities`/`referenceParticles.densities`
+    and frozen here. `queryParticles.densities`/`referenceParticles.densities`
     must already hold real values, same requirement as
-    `computeSPHGradientPositionJVP`. `adjacency` is an `AdjacencyList` or
+    `computeSPHGradientGeometryJVP`. `adjacency` is an `AdjacencyList` or
     `CompactHashMap`.
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
-            "computeSPHLaplacianBrookshawPositionJVP: queryValues and "
+            "computeSPHLaplacianBrookshawGeometryJVP: queryValues and "
             "referenceValues (frozen fi/fj) are both required."
         )
 
@@ -471,7 +480,7 @@ def computeSPHLaplacianNaiveJVP_Kernel(
     )
 
 
-def computeSPHLaplacianNaivePositionJVP(
+def computeSPHLaplacianNaiveGeometryJVP(
     queryParticles: ParticleState,
     domain: DomainDescription,
     kernel: KernelFunctions,
@@ -496,10 +505,18 @@ def computeSPHLaplacianNaivePositionJVP(
     re-confirmed here), `L = sum_j q_ij*L_ij`, `dL = sum_j (dq_ij*L_ij +
     q_ij*dL_ij)`, `(L_ij, dL_ij)` from `sphKernelLaplacianJVP`
     (`kernels/kernelJVP.py`). `adjacency` is an `AdjacencyList` or
-    `CompactHashMap`."""
+    `CompactHashMap`.
+
+    This is the geometry/mass/density-tangent **partial** contribution to
+    Laplacian's JVP -- `queryValues`/`referenceValues` are held at their
+    **primal** (non-tangent) value here. It is **not** the full derivative
+    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
+    relaunched with the tangent value arrays) for that, or call
+    `warpOperationJVP` directly, which sums both automatically
+    (`warpier_tier2_combined_jvp_plan.md`)."""
     if queryValues is None or referenceValues is None:
         raise ValueError(
-            "computeSPHLaplacianNaivePositionJVP: queryValues and "
+            "computeSPHLaplacianNaiveGeometryJVP: queryValues and "
             "referenceValues (frozen fi/fj) are both required."
         )
 
@@ -561,7 +578,7 @@ def computeSPHLaplacianNaivePositionJVP(
     return dLaplacian_t
 
 
-def computeSPHLaplacianPositionJVP(
+def computeSPHLaplacianGeometryJVP(
     queryParticles: ParticleState,
     domain: DomainDescription,
     kernel: KernelFunctions,
@@ -571,22 +588,22 @@ def computeSPHLaplacianPositionJVP(
     laplacianMode: LaplacianScheme = LaplacianScheme.Brookshaw,
     **kwargs,
 ) -> torch.Tensor:
-    """Dispatcher `operations.py` actually registers in `_TIER2_VALUE_DISPATCH`
-    -- routes to `computeSPHLaplacianBrookshawPositionJVP`/
-    `computeSPHLaplacianNaivePositionJVP` by `laplacianMode`. Dot/Default are
+    """Dispatcher `operations.py` actually registers in `_GEOMETRY_JVP_DISPATCH`
+    -- routes to `computeSPHLaplacianBrookshawGeometryJVP`/
+    `computeSPHLaplacianNaiveGeometryJVP` by `laplacianMode`. Dot/Default are
     rejected before reaching here (`operations.py`'s own centralized scope
     check); any other value is a defensive fallback, not expected to be
     reachable."""
     if laplacianMode is LaplacianScheme.Brookshaw:
-        return computeSPHLaplacianBrookshawPositionJVP(
+        return computeSPHLaplacianBrookshawGeometryJVP(
             queryParticles, domain, kernel, supportMode, adjacency, tangentQueryPositions, **kwargs,
         )
     elif laplacianMode is LaplacianScheme.Naive:
-        return computeSPHLaplacianNaivePositionJVP(
+        return computeSPHLaplacianNaiveGeometryJVP(
             queryParticles, domain, kernel, supportMode, adjacency, tangentQueryPositions, **kwargs,
         )
     raise NotImplementedError(
-        f"computeSPHLaplacianPositionJVP: Tier-2 laplacianMode={laplacianMode} is not "
+        f"computeSPHLaplacianGeometryJVP: geometry JVP laplacianMode={laplacianMode} is not "
         "implemented -- only Brookshaw and Naive are (warpier_tier2_operators_plan.md "
         "Steps 7/8)."
     )
