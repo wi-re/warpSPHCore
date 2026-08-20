@@ -126,6 +126,16 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   produces canonical strides at any dimensionality and has no transpose to
   go wrong. This is 1D-specific — a 2D-only test pass will not catch it.
 
+* **A kernel output declared `wp.array(dtype=vec_t)`, where `vec_t = vector(length=dim_t,
+  dtype=scalar_t)`, fails at launch time whenever `dim_t` isn't pinned via env var** (the default in
+  this repo's test suite) — Warp resolves `vec_t` to a length-`Any`, ungrounded vector type in that
+  case and rejects it (`TypeError: ... cannot be generic, got array(ndim=1, dtype=vec0f)`). Declare
+  such outputs `wp.array(dtype=Any)` instead (matching every other dimension-generic production
+  kernel, e.g. `wp_gradient.py`'s `outputValues`), and allocate the concrete `(numPairs, dim)` torch
+  tensor separately, cast via `castTorchToWarpAsBuiltins` (which resolves the concrete vector width
+  from the tensor's own shape, the same way `buildParticleSoA` already does for `positions`). Found
+  while porting the shared Tier-2 JVP `∇W_ij` kernel (`wp_kernelGradientJVP.py`).
+
 ## AD-bridge / autograd gotchas
 
 * **`warpSPHCore_PRECISION` is baked into every compiled kernel at first
@@ -268,6 +278,20 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   was luck, not a property checked in advance. Any future jit.script
   removal needs an actual run of the affected function (or its test
   coverage), not just a successful `import`.
+
+* **A dispatch branch that mirrors an existing one but omits a kwarg, or a scope-boundary guard that
+  isn't updated when a new scheme lands, is invisible to a single-scheme smoke test.** Two real bugs
+  shipped this way in the Tier-2 JVP dispatch wiring: `gradientMode` was forwarded to every Tier-2
+  operator's dispatch call except Laplacian's (silently defaulted to `GradientScheme.Symmetric`
+  regardless of what was requested — caught only because the Jacobian-reference test parametrizes
+  over all four `GradientScheme`s: 15/20 Laplacian cases failed, `Symmetric` alone passed); and a
+  centralized scope-boundary check written *before* `LaplacianScheme.Naive` was implemented kept
+  letting it through to Brookshaw's dispatch (would have silently returned Brookshaw's answer for a
+  `Naive` request) until a guard was added inside the function itself, caught by re-reading the
+  scope-boundary logic against what was actually implemented, not by a failing test. Any new dispatch
+  branch added by mirroring an existing one needs the same kwarg-forwarding and scope-guard review,
+  and its test file needs to sweep every scheme/mode value the operator supports, not just the
+  default one.
 
 ## Architectural facts still true (open capability gaps, not yet closed)
 
