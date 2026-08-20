@@ -401,15 +401,51 @@ bug to fix under this plan):**
    rederived independently -- the script computes `B`/`dB` once (in `_gradient_weights`) and reuses
    it for both Gradient/Divergence/Curl's coefficient and Laplacian's `q_ij`/`dq_ij`.
 
-**Scope note: Laplacian's Dot/Default schemes are NOT covered by this deliverable, despite the
-plan entry's title.** `computeLaplacianDot2`/`computeDotLaplacian` (`math/wp_laplaciandot.py`) do
-per-spatial-component block indexing into the field array (`q_ij[block*dim+k]`) that Brookshaw's
-plain `dot(kernelGradient, n_ij)` doesn't need -- a genuinely separate (if likely mechanical)
+**Scope note: Laplacian's Dot/Default schemes were NOT covered by this deliverable, despite the
+plan entry's title -- RESOLVED 2026-08-20 (informally "Tier 2.2b"), see below.**
+`computeLaplacianDot2`/`computeDotLaplacian` (`math/wp_laplaciandot.py`) do per-spatial-component
+block indexing into the field array (`q_ij[block*dim+k]`) that Brookshaw's plain
+`dot(kernelGradient, n_ij)` doesn't need -- a genuinely separate (if likely mechanical)
 JVP-assembly exercise, not just a formula swap the way Divergence/Curl were thin follow-ups on
 Gradient. Deferred rather than attempted under this tier's time budget; Brookshaw is what
 `wp_laplacian.py`'s own comments treat as the consistent estimator and is the scheme Tier 2.3
-already assumes Tier 2.2 covers, so this does not block the suggested order below. Worth its own
-small follow-up (`Tier 2.2b`, informally) before Tier 2.5 needs a Laplacian JVP under CRK.
+already assumes Tier 2.2 covers, so this did not block the suggested order below.
+
+**Tier 2.2b -- Result (done, 2026-08-20).** Both schemes turned out to reuse Brookshaw's exact
+`(G, dG, n_ij, dn_ij, D_ij, dD_ij)` regularized-distance chain and `P = dot(G,n_ij)/D_ij` (factored
+into shared `_laplacianGeometryChainJVP`/`_laplacianPJVP` helpers in `wp_laplacianJVP.py`, Brookshaw
+itself refactored to use them, no behavior change). **Default** (`computeDotLaplacian`) turned out
+to have *no* block indexing at all -- it's Brookshaw's own `-2*q_ij*P`-shaped formula one
+quotient-rule level deeper (a second regularized distance `D2_ij = r_ij + 1e-12*h_ij`, a different
+literal `eps` than `D_ij`'s `1e-8`), broadcast elementwise across the field; so it generalizes
+directly, no per-component loop needed. **Dot** (`computeLaplacianDot2`, DJ Price SPH/MHD eq 96) is
+the one with genuine `dim`-block projection (`proj_b = dot(q_ij[block b], n_ij)`), differentiated
+by the ordinary product rule (`dproj_b`) alongside `F_ab = P`/`dF_ab` -- mechanical once `P`/`dP`
+were already in hand, exactly as predicted. Both schemes' `queryValues`/`referenceValues`/output are
+generic `Any`-typed (following `computeSPHInterpolateGeometryJVP`'s precedent), unlike
+Brookshaw/Naive's fixed `scalar_t` -- Dot's own forward formula needs a field whose flattened
+per-particle size is a multiple of `dim` in >1D (re-enforcing `wp_laplacian.py`'s own `ValueError`),
+so a plain scalar field only stays in-scope for Dot when `dim == 1`. One Warp-specific hazard
+surfaced and avoided: the per-component loop bound must not be read via a vector's `.length`
+(`math/wp_distance.py`'s `minimumImageDistance` already documents this as unreliable on older Warp
+versions), so `flatInputShape` is threaded through explicitly -- `_jvpCommon.launchGeometryJVP`
+gained an `extraScalars` passthrough for this (a plain Python int appended to the kernel's own
+argument list, not part of the autograd-tracked tensor set). Validated against
+`torch.autograd.functional.jacobian` the same way as every other scheme in this file. Writing Dot's
+test initially surfaced a pre-existing bug (not introduced by this tier) where `computeLaplacianDot2`'s
+own automatic reverse-mode adjoint was wrong, making the usual jacobian-based reference untrustworthy
+for that scheme -- root cause: a Warp code-generation limitation where a loop-accumulated local
+(`proj`) consumed by a further non-linear op in the same function silently drops part of its
+reverse-mode gradient, confirmed via a minimal from-scratch repro. The same bug independently
+reproduced in Tier-2's own new `computeSPHLaplacianDotJVP_Func_i`. **Fixed same-day**: moving each
+function's accumulation loop into its own separate `@wp.func` that returns the accumulated value
+(rather than leaving it as a local reused in a non-linear op later in the same function) resolves it
+in both places -- `scripts/gradcheck_tier2_jvp_laplacian.py` now runs all four `LaplacianScheme`s
+through `torch.autograd.gradcheck`, Dot included, all green. Full write-up in
+`docs/lessons_learned.md`. Both schemes green on the standard jacobian-based reference (see
+`tests/operations/test_forward_mode_geometry_jvp_laplacian_{dot,default}.py`); full `pytest tests/`
+and `operation_matrix.py` suites unaffected (this tier's changes are additive plus Brookshaw's own
+already-covered refactor).
 
 **Validation, same two independent code paths as Tier 2.1 (both exact analytic derivatives, no
 finite differences):** a hand-written dense all-pairs per-pair kernel built only from already-

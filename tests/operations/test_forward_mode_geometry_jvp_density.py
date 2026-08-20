@@ -25,6 +25,7 @@ from warpSPHCore import (
     DomainDescription,
     OperationProperties,
     ParticleState,
+    ParticleTangentState,
     radiusSearchCompactHashMap,
     warpOperation,
     warpOperationJVP,
@@ -108,9 +109,8 @@ def test_densityGeometryJVP_matches_jacobian_reference_1d(mode):
 
     assembled = warpOperationJVP(
         p0, props, domain, adjacency=adjacency,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass),
     )
 
     torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
@@ -148,9 +148,8 @@ def test_densityGeometryJVP_matches_jacobian_reference_2d():
 
     assembled = warpOperationJVP(
         p0, props, domain, adjacency=adjacency,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass),
     )
 
     torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
@@ -170,8 +169,8 @@ def test_densityGeometryJVP_none_adjacency_matches_explicit():
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll)
     torch.manual_seed(7)
     dpos = torch.randn_like(positions)
-    viaExplicit = warpOperationJVP(p0, props, domain, adjacency=adjacency, tangentQueryPositions=dpos)
-    viaNone = warpOperationJVP(p0, props, domain, adjacency=None, tangentQueryPositions=dpos)
+    viaExplicit = warpOperationJVP(p0, props, domain, adjacency=adjacency, queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None))
+    viaNone = warpOperationJVP(p0, props, domain, adjacency=None, queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None))
     torch.testing.assert_close(viaNone, viaExplicit, rtol=1e-4, atol=1e-5)
 
 
@@ -186,7 +185,7 @@ def test_densityGeometryJVP_rejects_combination_with_value_tangent():
     n = positions.shape[0]
     with pytest.raises(NotImplementedError, match="geometry JVP"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                         tangentQueryPositions=torch.zeros_like(positions),
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
                          tangentQueryValues=torch.zeros(n, dtype=DTYPE))
 
 
@@ -213,9 +212,8 @@ def test_densityGeometryJVP_grid_traversal_matches_adjacency_traversal():
 
     common = dict(
         queryParticles=p0, domain=domain, kernel=KERNEL, supportMode=SupportScheme.Gather,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass),
     )
     viaAdjacency = computeSPHDensityGeometryJVP(adjacency=adjacency, **common)
     viaGrid = computeSPHDensityGeometryJVP(adjacency=hashMap, **common)
@@ -238,4 +236,4 @@ def test_otherOperators_geometryJVP_still_raise():
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll)
     with pytest.raises(NotImplementedError, match="geometry JVP"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                         tangentQueryPositions=torch.zeros_like(positions))
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None))

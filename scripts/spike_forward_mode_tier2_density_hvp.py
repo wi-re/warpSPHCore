@@ -52,7 +52,7 @@ import torch
 import warp as wp
 
 from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, line_case, grid_case_2d, make_domain
-from warpSPHCore import DomainDescription, OperationProperties, ParticleState, radiusSearchCompactHashMap, warpOperation, warpOperationHVP
+from warpSPHCore import DomainDescription, OperationProperties, ParticleState, ParticleTangentState, radiusSearchCompactHashMap, warpOperation, warpOperationHVP
 from warpSPHCore.coreOperations import computeSPHDensityGeometryJVP
 from warpSPHCore.enumTypes import OperationDirection, SupportScheme, WarpOperation
 
@@ -83,7 +83,8 @@ def fd_hvp_reference(pos0, sup0, mass0, domain, adjacency, kinds, mode, v, dim, 
         def g(x):
             p = ParticleState(positions=x, supports=sup0, masses=mass0, densities=None, kinds=kinds)
             return computeSPHDensityGeometryJVP(p, domain, KERNEL, mode, adjacency,
-                                                tangentQueryPositions=ea, tangentReferencePositions=zero)
+                                                queryTangentState=ParticleTangentState(positions=ea, supports=None, masses=None),
+                                                referenceTangentState=ParticleTangentState(positions=zero, supports=None, masses=None))
 
         gp = g(pos0 + eps * v)
         gm = g(pos0 - eps * v)

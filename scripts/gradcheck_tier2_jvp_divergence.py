@@ -28,7 +28,7 @@ import torch
 import warp as wp
 
 from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, grid_case_2d, make_domain
-from warpSPHCore import OperationProperties, ParticleState, warpOperation
+from warpSPHCore import OperationProperties, ParticleState, ParticleTangentState, warpOperation
 from warpSPHCore.enumTypes import GradientScheme, OperationDirection, SupportScheme, WarpOperation
 from warpSPHCore.coreOperations.wp_divergenceJVP import computeSPHDivergenceGeometryJVP
 
@@ -62,9 +62,8 @@ def main():
         p = ParticleState(positions=pos, supports=sup, masses=masses.detach(), densities=dens, kinds=kinds)
         return computeSPHDivergenceGeometryJVP(
             p, domain, KERNEL, SupportScheme.Gather, adjacency,
-            tangentQueryPositions=tqp, tangentReferencePositions=tqp,
-            tangentQuerySupports=tqs, tangentReferenceSupports=tqs,
-            tangentReferenceMasses=trm,
+            queryTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=None),
+            referenceTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=trm),
             queryValues=qval, referenceValues=rval,
             gradientMode=GradientScheme.Symmetric,
         )

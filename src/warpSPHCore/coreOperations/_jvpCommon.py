@@ -240,34 +240,42 @@ def launchGeometryJVP(
     queryPositions: torch.Tensor, querySupports: torch.Tensor, queryMasses: torch.Tensor,
     referencePositions: torch.Tensor, referenceSupports: torch.Tensor, referenceMasses: torch.Tensor,
 
-    tangentQueryPositions: torch.Tensor, tangentQuerySupports: torch.Tensor, tangentQueryMasses: torch.Tensor,
-    tangentReferencePositions: torch.Tensor, tangentReferenceSupports: torch.Tensor, tangentReferenceMasses: torch.Tensor,
+    queryTangentState: 'ParticleTangentState', referenceTangentState: 'ParticleTangentState',
 
     outputShape: int,
     outputDtype: Any,
 
     queryDensities: Optional[torch.Tensor] = None,
     referenceDensities: Optional[torch.Tensor] = None,
-    tangentQueryDensities: Optional[torch.Tensor] = None,
-    tangentReferenceDensities: Optional[torch.Tensor] = None,
 
     gradientMode: Optional['GradientScheme'] = None,
     laplacianMode: Optional['LaplacianScheme'] = None,
 
     extraTensors: tuple = (),
+    extraScalars: tuple = (),
 ) -> torch.Tensor:
     """Autograd-bridged launcher for every Tier-2 JVP kernel's shared CSR
     argument order (`queryState, referenceState, queryTangentState,
     referenceTangentState, domainState, useAdjacency, adjacencyState,
-    gridState, correctionData, kernelProperties[, *extraTensors],
-    outputValues`) -- routes through `StateAwareWarpFunction` (the same
-    bridge every primal operator reaches via `launchOperator`/`_launch`)
-    instead of a bare `wp.launch`, so gradients flow back through
-    `positions`/`supports`/`masses`/`densities` on both the query and
-    reference roles, their tangent counterparts, and any `extraTensors`
-    (e.g. Gradient/Divergence/Curl/Laplacian's frozen `queryValues`/
-    `referenceValues`) -- closing the reverse-mode gap
+    gridState, correctionData, kernelProperties[, *extraTensors][,
+    *extraScalars], outputValues`) -- routes through `StateAwareWarpFunction`
+    (the same bridge every primal operator reaches via
+    `launchOperator`/`_launch`) instead of a bare `wp.launch`, so gradients
+    flow back through `positions`/`supports`/`masses`/`densities` on both the
+    query and reference roles, their tangent counterparts, and any
+    `extraTensors` (e.g. Gradient/Divergence/Curl/Laplacian's frozen
+    `queryValues`/`referenceValues`) -- closing the reverse-mode gap
     `warpier_tier2_jvp_reverse_mode_plan.md` documents.
+
+    `extraScalars` (e.g. `LaplacianScheme.Dot`'s `flatInputShape`, needed for
+    its per-`dim`-block indexing) are plain Python ints/bools passed straight
+    through to the kernel launch, not threaded through the autograd bridge at
+    all -- there is nothing to differentiate and no `wp.array` to build, so
+    they're appended after `extraTensors` in the kernel's own parameter list.
+    Deliberately not read from a field's `wp.array`/vector `.length` inside
+    the kernel itself (see `math/wp_distance.py`'s `minimumImageDistance` for
+    why: older Warp versions silently treated `.length` as zero when used as
+    a dynamic for-loop bound).
 
     `domainState`/`correctionData`/`adjacencyState`/`gridState`/
     `kernelProperties`/particle `kinds` are built once per call and closed
@@ -287,8 +295,10 @@ def launchGeometryJVP(
         queryDensities = torch.zeros(nQuery, device=device, dtype=dtype)
     if referenceDensities is None:
         referenceDensities = torch.zeros(nRef, device=device, dtype=dtype)
+    tangentQueryDensities = queryTangentState.densities
     if tangentQueryDensities is None:
         tangentQueryDensities = torch.zeros(nQuery, device=device, dtype=dtype)
+    tangentReferenceDensities = referenceTangentState.densities
     if tangentReferenceDensities is None:
         tangentReferenceDensities = torch.zeros(nRef, device=device, dtype=dtype)
 
@@ -303,14 +313,14 @@ def launchGeometryJVP(
     _ParticleSoA = _SoA_BY_DIM[dim]
 
     flat_tensors = [
-        queryPositions, referencePositions,               # 0-1
-        querySupports, referenceSupports,                  # 2-3
-        queryMasses, referenceMasses,                       # 4-5
-        queryDensities, referenceDensities,                 # 6-7
-        tangentQueryPositions, tangentReferencePositions,   # 8-9
-        tangentQuerySupports, tangentReferenceSupports,     # 10-11
-        tangentQueryMasses, tangentReferenceMasses,         # 12-13
-        tangentQueryDensities, tangentReferenceDensities,   # 14-15
+        queryPositions, referencePositions,                                # 0-1
+        querySupports, referenceSupports,                                  # 2-3
+        queryMasses, referenceMasses,                                      # 4-5
+        queryDensities, referenceDensities,                                # 6-7
+        queryTangentState.positions, referenceTangentState.positions,      # 8-9
+        queryTangentState.supports, referenceTangentState.supports,        # 10-11
+        queryTangentState.masses, referenceTangentState.masses,            # 12-13
+        tangentQueryDensities, tangentReferenceDensities,                  # 14-15
     ] + list(extraTensors)
     n_extra = len(extraTensors)
 
@@ -337,7 +347,7 @@ def launchGeometryJVP(
             qPart, rPart, qTangent, rTangent, domainState,
             useAdjacency, adjacencyState, gridState,
             correctionData, kernelProperties,
-        ) + extra
+        ) + extra + extraScalars
 
     return StateAwareWarpFunction.apply(
         build_fn, launch_kernel, kernel, outputShape, outputDtype, *flat_tensors,

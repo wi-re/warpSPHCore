@@ -48,6 +48,7 @@ GRADCHECK_SCRIPTS = [
     "gradcheck_tier2_jvp_divergence.py",
     "gradcheck_tier2_jvp_curl.py",
     "gradcheck_tier2_jvp_laplacian.py",
+    "gradcheck_tier2_jvp_chained_backprop.py",
 ]
 
 

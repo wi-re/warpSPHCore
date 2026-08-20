@@ -20,7 +20,7 @@ import warp as wp
 
 wp.init()
 
-from warpSPHCore import AdjacencyList, DomainDescription, ParticleState, radiusSearchCompactHashMap
+from warpSPHCore import AdjacencyList, DomainDescription, ParticleState, ParticleTangentState, radiusSearchCompactHashMap
 from warpSPHCore.enumTypes import SupportScheme, KernelFunctions
 from warpSPHCore.coreOperations.wp_densityJVP import computeSPHDensityGeometryJVP
 
@@ -54,8 +54,8 @@ def main():
 
     dDensity = computeSPHDensityGeometryJVP(
         p, domain, KERNEL, SupportScheme.Gather, adjacency,
-        tangentQueryPositions=tangentQueryPositions,
-        tangentReferenceMasses=tangentReferenceMasses,
+        queryTangentState=ParticleTangentState(positions=tangentQueryPositions, supports=None, masses=None),
+        referenceTangentState=ParticleTangentState(positions=None, supports=None, masses=tangentReferenceMasses),
     )
 
     # allow_unused=True is the unambiguous check: it returns None per-tensor

@@ -26,6 +26,19 @@ class ParticleState:
     kinds: torch.Tensor # Particle types/categories, used e.g. for directional interactions or multi-material simulations. Shape [N], int32. Required: every operator kernel indexes SoA.kinds[i] unconditionally (see util/stateUtil.py's getParticleData), and OperationDirection.AllToAll used to paper over a missing kinds tensor with an N-sized zero dummy -- see warpier_fields.md Section 2.5.
     densities: Optional[torch.Tensor] = None # Densities are optional to allow for density computations which do not require pre-computed densities.
 
+@dataclass
+class ParticleTangentState:
+    """Bundled JVP tangent counterpart to `ParticleState`, minus `kinds`
+    (categorical, no tangent). Used by `warpOperationJVP`'s geometry-tangent
+    path (`_jvpCommon.py`'s `launchGeometryJVP`, every `wp_<op>JVP.py`'s
+    `computeSPH<Op>GeometryJVP`) in place of the loose parallel
+    `tangentQuery*`/`tangentReference*` tensor kwargs it replaced
+    (`warpier_tier2_correction_jvp_plan.md` phase a1)."""
+    positions: torch.Tensor # [N,D]
+    supports: torch.Tensor # [N]
+    masses: torch.Tensor # [N]
+    densities: Optional[torch.Tensor] = None # [N]
+
 @wp.struct
 class particleDataSoA_1:
     positions: wp.array(dtype=vector(length=1, dtype = scalar_t)) # type: ignore

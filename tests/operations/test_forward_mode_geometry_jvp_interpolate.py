@@ -25,6 +25,7 @@ from warpSPHCore import (
     DomainDescription,
     OperationProperties,
     ParticleState,
+    ParticleTangentState,
     radiusSearchCompactHashMap,
     warpOperation,
     warpOperationJVP,
@@ -121,9 +122,8 @@ def test_interpolateGeometryJVP_matches_jacobian_reference_1d(mode):
     p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
     assembled = warpOperationJVP(
         p0, props, domain, adjacency=adjacency,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass, tangentReferenceDensities=ddensity,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass, densities=ddensity),
         referenceValues=referenceValues,
     )
 
@@ -169,9 +169,8 @@ def test_interpolateGeometryJVP_matches_jacobian_reference_2d():
     p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
     assembled = warpOperationJVP(
         p0, props, domain, adjacency=adjacency,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass, tangentReferenceDensities=ddensity,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass, densities=ddensity),
         referenceValues=referenceValues,
     )
 
@@ -202,9 +201,9 @@ def test_interpolateGeometryJVP_none_adjacency_matches_explicit():
     torch.manual_seed(4)
     dpos = torch.randn_like(positions)
     viaExplicit = warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                                   tangentQueryPositions=dpos, referenceValues=referenceValues)
+                                   queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None), referenceValues=referenceValues)
     viaNone = warpOperationJVP(p0, props, domain, adjacency=None,
-                               tangentQueryPositions=dpos, referenceValues=referenceValues)
+                               queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None), referenceValues=referenceValues)
     torch.testing.assert_close(viaNone, viaExplicit, rtol=1e-4, atol=1e-5)
 
 
@@ -253,9 +252,8 @@ def test_interpolateGeometryJVP_combined_matches_jacobian_reference():
     p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
     assembled = warpOperationJVP(
         p0, props, domain, adjacency=adjacency,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass, tangentReferenceDensities=ddensity,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass, densities=ddensity),
         tangentReferenceValues=drval,
         referenceValues=referenceValues,
     )
@@ -270,11 +268,11 @@ def test_interpolateGeometryJVP_geometryOnly_unchanged_when_combination_allowed(
     positions, p0, domain, adjacency, props, referenceValues = _minimal_case()
     dpos = torch.zeros_like(positions)
     viaJVP = warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                              tangentQueryPositions=dpos, referenceValues=referenceValues)
+                              queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None), referenceValues=referenceValues)
     from warpSPHCore.coreOperations import computeSPHInterpolateGeometryJVP
     direct = computeSPHInterpolateGeometryJVP(
         p0, domain, props.kernel, props.supportMode, adjacency,
-        tangentQueryPositions=dpos, referenceValues=referenceValues,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None), referenceValues=referenceValues,
     )
     torch.testing.assert_close(viaJVP, direct, rtol=0, atol=0)
 
@@ -283,7 +281,7 @@ def test_interpolateGeometryJVP_rejects_missing_referenceValues():
     positions, p0, domain, adjacency, props, referenceValues = _minimal_case()
     with pytest.raises(ValueError, match="referenceValues"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                         tangentQueryPositions=torch.zeros_like(positions))
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None))
 
 
 def test_interpolateGeometryJVP_rejects_queryValues():
@@ -291,7 +289,7 @@ def test_interpolateGeometryJVP_rejects_queryValues():
     n = positions.shape[0]
     with pytest.raises(ValueError, match="queryValues"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                         tangentQueryPositions=torch.zeros_like(positions),
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
                          queryValues=torch.zeros(n, dtype=DTYPE),
                          referenceValues=referenceValues)
 
@@ -301,8 +299,10 @@ def test_interpolateGeometryJVP_rejects_tangentQueryMasses():
     n = positions.shape[0]
     with pytest.raises(NotImplementedError, match="geometry JVP"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                         tangentQueryPositions=torch.zeros_like(positions),
-                         tangentQueryMasses=torch.zeros(n, dtype=DTYPE),
+                         queryTangentState=ParticleTangentState(
+                             positions=torch.zeros_like(positions), supports=None,
+                             masses=torch.zeros(n, dtype=DTYPE),
+                         ),
                          referenceValues=referenceValues)
 
 
@@ -311,7 +311,7 @@ def test_interpolateGeometryJVP_rejects_volumes():
     n = positions.shape[0]
     with pytest.raises(NotImplementedError, match="geometry JVP"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                         tangentQueryPositions=torch.zeros_like(positions),
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
                          queryVolumes=torch.zeros(n, dtype=DTYPE),
                          referenceValues=referenceValues)
 
@@ -345,9 +345,8 @@ def test_interpolateGeometryJVP_grid_traversal_matches_adjacency_traversal():
 
     common = dict(
         queryParticles=p0, domain=domain, kernel=KERNEL, supportMode=SupportScheme.Gather,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass, tangentReferenceDensities=ddensity,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass, densities=ddensity),
         referenceValues=referenceValues,
     )
     viaAdjacency = computeSPHInterpolateGeometryJVP(adjacency=adjacency, **common)

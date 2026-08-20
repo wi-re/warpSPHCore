@@ -55,7 +55,7 @@ import torch
 import warp as wp
 
 from _gradcheck_common import DEVICE, DTYPE, KERNEL, build_adjacency, line_case, make_domain
-from warpSPHCore.dataTypes import ParticleState
+from warpSPHCore.dataTypes import ParticleState, ParticleTangentState
 from warpSPHCore.enumTypes import SupportScheme
 from warpSPHCore.coreOperations.wp_densityJVP import computeSPHDensityGeometryJVP
 
@@ -79,9 +79,8 @@ def main():
         p = ParticleState(positions=pos, supports=supports, masses=masses, densities=None, kinds=kinds)
         return computeSPHDensityGeometryJVP(
             p, domain, KERNEL, SupportScheme.Gather, adjacency,
-            tangentQueryPositions=tqp, tangentReferencePositions=trp,
-            tangentQuerySupports=tqs, tangentReferenceSupports=trs,
-            tangentReferenceMasses=trm,
+            queryTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=None),
+            referenceTangentState=ParticleTangentState(positions=trp, supports=trs, masses=trm),
         )
 
     pos_leaf = positions.detach().clone().requires_grad_(True)
@@ -98,9 +97,8 @@ def main():
         p = ParticleState(positions=pos, supports=supports, masses=masses, densities=None, kinds=kinds)
         return computeSPHDensityGeometryJVP(
             p, domain, KERNEL, SupportScheme.Gather, adjacency,
-            tangentQueryPositions=tqp, tangentReferencePositions=tqp,
-            tangentQuerySupports=tqs, tangentReferenceSupports=tqs,
-            tangentReferenceMasses=trm,
+            queryTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=None),
+            referenceTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=trm),
         )
 
     pos_leaf2 = positions.detach().clone().requires_grad_(True)

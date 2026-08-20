@@ -22,6 +22,7 @@ from warpSPHCore import (
     DomainDescription,
     OperationProperties,
     ParticleState,
+    ParticleTangentState,
     radiusSearchCompactHashMap,
     warpOperation,
     warpOperationJVP,
@@ -167,13 +168,13 @@ def test_forwardOperationJVP_combines_value_and_geometry_tangent():
     dpos = torch.randn_like(positions)
 
     tier2Only = warpOperationJVP(particles, props, domain, adjacency=adjacency,
-                                 tangentQueryPositions=dpos,
+                                 queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None),
                                  queryValues=queryValues, referenceValues=referenceValues)
     tier1Only = warpOperationJVP(particles, props, domain, adjacency=adjacency,
                                  tangentQueryValues=dq, tangentReferenceValues=dr,
                                  queryValues=queryValues, referenceValues=referenceValues)
     combined = warpOperationJVP(particles, props, domain, adjacency=adjacency,
-                                tangentQueryPositions=dpos,
+                                queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None),
                                 tangentQueryValues=dq, tangentReferenceValues=dr,
                                 queryValues=queryValues, referenceValues=referenceValues)
     torch.testing.assert_close(combined, tier2Only + tier1Only, rtol=0, atol=0)

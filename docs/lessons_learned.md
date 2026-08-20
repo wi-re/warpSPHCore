@@ -136,6 +136,32 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   from the tensor's own shape, the same way `buildParticleSoA` already does for `positions`). Found
   while porting the shared Tier-2 JVP `∇W_ij` kernel (`wp_kernelGradientJVP.py`).
 
+* **A loop-accumulated local value (e.g. `proj = dot(q[block], n)`, built via a runtime `for k in
+  range(dim):` loop) that is then consumed by a further non-linear op *in the same function body*
+  (e.g. `out = proj * n`, reusing `n` again) silently drops part of its reverse-mode gradient
+  contribution — forward value is unaffected; the analytical adjoint comes out at roughly half its
+  correct value, or worse once summed over multiple neighbors with varying signs. Moving the
+  accumulation loop into its own separate `@wp.func` that *returns* the accumulated value, called
+  from the original function instead of inlining the loop, fixes it.** This is a recurring Warp
+  code-generation limitation in this repo (has surfaced more than once) — version 1.16.0 at time of
+  writing. Latest occurrence: `math/wp_laplaciandot.py`'s `computeLaplacianDot2`
+  (`LaplacianScheme.Dot`'s forward kernel) and independently `coreOperations/wp_laplacianJVP.py`'s
+  own `computeSPHLaplacianDotJVP_Func_i` (Tier-2 JVP) — same root pattern, two unrelated call sites,
+  confirmed the same bug rather than two separate ones, both fixed the same way (`computeLaplacianDot2`'s
+  own `computeDotLaplacian(q_ij, n_ij, dim, base)` overload / `wp_laplacianJVP.py`'s
+  `_laplacianDotProjJVP`). Minimal from-scratch repro (no dependency on this codebase's kernel
+  structure): a `@wp.func` computing `proj = q[0]*n[0]` inside a `for k in range(dim):` loop (`dim` a
+  runtime `wp.int32` kernel argument, not a Python literal), then `out[i] += proj * n[d]` in the
+  *same* function — `wp.Tape`'s backward gives `d(out)/dn` at half the finite-difference value;
+  moving just the loop into a second `@wp.func` that returns `proj`, called from the first, gives the
+  correct value with no other change. Two things that do **not** fix it, confirmed by trying both
+  before finding the real fix: fully avoiding the bug by unrolling everything (works, but not always
+  practical) is not the same as restructuring the multiply within one function (`leftVec = proj * n`,
+  then read `leftVec[d]` instead of `n[d]` a second time — bug survives identically); the loop itself
+  has to move to a separate function, not just the multiply that consumes its result. Confirmed fixed
+  via `torch.autograd.gradcheck` (`scripts/gradcheck_tier2_jvp_laplacian.py`, all four
+  `LaplacianScheme`s now pass) and finite differences agreeing with the jacobian-based test reference.
+
 ## AD-bridge / autograd gotchas
 
 * **`warpSPHCore_PRECISION` is baked into every compiled kernel at first

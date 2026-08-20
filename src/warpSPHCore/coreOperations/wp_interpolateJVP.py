@@ -173,13 +173,9 @@ def computeSPHInterpolateGeometryJVP(
     kernel: KernelFunctions,
     supportMode: SupportScheme,
     adjacency: 'AdjacencyList | CompactHashMap',
-    tangentQueryPositions: torch.Tensor,
+    queryTangentState: ParticleTangentState,
     referenceParticles: Optional[ParticleState] = None,
-    tangentReferencePositions: Optional[torch.Tensor] = None,
-    tangentQuerySupports: Optional[torch.Tensor] = None,
-    tangentReferenceSupports: Optional[torch.Tensor] = None,
-    tangentReferenceMasses: Optional[torch.Tensor] = None,
-    tangentReferenceDensities: Optional[torch.Tensor] = None,
+    referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
@@ -215,11 +211,22 @@ def computeSPHInterpolateGeometryJVP(
     zerosVec = lambda n: torch.zeros((n, dim), device=device, dtype=dtype)
     zerosScalar = lambda n: torch.zeros(n, device=device, dtype=dtype)
 
-    tangentReferencePositions = tangentReferencePositions if tangentReferencePositions is not None else zerosVec(nRef)
-    tangentQuerySupports = tangentQuerySupports if tangentQuerySupports is not None else zerosScalar(nQuery)
-    tangentReferenceSupports = tangentReferenceSupports if tangentReferenceSupports is not None else zerosScalar(nRef)
-    tangentReferenceMasses = tangentReferenceMasses if tangentReferenceMasses is not None else zerosScalar(nRef)
-    tangentReferenceDensities = tangentReferenceDensities if tangentReferenceDensities is not None else zerosScalar(nRef)
+    queryTangentState = ParticleTangentState(
+        positions=queryTangentState.positions,
+        supports=queryTangentState.supports if queryTangentState.supports is not None else zerosScalar(nQuery),
+        masses=zerosScalar(nQuery),
+    )
+    if referenceTangentState is None:
+        referenceTangentState = ParticleTangentState(
+            positions=zerosVec(nRef), supports=zerosScalar(nRef), masses=zerosScalar(nRef), densities=zerosScalar(nRef),
+        )
+    else:
+        referenceTangentState = ParticleTangentState(
+            positions=referenceTangentState.positions if referenceTangentState.positions is not None else zerosVec(nRef),
+            supports=referenceTangentState.supports if referenceTangentState.supports is not None else zerosScalar(nRef),
+            masses=referenceTangentState.masses if referenceTangentState.masses is not None else zerosScalar(nRef),
+            densities=referenceTangentState.densities if referenceTangentState.densities is not None else zerosScalar(nRef),
+        )
 
     outputDtype = castTorchToWarpAsBuiltins(referenceValues).dtype
 
@@ -228,11 +235,9 @@ def computeSPHInterpolateGeometryJVP(
         domain, kernel, supportMode, adjacency,
         queryParticles.positions, queryParticles.supports, queryParticles.masses,
         referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
-        tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery),
-        tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses,
+        queryTangentState, referenceTangentState,
         outputShape=nQuery,
         outputDtype=outputDtype,
         referenceDensities=referenceParticles.densities,
-        tangentReferenceDensities=tangentReferenceDensities,
         extraTensors=(referenceValues,),
     )

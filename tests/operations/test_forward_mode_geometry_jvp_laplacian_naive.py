@@ -21,6 +21,7 @@ from warpSPHCore import (
     DomainDescription,
     OperationProperties,
     ParticleState,
+    ParticleTangentState,
     radiusSearchCompactHashMap,
     warpOperation,
     warpOperationJVP,
@@ -106,9 +107,8 @@ def _check_jacobian_reference(positions, supports, masses, domain, adjacency, mo
     p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
     assembled = warpOperationJVP(
         p0, props, domain, adjacency=adjacency,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass, tangentQueryDensities=ddensity, tangentReferenceDensities=ddensity,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None, densities=ddensity),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass, densities=ddensity),
         queryValues=queryValues, referenceValues=referenceValues,
     )
     torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
@@ -157,9 +157,8 @@ def _check_combined_jacobian_reference(positions, supports, masses, domain, adja
     p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
     assembled = warpOperationJVP(
         p0, props, domain, adjacency=adjacency,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass, tangentQueryDensities=ddensity, tangentReferenceDensities=ddensity,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None, densities=ddensity),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass, densities=ddensity),
         tangentQueryValues=dqval, tangentReferenceValues=drval,
         queryValues=queryValues, referenceValues=referenceValues,
     )
@@ -238,7 +237,7 @@ def test_laplacianNaiveGeometryJVP_rejects_missing_values():
     positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
     with pytest.raises(ValueError, match="queryValues"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                         tangentQueryPositions=torch.zeros_like(positions))
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None))
 
 
 def test_laplacianNaiveGeometryJVP_geometryOnly_unchanged_when_combination_allowed():
@@ -248,11 +247,11 @@ def test_laplacianNaiveGeometryJVP_geometryOnly_unchanged_when_combination_allow
     positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
     dpos = torch.zeros_like(positions)
     viaJVP = warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                              tangentQueryPositions=dpos, queryValues=qv, referenceValues=rv)
+                              queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None), queryValues=qv, referenceValues=rv)
     from warpSPHCore.coreOperations import computeSPHLaplacianNaiveGeometryJVP
     direct = computeSPHLaplacianNaiveGeometryJVP(
         p0, domain, props.kernel, props.supportMode, adjacency,
-        tangentQueryPositions=dpos, queryValues=qv, referenceValues=rv,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None), queryValues=qv, referenceValues=rv,
         gradientMode=props.gradientMode,
     )
     torch.testing.assert_close(viaJVP, direct, rtol=0, atol=0)
@@ -287,10 +286,8 @@ def test_laplacianNaiveGeometryJVP_grid_traversal_matches_adjacency_traversal():
 
     common = dict(
         queryParticles=p0, domain=domain, kernel=KERNEL, supportMode=SupportScheme.Gather,
-        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
-        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
-        tangentReferenceMasses=dmass,
-        tangentQueryDensities=ddensity, tangentReferenceDensities=ddensity,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None, densities=ddensity),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass, densities=ddensity),
         queryValues=queryValues, referenceValues=referenceValues,
         gradientMode=GradientScheme.Symmetric,
     )

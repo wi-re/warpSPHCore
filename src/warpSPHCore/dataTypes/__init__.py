@@ -12,12 +12,13 @@ __all__.extend([
 
 
 from .domain_t import DomainDescription, domainData
-from .particleData import PointCloud, ParticleState, particleDataSoA_1, particleDataSoA_2, particleDataSoA_3, WarpParticle_1, WarpParticle_2, WarpParticle_3
+from .particleData import PointCloud, ParticleState, ParticleTangentState, particleDataSoA_1, particleDataSoA_2, particleDataSoA_3, WarpParticle_1, WarpParticle_2, WarpParticle_3
 __all__.extend([
     'DomainDescription',
     'domainData',
     'PointCloud',
     'ParticleState',
+    'ParticleTangentState',
     'particleDataSoA_1',
     'particleDataSoA_2',
     'particleDataSoA_3',

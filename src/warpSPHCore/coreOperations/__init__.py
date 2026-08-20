@@ -26,6 +26,8 @@ from .wp_laplacianJVP import (
     computeSPHLaplacianGeometryJVP,
     computeSPHLaplacianBrookshawGeometryJVP,
     computeSPHLaplacianNaiveGeometryJVP,
+    computeSPHLaplacianDotGeometryJVP,
+    computeSPHLaplacianDefaultGeometryJVP,
 )
 
 __all__ = [
@@ -45,4 +47,6 @@ __all__ = [
     "computeSPHLaplacianGeometryJVP",
     "computeSPHLaplacianBrookshawGeometryJVP",
     "computeSPHLaplacianNaiveGeometryJVP",
+    "computeSPHLaplacianDotGeometryJVP",
+    "computeSPHLaplacianDefaultGeometryJVP",
 ]

@@ -193,10 +193,10 @@ _GEOMETRY_JVP_DISPATCH = {
     WarpOperation.Gradient: computeSPHGradientGeometryJVP,
     WarpOperation.Divergence: computeSPHDivergenceGeometryJVP,
     WarpOperation.Curl: computeSPHCurlGeometryJVP,
-    # Brookshaw and Naive (warpier_tier2_operators_plan.md Steps 7/8) -- Dot/Default
-    # are rejected before reaching this table by the laplacianMode scope-boundary
-    # check above. computeSPHLaplacianGeometryJVP dispatches between the two by
-    # laplacianMode itself.
+    # Brookshaw/Naive (warpier_tier2_operators_plan.md Steps 7/8) and Dot/Default
+    # (remaining-work plan's follow-up, resolved 2026-08-20) -- computeSPHLaplacianGeometryJVP
+    # dispatches between all four by laplacianMode itself. positiveDivergence is
+    # still rejected below regardless of laplacianMode.
     WarpOperation.Laplacian: computeSPHLaplacianGeometryJVP,
 }
 
@@ -206,10 +206,7 @@ def warpOperationJVP(
     operationProperties: OperationProperties,
     domain: DomainDescription,
     tangentQueryValues: Optional[torch.Tensor] = None, tangentReferenceValues: Optional[torch.Tensor] = None,
-    tangentQueryPositions: Optional[torch.Tensor] = None, tangentReferencePositions: Optional[torch.Tensor] = None,
-    tangentQuerySupports: Optional[torch.Tensor] = None, tangentReferenceSupports: Optional[torch.Tensor] = None,
-    tangentQueryMasses: Optional[torch.Tensor] = None, tangentReferenceMasses: Optional[torch.Tensor] = None,
-    tangentQueryDensities: Optional[torch.Tensor] = None, tangentReferenceDensities: Optional[torch.Tensor] = None,
+    queryTangentState: Optional[ParticleTangentState] = None, referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None, referenceValues: Optional[torch.Tensor] = None,
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None, # if none a datastructure is created, same as warpOperation
@@ -223,8 +220,9 @@ def warpOperationJVP(
     the value-tangent path into, and Phase 4 / `warpier_tier2_operators_plan.md`
     extend with the geometry-tangent path. The contract: **supply any subset
     of value tangents (`tangentQueryValues`/`tangentReferenceValues`) and
-    geometry tangents (`tangentQuery*`/`tangentReference*` positions/
-    supports/masses/densities); the return value is their sum** -- the
+    geometry tangents (`queryTangentState`/`referenceTangentState`, each a
+    `ParticleTangentState` bundling positions/supports/masses/densities);
+    the return value is their sum** -- the
     operator's full JVP in whatever combined direction you asked for. The
     value/geometry split below is this function's own internal bookkeeping
     (which piece was derived separately), not something a caller needs to
@@ -268,12 +266,28 @@ def warpOperationJVP(
       for Density still raises `NotImplementedError`.
     """
     geometryTangentArgs = {
-        "tangentQueryPositions": tangentQueryPositions, "tangentReferencePositions": tangentReferencePositions,
-        "tangentQuerySupports": tangentQuerySupports, "tangentReferenceSupports": tangentReferenceSupports,
-        "tangentQueryMasses": tangentQueryMasses, "tangentReferenceMasses": tangentReferenceMasses,
-        "tangentQueryDensities": tangentQueryDensities, "tangentReferenceDensities": tangentReferenceDensities,
+        "queryTangentState.positions": queryTangentState.positions if queryTangentState is not None else None,
+        "referenceTangentState.positions": referenceTangentState.positions if referenceTangentState is not None else None,
+        "queryTangentState.supports": queryTangentState.supports if queryTangentState is not None else None,
+        "referenceTangentState.supports": referenceTangentState.supports if referenceTangentState is not None else None,
+        "queryTangentState.masses": queryTangentState.masses if queryTangentState is not None else None,
+        "referenceTangentState.masses": referenceTangentState.masses if referenceTangentState is not None else None,
+        "queryTangentState.densities": queryTangentState.densities if queryTangentState is not None else None,
+        "referenceTangentState.densities": referenceTangentState.densities if referenceTangentState is not None else None,
     }
     providedGeometryTangents = [name for name, value in geometryTangentArgs.items() if value is not None]
+    # Local aliases so the rest of this function's scope-boundary checks and
+    # dispatch-argument assembly below stay unchanged field-for-field --
+    # only the two dataclass call sites (Density, the five value-having
+    # operators) need to know about the bundled ParticleTangentState shape.
+    tangentQueryPositions = queryTangentState.positions if queryTangentState is not None else None
+    tangentQuerySupports = queryTangentState.supports if queryTangentState is not None else None
+    tangentQueryMasses = queryTangentState.masses if queryTangentState is not None else None
+    tangentQueryDensities = queryTangentState.densities if queryTangentState is not None else None
+    tangentReferencePositions = referenceTangentState.positions if referenceTangentState is not None else None
+    tangentReferenceSupports = referenceTangentState.supports if referenceTangentState is not None else None
+    tangentReferenceMasses = referenceTangentState.masses if referenceTangentState is not None else None
+    tangentReferenceDensities = referenceTangentState.densities if referenceTangentState is not None else None
 
     if providedGeometryTangents:
         if operationProperties.operation not in _GEOMETRY_JVP_OPERATIONS:
@@ -318,12 +332,17 @@ def warpOperationJVP(
             zeroPositions = lambda n: torch.zeros((n, domain.dim), device=queryParticles.positions.device, dtype=queryParticles.positions.dtype)
             return computeSPHDensityGeometryJVP(
                 queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
-                tangentQueryPositions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
+                queryTangentState=ParticleTangentState(
+                    positions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
+                    supports=tangentQuerySupports,
+                    masses=tangentQueryMasses,
+                ),
                 referenceParticles=referenceParticles,
-                tangentReferencePositions=tangentReferencePositions,
-                tangentQuerySupports=tangentQuerySupports,
-                tangentReferenceSupports=tangentReferenceSupports,
-                tangentReferenceMasses=tangentReferenceMasses,
+                referenceTangentState=ParticleTangentState(
+                    positions=tangentReferencePositions,
+                    supports=tangentReferenceSupports,
+                    masses=tangentReferenceMasses,
+                ),
             )
 
         # The five value-having operators: scope boundaries enforced centrally here
@@ -359,15 +378,11 @@ def warpOperationJVP(
                 "warpOperationJVP: geometry JVP Curl is only implemented for domain.dim == 2 "
                 "-- 1D and 3D are both undecided by the spike."
             )
-        if operationProperties.operation is WarpOperation.Laplacian and (
-            operationProperties.laplacianMode not in (LaplacianScheme.Brookshaw, LaplacianScheme.Naive)
-            or operationProperties.positiveDivergence
-        ):
+        if operationProperties.operation is WarpOperation.Laplacian and operationProperties.positiveDivergence:
             raise NotImplementedError(
-                "warpOperationJVP: geometry JVP Laplacian only supports laplacianMode "
-                "Brookshaw/Naive, and not positiveDivergence -- Dot/Default are "
-                "explicitly deferred and positiveDotProduct's extra term isn't in the "
-                "derived formula."
+                "warpOperationJVP: geometry JVP Laplacian does not support "
+                "positiveDivergence -- positiveDotProduct's extra term isn't in any "
+                "of the four derived laplacianMode formulas."
             )
 
         dispatchFn = _GEOMETRY_JVP_DISPATCH.get(operationProperties.operation)
@@ -379,25 +394,29 @@ def warpOperationJVP(
             )
         nQuery = queryParticles.positions.shape[0]
         zeroPositions = lambda n: torch.zeros((n, domain.dim), device=queryParticles.positions.device, dtype=queryParticles.positions.dtype)
-        # Not every value-having operator's computeSPH<Op>GeometryJVP needs every
-        # kwarg (e.g. Interpolate has no tangentQueryDensities/gradientMode/
-        # laplacianMode term at all -- query-side density never enters its formula)
-        # -- only pass what each operator's own formula actually uses, so each
-        # function's signature stays exactly what its own formula needs (mirroring
-        # wp_densityJVP.py, no unused parameters).
+        # Not every value-having operator's computeSPH<Op>GeometryJVP formula
+        # actually uses every field of the bundled ParticleTangentState (e.g.
+        # Interpolate has no query-side density term at all) -- each op's own
+        # computeSPH<Op>GeometryJVP silently drops the fields its formula
+        # doesn't need (mirroring wp_densityJVP.py, no unused parameters),
+        # same as before this dataclass bundled the loose kwargs.
+        queryTangentStateForDispatch = ParticleTangentState(
+            positions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
+            supports=tangentQuerySupports,
+            masses=tangentQueryMasses,
+            densities=tangentQueryDensities,
+        )
         dispatchKwargs = dict(
-            tangentQueryPositions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
             referenceParticles=referenceParticles,
-            tangentReferencePositions=tangentReferencePositions,
-            tangentQuerySupports=tangentQuerySupports,
-            tangentReferenceSupports=tangentReferenceSupports,
-            tangentReferenceMasses=tangentReferenceMasses,
-            tangentReferenceDensities=tangentReferenceDensities,
+            referenceTangentState=ParticleTangentState(
+                positions=tangentReferencePositions,
+                supports=tangentReferenceSupports,
+                masses=tangentReferenceMasses,
+                densities=tangentReferenceDensities,
+            ),
             queryValues=queryValues,
             referenceValues=referenceValues,
         )
-        if operationProperties.operation is not WarpOperation.Interpolate:
-            dispatchKwargs["tangentQueryDensities"] = tangentQueryDensities
         # Laplacian's q_ij reuses Gradient's own B/dB (warpier_adjoint.md Tier 2.2
         # finding 2), so it needs gradientMode too, not just laplacianMode.
         if operationProperties.operation in (WarpOperation.Gradient, WarpOperation.Divergence,
@@ -407,6 +426,7 @@ def warpOperationJVP(
             dispatchKwargs["laplacianMode"] = operationProperties.laplacianMode
         geometryResult = dispatchFn(
             queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+            queryTangentStateForDispatch,
             **dispatchKwargs,
         )
 
