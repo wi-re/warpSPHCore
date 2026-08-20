@@ -89,25 +89,32 @@ chains at least two operations through a `warpOperationJVP` call, reduces to a s
 existing per-operator gradcheck scripts go. This is the test that actually validates the plan's
 stated goal, not just its mechanics.
 
-**Caveat to build the test around, not just note in passing:** the distinct-role adjoint bug (see
-below) means any chained demonstration built with genuinely distinct query/reference tensors would
-currently fail for an unrelated, already-tracked reason. Build this demonstration using the
-self-referencing (`referenceParticles=None`) construction, same as the existing per-operator gradcheck
-scripts, and note explicitly in the test that it doesn't cover the distinct-role case for the same
-reason those don't.
+**Caveat now lifted (2026-08-20):** this previously warned that a chained demonstration built with
+genuinely distinct query/reference tensors would fail, due to the self-pair Hessian bug below. That
+bug is now root-caused and fixed (see "Related, tracked elsewhere" below) — the self-referencing
+construction is no longer required for this reason. Still fine to build Step 5's demonstration either
+way; if built with distinct query/reference tensors, no special-casing around this is needed anymore.
 
 ## Related, tracked elsewhere (not part of this plan)
 
-- **Distinct-role reverse-mode adjoint bug** (found while landing Item 3's predecessor,
-  2026-08-20): `d(kernel-derivative-shaped output)/d(primal position)` is wrong when query and
-  reference are genuinely distinct tensors, for every operator whose kernel math embeds a derivative
-  (Gradient/Divergence/Curl/Laplacian, and every Tier-2 JVP operator). Reproduces identically in
-  primal, non-JVP `warpOperation(..., WarpOperation.Gradient, ...)` — predates Tier-2 JVP entirely.
-  Fully written up in `docs/lessons_learned.md`'s "Architectural facts still true" section (OPEN,
-  2026-08-20 bullet) and tracked as its own project memory
-  (`project_tier2_jvp_distinct_role_adjoint_bug`). Root-causing it is a fresh investigation into
-  `math/wp_normalize.py`'s `@wp.func_grad` adjoints, not scoped by this plan or any of its
-  predecessors.
+- **Self-pair reverse-mode Hessian bug — FIXED 2026-08-20** (found while landing Item 3's
+  predecessor): `d(kernel-derivative-shaped output)/d(primal position)` was wrong specifically at an
+  exact self-pair (`x_i == x_j`, `r == 0`) between a query and a reference point, for every operator
+  whose kernel math differentiates `sphGradient_`'s output a further time w.r.t. position
+  (Gradient/Divergence/Curl, and every Tier-2 JVP operator's `dW`/`dG`/`dL`). **Originally
+  mischaracterized as a generic "query != reference tensors" bug — it is not**: genuinely distinct,
+  non-coincident query/reference positions were always differentiated correctly; the trigger is
+  positional coincidence specifically, which is what every existing "distinct-role" gradcheck script's
+  `positions.detach().clone()` construction happened to produce. Root cause: `math/wp_normalize.py`'s
+  `norm_hess_warp` blows up like `O(1/eps)` at `x=0` and gets multiplied against an exactly-zero
+  `kernelTerm`, silently collapsing a genuine finite nonzero limit (the kernel's own peak curvature,
+  same value `kernels/hessian.py`'s `sphKernelHessian_` already computes correctly via its own explicit
+  `q < eps` branch) down to `0.0` — a floating-point `0 * infinity` cancellation, not a genuine
+  singularity. Fixed by giving `kernels/gradient.py`'s `sphGradient_` a custom `@wp.func_grad` that
+  returns `sphKernelHessian_`/`sphGradientDkDh_`'s already-validated closed forms directly, instead of
+  Warp's automatic (buggy-at-r=0) composition. Full write-up in `docs/lessons_learned.md`'s
+  "Architectural facts still true" section and the `project_tier2_jvp_distinct_role_adjoint_bug`
+  project memory (both updated 2026-08-20 with the corrected diagnosis and fix).
 - **HVP for the five non-Density operators** — explicitly out of scope by original user choice (JVP
   only). Not a backlog item; if a future Newton-style solve needs
   `Hess(Gradient/Divergence/Curl/Laplacian/Interpolate) @ v`, expect the same shape of work Density's

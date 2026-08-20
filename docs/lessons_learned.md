@@ -369,42 +369,87 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   needing SPH domain expertise to fix; reclassified 2026-08-07 — the guard
   itself was always the correct fix, not a placeholder for one.)
 
-* **OPEN (found 2026-08-20, not fixed):** reverse-mode differentiation
-  w.r.t. a pairwise kernel's *own primal position* is wrong when query and
-  reference roles are genuinely distinct tensors — and every existing
-  `gradcheck_*_native.py`/`gradcheck_tier2_jvp_*.py` script is structurally
-  blind to it. Found while wiring `_jvpCommon.launchGeometryJVP`
-  (`warpier_tier2_jvp_reverse_mode_plan.md`): `torch.autograd.gradcheck`
-  against a case built with `referenceParticles=None` (every existing
-  gradcheck script's convention — `queryPositions is referencePositions`,
-  one shared tensor) only ever measures the *combined* sensitivity
-  `d(output)/dx_i + d(output)/dx_j` at each shared index, never each role's
-  individual partial — so a bug that is wrong per-role but happens to sum
-  correctly (or trivially to zero, by translation invariance, for a
-  translation-invariant quantity like the Tier-2 JVP's `dW`/`dG`/`dL`) is
-  invisible to it. Building the case with *separate* query/reference
-  position tensors (same values, different objects — see
-  `scripts/gradcheck_tier2_jvp_interpolate.py`'s non-asserted repro case)
-  exposes a real, substantial analytical-vs-numerical mismatch, isolated to
-  exactly the term that differentiates a kernel-derivative-shaped quantity
-  (`sphGradient_`'s output, used inside Tier-2 JVP's `dW`/`dG`/`dL`, or
-  directly inside primal Gradient's own kernel) a further time w.r.t. its
-  own position input — **confirmed to reproduce identically in primal,
-  non-JVP `warpOperation(..., WarpOperation.Gradient, ...)`**, so this
-  predates the Tier-2 JVP work entirely and is not specific to it. Every
-  other differentiable input (tangent-direction partials, and the
-  `W`/`G`/`L`-only i.e. non-second-derivative partials) checked correct
-  under the same distinct-role construction — only the second-derivative-
-  level term is wrong. Prime suspect: `math/wp_normalize.py`'s hand-derived
-  `@wp.func_grad` adjoints for `vectorNorm_warp`/`vectorNormalize_warp`
-  (the `r=0`-regularized ones `sphGradient_` calls internally), not
-  investigated further. **Practical implication:** any reverse-mode use of
-  this codebase with query and reference genuinely distinct tensors (not
-  the common single-particle-set self-interaction pattern) should be
-  treated as unverified for operators whose kernel math itself embeds a
-  derivative (Gradient, Divergence, Curl, Laplacian, and every Tier-2 JVP
-  operator) until this is root-caused; Density and Interpolate's *own*
-  first-derivative-only (`W`-only) terms are unaffected.
+* **FIXED (found 2026-08-20, root-caused and fixed same day):**
+  reverse-mode differentiation w.r.t. a pairwise kernel's *own primal
+  position* was wrong specifically at an exact self-pair (`x_i == x_j`,
+  `r == 0`) between a query point and a reference point, for any operator
+  whose kernel math differentiates a kernel-*derivative*-shaped quantity a
+  further time w.r.t. position (`sphGradient_`'s reverse-mode Jacobian —
+  Gradient/Divergence/Curl's own reverse-mode, and every Tier-2 JVP
+  operator's `dW`/`dG`/`dL`). **Originally mischaracterized** (see the
+  superseded write-up this replaces, and
+  `project_tier2_jvp_distinct_role_adjoint_bug` in Claude's memory for the
+  full corrected investigation trail) as a generic "query != reference
+  tensors" bug — it is not. Genuinely distinct, *non-coincident*
+  query/reference position sets differentiate correctly in every
+  configuration tried (all `GradientScheme`s/`SupportScheme`s, 1D/2D,
+  non-uniform supports, both primal `warpOperation` and the Tier-2 JVP
+  bridge). The real trigger is a query point and a reference point occupying
+  the *exact same location* — which is what every existing "distinct-role"
+  gradcheck script's `positions.detach().clone()` construction happens to
+  produce (same coordinates, different tensor objects), and also what every
+  `referenceParticles=None` self-referencing script's shared-leaf self-pair
+  is, which is why none of them (before this fix) actually exercised the
+  bug in a way gradcheck's *combined* per-leaf sensitivity could see: for a
+  once-differentiated (`W`-shaped) quantity, the true self-pair contribution
+  to `d(output)/dx_i` cancels exactly (`+H(0) - H(0) = 0`) regardless of
+  the individual `H(0)` value, so a wrong-but-also-zero per-role value is
+  indistinguishable from a correct one there.
+
+  **Root cause:** `math/wp_normalize.py`'s `norm_hess_warp` (the hand-
+  derived Hessian-of-`|x|` behind `vectorNormalize_warp`'s custom adjoint,
+  which is what Warp's automatic differentiation of `sphGradient_` chains
+  through) regularizes with `get_epsilon(x)` (`1e-15` at float64) and blows
+  up like `O(1/eps)` exactly at `x=0`. `sphGradient_`'s implicit product
+  rule multiplies that against `kernelTerm(q=0)`, which is exactly `0.0` in
+  floating point for a smooth kernel's derivative at its symmetric peak —
+  `huge * 0.0` silently collapses to `0.0` instead of the true finite
+  limit, a removable `0 * infinity` singularity (like `sin(x)/x` at `x=0`).
+  Confirmed empirically before the fix: one-sided finite differences from
+  both sides of a self-pair converged cleanly to the *same* nonzero value
+  as the FD step shrank (1e-3 → 1e-8) — proof the true derivative is smooth
+  and well-defined, not a genuine kink the code could defensibly round to
+  zero. Contrast with `kernels/hessian.py`'s `sphKernelHessian_` (the
+  *closed-form* Hessian, used by e.g. `coreOperations/wp_densityHVP.py` and
+  `sphKernelGradientJVP_ij`'s `KernelMeanSymmetric`/`SuperSymmetric`
+  branches, never by plain `sphGradient_` differentiation before this fix):
+  it already has an explicit `if q < eps: factorA[i,i] = 1.0` near-origin
+  branch precisely because the general `outer(x,x)/r²` term is direction-
+  dependent at `r=0` in `dim > 1` and needs a hand-derived substitution —
+  and per `wp_densityHVP.py`'s own independent notebook check, its `r=0`
+  value is correctly finite and physically meaningful (the kernel's own
+  peak curvature), not zero. `norm_hess_warp`'s generic, automatically-
+  composed route had no equivalent near-origin handling.
+
+  **Not the same as, but related to, `wp_densityHVP.py`'s self-pair
+  exclusion** (`pairMask = ii != jj` when assembling Density's HVP): that
+  exclusion is for *true* self-interaction (`i == j`, the same particle in
+  both argument slots of one shared position variable), where the total
+  second derivative is *exactly* zero for any finite `H(0)` by a
+  translation-invariance identity (`H_aa + 2H_ab + H_bb = 0`) — a different,
+  stronger three-term identity than the simple `+H(0)-H(0)` antisymmetry
+  above, and already handled correctly by explicit index-based masking.
+  This bug's `x_i == x_j` trigger is about two *independent* variables
+  (different tensors, or the same tensor at different indices) that happen
+  to coincide numerically — there the correct partial is the nonzero
+  `H(0,h)` peak curvature, not zero, and nothing upstream has (or should
+  need) `i`/`j` identity information to tell the two cases apart; only the
+  kernel math's own `r=0` limit needs to be right.
+
+  **Fix:** `kernels/gradient.py`'s `sphGradient_` (split into `_1D`/`_2D`/
+  `_3D` concrete-length variants, mirroring `math/wp_normalize.py`'s own
+  workaround for the same "`@wp.func_grad` rejects `dim_t`-generic
+  functions" Warp restriction) now carries a custom `@wp.func_grad` that
+  returns `sphKernelHessian_`/`sphGradientDkDh_`'s already-validated closed
+  forms directly, instead of relying on Warp's automatic composition
+  through `vectorNormalize_warp`/`norm_hess_warp`. Verified: the
+  raw-`wp.Tape`, r>0 case is unchanged to ~1e-11; the coincident-position
+  self-pair gradcheck (previously a ~97%-relative-error mismatch) now
+  matches finite differences; `scripts/gradcheck_tier2_jvp_interpolate.py`'s
+  previously-known-failing distinct-role case now passes;
+  `scripts/kernel_sanity_native.py` all-pass; `scripts/operation_matrix.py
+  --ci` unchanged (`OK=258, HIGH=0, ERR=0, NAN=0`); full `pytest tests/`
+  unchanged (292 passed, 1 skipped).
 
 ## Notebook/documentation conventions
 
