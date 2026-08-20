@@ -7,26 +7,179 @@ dG_ij.x*coeff_ij.y - dG_ij.y*coeff_ij.x ]` (the product-rule expansion of
 `queryValues`/`referenceValues`). `domain.dim != 2` is rejected centrally in
 `operations.py` (1D/3D both undecided by the spike).
 
-Same shape as `wp_gradientJVP.py`/`wp_divergenceJVP.py` -- pure-torch
-coefficient assembly on top of `wp_kernelGradientJVP`'s shared pair kernel.
+CSR (per-query-particle) launch shape (`warpier_tier2_jvp_csr_backend_plan.md`
+Step 3), fixed at `dim=2`. Produces a `scalar_t` per query particle
+internally; the torch-level entry point unsqueezes to `[nQuery, 1]`
+afterward. Also supports grid (`CompactHashMap`) traversal. Replaced the
+original pair-indexed (COO) implementation once proven numerically
+equivalent to float32 round-off; see git history around 2026-08-20 for that
+implementation and its own equivalence tests if reference is ever needed.
 """
 
-from typing import Optional
+from typing import Any, Optional
 import torch
+import warp as wp
 
 from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
-from ..util import castTorchToWarp
+from ..math import zero_like_warp
+from ..kernels.kernelJVP import sphKernelGradientJVP
+from ..radiusSearch.grid_util import getIndexRange
+from ..util import allocateTorchWarp, castTorchToWarpAsBuiltins
+from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i
 from ._jvpCommon import (
     buildParticleSoA as _buildParticleSoA,
     buildDomainState as _buildDomainState,
     buildKernelState as _buildKernelState,
-    gradientWeights as _gradientWeights,
+    gradientWeightsJVP as _gradientWeightsJVP,
+    buildAdjacencyOrGridState as _buildAdjacencyOrGridState,
+    buildNullCorrectionData as _buildNullCorrectionData,
 )
-from .wp_kernelGradientJVP import launchPairKernelGradientJVP as _launchPairKernelGradientJVP
 
 __all__ = ['computeSPHCurlPositionJVP']
+
+
+# ---------------------------------------------------------------------------
+# CSR (per-query-particle) launch shape.
+# ---------------------------------------------------------------------------
+
+
+@wp.func
+def computeSPHCurlJVP_Func_i(
+    i: wp.int32, dim: wp.int32,
+    iPtcl: Any, iTangentPtcl: Any,
+    referenceState: Any, referenceTangentState: Any,
+
+    domainState: domainData,
+    kernelProperties: kernelState,
+
+    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+
+    iCorrectionData: Any, correctionData: Any,
+
+    fi: Any, referenceValues: wp.array(dtype = Any), # type: ignore
+
+    outputValue: Any, # type: ignore
+):
+    out = zero_like_warp(outputValue)
+    for neighborIndex in range(numIndices):
+        jj = beginIndex + neighborIndex
+        j = wp.int32(offsetArray[jj])
+        jPtcl = getParticleData(referenceState, j)
+        if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+            if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
+                continue
+        ##########################################################
+        #   The core particle-particle interaction starts here   #
+        ##########################################################
+        jTangentPtcl = getParticleData(referenceTangentState, j)
+
+        G, dG = sphKernelGradientJVP(
+            iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support,
+            iTangentPtcl.position, jTangentPtcl.position, iTangentPtcl.support, jTangentPtcl.support,
+            kernelProperties, domainState,
+        )
+
+        A, B, dA, dB = _gradientWeightsJVP(
+            jPtcl.mass, iPtcl.density, jPtcl.density,
+            jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
+            kernelProperties.gradientMode,
+        )
+
+        fj = referenceValues[j]
+        coeff = fi * A + fj * B
+        dcoeff = fi * dA + fj * dB
+
+        out += G[0] * dcoeff[1] - G[1] * dcoeff[0] + dG[0] * coeff[1] - dG[1] * coeff[0]
+
+    return out
+
+
+@wp.func
+def computeSPHCurlJVP_Func_Adjacency(
+    i: wp.int32, dim: wp.int32,
+    queryState: Any, referenceState: Any,
+    queryTangentState: Any, referenceTangentState: Any,
+    correctionData: Any,
+    domainState: domainData,
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
+    kernelProperties: kernelState,
+
+    queryValue: Any, referenceValues: Any, # type: ignore
+
+    outputValue: Any, # type: ignore
+):
+    iPtcl = getParticleData(queryState, i)
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
+            return zero_like_warp(outputValue)
+
+    iTangentPtcl = getParticleData(queryTangentState, i)
+    iCorrectionData = getParticleCorrectionData_i(correctionData, i)
+
+    fi = queryValue[i]
+
+    out = zero_like_warp(outputValue)
+    for o in range(numOffsets):
+        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
+
+        out += computeSPHCurlJVP_Func_i(
+            i, dim,
+            iPtcl, iTangentPtcl,
+            referenceState, referenceTangentState,
+
+            domainState,
+            kernelProperties,
+
+            beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
+
+            iCorrectionData, correctionData,
+
+            fi, referenceValues,
+
+            outputValue,
+        )
+    return out
+
+
+@wp.kernel
+def computeSPHCurlJVP_Kernel(
+    queryState: Any,
+    referenceState: Any,
+    queryTangentState: Any,
+    referenceTangentState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
+
+    queryValues: Any, referenceValues: Any, # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = Any) # type: ignore
+):
+    i = wp.tid()
+    numParticles = queryState.positions.shape[0]
+    if i >= numParticles:
+        return
+
+    outputValues[i] = computeSPHCurlJVP_Func_Adjacency(
+        i, domainState.dim,
+        queryState, referenceState,
+        queryTangentState, referenceTangentState,
+        correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryValues, referenceValues,
+
+        zero_like_warp(outputValues[i]),
+    )
 
 
 def computeSPHCurlPositionJVP(
@@ -34,7 +187,7 @@ def computeSPHCurlPositionJVP(
     domain: DomainDescription,
     kernel: KernelFunctions,
     supportMode: SupportScheme,
-    adjacency: AdjacencyList,
+    adjacency: 'AdjacencyList | CompactHashMap',
     tangentQueryPositions: torch.Tensor,
     referenceParticles: Optional[ParticleState] = None,
     tangentReferencePositions: Optional[torch.Tensor] = None,
@@ -53,6 +206,7 @@ def computeSPHCurlPositionJVP(
     (`fi`/`fj`, `[numParticles, 2]` vector fields) are required and frozen.
     `queryParticles.densities`/`referenceParticles.densities` must already
     hold real values, same requirement as `computeSPHGradientPositionJVP`.
+    `adjacency` is an `AdjacencyList` or `CompactHashMap`.
     """
     if domain.dim != 2:
         raise ValueError("computeSPHCurlPositionJVP: only domain.dim == 2 is implemented.")
@@ -78,42 +232,43 @@ def computeSPHCurlPositionJVP(
     tangentQueryDensities = tangentQueryDensities if tangentQueryDensities is not None else zerosScalar(nQuery)
     tangentReferenceDensities = tangentReferenceDensities if tangentReferenceDensities is not None else zerosScalar(nRef)
 
-    queryState = _buildParticleSoA(dim, queryParticles.positions, queryParticles.supports, queryParticles.masses)
-    referenceState = _buildParticleSoA(dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses)
-    queryTangentState = _buildParticleSoA(dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery))
-    referenceTangentState = _buildParticleSoA(dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses)
-    domainState = _buildDomainState(domain)
-    kernelProperties = _buildKernelState(kernel, supportMode)
-
-    edgeI = castTorchToWarp(adjacency.i)
-    edgeJ = castTorchToWarp(adjacency.j)
-
-    G_t, dG_t = _launchPairKernelGradientJVP(
-        queryState, referenceState, queryTangentState, referenceTangentState,
-        domainState, kernelProperties, edgeI, edgeJ, dim, device, dtype,
+    queryState = _buildParticleSoA(
+        dim, queryParticles.positions, queryParticles.supports, queryParticles.masses, queryParticles.densities,
     )
+    referenceState = _buildParticleSoA(
+        dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
+        referenceParticles.densities,
+    )
+    queryTangentState = _buildParticleSoA(
+        dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery), tangentQueryDensities,
+    )
+    referenceTangentState = _buildParticleSoA(
+        dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses, tangentReferenceDensities,
+    )
+    domainState = _buildDomainState(domain)
+    kernelProperties = _buildKernelState(kernel, supportMode, gradientMode=gradientMode)
+    correctionData = _buildNullCorrectionData(dim, device)
 
-    iIdx = adjacency.i.long()
-    jIdx = adjacency.j.long()
-    massJ = referenceParticles.masses[jIdx]
-    densityI = queryParticles.densities[iIdx]
-    densityJ = referenceParticles.densities[jIdx]
-    dMassJ = tangentReferenceMasses[jIdx]
-    dDensityI = tangentQueryDensities[iIdx]
-    dDensityJ = tangentReferenceDensities[jIdx]
+    useAdjacency, adjacencyState, gridState, _numOffsets = _buildAdjacencyOrGridState(adjacency, domain)
 
-    A, B, dA, dB = _gradientWeights(massJ, densityI, densityJ, dMassJ, dDensityI, dDensityJ, gradientMode)
+    queryValuesWarp = castTorchToWarpAsBuiltins(queryValues.contiguous())
+    referenceValuesWarp = castTorchToWarpAsBuiltins(referenceValues.contiguous())
+    warpDevice = queryState.positions.device
+    dCurl_t, dCurl_w = allocateTorchWarp(nQuery, queryState.masses.dtype, warpDevice)
 
-    fi = queryValues[iIdx]  # [numPairs, 2]
-    fj = referenceValues[jIdx]
-    coeff = fi * A.unsqueeze(-1) + fj * B.unsqueeze(-1)
-    dcoeff = fi * dA.unsqueeze(-1) + fj * dB.unsqueeze(-1)
-
-    def cross(g, c):
-        return g[..., 0] * c[..., 1] - g[..., 1] * c[..., 0]
-
-    pairContribution = cross(dG_t, coeff) + cross(G_t, dcoeff)
-
-    dCurl = torch.zeros(nQuery, device=device, dtype=dtype)
-    dCurl.index_add_(0, iIdx, pairContribution)
-    return dCurl.unsqueeze(-1)
+    wp.launch(
+        computeSPHCurlJVP_Kernel,
+        dim=nQuery,
+        inputs=[
+            queryState, referenceState,
+            queryTangentState, referenceTangentState,
+            domainState,
+            useAdjacency, adjacencyState, gridState,
+            correctionData,
+            kernelProperties,
+            queryValuesWarp, referenceValuesWarp,
+            dCurl_w,
+        ],
+        device=warpDevice,
+    )
+    return dCurl_t.unsqueeze(-1)

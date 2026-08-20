@@ -13,7 +13,7 @@ from .wp_covariance import _computeSPHCovariance_stateBackend
 from .wp_curl import _computeSPHCurl_stateBackend
 from .wp_density import _computeSPHDensity_stateBackend
 from .wp_interpolate import _computeSPHInterpolant_stateBackend
-from .wp_laplacian import _computeSPHLaplacian_stateBackend 
+from .wp_laplacian import _computeSPHLaplacian_stateBackend
 from .wp_divergence import _computeSPHDivergence_stateBackend
 from .wp_gradient import _computeSPHGradient_stateBackend
 from .wp_densityJVP import computeSPHDensityPositionJVP

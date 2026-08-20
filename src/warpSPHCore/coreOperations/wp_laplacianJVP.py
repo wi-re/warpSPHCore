@@ -3,14 +3,20 @@ operator's Brookshaw and Naive schemes (`warpier_tier2_operators_plan.md`
 Steps 7/8, `warpier_adjoint.md` Tiers 2.2/2.3). Dot/Default `laplacianMode`s
 are out of scope, enforced centrally in `operations.py`.
 
+CSR (per-query-particle) launch shape (`warpier_tier2_jvp_csr_backend_plan.md`
+Steps 3/4):
+
 **Brookshaw** (`computeSPHLaplacianBrookshawPositionJVP`): `q_ij =
-(fj-fi)*B_ij` (`B` from `_jvpCommon.gradientWeights` -- literally the same
+(fj-fi)*B_ij` (`B` from `_jvpCommon.gradientWeightsJVP` -- literally the same
 coefficient as Gradient's `B` term, not re-derived), `D_ij = r_ij +
 eps*h_ij` (`eps=1e-8`, matching `wp_laplacian.py`'s literal constant),
 `n_ij = x_ij/D_ij`, `L_ij = -2*q_ij*dot(G_ij,n_ij)/D_ij`; the
 regularized-distance chain (`dr_ij`, `dD_ij`, `dn_ij`, `dL_ij`) is ordinary
-calculus on top of `wp_kernelGradientJVP`'s shared `(G_ij, dG_ij)` pair
-kernel.
+calculus on top of `kernels.kernelJVP.sphKernelGradientJVP`'s `(G_ij,
+dG_ij)`, transcribed to warp scalar/vector ops using the same
+already-validated building blocks `wp_laplacian.py`'s own primal kernel uses
+(`computeDistanceVec`/`safe_sqrt`/`computePairwiseSupport`), plus
+`computePairwiseSupportJVP` for the tangent.
 
 **Naive** (`computeSPHLaplacianNaivePositionJVP`): `q_ij` is the exact same
 `B_ij` again (`wp_laplacian.py`'s `q_ij` depends only on `gradientMode`,
@@ -18,12 +24,17 @@ never `laplacianMode` -- Tier 2.2's finding, re-confirmed by Tier 2.3 under
 this scheme), but `L_ij`/`dL_ij` come from `sphKernelLaplacianJVP`
 (`kernels/kernelJVP.py`, the actual analytic second-derivative-of-r
 estimator's own JVP) instead of Brookshaw's gradient-based `n_ij/D_ij`
-estimator -- a genuinely different per-pair kernel launch, `L = sum_j
-q_ij*L_ij`, `dL = sum_j (dq_ij*L_ij + q_ij*dL_ij)`.
+estimator, `L = sum_j q_ij*L_ij`, `dL = sum_j (dq_ij*L_ij + q_ij*dL_ij)`.
 
 `computeSPHLaplacianPositionJVP` is the thin dispatcher `operations.py`
 actually registers (`_TIER2_VALUE_DISPATCH[WarpOperation.Laplacian]`),
 picking between the two by `laplacianMode`.
+
+Both schemes also support grid (`CompactHashMap`) traversal, via the same
+`_Func_Adjacency` dispatch every primal operator already uses. Replaced the
+original pair-indexed (COO) implementations once proven numerically
+equivalent to float32 round-off; see git history around 2026-08-20 for those
+implementations and their own equivalence tests if reference is ever needed.
 """
 
 from typing import Any, Optional
@@ -33,16 +44,21 @@ import warp as wp
 from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
-from ..util import castTorchToWarp, allocateTorchWarp
+from ..math import zero_like_warp, safe_sqrt
+from ..util import allocateTorchWarp, castTorchToWarpAsBuiltins
+from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i
+from ..util.support import computePairwiseSupport, computePairwiseSupportJVP
+from ..math.wp_distance import computeDistanceVec
+from ..radiusSearch.grid_util import getIndexRange
 from ._jvpCommon import (
     buildParticleSoA as _buildParticleSoA,
     buildDomainState as _buildDomainState,
     buildKernelState as _buildKernelState,
-    gradientWeights as _gradientWeights,
+    gradientWeightsJVP as _gradientWeightsJVP,
+    buildAdjacencyOrGridState as _buildAdjacencyOrGridState,
+    buildNullCorrectionData as _buildNullCorrectionData,
 )
-from .wp_kernelGradientJVP import launchPairKernelGradientJVP as _launchPairKernelGradientJVP
-from ..kernels.kernelJVP import sphKernelLaplacianJVP
-from ..util.stateUtil import getParticle
+from ..kernels.kernelJVP import sphKernelGradientJVP, sphKernelLaplacianJVP
 
 __all__ = [
     'computeSPHLaplacianPositionJVP',
@@ -53,25 +69,169 @@ __all__ = [
 _LAPLACIAN_EPS = 1e-8  # matches wp_laplacian.py's literal constant, not get_epsilon(r)
 
 
-def _pairwiseSupportAndTangent(hi, hj, dhi, dhj, mode: SupportScheme):
-    """`computePairwiseSupport`'s dispatch, evaluated in torch on flat
-    `[numPairs]` tensors (mirrors `scripts/spike_forward_mode_tier2_gradient.py`'s
-    `_h_ij_and_tangent`, minus the dense-grid broadcasting) -- used only for
-    Laplacian's `eps` regularization term, independent of which branch
-    `sphKernelGradientJVP` itself took for `G_ij`/`dG_ij`. `mode` here is
-    already the `SupportScheme` enum (not the raw `.value` int the spike's
-    helper had to coerce back from), since this module passes it straight
-    through from the Python-level `supportMode` argument."""
-    if mode == SupportScheme.Gather:
-        return hi, dhi
-    elif mode == SupportScheme.Scatter:
-        return hj, dhj
-    elif mode == SupportScheme.MeanSymmetric:
-        return (hi + hj) / 2.0, (dhi + dhj) / 2.0
-    else:
-        hij = torch.maximum(hi, hj)
-        dhij = torch.where(hi >= hj, dhi, dhj)
-        return hij, dhij
+# ---------------------------------------------------------------------------
+# Brookshaw CSR (per-query-particle) launch shape.
+# ---------------------------------------------------------------------------
+
+@wp.func
+def computeSPHLaplacianBrookshawJVP_Func_i(
+    i: wp.int32, dim: wp.int32,
+    iPtcl: Any, iTangentPtcl: Any,
+    referenceState: Any, referenceTangentState: Any,
+
+    domainState: domainData,
+    kernelProperties: kernelState,
+
+    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+
+    iCorrectionData: Any, correctionData: Any,
+
+    fi: scalar_t, referenceValues: wp.array(dtype = scalar_t), # type: ignore
+
+    outputValue: Any, # type: ignore
+):
+    out = zero_like_warp(outputValue)
+    for neighborIndex in range(numIndices):
+        jj = beginIndex + neighborIndex
+        j = wp.int32(offsetArray[jj])
+        jPtcl = getParticleData(referenceState, j)
+        if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+            if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
+                continue
+        ##########################################################
+        #   The core particle-particle interaction starts here   #
+        ##########################################################
+        jTangentPtcl = getParticleData(referenceTangentState, j)
+
+        G, dG = sphKernelGradientJVP(
+            iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support,
+            iTangentPtcl.position, jTangentPtcl.position, iTangentPtcl.support, jTangentPtcl.support,
+            kernelProperties, domainState,
+        )
+
+        _A, B, _dA, dB = _gradientWeightsJVP(
+            jPtcl.mass, iPtcl.density, jPtcl.density,
+            jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
+            kernelProperties.gradientMode,
+        )
+
+        fj = referenceValues[j]
+        q = (fj - fi) * B
+        dq = (fj - fi) * dB
+
+        x_ij = computeDistanceVec(iPtcl.position, jPtcl.position, domainState)
+        dx_ij = iTangentPtcl.position - jTangentPtcl.position
+        r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
+        if r_ij > scalar_t(0.0):
+            dr_ij = wp.dot(x_ij, dx_ij) / r_ij
+        else:
+            dr_ij = scalar_t(0.0)
+
+        h_ij = computePairwiseSupport(iPtcl.support, jPtcl.support, kernelProperties.supportMode)
+        dh_ij = computePairwiseSupportJVP(
+            iPtcl.support, jPtcl.support, iTangentPtcl.support, jTangentPtcl.support, kernelProperties.supportMode,
+        )
+
+        eps = scalar_t(1e-8)  # matches wp_laplacian.py's literal constant (this file's own _LAPLACIAN_EPS)
+        D_ij = r_ij + eps * h_ij
+        dD_ij = dr_ij + eps * dh_ij
+        n_ij = x_ij / D_ij
+        dn_ij = (dx_ij - n_ij * dD_ij) / D_ij
+
+        dot_Gn = wp.dot(G, n_ij)
+        d_dot_Gn = wp.dot(dG, n_ij) + wp.dot(G, dn_ij)
+        P = dot_Gn / D_ij
+        dP = d_dot_Gn / D_ij - dot_Gn * dD_ij / (D_ij * D_ij)
+
+        out += -scalar_t(2.0) * (dq * P + q * dP)
+
+    return out
+
+
+@wp.func
+def computeSPHLaplacianBrookshawJVP_Func_Adjacency(
+    i: wp.int32, dim: wp.int32,
+    queryState: Any, referenceState: Any,
+    queryTangentState: Any, referenceTangentState: Any,
+    correctionData: Any,
+    domainState: domainData,
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
+    kernelProperties: kernelState,
+
+    queryValue: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+
+    outputValue: Any, # type: ignore
+):
+    iPtcl = getParticleData(queryState, i)
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
+            return zero_like_warp(outputValue)
+
+    iTangentPtcl = getParticleData(queryTangentState, i)
+    iCorrectionData = getParticleCorrectionData_i(correctionData, i)
+
+    fi = queryValue[i]
+
+    out = zero_like_warp(outputValue)
+    for o in range(numOffsets):
+        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
+
+        out += computeSPHLaplacianBrookshawJVP_Func_i(
+            i, dim,
+            iPtcl, iTangentPtcl,
+            referenceState, referenceTangentState,
+
+            domainState,
+            kernelProperties,
+
+            beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
+
+            iCorrectionData, correctionData,
+
+            fi, referenceValues,
+
+            outputValue,
+        )
+    return out
+
+
+@wp.kernel
+def computeSPHLaplacianBrookshawJVP_Kernel(
+    queryState: Any,
+    referenceState: Any,
+    queryTangentState: Any,
+    referenceTangentState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
+
+    queryValues: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = Any) # type: ignore
+):
+    i = wp.tid()
+    numParticles = queryState.positions.shape[0]
+    if i >= numParticles:
+        return
+
+    outputValues[i] = computeSPHLaplacianBrookshawJVP_Func_Adjacency(
+        i, domainState.dim,
+        queryState, referenceState,
+        queryTangentState, referenceTangentState,
+        correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryValues, referenceValues,
+
+        zero_like_warp(outputValues[i]),
+    )
 
 
 def computeSPHLaplacianBrookshawPositionJVP(
@@ -79,7 +239,7 @@ def computeSPHLaplacianBrookshawPositionJVP(
     domain: DomainDescription,
     kernel: KernelFunctions,
     supportMode: SupportScheme,
-    adjacency: AdjacencyList,
+    adjacency: 'AdjacencyList | CompactHashMap',
     tangentQueryPositions: torch.Tensor,
     referenceParticles: Optional[ParticleState] = None,
     tangentReferencePositions: Optional[torch.Tensor] = None,
@@ -98,7 +258,8 @@ def computeSPHLaplacianBrookshawPositionJVP(
     `queryValues`/`referenceValues` (`fi`/`fj`, scalar fields) are required
     and frozen. `queryParticles.densities`/`referenceParticles.densities`
     must already hold real values, same requirement as
-    `computeSPHGradientPositionJVP`.
+    `computeSPHGradientPositionJVP`. `adjacency` is an `AdjacencyList` or
+    `CompactHashMap`.
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -122,130 +283,192 @@ def computeSPHLaplacianBrookshawPositionJVP(
     tangentQueryDensities = tangentQueryDensities if tangentQueryDensities is not None else zerosScalar(nQuery)
     tangentReferenceDensities = tangentReferenceDensities if tangentReferenceDensities is not None else zerosScalar(nRef)
 
-    queryState = _buildParticleSoA(dim, queryParticles.positions, queryParticles.supports, queryParticles.masses)
-    referenceState = _buildParticleSoA(dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses)
-    queryTangentState = _buildParticleSoA(dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery))
-    referenceTangentState = _buildParticleSoA(dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses)
-    domainState = _buildDomainState(domain)
-    kernelProperties = _buildKernelState(kernel, supportMode)
-
-    edgeI = castTorchToWarp(adjacency.i)
-    edgeJ = castTorchToWarp(adjacency.j)
-
-    G_t, dG_t = _launchPairKernelGradientJVP(
-        queryState, referenceState, queryTangentState, referenceTangentState,
-        domainState, kernelProperties, edgeI, edgeJ, dim, device, dtype,
+    queryState = _buildParticleSoA(
+        dim, queryParticles.positions, queryParticles.supports, queryParticles.masses, queryParticles.densities,
     )
+    referenceState = _buildParticleSoA(
+        dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
+        referenceParticles.densities,
+    )
+    queryTangentState = _buildParticleSoA(
+        dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery), tangentQueryDensities,
+    )
+    referenceTangentState = _buildParticleSoA(
+        dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses, tangentReferenceDensities,
+    )
+    domainState = _buildDomainState(domain)
+    kernelProperties = _buildKernelState(kernel, supportMode, gradientMode=gradientMode)
+    correctionData = _buildNullCorrectionData(dim, device)
 
-    iIdx = adjacency.i.long()
-    jIdx = adjacency.j.long()
-    massJ = referenceParticles.masses[jIdx]
-    densityI = queryParticles.densities[iIdx]
-    densityJ = referenceParticles.densities[jIdx]
-    dMassJ = tangentReferenceMasses[jIdx]
-    dDensityI = tangentQueryDensities[iIdx]
-    dDensityJ = tangentReferenceDensities[jIdx]
+    useAdjacency, adjacencyState, gridState, _numOffsets = _buildAdjacencyOrGridState(adjacency, domain)
 
-    _, B, _, dB = _gradientWeights(massJ, densityI, densityJ, dMassJ, dDensityI, dDensityJ, gradientMode)
+    queryValuesWarp = castTorchToWarpAsBuiltins(queryValues.contiguous())
+    referenceValuesWarp = castTorchToWarpAsBuiltins(referenceValues.contiguous())
+    warpDevice = queryState.positions.device
+    dLaplacian_t, dLaplacian_w = allocateTorchWarp(nQuery, queryState.masses.dtype, warpDevice)
 
-    fi = queryValues[iIdx]
-    fj = referenceValues[jIdx]
-    q = (fj - fi) * B
-    dq = (fj - fi) * dB
+    wp.launch(
+        computeSPHLaplacianBrookshawJVP_Kernel,
+        dim=nQuery,
+        inputs=[
+            queryState, referenceState,
+            queryTangentState, referenceTangentState,
+            domainState,
+            useAdjacency, adjacencyState, gridState,
+            correctionData,
+            kernelProperties,
+            queryValuesWarp, referenceValuesWarp,
+            dLaplacian_w,
+        ],
+        device=warpDevice,
+    )
+    return dLaplacian_t
 
-    xI = queryParticles.positions[iIdx]
-    xJ = referenceParticles.positions[jIdx]
-    dxI = tangentQueryPositions[iIdx]
-    dxJ = tangentReferencePositions[jIdx]
-    x_ij = xI - xJ
-    dx_ij = dxI - dxJ
-    r_ij = x_ij.norm(dim=-1)
-    r_ij_safe = torch.where(r_ij > 0, r_ij, torch.ones_like(r_ij))
-    # safe_sqrt's custom adjoint (math/wp_sqrt.py) contributes 0 when its
-    # argument is <=0, i.e. production defines dr_ij=0 exactly at r_ij=0
-    # (self-pairs) rather than 0/0 -- matched here, not just NaN-avoided
-    # (warpier_adjoint.md Tier 2.2's own note on this).
-    dr_ij = torch.where(r_ij > 0, (x_ij * dx_ij).sum(-1) / r_ij_safe, torch.zeros_like(r_ij))
 
-    hI = queryParticles.supports[iIdx]
-    hJ = referenceParticles.supports[jIdx]
-    dhI = tangentQuerySupports[iIdx]
-    dhJ = tangentReferenceSupports[jIdx]
-    h_ij, dh_ij = _pairwiseSupportAndTangent(hI, hJ, dhI, dhJ, supportMode)
+# ---------------------------------------------------------------------------
+# Naive CSR (per-query-particle) launch shape. Reuses sphKernelLaplacianJVP
+# (the analytic second-derivative-of-r estimator's own JVP) directly instead
+# of Brookshaw's gradient-based n_ij/D_ij estimator -- q_ij is the same
+# B-only gradientWeightsJVP coefficient as Brookshaw, per this file's own
+# module docstring finding.
+# ---------------------------------------------------------------------------
 
-    D_ij = r_ij + _LAPLACIAN_EPS * h_ij
-    dD_ij = dr_ij + _LAPLACIAN_EPS * dh_ij
-    n_ij = x_ij / D_ij.unsqueeze(-1)
-    dn_ij = (dx_ij - n_ij * dD_ij.unsqueeze(-1)) / D_ij.unsqueeze(-1)
 
-    dot_Gn = (G_t * n_ij).sum(-1)
-    d_dot_Gn = (dG_t * n_ij).sum(-1) + (G_t * dn_ij).sum(-1)
-    P = dot_Gn / D_ij
-    dP = d_dot_Gn / D_ij - dot_Gn * dD_ij / D_ij ** 2
+@wp.func
+def computeSPHLaplacianNaiveJVP_Func_i(
+    i: wp.int32, dim: wp.int32,
+    iPtcl: Any, iTangentPtcl: Any,
+    referenceState: Any, referenceTangentState: Any,
 
-    dL = -2.0 * (dq * P + q * dP)
+    domainState: domainData,
+    kernelProperties: kernelState,
 
-    dLaplacian = torch.zeros(nQuery, device=device, dtype=dtype)
-    dLaplacian.index_add_(0, iIdx, dL)
-    return dLaplacian
+    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+
+    iCorrectionData: Any, correctionData: Any,
+
+    fi: scalar_t, referenceValues: wp.array(dtype = scalar_t), # type: ignore
+
+    outputValue: Any, # type: ignore
+):
+    out = zero_like_warp(outputValue)
+    for neighborIndex in range(numIndices):
+        jj = beginIndex + neighborIndex
+        j = wp.int32(offsetArray[jj])
+        jPtcl = getParticleData(referenceState, j)
+        if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+            if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
+                continue
+        ##########################################################
+        #   The core particle-particle interaction starts here   #
+        ##########################################################
+        jTangentPtcl = getParticleData(referenceTangentState, j)
+
+        L, dL = sphKernelLaplacianJVP(
+            iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support,
+            iTangentPtcl.position, jTangentPtcl.position, iTangentPtcl.support, jTangentPtcl.support,
+            kernelProperties, domainState,
+        )
+
+        _A, B, _dA, dB = _gradientWeightsJVP(
+            jPtcl.mass, iPtcl.density, jPtcl.density,
+            jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
+            kernelProperties.gradientMode,
+        )
+
+        fj = referenceValues[j]
+        q = (fj - fi) * B
+        dq = (fj - fi) * dB
+
+        out += dq * L + q * dL
+
+    return out
+
+
+@wp.func
+def computeSPHLaplacianNaiveJVP_Func_Adjacency(
+    i: wp.int32, dim: wp.int32,
+    queryState: Any, referenceState: Any,
+    queryTangentState: Any, referenceTangentState: Any,
+    correctionData: Any,
+    domainState: domainData,
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
+    kernelProperties: kernelState,
+
+    queryValue: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+
+    outputValue: Any, # type: ignore
+):
+    iPtcl = getParticleData(queryState, i)
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
+            return zero_like_warp(outputValue)
+
+    iTangentPtcl = getParticleData(queryTangentState, i)
+    iCorrectionData = getParticleCorrectionData_i(correctionData, i)
+
+    fi = queryValue[i]
+
+    out = zero_like_warp(outputValue)
+    for o in range(numOffsets):
+        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
+
+        out += computeSPHLaplacianNaiveJVP_Func_i(
+            i, dim,
+            iPtcl, iTangentPtcl,
+            referenceState, referenceTangentState,
+
+            domainState,
+            kernelProperties,
+
+            beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
+
+            iCorrectionData, correctionData,
+
+            fi, referenceValues,
+
+            outputValue,
+        )
+    return out
 
 
 @wp.kernel
-def _sphKernelLaplacianJVP_PairKernel(
+def computeSPHLaplacianNaiveJVP_Kernel(
     queryState: Any,
     referenceState: Any,
     queryTangentState: Any,
     referenceTangentState: Any,
     domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
     kernelProperties: kernelState,
-    edgeI: wp.array(dtype=wp.int64),
-    edgeJ: wp.array(dtype=wp.int64),
-    outL: wp.array(dtype=scalar_t),
-    outDL: wp.array(dtype=scalar_t),
+    # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
+
+    queryValues: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = Any) # type: ignore
 ):
-    e = wp.tid()
-    if e >= edgeI.shape[0]:
+    i = wp.tid()
+    numParticles = queryState.positions.shape[0]
+    if i >= numParticles:
         return
-    i = wp.int32(edgeI[e])
-    j = wp.int32(edgeJ[e])
 
-    xi, hi, _mi, _rhoi, _ki = getParticle(queryState, i)
-    xj, hj, _mj, _rhoj, _kj = getParticle(referenceState, j)
-    dxi, dhi, _dmi, _drhoi, _dki = getParticle(queryTangentState, i)
-    dxj, dhj, _dmj, _drhoj, _dkj = getParticle(referenceTangentState, j)
+    outputValues[i] = computeSPHLaplacianNaiveJVP_Func_Adjacency(
+        i, domainState.dim,
+        queryState, referenceState,
+        queryTangentState, referenceTangentState,
+        correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        queryValues, referenceValues,
 
-    L, dL = sphKernelLaplacianJVP(xi, xj, hi, hj, dxi, dxj, dhi, dhj, kernelProperties, domainState)
-    outL[e] = L
-    outDL[e] = dL
-
-
-def _launchPairKernelLaplacianJVP(
-    queryState, referenceState, queryTangentState, referenceTangentState,
-    domainState: domainData, kernelProperties: kernelState,
-    edgeI, edgeJ,
-):
-    """One thread per adjacency pair, producing the pairwise `(L_ij, dL_ij)`
-    JVP (`d(sphKernelLaplacian)/d{x,h}`) as flat `[numPairs]` torch tensors
-    -- Naive's own per-pair kernel launch (distinct from Brookshaw's shared
-    `(G_ij, dG_ij)` launch in `wp_kernelGradientJVP.py`, since Naive uses the
-    analytic second-derivative-of-r estimator directly rather than a
-    gradient-based one). Structurally identical to `_jvpCommon.launchPairKernelJVP`
-    (both produce a `[numPairs]` scalar pair), just calling `sphKernelLaplacianJVP`
-    instead of `sphKernelJVP` -- kept local to this file rather than promoted
-    to `_jvpCommon.py` since Naive is its only consumer.
-    """
-    numPairs = edgeI.shape[0]
-    L_t, L_w = allocateTorchWarp(numPairs, scalar_t, edgeI.device)
-    dL_t, dL_w = allocateTorchWarp(numPairs, scalar_t, edgeI.device)
-
-    wp.launch(
-        _sphKernelLaplacianJVP_PairKernel,
-        dim=numPairs,
-        inputs=[queryState, referenceState, queryTangentState, referenceTangentState,
-                domainState, kernelProperties, edgeI, edgeJ, L_w, dL_w],
-        device=edgeI.device,
+        zero_like_warp(outputValues[i]),
     )
-    return L_t, dL_t
 
 
 def computeSPHLaplacianNaivePositionJVP(
@@ -253,7 +476,7 @@ def computeSPHLaplacianNaivePositionJVP(
     domain: DomainDescription,
     kernel: KernelFunctions,
     supportMode: SupportScheme,
-    adjacency: AdjacencyList,
+    adjacency: 'AdjacencyList | CompactHashMap',
     tangentQueryPositions: torch.Tensor,
     referenceParticles: Optional[ParticleState] = None,
     tangentReferencePositions: Optional[torch.Tensor] = None,
@@ -272,7 +495,8 @@ def computeSPHLaplacianNaivePositionJVP(
     dispatched, not `laplacianMode`-dispatched -- Tier 2.2's finding,
     re-confirmed here), `L = sum_j q_ij*L_ij`, `dL = sum_j (dq_ij*L_ij +
     q_ij*dL_ij)`, `(L_ij, dL_ij)` from `sphKernelLaplacianJVP`
-    (`kernels/kernelJVP.py`)."""
+    (`kernels/kernelJVP.py`). `adjacency` is an `AdjacencyList` or
+    `CompactHashMap`."""
     if queryValues is None or referenceValues is None:
         raise ValueError(
             "computeSPHLaplacianNaivePositionJVP: queryValues and "
@@ -295,42 +519,46 @@ def computeSPHLaplacianNaivePositionJVP(
     tangentQueryDensities = tangentQueryDensities if tangentQueryDensities is not None else zerosScalar(nQuery)
     tangentReferenceDensities = tangentReferenceDensities if tangentReferenceDensities is not None else zerosScalar(nRef)
 
-    queryState = _buildParticleSoA(dim, queryParticles.positions, queryParticles.supports, queryParticles.masses)
-    referenceState = _buildParticleSoA(dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses)
-    queryTangentState = _buildParticleSoA(dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery))
-    referenceTangentState = _buildParticleSoA(dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses)
-    domainState = _buildDomainState(domain)
-    kernelProperties = _buildKernelState(kernel, supportMode)
-
-    edgeI = castTorchToWarp(adjacency.i)
-    edgeJ = castTorchToWarp(adjacency.j)
-
-    L_t, dL_t = _launchPairKernelLaplacianJVP(
-        queryState, referenceState, queryTangentState, referenceTangentState,
-        domainState, kernelProperties, edgeI, edgeJ,
+    queryState = _buildParticleSoA(
+        dim, queryParticles.positions, queryParticles.supports, queryParticles.masses, queryParticles.densities,
     )
+    referenceState = _buildParticleSoA(
+        dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
+        referenceParticles.densities,
+    )
+    queryTangentState = _buildParticleSoA(
+        dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery), tangentQueryDensities,
+    )
+    referenceTangentState = _buildParticleSoA(
+        dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses, tangentReferenceDensities,
+    )
+    domainState = _buildDomainState(domain)
+    kernelProperties = _buildKernelState(kernel, supportMode, gradientMode=gradientMode)
+    correctionData = _buildNullCorrectionData(dim, device)
 
-    iIdx = adjacency.i.long()
-    jIdx = adjacency.j.long()
-    massJ = referenceParticles.masses[jIdx]
-    densityI = queryParticles.densities[iIdx]
-    densityJ = referenceParticles.densities[jIdx]
-    dMassJ = tangentReferenceMasses[jIdx]
-    dDensityI = tangentQueryDensities[iIdx]
-    dDensityJ = tangentReferenceDensities[jIdx]
+    useAdjacency, adjacencyState, gridState, _numOffsets = _buildAdjacencyOrGridState(adjacency, domain)
 
-    _, B, _, dB = _gradientWeights(massJ, densityI, densityJ, dMassJ, dDensityI, dDensityJ, gradientMode)
+    queryValuesWarp = castTorchToWarpAsBuiltins(queryValues.contiguous())
+    referenceValuesWarp = castTorchToWarpAsBuiltins(referenceValues.contiguous())
+    warpDevice = queryState.positions.device
+    dLaplacian_t, dLaplacian_w = allocateTorchWarp(nQuery, queryState.masses.dtype, warpDevice)
 
-    fi = queryValues[iIdx]
-    fj = referenceValues[jIdx]
-    q = (fj - fi) * B
-    dq = (fj - fi) * dB
-
-    pairContribution = dq * L_t + q * dL_t
-
-    dLaplacian = torch.zeros(nQuery, device=device, dtype=dtype)
-    dLaplacian.index_add_(0, iIdx, pairContribution)
-    return dLaplacian
+    wp.launch(
+        computeSPHLaplacianNaiveJVP_Kernel,
+        dim=nQuery,
+        inputs=[
+            queryState, referenceState,
+            queryTangentState, referenceTangentState,
+            domainState,
+            useAdjacency, adjacencyState, gridState,
+            correctionData,
+            kernelProperties,
+            queryValuesWarp, referenceValuesWarp,
+            dLaplacian_w,
+        ],
+        device=warpDevice,
+    )
+    return dLaplacian_t
 
 
 def computeSPHLaplacianPositionJVP(
@@ -338,7 +566,7 @@ def computeSPHLaplacianPositionJVP(
     domain: DomainDescription,
     kernel: KernelFunctions,
     supportMode: SupportScheme,
-    adjacency: AdjacencyList,
+    adjacency: 'AdjacencyList | CompactHashMap',
     tangentQueryPositions: torch.Tensor,
     laplacianMode: LaplacianScheme = LaplacianScheme.Brookshaw,
     **kwargs,

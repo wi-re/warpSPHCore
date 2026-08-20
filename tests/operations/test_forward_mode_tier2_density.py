@@ -184,6 +184,39 @@ def test_densityPositionJVP_rejects_combination_with_value_tangent():
                          tangentQueryValues=torch.zeros(n, dtype=DTYPE))
 
 
+def test_densityPositionJVP_grid_traversal_matches_adjacency_traversal():
+    # computeSPHDensityPositionJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
+    # also supports grid (CompactHashMap) traversal, unlike warpOperationJVP's
+    # own centralized AdjacencyList-only gate above -- exercised here via a
+    # direct import, since warpOperationJVP itself still rejects non-AdjacencyList
+    # adjacency (test_densityPositionJVP_rejects_nonAdjacencyList).
+    from warpSPHCore.coreOperations import computeSPHDensityPositionJVP
+
+    positions, supports, masses = _grid_case_2d()
+    domain = _make_domain(dim=2)
+    kinds = torch.zeros(positions.shape[0], dtype=torch.int32, device=DEVICE)
+    p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
+    adjacency = radiusSearchCompactHashMap(p0, domain, mode=SupportScheme.Gather)
+    hashMap = adjacency.hashMap
+    assert hashMap is not None
+
+    torch.manual_seed(2)
+    dpos = torch.randn_like(positions)
+    dsup = torch.randn_like(supports) * 0.1
+    dmass = torch.randn_like(masses)
+
+    common = dict(
+        queryParticles=p0, domain=domain, kernel=KERNEL, supportMode=SupportScheme.Gather,
+        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
+        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
+        tangentReferenceMasses=dmass,
+    )
+    viaAdjacency = computeSPHDensityPositionJVP(adjacency=adjacency, **common)
+    viaGrid = computeSPHDensityPositionJVP(adjacency=hashMap, **common)
+
+    torch.testing.assert_close(viaGrid, viaAdjacency, rtol=1e-5, atol=1e-6)
+
+
 def test_otherOperators_tier2_still_raise():
     # Density, Interpolate, Gradient, Divergence, Curl, and Laplacian(Brookshaw)
     # are all implemented now (warpier_tier2_operators_plan.md steps 0-7) --

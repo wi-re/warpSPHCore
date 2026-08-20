@@ -244,3 +244,43 @@ def test_interpolatePositionJVP_rejects_volumes():
                          tangentQueryPositions=torch.zeros_like(positions),
                          queryVolumes=torch.zeros(n, dtype=DTYPE),
                          referenceValues=referenceValues)
+
+
+def test_interpolatePositionJVP_grid_traversal_matches_adjacency_traversal():
+    # computeSPHInterpolatePositionJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
+    # also supports grid (CompactHashMap) traversal, unlike warpOperationJVP's
+    # own centralized AdjacencyList-only gate -- exercised here via a direct
+    # import, since warpOperationJVP itself still rejects non-AdjacencyList
+    # adjacency (test_interpolatePositionJVP_rejects_nonAdjacencyList).
+    from warpSPHCore.coreOperations import computeSPHInterpolatePositionJVP
+
+    positions, supports, masses = _grid_case_2d()
+    domain = _make_domain(dim=2)
+    n = positions.shape[0]
+    kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
+    p0_forAdjacency = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
+    adjacency = radiusSearchCompactHashMap(p0_forAdjacency, domain, mode=SupportScheme.Gather)
+    hashMap = adjacency.hashMap
+    assert hashMap is not None
+
+    densities = _densities_for(positions, supports, masses, kinds, domain, adjacency)
+    p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
+
+    torch.manual_seed(2)
+    referenceValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
+    dpos = torch.randn_like(positions)
+    dsup = torch.randn_like(supports) * 0.1
+    dmass = torch.randn_like(masses)
+    ddensity = torch.randn_like(densities) * 0.1
+
+    common = dict(
+        queryParticles=p0, domain=domain, kernel=KERNEL, supportMode=SupportScheme.Gather,
+        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
+        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
+        tangentReferenceMasses=dmass, tangentReferenceDensities=ddensity,
+        referenceValues=referenceValues,
+    )
+    viaAdjacency = computeSPHInterpolatePositionJVP(adjacency=adjacency, **common)
+    viaGrid = computeSPHInterpolatePositionJVP(adjacency=hashMap, **common)
+
+    torch.testing.assert_close(viaGrid, viaAdjacency, rtol=1e-5, atol=1e-6)

@@ -1,5 +1,56 @@
 # CSR-style backend port for the Tier-2 JVP kernels
 
+## Status (2026-08-20): Steps 1-6 done, Step 7 not started
+
+All seven operators (Density, Interpolate, Gradient, Divergence, Curl,
+Laplacian-Brookshaw, Laplacian-Naive) are ported to the CSR shape and
+cut over — the old COO/pair-indexed implementations, `_jvpCommon.launchPairKernelJVP`/
+`_sphKernelJVP_PairKernel`, `wp_kernelGradientJVP.py` (deleted entirely),
+and `wp_laplacianJVP.py`'s local Naive pair kernel are gone.
+`computeSPH<Op>PositionJVP`'s names/signatures/return shapes are unchanged,
+per Step 5's own requirement — `warpOperationJVP` and every existing
+`test_forward_mode_tier2_*.py` file needed no changes. Full test suite green
+(261 passed, 1 skipped) and `operation_matrix.py --device cpu --ci` baseline
+unchanged (OK=258, HIGH=0, ERR=0, NAN=0) both before and after cutover.
+
+**Grid (`CompactHashMap`) traversal landed too**, not just the CSR reshape —
+flagged in the plan's own "explicitly out of scope" section below as a
+natural pickup, and the user confirmed it was fine to add. Each
+`computeSPH<Op>PositionJVP` now accepts an `AdjacencyList` *or*
+`CompactHashMap`. `warpOperationJVP` itself still centrally rejects non-
+`AdjacencyList` adjacency for Tier-2 (that gate in `operations.py` was left
+untouched — grid support is available at the direct-import level, not yet
+exposed through the public JVP entry point, since wiring that through wasn't
+asked for). A `test_<op>PositionJVP_grid_traversal_matches_adjacency_traversal`
+test was added to each operator's existing test file (comparing CSR-via-grid
+against CSR-via-adjacency-list on the same particle set) to keep that
+capability covered going forward.
+
+**Equivalence proof, not preserved as standing tests**: each step's own
+old-vs-new numerical equivalence check (Step 1's own gate, repeated per
+operator) was run as throwaway test files during development and passed
+across every `SupportScheme`/`GradientScheme` combination to `rtol=1e-5,
+atol=1e-6` — tighter than the existing Jacobian-reference tests' own
+`rtol=1e-3, atol=1e-5`, since old-vs-new is two independently-derived numeric
+paths computing (up to launch-shape) the same floating point operations, not
+a Jacobian-vs-analytic identity. Those equivalence test files were deleted
+after the cutover (comparing an implementation against itself is moot once
+there's only one) — see git history around 2026-08-20 if that evidence is
+ever needed again; the grid-traversal tests that came out of the same files
+were kept (see above), since that comparison stays meaningful post-cutover.
+
+**Step 7 (benchmark memory/runtime on a large-particle-count case) was
+explicitly deferred** — not started. Left for whoever picks this up next;
+Step 7's own text below still describes what it should measure.
+
+**Interaction with `warpier_tier2_jvp_reverse_mode_plan.md`, now actionable**:
+the "Key interaction" section below predicted that once this CSR port landed,
+that plan's own "three bespoke pair-kernel extraction closures" work would
+shrink to "extend `extractStateInfo` with two more slots (tangent particle
+state)" — that's now true, since every Tier-2 JVP kernel is per-query-
+particle-threaded like every primal operator. Not acted on here; noting it
+stays accurate for whoever picks up either plan next.
+
 ## Context
 
 Every Tier-2 JVP kernel shipped by `warpier_tier2_operators_plan.md` (Density, Interpolate,
@@ -102,6 +153,8 @@ operators) — the shared piece that survives is the per-pair building block (`s
 instead of from three distinct per-pair ones.
 
 ## Steps
+
+(Steps 1-6 done, see Status above; Step 7 not started.)
 
 1. **Prove the pattern on one operator first: Density** (simplest — no coefficient assembly beyond
    `dmj*W_ij + mj*dW_ij`, no `GradientScheme` branching). New `computeSPHDensityJVP_Func_i`/

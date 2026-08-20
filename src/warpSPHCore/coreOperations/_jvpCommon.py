@@ -1,12 +1,13 @@
-"""Shared boilerplate for the pair-indexed Tier-2 JVP kernels
-(`warpier_tier2_operators_plan.md` Steps 0/3): SoA/domain/kernel-state
-builders extracted from `wp_densityJVP.py` unchanged, plus the shared
-per-pair `(W_ij, dW_ij)` kernel launcher every `wp_<op>JVP.py` needs (Step 3
-factors this out of `wp_densityJVP.py` so `wp_interpolateJVP.py` and later
-operators reuse it instead of re-launching their own copy).
+"""Shared boilerplate for the Tier-2 JVP kernels
+(`warpier_tier2_operators_plan.md` Steps 0/3, `warpier_tier2_jvp_csr_backend_plan.md`):
+SoA/domain/kernel-state builders shared by every `wp_<op>JVP.py`, plus the
+CSR-port launch helpers (`buildAdjacencyOrGridState`/`buildNullCorrectionData`/
+`gradientWeightsJVP`) that let a per-query-particle JVP kernel be hand-launched,
+bypassing `launchOperator` (`extractStateInfo`'s `build_fn` has no
+tangent-state slot, see `warpier_tier2_jvp_csr_backend_plan.md`).
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, Union
 import torch
 import warp as wp
 
@@ -15,10 +16,11 @@ from ..dataTypes import *
 from ..enumTypes import *
 from ..util import castTorchToWarp, castTorchToWarpAsBuiltins, allocateTorchWarp
 from ..enumTypes import supportSchemeToUint
-from ..kernels.kernelJVP import sphKernelJVP
-from ..util.stateUtil import getParticle
 
-__all__ = ['buildParticleSoA', 'buildDomainState', 'buildKernelState', 'launchPairKernelJVP', 'gradientWeights']
+__all__ = [
+    'buildParticleSoA', 'buildDomainState', 'buildKernelState',
+    'buildAdjacencyOrGridState', 'buildNullCorrectionData', 'gradientWeightsJVP',
+]
 
 _SoA_BY_DIM = {1: particleDataSoA_1, 2: particleDataSoA_2, 3: particleDataSoA_3}
 
@@ -51,101 +53,172 @@ def buildDomainState(domain: DomainDescription) -> domainData:
     return d
 
 
-def buildKernelState(kernel: KernelFunctions, supportMode: SupportScheme) -> kernelState:
+def buildKernelState(
+    kernel: KernelFunctions, supportMode: SupportScheme,
+    gradientMode: Optional[GradientScheme] = None,
+    laplacianMode: Optional[LaplacianScheme] = None,
+) -> kernelState:
     k = kernelState()
     k.kernelFunction = kernel.value
     k.supportMode = supportSchemeToUint(supportMode)
+    # gradientMode/laplacianMode default to 0, which matches neither GradientScheme
+    # nor LaplacianScheme's enum values (both start at 1) -- CSR JVP kernels that
+    # branch on kernelProperties.gradientMode/.laplacianMode (Gradient/Divergence/
+    # Curl/Laplacian) need these actually set; the COO path never reads them from
+    # this struct at all (its coefficient math is pure torch), so this was never
+    # needed before the CSR port (warpier_tier2_jvp_csr_backend_plan.md).
+    if gradientMode is not None:
+        k.gradientMode = gradientMode.value
+    if laplacianMode is not None:
+        k.laplacianMode = laplacianMode.value
     return k
 
 
-@wp.kernel
-def _sphKernelJVP_PairKernel(
-    queryState: Any,
-    referenceState: Any,
-    queryTangentState: Any,
-    referenceTangentState: Any,
-    domainState: domainData,
-    kernelProperties: kernelState,
-    edgeI: wp.array(dtype=wp.int64),
-    edgeJ: wp.array(dtype=wp.int64),
-    outW: wp.array(dtype=scalar_t),
-    outDW: wp.array(dtype=scalar_t),
-):
-    e = wp.tid()
-    if e >= edgeI.shape[0]:
-        return
-    i = wp.int32(edgeI[e])
-    j = wp.int32(edgeJ[e])
-
-    xi, hi, _mi, _rhoi, _ki = getParticle(queryState, i)
-    xj, hj, _mj, _rhoj, _kj = getParticle(referenceState, j)
-    dxi, dhi, _dmi, _drhoi, _dki = getParticle(queryTangentState, i)
-    dxj, dhj, _dmj, _drhoj, _dkj = getParticle(referenceTangentState, j)
-
-    W, dW = sphKernelJVP(xi, xj, hi, hj, dxi, dxj, dhi, dhj, kernelProperties, domainState)
-    outW[e] = W
-    outDW[e] = dW
-
-
-def launchPairKernelJVP(
-    queryState, referenceState, queryTangentState, referenceTangentState,
-    domainState: domainData, kernelProperties: kernelState,
-    edgeI, edgeJ,
-):
-    """One thread per adjacency pair `(i, j)`, producing the pairwise
-    `(W_ij, dW_ij)` JVP as flat `[numPairs]` torch tensors -- the single
-    warp kernel launch shared by every Tier-2 `wp_<op>JVP.py` operator
-    (`warpier_tier2_operators_plan.md` Step 3). `edgeI`/`edgeJ` are the
-    already-cast warp int64 arrays (`castTorchToWarp(adjacency.i/.j)`).
-    """
-    numPairs = edgeI.shape[0]
-    W_t, W_w = allocateTorchWarp(numPairs, scalar_t, edgeI.device)
-    dW_t, dW_w = allocateTorchWarp(numPairs, scalar_t, edgeI.device)
-
-    wp.launch(
-        _sphKernelJVP_PairKernel,
-        dim=numPairs,
-        inputs=[queryState, referenceState, queryTangentState, referenceTangentState,
-                domainState, kernelProperties, edgeI, edgeJ, W_w, dW_w],
-        device=edgeI.device,
-    )
-    return W_t, dW_t
-
-
-def gradientWeights(
-    massJ: torch.Tensor, densityI: torch.Tensor, densityJ: torch.Tensor,
-    dMassJ: torch.Tensor, dDensityI: torch.Tensor, dDensityJ: torch.Tensor,
-    scheme: GradientScheme,
+@wp.func
+def gradientWeightsJVP(
+    massJ: scalar_t, densityI: scalar_t, densityJ: scalar_t,
+    dMassJ: scalar_t, dDensityI: scalar_t, dDensityJ: scalar_t,
+    gradientMode: wp.int32,
 ):
     """`coeff_ij = fi*A_ij + fj*B_ij` (`fi`/`fj` frozen -- Tier 1 territory,
     contribute no term of their own here), `A`/`B`/`dA`/`dB` per
-    `warpier_adjoint.md` Tier 2.2. Shared by Gradient/Divergence/Curl (their
-    own `coeff_ij`) and Laplacian(Brookshaw) (`B` doubles as `q_ij`'s
-    coefficient, `warpier_adjoint.md` Tier 2.2 finding 2 -- not a coincidence,
-    not re-derived independently). All six inputs and both outputs are flat
-    `[numPairs]` (already indexed by `adjacency.i`/`.j`), unlike the
-    `scripts/spike_forward_mode_tier2_gradient.py` this ports, which worked
-    on the dense `(n,n)` all-pairs grid -- the formulas are otherwise
-    identical."""
+    `warpier_adjoint.md` Tier 2.2 -- the CSR JVP kernels' shared `(A, B, dA,
+    dB)` building block (`warpier_tier2_jvp_csr_backend_plan.md` Step 3: "the
+    shared piece that survives is the per-pair building block ... called
+    from inside seven distinct per-query kernels"), used by
+    Gradient/Divergence/Curl/Laplacian(Brookshaw/Naive)'s CSR kernels to
+    combine with their own operator-specific `fi`/`fj` weighting.
+    """
     Vj = massJ / densityJ
-    dVj = dMassJ / densityJ - massJ * dDensityJ / densityJ ** 2
+    dVj = dMassJ / densityJ - massJ * dDensityJ / (densityJ * densityJ)
 
-    if scheme == GradientScheme.Naive:
-        A, dA = torch.zeros_like(Vj), torch.zeros_like(Vj)
-        B, dB = Vj, dVj
-    elif scheme == GradientScheme.Difference:
-        A, dA = -Vj, -dVj
-        B, dB = Vj, dVj
-    elif scheme == GradientScheme.Summation:
-        A, dA = Vj, dVj
-        B, dB = Vj, dVj
-    elif scheme == GradientScheme.Symmetric:
+    A = scalar_t(0.0)
+    dA = scalar_t(0.0)
+    B = scalar_t(0.0)
+    dB = scalar_t(0.0)
+    if gradientMode == wp.static(GradientScheme.Naive.value):
+        B = Vj
+        dB = dVj
+    elif gradientMode == wp.static(GradientScheme.Difference.value):
+        A = -Vj
+        dA = -dVj
+        B = Vj
+        dB = dVj
+    elif gradientMode == wp.static(GradientScheme.Summation.value):
+        A = Vj
+        dA = dVj
+        B = Vj
+        dB = dVj
+    elif gradientMode == wp.static(GradientScheme.Symmetric.value):
         A = massJ / densityI
-        dA = dMassJ / densityI - massJ * dDensityI / densityI ** 2
-        B = massJ * densityI / densityJ ** 2
-        dB = (dMassJ * densityI / densityJ ** 2
-              + massJ * dDensityI / densityJ ** 2
-              - 2.0 * massJ * densityI * dDensityJ / densityJ ** 3)
-    else:
-        raise ValueError(f"gradientWeights: unsupported GradientScheme {scheme}")
+        dA = dMassJ / densityI - massJ * dDensityI / (densityI * densityI)
+        B = massJ * densityI / (densityJ * densityJ)
+        dB = (dMassJ * densityI / (densityJ * densityJ)
+              + massJ * dDensityI / (densityJ * densityJ)
+              - scalar_t(2.0) * massJ * densityI * dDensityJ / (densityJ * densityJ * densityJ))
     return A, B, dA, dB
+
+
+_CORRECTION_BY_DIM = {1: correctionData_1, 2: correctionData_2, 3: correctionData_3}
+
+
+def buildNullCorrectionData(dim: int, device: torch.device) -> Any:
+    """A `correctionData_{dim}` struct with every `useX` flag `False` and
+    size-1 zero-filled arrays behind them -- the CSR JVP kernels' `_Func_i`/
+    `_Func_Adjacency` accept `correctionData`/`iCorrectionData` purely to
+    match the canonical structured kernel ABI's parameter list (Tier-2 JVP
+    has no CRK/renorm/grad-h support, enforced centrally in
+    `operations.py`'s `warpOperationJVP`), so the arrays behind the flags
+    are never read -- mirrors `extractStateInfo`'s own disabled-correction
+    path (`nullField`) without pulling in that machinery's tensor-identity
+    caching, which a one-shot manual launch like this has no use for.
+    """
+    torchDtype = get_torch_precision()
+    zeroScalar = lambda: castTorchToWarpAsBuiltins(torch.zeros(1, device=device, dtype=torchDtype))
+    zeroVec = lambda: castTorchToWarpAsBuiltins(torch.zeros((1, dim), device=device, dtype=torchDtype))
+    zeroMat = lambda: castTorchToWarpAsBuiltins(torch.zeros((1, dim, dim), device=device, dtype=torchDtype))
+
+    corrState = _CORRECTION_BY_DIM[dim]()
+    corrState.useGradientRenormalization = False
+    corrState.renormalizationMatrices = zeroMat()
+    corrState.useVolume = False
+    corrState.queryVolumes = zeroScalar()
+    corrState.referenceVolumes = zeroScalar()
+    corrState.useGradHTerms = False
+    corrState.queryOmegas = zeroScalar()
+    corrState.referenceOmegas = zeroScalar()
+    corrState.useCRK = False
+    corrState.queryA = zeroScalar()
+    corrState.queryB = zeroVec()
+    corrState.queryGradA = zeroVec()
+    corrState.queryGradB = zeroMat()
+    corrState.referenceA = zeroScalar()
+    corrState.referenceB = zeroVec()
+    corrState.referenceGradA = zeroVec()
+    corrState.referenceGradB = zeroMat()
+    return corrState
+
+
+def buildAdjacencyOrGridState(
+    adjacency: Union[AdjacencyList, CompactHashMap],
+    domain: 'DomainDescription',
+):
+    """Convert a torch-facing `AdjacencyList` (CSR-capable already --
+    `.j`/`.edgeOffsets`/`.numNeighbors`, see `dataTypes/adjacency_t.py`'s own
+    docstring) or `CompactHashMap` into the warp-side `(adjacencyData,
+    gridData)` struct pair `getIndexRange` consumes, plus the `useAdjacency`/
+    `numOffsets` pair driving `_Func_Adjacency`'s dispatch -- the same
+    conversion `extractStateInfo` performs (`autograd/arg_extract.py`
+    Section 4) for `launchOperator`, done by hand here since a hand-launched
+    JVP kernel bypasses that machinery entirely (see this module's
+    docstring). The branch not in use is filled with size-1 zero dummies
+    (adjacency's own `domain.min`/`domain.max` stand in for the unused grid
+    qMin/qMax, matching `extractStateInfo`'s own choice) -- never read, since
+    `getIndexRange` only touches one branch depending on `useAdjacency`.
+    """
+    device = domain.min.device
+    dim = domain.dim
+
+    adjState = adjacencyData()
+    gState = gridData()
+
+    if isinstance(adjacency, CompactHashMap):
+        useAdjacency = False
+        adjState.neighborList = castTorchToWarp(torch.zeros(1, device=device, dtype=torch.int64))
+        adjState.neighborOffsets = castTorchToWarp(torch.zeros(1, device=device, dtype=torch.int32))
+        adjState.numNeighbors = castTorchToWarp(torch.zeros(1, device=device, dtype=torch.int32))
+
+        gState.sortIndex = castTorchToWarp(adjacency.sortIndex)
+        gState.qMin = castTorchToWarpAsBuiltins(adjacency.qMin)
+        gState.qMax = castTorchToWarpAsBuiltins(adjacency.qMax)
+        gState.hCell = scalar_t(adjacency.hCell)
+        gState.numCells = castTorchToWarp(adjacency.numCells)
+        gState.hashTable = castTorchToWarpAsBuiltins(adjacency.hashTable)
+        gState.cellTable = castTorchToWarpAsBuiltins(adjacency.sortedCellTable)
+        gState.D = adjacency.D
+        gState.numOffsets = adjacency.numOffsets
+        gState.cellOffsets = castTorchToWarpAsBuiltins(adjacency.cellOffsets)
+        numOffsets = adjacency.numOffsets
+    elif isinstance(adjacency, AdjacencyList):
+        useAdjacency = True
+        adjState.neighborList = castTorchToWarp(adjacency.j)
+        adjState.neighborOffsets = castTorchToWarp(adjacency.edgeOffsets)
+        adjState.numNeighbors = castTorchToWarp(adjacency.numNeighbors)
+
+        gState.sortIndex = castTorchToWarp(torch.zeros(1, device=device, dtype=torch.int64))
+        gState.qMin = castTorchToWarpAsBuiltins(domain.min)
+        gState.qMax = castTorchToWarpAsBuiltins(domain.max)
+        gState.hCell = scalar_t(0.0)
+        gState.numCells = castTorchToWarp(torch.zeros(dim, device=device, dtype=torch.int32))
+        gState.hashTable = castTorchToWarpAsBuiltins(torch.zeros((1, 2), device=device, dtype=torch.int32))
+        gState.cellTable = castTorchToWarpAsBuiltins(torch.zeros((1, 3), device=device, dtype=torch.int64))
+        gState.D = dim
+        gState.numOffsets = 0
+        gState.cellOffsets = castTorchToWarpAsBuiltins(torch.zeros((1, 3), device=device, dtype=torch.int32))
+        numOffsets = 1
+    else:
+        raise NotImplementedError(
+            "buildAdjacencyOrGridState: adjacency must be an AdjacencyList or "
+            f"CompactHashMap, got {type(adjacency)}."
+        )
+    return useAdjacency, adjState, gState, numOffsets

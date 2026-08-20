@@ -167,3 +167,45 @@ def test_curlPositionJVP_rejects_1d():
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
                          tangentQueryPositions=torch.zeros_like(positions),
                          queryValues=qv, referenceValues=rv)
+
+
+def test_curlPositionJVP_grid_traversal_matches_adjacency_traversal():
+    # computeSPHCurlPositionJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
+    # also supports grid (CompactHashMap) traversal, unlike warpOperationJVP's
+    # own centralized AdjacencyList-only gate -- exercised here via a direct
+    # import.
+    from warpSPHCore.coreOperations import computeSPHCurlPositionJVP
+
+    positions, supports, masses = _grid_case_2d()
+    domain = _make_domain(dim=2)
+    n = positions.shape[0]
+    kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
+    p0_forAdjacency = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
+    adjacency = radiusSearchCompactHashMap(p0_forAdjacency, domain, mode=SupportScheme.Gather)
+    hashMap = adjacency.hashMap
+    assert hashMap is not None
+
+    densities = _densities_for(positions, supports, masses, kinds, domain, adjacency)
+    p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
+
+    torch.manual_seed(2)
+    queryValues = torch.randn(n, 2, dtype=DTYPE, device=DEVICE)
+    referenceValues = torch.randn(n, 2, dtype=DTYPE, device=DEVICE)
+    dpos = torch.randn_like(positions)
+    dsup = torch.randn_like(supports) * 0.1
+    dmass = torch.randn_like(masses)
+    ddensity = torch.randn_like(densities) * 0.1
+
+    common = dict(
+        queryParticles=p0, domain=domain, kernel=KERNEL, supportMode=SupportScheme.Gather,
+        tangentQueryPositions=dpos, tangentReferencePositions=dpos,
+        tangentQuerySupports=dsup, tangentReferenceSupports=dsup,
+        tangentReferenceMasses=dmass,
+        tangentQueryDensities=ddensity, tangentReferenceDensities=ddensity,
+        queryValues=queryValues, referenceValues=referenceValues,
+        gradientMode=GradientScheme.Symmetric,
+    )
+    viaAdjacency = computeSPHCurlPositionJVP(adjacency=adjacency, **common)
+    viaGrid = computeSPHCurlPositionJVP(adjacency=hashMap, **common)
+
+    torch.testing.assert_close(viaGrid, viaAdjacency, rtol=1e-5, atol=1e-6)
