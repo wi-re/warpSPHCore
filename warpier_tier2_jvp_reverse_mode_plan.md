@@ -1,5 +1,48 @@
 # Reverse-mode through the Tier-2 JVP bridge
 
+## Status: bridge wired for all six operators (2026-08-20); one pre-existing,
+out-of-scope reverse-mode bug found and documented, not fixed
+
+`warpier_tier2_jvp_csr_backend_plan.md`'s CSR port (done first, per this plan's own sequencing note)
+made the "Approach" section below moot: the Tier-2 JVP kernels' ABI now matches
+`extractStateInfo`'s per-query-particle convention closely enough that no bespoke pair-kernel
+`build_fn`s were needed. Instead, one new function, `_jvpCommon.launchGeometryJVP`, builds the
+`(qPart, rPart, qTangent, rTangent, domainState, useAdjacency, adjacencyState, gridState,
+correctionData, kernelProperties[, *extraTensors])` tuple from a flat list of the 16 particle-state
+tensors (8 primal + 8 tangent, `queryDensities`/`referenceDensities`/tangent-density defaulting to
+zeros when `None`, matching each operator's pre-existing convention) plus any operator-specific extra
+tensors (`queryValues`/`referenceValues`), and calls `StateAwareWarpFunction.apply` directly —
+`domainState`/`correctionData`/`adjacencyState`/`gridState`/particle `kinds` are non-differentiable
+and built once per call, closed over in `build_fn` rather than threaded through `flat_tensors`.
+`extractStateInfo` itself is untouched, as the original plan intended. All six `wp_<op>JVP.py`
+`compute SPH<Op>GeometryJVP` functions now call this instead of hand-building structs and a bare
+`wp.launch` — zero call-site changes outside those six files, matching the "zero call-site changes"
+design property below.
+
+**Verified:** all 140 forward-mode (no-grad) value tests pass unmodified; the full suite (292
+passed/1 skipped) and `operation_matrix.py --ci` (`OK=258, HIGH=0, ERR=0, NAN=0`) both stay at
+baseline. Six new `scripts/gradcheck_tier2_jvp_<op>.py` scripts (Step 4), registered in
+`test_gradcheck_scripts.py`, gradcheck every operator's **self-referencing** construction
+(`referenceParticles=None`) against positions/supports/densities, every tangent counterpart, and
+`queryValues`/`referenceValues` where applicable — all pass.
+
+**Found, not fixed: a pre-existing reverse-mode gap, outside this plan's scope.** Every
+`gradcheck_*_native.py` script in this repo (Tier-2 JVP's new ones included) constructs its case with
+`referenceParticles` defaulting to the *same* tensor as `queryParticles` — `torch.autograd.gradcheck`
+against a shared leaf only ever measures the *combined* sensitivity `d(output)/dx_i + d(output)/dx_j`
+at each shared index, never each role's individual partial. Constructing a genuinely distinct-role
+case (separate query/reference position *tensors*, same values) exposes a real, substantial
+mismatch in the `dW`/`dG`/`dL`-w.r.t.-primal-position term specifically (the tangent-input partials,
+and the `W`/`G`/`L`-only i.e. Tier-1-shaped partials, are all correct in the same distinct-role
+construction — only the second-derivative-level term is wrong). **The identical mismatch reproduces
+in primal, non-JVP `warpOperation(..., WarpOperation.Gradient, ...)`** under the same distinct-role
+construction — so this is a latent gap in the `vectorNorm_warp`/`vectorNormalize_warp`/`sphGradient_`
+reverse-mode chain (`math/wp_normalize.py`'s hand-derived `@wp.func_grad` adjoints), predating this
+plan and this session entirely, not something `_jvpCommon.launchGeometryJVP` introduced. Repro kept
+as a non-asserted, exit-0 case inside `scripts/gradcheck_tier2_jvp_interpolate.py` (prints
+PASS/FAIL, doesn't gate CI). Root-causing/fixing the adjoint chain itself is a separate effort, not
+attempted here — flagged rather than silently worked around.
+
 ## Context
 
 `warpier_tier2_operators_plan.md` (Steps 0-8, done 2026-08-19) wired forward-mode (JVP) position/

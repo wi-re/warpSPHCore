@@ -1,10 +1,14 @@
 """Shared boilerplate for the Tier-2 JVP kernels
 (`warpier_tier2_operators_plan.md` Steps 0/3, `warpier_tier2_jvp_csr_backend_plan.md`):
-SoA/domain/kernel-state builders shared by every `wp_<op>JVP.py`, plus the
+SoA/domain/kernel-state builders shared by every `wp_<op>JVP.py`, the
 CSR-port launch helpers (`buildAdjacencyOrGridState`/`buildNullCorrectionData`/
-`gradientWeightsJVP`) that let a per-query-particle JVP kernel be hand-launched,
-bypassing `launchOperator` (`extractStateInfo`'s `build_fn` has no
-tangent-state slot, see `warpier_tier2_jvp_csr_backend_plan.md`).
+`gradientWeightsJVP`), and `launchGeometryJVP`
+(`warpier_tier2_jvp_reverse_mode_plan.md`) -- the autograd-bridged launcher
+that replaced every `wp_<op>JVP.py`'s own bare `wp.launch` once the CSR port
+made the Tier-2 JVP kernels' ABI match `extractStateInfo`'s own
+per-query-particle convention closely enough that a dedicated `build_fn`
+(rather than a generalization of `extractStateInfo` itself, which stays
+untouched) was all reverse-mode differentiability needed.
 """
 
 from typing import Any, Optional, Union
@@ -16,10 +20,12 @@ from ..dataTypes import *
 from ..enumTypes import *
 from ..util import castTorchToWarp, castTorchToWarpAsBuiltins, allocateTorchWarp
 from ..enumTypes import supportSchemeToUint
+from ..autograd import StateAwareWarpFunction, launch_kernel
 
 __all__ = [
     'buildParticleSoA', 'buildDomainState', 'buildKernelState',
     'buildAdjacencyOrGridState', 'buildNullCorrectionData', 'gradientWeightsJVP',
+    'launchGeometryJVP',
 ]
 
 _SoA_BY_DIM = {1: particleDataSoA_1, 2: particleDataSoA_2, 3: particleDataSoA_3}
@@ -222,3 +228,117 @@ def buildAdjacencyOrGridState(
             f"CompactHashMap, got {type(adjacency)}."
         )
     return useAdjacency, adjState, gState, numOffsets
+
+
+def launchGeometryJVP(
+    kernel: Any,
+    domain: 'DomainDescription',
+    kernelFn: 'KernelFunctions',
+    supportMode: 'SupportScheme',
+    adjacency: Union['AdjacencyList', 'CompactHashMap'],
+
+    queryPositions: torch.Tensor, querySupports: torch.Tensor, queryMasses: torch.Tensor,
+    referencePositions: torch.Tensor, referenceSupports: torch.Tensor, referenceMasses: torch.Tensor,
+
+    tangentQueryPositions: torch.Tensor, tangentQuerySupports: torch.Tensor, tangentQueryMasses: torch.Tensor,
+    tangentReferencePositions: torch.Tensor, tangentReferenceSupports: torch.Tensor, tangentReferenceMasses: torch.Tensor,
+
+    outputShape: int,
+    outputDtype: Any,
+
+    queryDensities: Optional[torch.Tensor] = None,
+    referenceDensities: Optional[torch.Tensor] = None,
+    tangentQueryDensities: Optional[torch.Tensor] = None,
+    tangentReferenceDensities: Optional[torch.Tensor] = None,
+
+    gradientMode: Optional['GradientScheme'] = None,
+    laplacianMode: Optional['LaplacianScheme'] = None,
+
+    extraTensors: tuple = (),
+) -> torch.Tensor:
+    """Autograd-bridged launcher for every Tier-2 JVP kernel's shared CSR
+    argument order (`queryState, referenceState, queryTangentState,
+    referenceTangentState, domainState, useAdjacency, adjacencyState,
+    gridState, correctionData, kernelProperties[, *extraTensors],
+    outputValues`) -- routes through `StateAwareWarpFunction` (the same
+    bridge every primal operator reaches via `launchOperator`/`_launch`)
+    instead of a bare `wp.launch`, so gradients flow back through
+    `positions`/`supports`/`masses`/`densities` on both the query and
+    reference roles, their tangent counterparts, and any `extraTensors`
+    (e.g. Gradient/Divergence/Curl/Laplacian's frozen `queryValues`/
+    `referenceValues`) -- closing the reverse-mode gap
+    `warpier_tier2_jvp_reverse_mode_plan.md` documents.
+
+    `domainState`/`correctionData`/`adjacencyState`/`gridState`/
+    `kernelProperties`/particle `kinds` are built once per call and closed
+    over by `build_fn` rather than threaded through `flat_tensors`: none of
+    them are differentiable (indices, domain bounds, disabled-correction
+    flags), so there is nothing for the bridge to track for them -- only the
+    16 particle-state tensors (8 primal + 8 tangent) and any `extraTensors`
+    participate in `StateAwareWarpFunction`'s autograd bookkeeping.
+    """
+    device = queryPositions.device
+    dtype = queryPositions.dtype
+    dim = domain.dim
+    nQuery = queryPositions.shape[0]
+    nRef = referencePositions.shape[0]
+
+    if queryDensities is None:
+        queryDensities = torch.zeros(nQuery, device=device, dtype=dtype)
+    if referenceDensities is None:
+        referenceDensities = torch.zeros(nRef, device=device, dtype=dtype)
+    if tangentQueryDensities is None:
+        tangentQueryDensities = torch.zeros(nQuery, device=device, dtype=dtype)
+    if tangentReferenceDensities is None:
+        tangentReferenceDensities = torch.zeros(nRef, device=device, dtype=dtype)
+
+    domainState = buildDomainState(domain)
+    kernelProperties = buildKernelState(kernelFn, supportMode, gradientMode=gradientMode, laplacianMode=laplacianMode)
+    correctionData = buildNullCorrectionData(dim, device)
+    useAdjacency, adjacencyState, gridState, _numOffsets = buildAdjacencyOrGridState(adjacency, domain)
+
+    qKinds = castTorchToWarp(torch.zeros(nQuery, device=device, dtype=torch.int32))
+    rKinds = castTorchToWarp(torch.zeros(nRef, device=device, dtype=torch.int32))
+
+    _ParticleSoA = _SoA_BY_DIM[dim]
+
+    flat_tensors = [
+        queryPositions, referencePositions,               # 0-1
+        querySupports, referenceSupports,                  # 2-3
+        queryMasses, referenceMasses,                       # 4-5
+        queryDensities, referenceDensities,                 # 6-7
+        tangentQueryPositions, tangentReferencePositions,   # 8-9
+        tangentQuerySupports, tangentReferenceSupports,     # 10-11
+        tangentQueryMasses, tangentReferenceMasses,         # 12-13
+        tangentQueryDensities, tangentReferenceDensities,   # 14-15
+    ] + list(extraTensors)
+    n_extra = len(extraTensors)
+
+    def build_fn(wa: list, use_bundle: bool = False) -> tuple:
+        qPart = _ParticleSoA()
+        qPart.positions, qPart.supports = wa[0], wa[2]
+        qPart.masses, qPart.densities, qPart.kinds = wa[4], wa[6], qKinds
+
+        rPart = _ParticleSoA()
+        rPart.positions, rPart.supports = wa[1], wa[3]
+        rPart.masses, rPart.densities, rPart.kinds = wa[5], wa[7], rKinds
+
+        qTangent = _ParticleSoA()
+        qTangent.positions, qTangent.supports = wa[8], wa[10]
+        qTangent.masses, qTangent.densities, qTangent.kinds = wa[12], wa[14], qKinds
+
+        rTangent = _ParticleSoA()
+        rTangent.positions, rTangent.supports = wa[9], wa[11]
+        rTangent.masses, rTangent.densities, rTangent.kinds = wa[13], wa[15], rKinds
+
+        extra = tuple(wa[16 + i] for i in range(n_extra))
+
+        return (
+            qPart, rPart, qTangent, rTangent, domainState,
+            useAdjacency, adjacencyState, gridState,
+            correctionData, kernelProperties,
+        ) + extra
+
+    return StateAwareWarpFunction.apply(
+        build_fn, launch_kernel, kernel, outputShape, outputDtype, *flat_tensors,
+    )

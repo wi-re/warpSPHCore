@@ -34,15 +34,8 @@ from ..enumTypes import *
 from ..math import zero_like_warp
 from ..kernels.kernelJVP import sphKernelJVP
 from ..radiusSearch.grid_util import getIndexRange
-from ..util import allocateTorchWarp
 from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i
-from ._jvpCommon import (
-    buildParticleSoA as _buildParticleSoA,
-    buildDomainState as _buildDomainState,
-    buildKernelState as _buildKernelState,
-    buildAdjacencyOrGridState as _buildAdjacencyOrGridState,
-    buildNullCorrectionData as _buildNullCorrectionData,
-)
+from ._jvpCommon import launchGeometryJVP as _launchGeometryJVP
 
 __all__ = ['computeSPHDensityGeometryJVP']
 
@@ -203,32 +196,13 @@ def computeSPHDensityGeometryJVP(
     tangentReferenceSupports = tangentReferenceSupports if tangentReferenceSupports is not None else zerosScalar(nRef)
     tangentReferenceMasses = tangentReferenceMasses if tangentReferenceMasses is not None else zerosScalar(nRef)
 
-    queryState = _buildParticleSoA(dim, queryParticles.positions, queryParticles.supports, queryParticles.masses)
-    referenceState = _buildParticleSoA(dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses)
-    queryTangentState = _buildParticleSoA(dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery))
-    referenceTangentState = _buildParticleSoA(dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses)
-    domainState = _buildDomainState(domain)
-    kernelProperties = _buildKernelState(kernel, supportMode)
-    correctionData = _buildNullCorrectionData(dim, device)
-
-    useAdjacency, adjacencyState, gridState, _numOffsets = _buildAdjacencyOrGridState(adjacency, domain)
-
-    massDtype = queryState.masses.dtype
-    warpDevice = queryState.positions.device
-    dDensity_t, dDensity_w = allocateTorchWarp(nQuery, massDtype, warpDevice)
-
-    wp.launch(
+    return _launchGeometryJVP(
         computeSPHDensityJVP_Kernel,
-        dim=nQuery,
-        inputs=[
-            queryState, referenceState,
-            queryTangentState, referenceTangentState,
-            domainState,
-            useAdjacency, adjacencyState, gridState,
-            correctionData,
-            kernelProperties,
-            dDensity_w,
-        ],
-        device=warpDevice,
+        domain, kernel, supportMode, adjacency,
+        queryParticles.positions, queryParticles.supports, queryParticles.masses,
+        referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
+        tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery),
+        tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses,
+        outputShape=nQuery,
+        outputDtype=scalar_t,
     )
-    return dDensity_t

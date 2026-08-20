@@ -345,6 +345,43 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   needing SPH domain expertise to fix; reclassified 2026-08-07 — the guard
   itself was always the correct fix, not a placeholder for one.)
 
+* **OPEN (found 2026-08-20, not fixed):** reverse-mode differentiation
+  w.r.t. a pairwise kernel's *own primal position* is wrong when query and
+  reference roles are genuinely distinct tensors — and every existing
+  `gradcheck_*_native.py`/`gradcheck_tier2_jvp_*.py` script is structurally
+  blind to it. Found while wiring `_jvpCommon.launchGeometryJVP`
+  (`warpier_tier2_jvp_reverse_mode_plan.md`): `torch.autograd.gradcheck`
+  against a case built with `referenceParticles=None` (every existing
+  gradcheck script's convention — `queryPositions is referencePositions`,
+  one shared tensor) only ever measures the *combined* sensitivity
+  `d(output)/dx_i + d(output)/dx_j` at each shared index, never each role's
+  individual partial — so a bug that is wrong per-role but happens to sum
+  correctly (or trivially to zero, by translation invariance, for a
+  translation-invariant quantity like the Tier-2 JVP's `dW`/`dG`/`dL`) is
+  invisible to it. Building the case with *separate* query/reference
+  position tensors (same values, different objects — see
+  `scripts/gradcheck_tier2_jvp_interpolate.py`'s non-asserted repro case)
+  exposes a real, substantial analytical-vs-numerical mismatch, isolated to
+  exactly the term that differentiates a kernel-derivative-shaped quantity
+  (`sphGradient_`'s output, used inside Tier-2 JVP's `dW`/`dG`/`dL`, or
+  directly inside primal Gradient's own kernel) a further time w.r.t. its
+  own position input — **confirmed to reproduce identically in primal,
+  non-JVP `warpOperation(..., WarpOperation.Gradient, ...)`**, so this
+  predates the Tier-2 JVP work entirely and is not specific to it. Every
+  other differentiable input (tangent-direction partials, and the
+  `W`/`G`/`L`-only i.e. non-second-derivative partials) checked correct
+  under the same distinct-role construction — only the second-derivative-
+  level term is wrong. Prime suspect: `math/wp_normalize.py`'s hand-derived
+  `@wp.func_grad` adjoints for `vectorNorm_warp`/`vectorNormalize_warp`
+  (the `r=0`-regularized ones `sphGradient_` calls internally), not
+  investigated further. **Practical implication:** any reverse-mode use of
+  this codebase with query and reference genuinely distinct tensors (not
+  the common single-particle-set self-interaction pattern) should be
+  treated as unverified for operators whose kernel math itself embeds a
+  derivative (Gradient, Divergence, Curl, Laplacian, and every Tier-2 JVP
+  operator) until this is root-caused; Density and Interpolate's *own*
+  first-derivative-only (`W`-only) terms are unaffected.
+
 ## Notebook/documentation conventions
 
 * **"Grid mode" doesn't need its own notebook.** Grid dispatch is just

@@ -45,18 +45,13 @@ from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
 from ..math import zero_like_warp, safe_sqrt
-from ..util import allocateTorchWarp, castTorchToWarpAsBuiltins
 from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i
 from ..util.support import computePairwiseSupport, computePairwiseSupportJVP
 from ..math.wp_distance import computeDistanceVec
 from ..radiusSearch.grid_util import getIndexRange
 from ._jvpCommon import (
-    buildParticleSoA as _buildParticleSoA,
-    buildDomainState as _buildDomainState,
-    buildKernelState as _buildKernelState,
     gradientWeightsJVP as _gradientWeightsJVP,
-    buildAdjacencyOrGridState as _buildAdjacencyOrGridState,
-    buildNullCorrectionData as _buildNullCorrectionData,
+    launchGeometryJVP as _launchGeometryJVP,
 )
 from ..kernels.kernelJVP import sphKernelGradientJVP, sphKernelLaplacianJVP
 
@@ -292,46 +287,22 @@ def computeSPHLaplacianBrookshawGeometryJVP(
     tangentQueryDensities = tangentQueryDensities if tangentQueryDensities is not None else zerosScalar(nQuery)
     tangentReferenceDensities = tangentReferenceDensities if tangentReferenceDensities is not None else zerosScalar(nRef)
 
-    queryState = _buildParticleSoA(
-        dim, queryParticles.positions, queryParticles.supports, queryParticles.masses, queryParticles.densities,
-    )
-    referenceState = _buildParticleSoA(
-        dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
-        referenceParticles.densities,
-    )
-    queryTangentState = _buildParticleSoA(
-        dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery), tangentQueryDensities,
-    )
-    referenceTangentState = _buildParticleSoA(
-        dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses, tangentReferenceDensities,
-    )
-    domainState = _buildDomainState(domain)
-    kernelProperties = _buildKernelState(kernel, supportMode, gradientMode=gradientMode)
-    correctionData = _buildNullCorrectionData(dim, device)
-
-    useAdjacency, adjacencyState, gridState, _numOffsets = _buildAdjacencyOrGridState(adjacency, domain)
-
-    queryValuesWarp = castTorchToWarpAsBuiltins(queryValues.contiguous())
-    referenceValuesWarp = castTorchToWarpAsBuiltins(referenceValues.contiguous())
-    warpDevice = queryState.positions.device
-    dLaplacian_t, dLaplacian_w = allocateTorchWarp(nQuery, queryState.masses.dtype, warpDevice)
-
-    wp.launch(
+    return _launchGeometryJVP(
         computeSPHLaplacianBrookshawJVP_Kernel,
-        dim=nQuery,
-        inputs=[
-            queryState, referenceState,
-            queryTangentState, referenceTangentState,
-            domainState,
-            useAdjacency, adjacencyState, gridState,
-            correctionData,
-            kernelProperties,
-            queryValuesWarp, referenceValuesWarp,
-            dLaplacian_w,
-        ],
-        device=warpDevice,
+        domain, kernel, supportMode, adjacency,
+        queryParticles.positions, queryParticles.supports, queryParticles.masses,
+        referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
+        tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery),
+        tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses,
+        outputShape=nQuery,
+        outputDtype=scalar_t,
+        queryDensities=queryParticles.densities,
+        referenceDensities=referenceParticles.densities,
+        tangentQueryDensities=tangentQueryDensities,
+        tangentReferenceDensities=tangentReferenceDensities,
+        gradientMode=gradientMode,
+        extraTensors=(queryValues, referenceValues),
     )
-    return dLaplacian_t
 
 
 # ---------------------------------------------------------------------------
@@ -536,46 +507,22 @@ def computeSPHLaplacianNaiveGeometryJVP(
     tangentQueryDensities = tangentQueryDensities if tangentQueryDensities is not None else zerosScalar(nQuery)
     tangentReferenceDensities = tangentReferenceDensities if tangentReferenceDensities is not None else zerosScalar(nRef)
 
-    queryState = _buildParticleSoA(
-        dim, queryParticles.positions, queryParticles.supports, queryParticles.masses, queryParticles.densities,
-    )
-    referenceState = _buildParticleSoA(
-        dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
-        referenceParticles.densities,
-    )
-    queryTangentState = _buildParticleSoA(
-        dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery), tangentQueryDensities,
-    )
-    referenceTangentState = _buildParticleSoA(
-        dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses, tangentReferenceDensities,
-    )
-    domainState = _buildDomainState(domain)
-    kernelProperties = _buildKernelState(kernel, supportMode, gradientMode=gradientMode)
-    correctionData = _buildNullCorrectionData(dim, device)
-
-    useAdjacency, adjacencyState, gridState, _numOffsets = _buildAdjacencyOrGridState(adjacency, domain)
-
-    queryValuesWarp = castTorchToWarpAsBuiltins(queryValues.contiguous())
-    referenceValuesWarp = castTorchToWarpAsBuiltins(referenceValues.contiguous())
-    warpDevice = queryState.positions.device
-    dLaplacian_t, dLaplacian_w = allocateTorchWarp(nQuery, queryState.masses.dtype, warpDevice)
-
-    wp.launch(
+    return _launchGeometryJVP(
         computeSPHLaplacianNaiveJVP_Kernel,
-        dim=nQuery,
-        inputs=[
-            queryState, referenceState,
-            queryTangentState, referenceTangentState,
-            domainState,
-            useAdjacency, adjacencyState, gridState,
-            correctionData,
-            kernelProperties,
-            queryValuesWarp, referenceValuesWarp,
-            dLaplacian_w,
-        ],
-        device=warpDevice,
+        domain, kernel, supportMode, adjacency,
+        queryParticles.positions, queryParticles.supports, queryParticles.masses,
+        referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
+        tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery),
+        tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses,
+        outputShape=nQuery,
+        outputDtype=scalar_t,
+        queryDensities=queryParticles.densities,
+        referenceDensities=referenceParticles.densities,
+        tangentQueryDensities=tangentQueryDensities,
+        tangentReferenceDensities=tangentReferenceDensities,
+        gradientMode=gradientMode,
+        extraTensors=(queryValues, referenceValues),
     )
-    return dLaplacian_t
 
 
 def computeSPHLaplacianGeometryJVP(

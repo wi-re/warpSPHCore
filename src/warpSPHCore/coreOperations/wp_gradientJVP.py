@@ -31,15 +31,11 @@ from ..enumTypes import *
 from ..math import zero_like_warp
 from ..kernels.kernelJVP import sphKernelGradientJVP
 from ..radiusSearch.grid_util import getIndexRange
-from ..util import allocateTorchWarp, castTorchToWarpAsBuiltins, _get_warp_vector_dtype
+from ..util import _get_warp_vector_dtype
 from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i
 from ._jvpCommon import (
-    buildParticleSoA as _buildParticleSoA,
-    buildDomainState as _buildDomainState,
-    buildKernelState as _buildKernelState,
     gradientWeightsJVP as _gradientWeightsJVP,
-    buildAdjacencyOrGridState as _buildAdjacencyOrGridState,
-    buildNullCorrectionData as _buildNullCorrectionData,
+    launchGeometryJVP as _launchGeometryJVP,
 )
 
 __all__ = ['computeSPHGradientGeometryJVP']
@@ -244,43 +240,19 @@ def computeSPHGradientGeometryJVP(
     tangentQueryDensities = tangentQueryDensities if tangentQueryDensities is not None else zerosScalar(nQuery)
     tangentReferenceDensities = tangentReferenceDensities if tangentReferenceDensities is not None else zerosScalar(nRef)
 
-    queryState = _buildParticleSoA(
-        dim, queryParticles.positions, queryParticles.supports, queryParticles.masses, queryParticles.densities,
-    )
-    referenceState = _buildParticleSoA(
-        dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
-        referenceParticles.densities,
-    )
-    queryTangentState = _buildParticleSoA(
-        dim, tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery), tangentQueryDensities,
-    )
-    referenceTangentState = _buildParticleSoA(
-        dim, tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses, tangentReferenceDensities,
-    )
-    domainState = _buildDomainState(domain)
-    kernelProperties = _buildKernelState(kernel, supportMode, gradientMode=gradientMode)
-    correctionData = _buildNullCorrectionData(dim, device)
-
-    useAdjacency, adjacencyState, gridState, _numOffsets = _buildAdjacencyOrGridState(adjacency, domain)
-
-    queryValuesWarp = castTorchToWarpAsBuiltins(queryValues.contiguous())
-    referenceValuesWarp = castTorchToWarpAsBuiltins(referenceValues.contiguous())
-    warpDevice = queryState.positions.device
-    dGradient_t, dGradient_w = allocateTorchWarp(nQuery, _get_warp_vector_dtype(dim, dtype), warpDevice)
-
-    wp.launch(
+    return _launchGeometryJVP(
         computeSPHGradientJVP_Kernel,
-        dim=nQuery,
-        inputs=[
-            queryState, referenceState,
-            queryTangentState, referenceTangentState,
-            domainState,
-            useAdjacency, adjacencyState, gridState,
-            correctionData,
-            kernelProperties,
-            queryValuesWarp, referenceValuesWarp,
-            dGradient_w,
-        ],
-        device=warpDevice,
+        domain, kernel, supportMode, adjacency,
+        queryParticles.positions, queryParticles.supports, queryParticles.masses,
+        referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
+        tangentQueryPositions, tangentQuerySupports, zerosScalar(nQuery),
+        tangentReferencePositions, tangentReferenceSupports, tangentReferenceMasses,
+        outputShape=nQuery,
+        outputDtype=_get_warp_vector_dtype(dim, dtype),
+        queryDensities=queryParticles.densities,
+        referenceDensities=referenceParticles.densities,
+        tangentQueryDensities=tangentQueryDensities,
+        tangentReferenceDensities=tangentReferenceDensities,
+        gradientMode=gradientMode,
+        extraTensors=(queryValues, referenceValues),
     )
-    return dGradient_t
