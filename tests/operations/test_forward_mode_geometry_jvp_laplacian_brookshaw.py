@@ -266,6 +266,52 @@ def test_laplacianGeometryJVP_naive_still_rejects_crkState():
                          queryValues=qv, referenceValues=rv)
 
 
+def test_laplacianBrookshawGeometryJVP_accepts_renormalizationState():
+    # warpier_tier2_correction_jvp_plan.md phase (f): renormalization tangent
+    # extension landed for Laplacian's Brookshaw scheme (and Divergence/Curl)
+    # -- renormalizationState (with or without renormalizationTangentState)
+    # no longer raises here. See test_gradientGeometryJVP_accepts_crkState in
+    # test_forward_mode_geometry_jvp_gradient.py for phase (d)'s Gradient-only
+    # precedent this extends. Naive/Dot/Default stay out of scope (no
+    # derivation exists) -- see
+    # test_laplacianGeometryJVP_naive_still_rejects_renormalizationState below.
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    from warpSPHCore.dataTypes import RenormalizationState, RenormalizationTangentState
+    n = positions.shape[0]
+    dummy = RenormalizationState(renormalizationMatrices=torch.zeros(n, 1, 1, dtype=DTYPE))
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                              renormalizationState=dummy,
+                              queryValues=qv, referenceValues=rv)
+    assert torch.isfinite(result).all()
+
+    dummyTangent = RenormalizationTangentState(renormalizationMatrices=torch.zeros(n, 1, 1, dtype=DTYPE))
+    with pytest.raises(ValueError, match="renormalizationTangentState requires renormalizationState"):
+        warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                         renormalizationTangentState=dummyTangent,
+                         queryValues=qv, referenceValues=rv)
+
+
+def test_laplacianGeometryJVP_naive_still_rejects_renormalizationState():
+    # Naive/Dot/Default stay out of renormalization scope
+    # (warpier_tier2_correction_jvp_plan.md phase (f) only covers Brookshaw) --
+    # verified here for Naive as the representative case, same boundary
+    # test_laplacianGeometryJVP_naive_still_rejects_crkState checks for CRK.
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    from warpSPHCore.dataTypes import RenormalizationState
+    n = positions.shape[0]
+    dummy = RenormalizationState(renormalizationMatrices=torch.zeros(n, 1, 1, dtype=DTYPE))
+    naiveProps = OperationProperties(kernel=KERNEL, operation=WarpOperation.Laplacian,
+                                     supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll,
+                                     gradientMode=GradientScheme.Symmetric, laplacianMode=LaplacianScheme.Naive)
+    with pytest.raises(NotImplementedError, match="Brookshaw"):
+        warpOperationJVP(p0, naiveProps, domain, adjacency=adjacency,
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                         renormalizationState=dummy,
+                         queryValues=qv, referenceValues=rv)
+
+
 def test_laplacianBrookshawGeometryJVP_geometryOnly_unchanged_when_combination_allowed():
     # Regression guard (warpier_tier2_combined_jvp_plan.md step 5): the
     # geometry-only path (no value tangent supplied) must return exactly

@@ -115,16 +115,84 @@ def pinv2x2_warp(
         EV[i][1] = scalar_t(1.0)
         return
 
-    # Closed-form symmetric 2x2 eigendecomposition: a single atan2 call. This replaces a general (and
-    # for a symmetric input, unnecessary) 2x2 SVD that computed U's rotation angle and V's rotation
-    # angle from two SEPARATE atan2 expressions. For a near-isotropic C (a~=d, b~=c~=0 -- the common
-    # case for a locally regular/well-resolved particle neighborhood) both of those expressions'
-    # denominators round to ~0, and because the two expressions round differently at the float-noise
-    # level, the two angles could land on unrelated values instead of the (here) required theta==phi,
-    # producing an inverse that was spuriously rotated by tens of degrees instead of staying diagonal
-    # -- reproduced directly against production covariance matrices, see warpier_core.md. A symmetric
-    # matrix only has one rotation angle in the first place, so computing it once removes the
-    # possibility of the two desyncing.
+    # Eigenvalue MAGNITUDES via the closed-form trace/determinant quadratic (atan2-free) --
+    # used only to decide, below, whether C is well-conditioned (the common case: a regular/
+    # well-resolved particle neighborhood) or needs an eigenvalue truncated (rank-deficient,
+    # e.g. too few effectively-independent neighbor directions). This decision is forward-only
+    # (no gradient needs to flow through an `if`, same as every other branch condition in this
+    # codebase), so `disc`'s own kink at disc==0 (a==d and b==0 simultaneously) is harmless here.
+    trace = a + d
+    diff = a - d
+    # safe_sqrt (not wp.sqrt): at exact isotropy (diff==0, b==0) the radicand is exactly 0,
+    # where sqrt's own derivative is infinite -- disc's value isn't consumed by the
+    # well-conditioned branch's L computation below at all (only by the branch condition and
+    # the EV diagnostic output), but Warp's autodiff still computes and accumulates its adjoint
+    # contribution regardless of whether the caller reads EV, and an infinite adjoint here
+    # corrupts the shared upstream a/b/d adjoint accumulators with NaN even though L's own
+    # contribution is perfectly finite (confirmed empirically: without safe_sqrt,
+    # gradcheck's analytical Jacobian was all-NaN at C==I even though L is smooth there).
+    # safe_sqrt's own custom `@wp.func_grad` (math/wp_sqrt.py) already handles exactly this
+    # class of "true value needed, but adjoint undefined at x==0" case elsewhere in this
+    # codebase by contributing a zero adjoint there instead.
+    disc = safe_sqrt(diff * diff + scalar_t(4.0) * b * b)
+    lamP = scalar_t(0.5) * (trace + disc)
+    lamM = scalar_t(0.5) * (trace - disc)
+    big = lamP
+    small = lamM
+    if wp.abs(lamM) > wp.abs(lamP):
+        big = lamM
+        small = lamP
+
+    EV[i][0] = big
+    EV[i][1] = small
+
+    # Zeroing based on a fixed absolute epsilon lets thin/anisotropic neighborhoods (e.g. free-surface
+    # fingers, near-collinear particle rows) through with a tiny but nonzero small eigenvalue, which
+    # then gets inverted into a huge amplification factor. Use a cutoff relative to the largest
+    # eigenvalue instead, matching the rcond convention torch.linalg.pinv uses for the 3D path.
+    rcond = scalar_t(1.0e-6)
+    threshold = rcond * wp.abs(big)
+
+    if wp.abs(big) > scalar_t(1.0e-12) and wp.abs(small) > threshold:
+        # Well-conditioned (full-rank) C: pinv(C) is mathematically IDENTICAL to the ordinary
+        # matrix inverse here (a pseudo-inverse only differs from the ordinary inverse when a
+        # singular value gets truncated, which this branch's own condition just ruled out) --
+        # so compute it via the direct closed-form 2x2 inverse instead of reconstructing from
+        # eigenvectors. This formula is smooth in (a,b,d) everywhere det != 0, with no atan2
+        # anywhere, fixing a genuine reverse-mode adjoint bug the eigenvector-reconstruction
+        # path below has at exactly isotropic C (a==d, b==0 -- the common case for a locally
+        # regular/uniform particle neighborhood, e.g. any perfectly regular grid): Warp's own
+        # `adj_atan2` silently drops the gradient contribution (treats it as exactly 0) when
+        # both of `atan2`'s arguments are exactly 0, even though the TRUE derivative of pinv in
+        # that direction is finite and well-defined -- confirmed via
+        # `torch.autograd.gradcheck(pinv2x2_warpBackend, (C,))` at `C = I`: the numerical
+        # Jacobian's `d(inv01)/dC01` is `-0.5`, not the `0` the eigenvector-reconstruction path
+        # silently produced. This also removes the need for every renorm-touching gradcheck/
+        # spike script's own `+-15%` non-uniform-support perturbation workaround for a perfectly
+        # regular grid -- that workaround dodged this exact bug rather than fixing it.
+        det = a * d - b * b
+        invDet = scalar_t(1.0) / det
+        L[i][0,0] = d * invDet
+        L[i][0,1] = -b * invDet
+        L[i][1,0] = -b * invDet
+        L[i][1,1] = a * invDet
+        return
+
+    # Rank-deficient (or exactly-zero) C: fall back to the eigenvector reconstruction, needed
+    # here (unlike the well-conditioned branch above) to actually zero out the near-null
+    # eigendirection. This branch is rare in practice, and a rank-deficient C is inherently
+    # anisotropic (one eigenvalue near zero, the other not) -- essentially never coinciding with
+    # the exact isotropy (a==d, b==0) that makes the atan2-based eigenvector computation below
+    # adjoint-fragile, so that fragility is not a practical concern in this branch. Closed-form
+    # symmetric 2x2 eigendecomposition: a single atan2 call. This replaces a general (and for a
+    # symmetric input, unnecessary) 2x2 SVD that computed U's rotation angle and V's rotation
+    # angle from two SEPARATE atan2 expressions. For a near-isotropic C both of those
+    # expressions' denominators round to ~0, and because the two expressions round differently
+    # at the float-noise level, the two angles could land on unrelated values instead of the
+    # (here) required theta==phi, producing an inverse that was spuriously rotated by tens of
+    # degrees instead of staying diagonal -- reproduced directly against production covariance
+    # matrices, see warpier_core.md. A symmetric matrix only has one rotation angle in the first
+    # place, so computing it once removes the possibility of the two desyncing.
     theta = (scalar_t(0.5)) * wp.atan2(scalar_t(2.0) * b, a - d)
     cosTheta = wp.cos(theta)
     sinTheta = wp.sin(theta)
@@ -141,29 +209,20 @@ def pinv2x2_warp(
     # (and its callers) assume. Eigenvalues are signed here, unlike the old singular-value convention.
     bigX = v1x
     bigY = v1y
-    big = lam1
+    bigEig = lam1
     smallX = v2x
     smallY = v2y
-    small = lam2
+    smallEig = lam2
     if wp.abs(lam2) > wp.abs(lam1):
         bigX = v2x
         bigY = v2y
-        big = lam2
+        bigEig = lam2
         smallX = v1x
         smallY = v1y
-        small = lam1
+        smallEig = lam1
 
-    EV[i][0] = big
-    EV[i][1] = small
-
-    # Zeroing based on a fixed absolute epsilon lets thin/anisotropic neighborhoods (e.g. free-surface
-    # fingers, near-collinear particle rows) through with a tiny but nonzero small eigenvalue, which
-    # then gets inverted into a huge amplification factor. Use a cutoff relative to the largest
-    # eigenvalue instead, matching the rcond convention torch.linalg.pinv uses for the 3D path.
-    rcond = scalar_t(1.0e-6)
-    threshold = rcond * wp.abs(big)
-    big_inv = scalar_t(0.0) if wp.abs(big) <= scalar_t(1.0e-12) else scalar_t(1.0) / big
-    small_inv = scalar_t(0.0) if wp.abs(small) <= threshold else scalar_t(1.0) / small
+    big_inv = scalar_t(0.0) if wp.abs(bigEig) <= scalar_t(1.0e-12) else scalar_t(1.0) / bigEig
+    small_inv = scalar_t(0.0) if wp.abs(smallEig) <= threshold else scalar_t(1.0) / smallEig
 
     L[i][0,0] = big_inv * bigX * bigX + small_inv * smallX * smallX
     L[i][0,1] = big_inv * bigX * bigY + small_inv * smallX * smallY

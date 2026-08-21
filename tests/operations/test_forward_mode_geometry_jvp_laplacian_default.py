@@ -223,6 +223,41 @@ def test_laplacianDefaultGeometryJVP_rejects_missing_values():
                          queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None))
 
 
+def test_laplacianDefaultGeometryJVP_accepts_crkState_and_renormalizationState():
+    # warpier_tier2_correction_jvp_plan.md follow-up (2026-08-21, after the
+    # plan's own phases (a1)-(f) closed): CRK/renormalization tangent support
+    # extended from Brookshaw-only to Dot/Default -- both no longer raise
+    # here (with or without their own tangent counterpart), and may be
+    # supplied simultaneously (a separate follow-up landed in the same pass).
+    # Naive stays permanently rejected -- see
+    # test_laplacianGeometryJVP_naive_still_rejects_crkState in
+    # test_forward_mode_geometry_jvp_laplacian_brookshaw.py.
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    from warpSPHCore.dataTypes import CRKState, RenormalizationState
+    n = positions.shape[0]
+    crkDummy = CRKState(A=torch.zeros(n, dtype=DTYPE), B=torch.zeros(n, 1, dtype=DTYPE),
+                        gradA=torch.zeros(n, 1, dtype=DTYPE), gradB=torch.zeros(n, 1, 1, dtype=DTYPE))
+    renormDummy = RenormalizationState(renormalizationMatrices=torch.zeros(n, 1, 1, dtype=DTYPE))
+
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                              crkState=crkDummy,
+                              queryValues=qv, referenceValues=rv)
+    assert torch.isfinite(result).all()
+
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                              renormalizationState=renormDummy,
+                              queryValues=qv, referenceValues=rv)
+    assert torch.isfinite(result).all()
+
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                              crkState=crkDummy, renormalizationState=renormDummy,
+                              queryValues=qv, referenceValues=rv)
+    assert torch.isfinite(result).all()
+
+
 def test_laplacianDefaultGeometryJVP_geometryOnly_unchanged_when_combination_allowed():
     # Regression guard (warpier_tier2_combined_jvp_plan.md step 5): the
     # geometry-only path (no value tangent supplied) must return exactly

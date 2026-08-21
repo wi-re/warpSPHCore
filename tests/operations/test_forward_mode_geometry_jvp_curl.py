@@ -230,6 +230,31 @@ def test_curlGeometryJVP_accepts_crkState():
                          queryValues=qv, referenceValues=rv)
 
 
+def test_curlGeometryJVP_accepts_renormalizationState():
+    # warpier_tier2_correction_jvp_plan.md phase (f): renormalization tangent
+    # extension landed for Curl (and Divergence/Laplacian(Brookshaw)) --
+    # renormalizationState (with or without renormalizationTangentState) no
+    # longer raises here. See test_gradientGeometryJVP_accepts_crkState in
+    # test_forward_mode_geometry_jvp_gradient.py for phase (d)'s Gradient-only
+    # precedent this extends.
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    from warpSPHCore.dataTypes import RenormalizationState, RenormalizationTangentState
+    n = positions.shape[0]
+    dummy = RenormalizationState(renormalizationMatrices=torch.zeros(n, 2, 2, dtype=DTYPE))
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                              renormalizationState=dummy,
+                              queryValues=qv, referenceValues=rv)
+    assert torch.isfinite(result).all()
+
+    dummyTangent = RenormalizationTangentState(renormalizationMatrices=torch.zeros(n, 2, 2, dtype=DTYPE))
+    with pytest.raises(ValueError, match="renormalizationTangentState requires renormalizationState"):
+        warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                         renormalizationTangentState=dummyTangent,
+                         queryValues=qv, referenceValues=rv)
+
+
 def test_curlGeometryJVP_none_adjacency_matches_explicit():
     # warpOperationJVP builds a CompactHashMap when adjacency=None, same as
     # warpOperation's own primal path (autograd/arg_extract.py Section 4) --

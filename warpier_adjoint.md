@@ -71,6 +71,23 @@ deliberately not probed -- test geometries (a regular line, a regular grid) are 
 well-conditioned and nowhere near that boundary, consistent with how earlier tiers treated the
 periodic-wrap and `SupportScheme`-tie boundaries. NEXT: Tier 2.5 (CRK), the last and hardest tier.
 
+**Update, 2026-08-21** (`warpier_tier2_correction_jvp_plan.md` follow-up): a genuinely *different*,
+separate bug -- not the rank-cutoff discontinuity flagged above, which remains a real, still-unprobed
+risk -- was found and fixed in `pinv2x2_warp`: the eigenvector-reconstruction path's single `atan2`
+call had a reverse-mode adjoint that silently dropped to `0` at exact eigenvalue isotropy (`a==d,
+b==0`, i.e. `C` proportional to the identity), even though the true derivative of the pseudo-inverse
+there is finite (`pinv(C) == inv(C)` for any full-rank `C`, and ordinary matrix inversion is smooth
+wherever `det(C) != 0` regardless of eigenvalue degeneracy). This is exactly the geometry a perfectly
+regular/uniform particle grid produces, so it silently broke reverse-mode gradients for
+gradient-renormalization on the single most common test/production geometry -- every renorm-touching
+script in this repo (including this one, above) worked around it with a `+-15%` non-uniform-support
+perturbation rather than actually being well-conditioned by choice. Fixed by routing the
+well-conditioned (no-truncation) branch through the direct closed-form 2x2 matrix inverse instead of
+the eigenvector reconstruction -- see `wp_pinv2x2.py`'s own updated comments and
+`scripts/gradcheck_pinv_native.py`'s `run_pinv2x2_isotropic` for the full writeup and regression
+guard. The rank-cutoff discontinuity itself is untouched by this fix and remains exactly as
+flagged above.
+
 **Tier 2.3 (Laplacian's Naive scheme) is done.** This tier's own entry (below) had
 recommended deferring it and asking whether `LaplacianScheme.Naive` matters in
 practice before spending the derivation effort, since Brookshaw (Tier 2.2) is the
@@ -729,7 +746,26 @@ and never approach that cutoff -- consistent with the "flag failing cases near t
 rather than silently producing a wrong tangent" guidance: there is nothing to flag if the
 boundary is never approached, and manufacturing a near-singular covariance matrix on purpose to
 probe it was judged out of scope for this tier (the plan asked for the identity to be validated,
-not for the discontinuity itself to be characterized).
+not for the discontinuity itself to be characterized). **This rank-cutoff discontinuity is still
+unaddressed as of 2026-08-21** -- it is a different, genuine mathematical kink (the pseudo-inverse
+function itself is non-smooth exactly where the truncation rank changes, analogous to a ReLU kink),
+not the bug fixed below.
+
+**Fixed, 2026-08-21** (`warpier_tier2_correction_jvp_plan.md` follow-up, separate from the
+rank-cutoff risk above): this script's own "only mildly perturbed supports" choice for the 2D grid
+case was not a stylistic preference -- an EXACTLY uniform, unperturbed grid's covariance matrix is
+proportional to the identity (`a==d, b==0` in `pinv2x2_warp`'s notation), and the old eigenvector-
+reconstruction path's `atan2`-based rotation angle had a reverse-mode adjoint that silently dropped
+to `0` there, even though the pseudo-inverse itself is perfectly smooth in that direction (it equals
+the ordinary, well-conditioned matrix inverse, not a rank-deficient pseudo-inverse at all). Fixed in
+`wp_pinv2x2.py` by routing the well-conditioned branch through the direct closed-form 2x2 inverse
+formula instead -- no `atan2`, so no adjoint singularity at isotropy. Regression guard:
+`scripts/gradcheck_pinv_native.py`'s `run_pinv2x2_isotropic` (the pinv function in isolation) and
+`scripts/gradcheck_renorm_uniform_grid_native.py` (the full renorm -> Gradient JVP pipeline, on a
+genuinely unperturbed grid, no workaround). The `+-15%` perturbation this script and every other
+renorm-touching script use is no longer strictly necessary but was left in place (harmless, and
+those scripts test other things too) -- only the two new scripts above deliberately omit it, since
+proving the omission is safe is their entire point.
 
 **Validation, same two independent code paths as every earlier tier (both exact analytic
 derivatives, no finite differences):** a hand-written dense all-pairs assembly built only from

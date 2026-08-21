@@ -1,6 +1,6 @@
 # Tier-2 JVP: correction-tangent support (CRK / renormalization / apparent-volume) + interface bundling
 
-## Status: (a1) done (2026-08-20); (a2) done (2026-08-21); (b) done (2026-08-21); (c) done (2026-08-21); (d) done (2026-08-21); (e) done (2026-08-21); (f) next
+## Status: (a1) done (2026-08-20); (a2) done (2026-08-21); (b) done (2026-08-21); (c) done (2026-08-21); (d) done (2026-08-21); (e) done (2026-08-21); (f) done (2026-08-21) -- **plan closed**. Follow-ups (2026-08-21, see "Follow-up" sections below): Laplacian Dot/Default CRK+renorm extension, CRK+renorm applied simultaneously, and a genuine root-cause fix for `pinv2x2`'s uniform-grid reverse-mode adjoint bug -- all three also done.
 
 ## Context
 
@@ -547,19 +547,237 @@ deferral as (d), extended per operator). Same three files as (e), same three-gra
 tangents (renorm-alone or CRK-alone; CRK+renorm-simultaneous flagged as a fast, low-risk follow-up,
 not required here), and apparent-volume tangent support covers all five value-having operators.
 
-## Explicitly out of scope (all phases)
+**Done (2026-08-21).** Landed as specified above, net-new files/additions only, no bugs found this
+time (unlike (b)/(e), each of which turned up a genuine pre-existing production bug while validating):
+- `wp_divergenceJVP.py`'s `computeSPHDivergenceJVP_Func_i` and `wp_curlJVP.py`'s
+  `computeSPHCurlJVP_Func_i` each gained the same `dG = matmul(dL,G) + matmul(L,dG); G = matmul(L,G)`
+  product-rule step Gradient's own JVP uses (`wp_gradientJVP.py`, phase (d)), inserted immediately
+  after the CRK dispatch and gated on `correctionData.useGradientRenormalization` -- a no-op
+  (identical to the call it replaces) when renorm isn't in use, matching the primal kernels' own
+  fixed CRK-then-renorm composition order (confirmed by grep: `wp_divergence.py`/`wp_curl.py`/
+  `wp_laplacian.py` all apply `matmul(iCorrectionData.renormalizationMatrix, kernelGradient)` at the
+  same point, right after `computeKernelGradientCRK`, as `wp_gradient.py` does). `wp_laplacianJVP.py`'s
+  shared `_laplacianGeometryChainJVP` (used by Brookshaw/Dot/Default, same function phase (e) added
+  the CRK swap to) gained the identical product-rule step, gated on a new `useRenorm`/`Li`/`dLi`
+  parameter triple, applied right after the CRK swap and before the regularized-distance chain --
+  safe for Dot/Default too since `operations.py`'s own scope check (below) guarantees `useRenorm` is
+  always `False` for them, the same "shared point, but only one caller ever enables it" reasoning
+  phase (e) already established for CRK in this exact function. `computeSPHDivergenceGeometryJVP`/
+  `computeSPHCurlGeometryJVP`/`computeSPHLaplacianBrookshawGeometryJVP` each gained
+  `renormalizationState`/`renormalizationTangentState` parameters, threaded straight through to
+  `_launchGeometryJVP` (which already had unconditional renorm wiring from phase (a2)/(d) -- no new
+  ABI-threading work needed, same "already reachable" finding phases (b)/(e) each hit for their own
+  new parameters).
+- `operations.py`'s single `renormalizationState is not None and operation is not Gradient` rejection
+  was split the same way phase (e) split CRK's: a new `_RENORM_GEOMETRY_JVP_OPERATIONS` tuple
+  (Gradient/Divergence/Curl/Laplacian) replaces the Gradient-only check; a second,
+  Laplacian-specific check rejects `renormalizationState` whenever `laplacianMode is not
+  LaplacianScheme.Brookshaw` (Naive/Dot/Default stay out of scope, no derivation exists, mirroring
+  CRK's identical restriction). Dispatch-kwargs assembly folds the `renormalizationState`/
+  `renormalizationTangentState` pair into the same `if` block that already gated `crkState`/
+  `crkTangentState` for Gradient/Divergence/Curl/Laplacian(Brookshaw) -- both corrections share
+  exactly the same per-operator/per-scheme scope boundary, so one shared condition serves both
+  (Naive/Dot/Default's own `computeSPHLaplacian{Naive,Dot,Default}GeometryJVP` take neither parameter
+  at all, so this still avoids ever passing them an unsupported kwarg).
+- Validation: `scripts/spike_forward_mode_tier2_renorm_extension.py` (one combined spike, all three
+  operators, production `warpOperationJVP` vs. `torch.autograd.functional.jacobian` on primal
+  `warpOperation(<op>, renormalizationState=...)`, non-uniform (+-15%) supports per phase (d)'s own
+  "avoid a degenerate/singular covariance matrix" discipline, `rel_err` ~1e-15-1e-16 for all three,
+  registered in `test_gradcheck_scripts.py`'s `SPIKE_SCRIPTS`) and three new gradcheck scripts
+  (`gradcheck_tier2_jvp_{divergence,curl,laplacian_brookshaw}_renorm.py`), each the same two-layer
+  pattern (e)'s own three CRK-extension scripts established (direct-tensor gradcheck isolating the
+  renorm `flat_tensors` wiring for each operator's own new parameters, plus an end-to-end gradcheck
+  with `renormalizationState`/`renormalizationTangentState` derived from the same leaves via
+  `renorm.py`'s `computeRenormalizationMatricesJVP` -- the middle "JVP-vs-jacobian identity" layer
+  (c)/(d)'s own scripts have was judged redundant here too, since the spike already covers exactly
+  that check for all three operators at once). Divergence/Curl's end-to-end gradcheck also applies the
+  same non-uniform-support perturbation the spike uses (their direct-tensor gradcheck needs no such
+  care -- `renormalizationState`/`renormalizationTangentState` are independent synthetic leaves there,
+  not derived through `pinv2x2_warpBackend` at all); Laplacian(Brookshaw)'s 1D `line_case` needed none
+  (matching `gradcheck_tier2_jvp_gradient_renorm.py`'s own dim=1 scripts, which never hit the
+  pinv-degenerate case either). All green; registered in `test_gradcheck_scripts.py`'s
+  `GRADCHECK_SCRIPTS`. `gradcheck_renorm_native.py`/`gradcheck_pinv_native.py` and every existing
+  non-renorm/CRK-only gradcheck script stayed unaffected (no edits to `renorm.py`'s existing functions
+  or `pinv/`). Full `pytest tests/` (372 passed, 1 skipped) and `operation_matrix.py` (`OK=258, HIGH=0,
+  ERR=0, NAN=0`, bit-identical to the pre-phase baseline) both green. Added
+  `test_{divergence,curl}GeometryJVP_accepts_renormalizationState`/
+  `test_laplacianBrookshawGeometryJVP_accepts_renormalizationState` (mirroring (e)'s own
+  `accepts_crkState` tests) and `test_laplacianGeometryJVP_naive_still_rejects_renormalizationState`
+  (mirroring (e)'s `..._still_rejects_crkState`) to keep both the new acceptance and the still-out-of-
+  scope Naive/Dot/Default boundary covered -- no prior test asserted the old Gradient-only rejection
+  for these three operators (phase (d) never added one), so no existing test needed converting the way
+  (e) converted CRK's own `..._still_rejects_crkState` tests.
+
+## Follow-up (2026-08-21, after this plan's own phases (a1)-(f) closed)
+
+Two of the items this plan originally listed as "explicitly out of scope" turned out to be
+straightforward to close using exactly the machinery this plan built — landed in the same session,
+documented here rather than reopening phase headers above (the plan itself stays closed; this is new
+work built on top of it):
+
+- **Laplacian's Dot/Default schemes gained CRK/renormalization tangent support** (Naive stays out of
+  scope — see below, it isn't a gap). `wp_laplacian.py`'s single primal kernel
+  (`computeSPHLaplacianTensor_Func_i`) already computed one CRK/renorm-corrected `kernelGradient`
+  unconditionally before dispatching on `laplacianMode`; Dot/Default's own branches (`computeLaplacianDot2`/
+  `computeDotLaplacian`) already consumed it (confirmed by reading the dispatch directly), and phase
+  (e)/(f)'s own `_laplacianGeometryChainJVP` (the shared JVP building block Brookshaw/Dot/Default all
+  call) already produced a CRK/renorm-corrected `(G, dG)` pair unconditionally — Dot/Default's own
+  `computeSPHLaplacian{Dot,Default}GeometryJVP` just never exposed `crkState`/`crkTangentState`/
+  `renormalizationState`/`renormalizationTangentState` parameters to reach it. Landed as
+  parameter-threading (mirroring Brookshaw's own signature/launch-call shape exactly) plus one genuine
+  bug fix (below) — no new derivation.
+  - **Found and fixed a genuine, pre-existing reverse-mode adjoint bug, in both the primal kernel and
+    this JVP, discovered while validating**: Dot's own `F_ab = dot(G,n_ij)/D_ij` is bit-for-bit
+    Brookshaw's own `P` (same `n_ij`/`D_ij`, same `eps=1e-8`), so it inherits the identical self-pair
+    (`r_ij == 0`) reverse-mode-adjoint hazard phase (e) already found and fixed for Brookshaw
+    (`correctGradientCRK`'s value at `x_ij == 0` is generically nonzero once CRK is enabled, and Warp's
+    reverse-mode through "a nonzero `G` dotted against an exactly-zero `n_ij`, itself divided by `D_ij`
+    again" produces a wrong adjoint there). Default's own `n_ij2 = n_ij/D2_ij` divides by a *second*
+    regularized distance on top of `n_ij`'s own division — one quotient-rule level deeper, same hazard.
+    Confirmed via `torch.autograd.gradcheck` failing directly on `warpOperation(Laplacian, Dot/Default,
+    crkState=...)` and on `computeSPHLaplacian{Dot,Default}GeometryJVP(..., crkState=...,
+    crkTangentState=...)` before the fix, both failures isolated to exactly the self-pair (diagonal)
+    Jacobian entries — the same signature Brookshaw's own bug had. **Fixed** in `wp_laplacian.py`
+    (primal, both branches) and `wp_laplacianJVP.py` (both `_Func_i`s) by guarding each scheme's own
+    `kernelGradient`-consuming contribution with an explicit `if r_ij > 0:`, mirroring Brookshaw's own
+    fix exactly — the true contribution at `r_ij == 0` is always exactly `0` for both schemes (`n_ij ==
+    0` there by construction, CRK or not), so this changes no forward value anywhere (confirmed:
+    `operation_matrix.py` stayed bit-identical at `OK=258, HIGH=0, ERR=0, NAN=0`, and every existing
+    non-CRK gradcheck script stayed green with unchanged output). Renormalization alone (no CRK) never
+    triggered this — `matmul(L, kernelGradient)` at a self-pair is `matmul(L, 0) = 0` regardless of `L`,
+    since the plain (uncorrected) `kernelGradient` is already exactly `0` at `r_ij == 0` — confirmed
+    empirically before assuming it.
+  - `operations.py`'s Laplacian-specific CRK/renorm scope checks now test membership in a new
+    `_LAPLACIAN_CORRECTION_SCHEMES = (Brookshaw, Dot, Default)` tuple instead of `is Brookshaw`; the
+    dispatch-kwargs assembly condition widened the same way. **Naive is excluded permanently, not
+    "not yet implemented"**: its estimator (`sphKernelLaplacian`, the analytic second-derivative-of-r
+    formula) never reads the corrected `kernelGradient` at all in the primal kernel, so CRK/renorm
+    correction is mathematically inapplicable to it by construction — there is no formula to derive,
+    the same reasoning that already excludes Density's density tangent permanently.
+  - Validation: `scripts/spike_forward_mode_tier2_laplacian_dot_default_extension.py` (Dot/Default ×
+    {CRK, renorm}, production `warpOperationJVP` vs. jacobian on primal `warpOperation`, `rel_err`
+    ~1e-15–1e-16, all four green) and four new gradcheck scripts
+    (`gradcheck_tier2_jvp_laplacian_{dot,default}_{crk,renorm}.py`), each the same two-layer
+    direct-tensor + end-to-end pattern established in phases (e)/(f). All registered in
+    `test_gradcheck_scripts.py`. Added `test_laplacian{Dot,Default}GeometryJVP_accepts_crkState_and_renormalizationState`
+    to each scheme's own test file.
+- **CRK and gradient-renormalization may now be supplied simultaneously**, for every operator/scheme
+  that supports each individually (Gradient/Divergence/Curl/Laplacian(Brookshaw/Dot/Default)). This
+  needed no new derivation at all: every primal kernel already composed the two corrections in the same
+  fixed order unconditionally — `kernelGradient = computeKernelGradientCRK(...)`, then `if
+  useGradientRenormalization: kernelGradient = matmul(renormalizationMatrix, kernelGradient)` (identical
+  shape in `wp_gradient.py`/`wp_divergence.py`/`wp_curl.py`/`wp_laplacian.py`) — and every JVP formula
+  here already mirrors that exactly (`G, dG = computeKernelGradientCRKJVP(...)` — a no-op when CRK is
+  off — then phase (d)'s `dG = matmul(dL,G) + matmul(L,dG); G = matmul(L,G)` product rule when renorm is
+  on). Since `L` (`renormalizationMatrices`) is computed from raw geometry only (confirmed
+  `computeRenormalizationMatrices_`'s own internal covariance call is always `crkState=None`), there is
+  no cross-term between the two corrections' *values* — the only open question was whether the already-
+  composed JVP *chain* was correct once both were differentiated through together, which had never been
+  exercised (`operations.py` unconditionally rejected the combination). It was: removing the
+  `crkState is not None and renormalizationState is not None: raise NotImplementedError` block and
+  validating was sufficient.
+  - **A red herring investigated (and, at first, worked around) while validating, then actually fixed
+    at its root a short time later in the same session (see the follow-up entry below)**: an early
+    check on an unperturbed, perfectly uniform 2D grid saw a large mismatch at exactly one particle —
+    the grid's symmetric center. Initially misdiagnosed as `pinv2x2_warpBackend`'s already-documented
+    `rcond`-cutoff discontinuity (a perfectly uniform neighborhood's covariance sitting exactly at the
+    eigenvalue-truncation boundary) and routed around with the standard `+-15%` non-uniform-support
+    perturbation (`rel_err` dropped from ~7e-3 to ~1e-16) — that workaround was sufficient to unblock
+    this task, but the diagnosis was wrong: the real mechanism (found while addressing the user's
+    direct follow-up question "can this be fixed instead of worked around") was a reverse-mode adjoint
+    bug in `pinv2x2_warp`'s `atan2`-based eigenvector reconstruction at exact eigenvalue isotropy, not
+    proximity to the rank-truncation cutoff at all — see the follow-up entry below for the actual root
+    cause and fix. Genuinely not a CRK+renorm interaction bug either way.
+  - Validation: `scripts/spike_forward_mode_tier2_crk_renorm_simultaneous.py` (all six supporting
+    operator/scheme combinations, production `warpOperationJVP` vs. jacobian on primal `warpOperation`,
+    `rel_err` ~1e-15–1e-16, all six green) and
+    `scripts/gradcheck_tier2_jvp_gradient_crk_renorm_simultaneous.py` (one representative operator,
+    reverse-mode-through-the-JVP gradcheck, both correction states as independent leaves and derived
+    from the same positions being perturbed). Both registered in `test_gradcheck_scripts.py`. Added
+    `test_gradientGeometryJVP_accepts_crkState_and_renormalizationState_simultaneously`.
+- Both changes: full `pytest tests/` (382 passed, 1 skipped, up from phase (f)'s own 372/1 baseline by
+  exactly this follow-up's 10 new entries: 2 spikes + 4 Dot/Default gradcheck scripts + 1 simultaneous
+  gradcheck script registered in `test_gradcheck_scripts.py`, plus 3 new in-process scope-acceptance
+  tests) and `operation_matrix.py` (`OK=258, HIGH=0, ERR=0, NAN=0`, bit-identical to the pre-follow-up
+  baseline, confirming the two self-pair-guard fixes changed no forward value) both green.
+
+### Second follow-up, same day: fixed the `pinv2x2` uniform-grid degeneracy at its root
+
+User pushed back on the CRK+renorm-simultaneous validation's own `+-15%` support-perturbation
+workaround (above) — regular/uniform grids are themselves a common, useful test geometry for
+numerical SPH analysis, so "the code doesn't work on those" is a real limitation, not just a test
+inconvenience, and asked whether the underlying bug could be fixed instead of routed around every
+time.
+
+**Root cause, found by direct reproduction, not just re-reading the existing docs.** It is
+genuinely *not* the already-documented `rcond`-relative rank-truncation discontinuity
+(`warpier_adjoint.md`'s Tier 2.4 entries) — that's a separate, real mathematical kink (the
+pseudo-inverse function itself is non-smooth exactly where the truncation rank changes) that
+remains unaddressed and out of scope here. It is instead a **reverse-mode adjoint bug specific to
+exact eigenvalue isotropy** (`a==d, b==0` in `wp_pinv2x2.py`'s notation — precisely what a
+perfectly regular/uniform particle neighborhood's covariance matrix looks like, being proportional
+to the identity): the old `pinv2x2_warp` always reconstructed the pseudo-inverse from an
+eigendecomposition whose rotation angle came from a single `theta = 0.5*atan2(2b, a-d)` call. At
+exact isotropy both of `atan2`'s arguments are exactly `0`, and Warp's own `adj_atan2` (native
+builtin) silently drops the gradient contribution there in production mode (only updates the
+adjoint `if (d > 0)`, where `d = x*x+y*y`) rather than computing the mathematically correct value —
+even though the TRUE derivative of the pseudo-inverse in that direction is finite and well-defined:
+`pinv(C) == inv(C)` exactly for any full-rank `C` (a pseudo-inverse only differs from the ordinary
+inverse when a singular value gets truncated), and ordinary 2x2 matrix inversion
+(`inv = adj(C)/det(C)`) is a smooth, rational function of `(a,b,d)` wherever `det(C) != 0`,
+regardless of eigenvalue degeneracy. Confirmed directly: `torch.autograd.gradcheck` at `C = I`
+failed before the fix, with the analytical Jacobian's `d(inv01)/dC01` entry silently `0` where the
+numerical one was `-0.5`.
+
+**Fixed** in `src/warpSPHCore/pinv/wp_pinv2x2.py`'s `pinv2x2_warp`: eigenvalue *magnitudes* are now
+computed via the ordinary closed-form trace/determinant quadratic (`disc = safe_sqrt(diff^2+4b^2)`,
+using this codebase's own `safe_sqrt` — `math/wp_sqrt.py`'s existing custom `@wp.func_grad`, since
+`disc` itself has the analogous `sqrt'(0)=infinity` hazard and its adjoint does get computed
+even when its value doesn't feed the well-conditioned branch's output, corrupting the shared
+upstream `a`/`b`/`d` adjoint accumulators with NaN otherwise — confirmed empirically, not assumed),
+used only to decide which branch to take (a forward-only, non-differentiated decision, same
+discipline as every other branch condition in this codebase). When neither eigenvalue needs
+truncating (the common, well-conditioned case — includes every regular/uniform grid), the inverse
+is computed directly via `inv = adj(C)/det(C)`, with no `atan2` and no eigendecomposition at all.
+The original `atan2`-based eigenvector reconstruction is kept, unchanged, as a fallback for the
+rare rank-deficient branch (where truncating a near-zero eigenvalue genuinely requires knowing the
+eigenvectors) — a rank-deficient `C` is inherently anisotropic (one eigenvalue near zero, the other
+not), so this fallback's own `atan2` fragility at exact isotropy is not a practical concern there.
+
+**Validation:** `scripts/gradcheck_pinv_native.py` gained `run_pinv2x2_isotropic` (the pinv
+function in isolation, `C` proportional to the identity — this is the direct regression guard: it
+would have failed before the fix and passes now, both `gradcheck` and a forward-value check).
+`scripts/gradcheck_renorm_uniform_grid_native.py` (new file, registered in
+`test_gradcheck_scripts.py`) closes the loop end-to-end on a genuinely unperturbed 3x3 grid, no
+workaround: `torch.autograd.gradcheck` on `computeRenormalizationMatrices` directly, on
+`warpOperation(Gradient, renormalizationState=...)`, and a JVP-vs-jacobian identity check on
+`warpOperationJVP(Gradient, crkState=..., renormalizationState=...)` (CRK+renorm simultaneous, the
+hardest combination this fix needed to support) — all three green. Every already-existing
+renorm-touching script's own `+-15%` perturbation was left in place (harmless, and those scripts
+exercise other things too) rather than churned out everywhere; only the two new scripts above
+deliberately omit it, since proving the omission is now safe is their entire point. Full
+`pytest tests/` (unaffected pass count, +1 for the new script's registration) and
+`operation_matrix.py` (`OK=258, HIGH=0, ERR=0, NAN=0`, bit-identical) both green.
+`gradcheck_pinv_native.py`/`gradcheck_renorm_native.py` (the pre-existing scripts) both still PASS
+unmodified. `warpier_adjoint.md`'s Tier 2.4 entries updated with the correct root-cause writeup
+(they had, until now, only ever flagged the *different*, still-open rank-cutoff discontinuity).
+
+## Explicitly out of scope (all phases, updated 2026-08-21 per the follow-ups above)
 
 - `Field.tangent`/`torch.autograd.forward_ad`/`ExecutionMode.FORWARD` — stays dormant, per the
   decision above.
 - Grad-H tangent support — no consumer exists yet.
-- Laplacian's Dot/Default/Naive schemes for CRK/renorm (Brookshaw only, matching existing scheme
-  restrictions already enforced in `operations.py`).
-- CRK+renormalization applied simultaneously (each is separately supported; the combination is a fast
-  follow-up once both are independently proven, not required by this plan).
+- Laplacian's Naive scheme for CRK/renorm — permanently excluded (not "not yet implemented"): its
+  estimator never reads the CRK/renorm-corrected `kernelGradient` at all in the primal kernel, so
+  there is no formula to derive. Dot/Default gained support in the 2026-08-21 follow-up above.
 - The single unified operator wrapper (tangent-defaults-to-`None` auto-dispatch) — a later, separate
   effort once this lands.
 - HVP for any of these corrections — this plan is JVP-only, matching every existing Tier-2 scope
   decision.
+- `pinv2x2_warpBackend`'s `rcond`-relative rank-truncation discontinuity (a tangent pushing an
+  eigenvalue across the truncation threshold mid-JVP) — a genuine, different mathematical kink from
+  the isotropic-eigenvalue adjoint bug the second follow-up above fixed; still unaddressed, still
+  flagged in `warpier_adjoint.md`'s Tier 2.4 entries.
 
 ## Verification (after every phase, not just at the end)
 

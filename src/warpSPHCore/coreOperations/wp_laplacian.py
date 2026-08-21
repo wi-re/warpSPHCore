@@ -145,9 +145,24 @@ def computeSPHLaplacianTensor_Func_i(
             if r_ij > scalar_t(0.0):
                 laplacian_contribution = -scalar_t(2.0) * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
         elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Dot.value): # Dot
-            laplacian_contribution = computeLaplacianDot2(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
+            # Same explicit r_ij > 0 guard and same reason as Brookshaw's above --
+            # computeLaplacianDot2's own F_ab weighting is bit-for-bit Brookshaw's P
+            # (dot(kernelGradient,n_ij)/D_ij), so it has the identical self-pair
+            # reverse-mode-adjoint hazard once CRK makes kernelGradient nonzero at
+            # x_ij == 0 (confirmed via gradcheck failing on the self-pair diagonal
+            # Jacobian entries specifically, same as Brookshaw's own repro --
+            # `warpier_tier2_correction_jvp_plan.md` follow-up, 2026-08-21). The true
+            # contribution at r_ij == 0 is always exactly 0 (CRK or not, since n_ij == 0
+            # there by construction), so this changes no forward value anywhere.
+            if r_ij > scalar_t(0.0):
+                laplacian_contribution = computeLaplacianDot2(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
         elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Default.value): # Default
-            laplacian_contribution = computeDotLaplacian(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
+            # Same guard, same reason -- computeDotLaplacian's own n_ij2 = n_ij/D2_ij
+            # divides by a *second* regularized distance on top of n_ij's own division,
+            # so it inherits the identical self-pair hazard, one quotient-rule level
+            # deeper (confirmed via gradcheck, same as Dot above).
+            if r_ij > scalar_t(0.0):
+                laplacian_contribution = computeDotLaplacian(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
 
         if kernelProperties.positiveDivergenceMode:
             out += positiveDotProduct(x_ij, q_ij, laplacian_contribution, dim)

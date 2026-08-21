@@ -22,7 +22,7 @@ import warp as wp
 from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
-from ..math import zero_like_warp
+from ..math import zero_like_warp, matmul
 from ..crk import computeKernelGradientCRKJVP
 from ..radiusSearch.grid_util import getIndexRange
 from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i, getParticleCorrectionTangentData_i
@@ -83,6 +83,15 @@ def computeSPHDivergenceJVP_Func_i(
             iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB,
             iCorrectionTangentData.A, iCorrectionTangentData.B, iCorrectionTangentData.gradA, iCorrectionTangentData.gradB,
         )
+
+        # Renormalization tangent extension (`warpier_tier2_correction_jvp_plan.md`
+        # phase (f)): same `dL_i @ G + L_i @ dG` product rule Gradient's own JVP uses
+        # (wp_gradientJVP.py, phase (d)), applied AFTER CRK (matching the primal
+        # kernel's fixed CRK-then-renorm composition order, wp_divergence.py) -- a
+        # no-op when correctionData.useGradientRenormalization is False.
+        if correctionData.useGradientRenormalization:
+            dG = matmul(iCorrectionTangentData.renormalizationMatrix, G) + matmul(iCorrectionData.renormalizationMatrix, dG)
+            G = matmul(iCorrectionData.renormalizationMatrix, G)
 
         A, B, dA, dB = _gradientWeightsJVP(
             jPtcl.mass, iPtcl.density, jPtcl.density,
@@ -203,6 +212,8 @@ def computeSPHDivergenceGeometryJVP(
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
     crkTangentState: Optional[CRKTangentState] = None,
+    renormalizationState: Optional[RenormalizationState] = None,
+    renormalizationTangentState: Optional[RenormalizationTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dDivergence_i`, shape `[numParticles]`.
@@ -231,6 +242,16 @@ def computeSPHDivergenceGeometryJVP(
     via Divergence's own `dot(dcoeff,G) + dot(coeff,dG)` formula instead of
     Gradient's `dcoeff*G + coeff*dG`. `crkTangentState` may be omitted
     (treated as an all-zero tangent), same as Gradient.
+    `renormalizationState`/`renormalizationTangentState` (phase (f)) enable
+    gradient-renormalization correction and its tangent, matching
+    `warpOperation(..., renormalizationState=...)` -- reuses phase (d)'s
+    `dL_i @ G + L_i @ dG` product rule verbatim, applied after the CRK swap
+    above (matching the primal kernel's own fixed CRK-then-renorm composition
+    order, `wp_divergence.py`), then combined via Divergence's own
+    `dot(dcoeff,G) + dot(coeff,dG)` formula. `renormalizationTangentState`
+    may be omitted (an all-zero tangent, correction held frozen), same as
+    Gradient -- `renorm.py`'s `computeRenormalizationMatricesJVP` is the
+    usual way to derive a real one from the same geometry tangents.
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -280,5 +301,7 @@ def computeSPHDivergenceGeometryJVP(
         tangentReferenceVolumes=tangentReferenceVolumes,
         crkState=crkState,
         crkTangentState=crkTangentState,
+        renormalizationState=renormalizationState,
+        renormalizationTangentState=renormalizationTangentState,
         extraTensors=(queryValues, referenceValues),
     )

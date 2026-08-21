@@ -313,6 +313,31 @@ def test_gradientGeometryJVP_accepts_crkState():
                          queryValues=qv, referenceValues=rv)
 
 
+def test_gradientGeometryJVP_accepts_crkState_and_renormalizationState_simultaneously():
+    # warpier_tier2_correction_jvp_plan.md follow-up (2026-08-21, after the
+    # plan's own phases (a1)-(f) closed, which deliberately left this
+    # combination as a documented but unimplemented fast follow-up): CRK and
+    # gradient-renormalization may now be supplied at the same time -- both
+    # the primal kernels and every JVP formula here already compose them in
+    # the same fixed CRK-then-renorm order regardless, so no new derivation
+    # was needed, only removing this now-stale scope check. See
+    # `scripts/spike_forward_mode_tier2_crk_renorm_simultaneous.py` for the
+    # full validation (all six CRK+renorm-supporting operator/scheme
+    # combinations, JVP-vs-jacobian identity through production
+    # `warpOperationJVP`).
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    from warpSPHCore.dataTypes import CRKState, RenormalizationState
+    n = positions.shape[0]
+    crkDummy = CRKState(A=torch.zeros(n, dtype=DTYPE), B=torch.zeros(n, 1, dtype=DTYPE),
+                        gradA=torch.zeros(n, 1, dtype=DTYPE), gradB=torch.zeros(n, 1, 1, dtype=DTYPE))
+    renormDummy = RenormalizationState(renormalizationMatrices=torch.zeros(n, 1, 1, dtype=DTYPE))
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                              crkState=crkDummy, renormalizationState=renormDummy,
+                              queryValues=qv, referenceValues=rv)
+    assert torch.isfinite(result).all()
+
+
 def test_gradientGeometryJVP_grid_traversal_matches_adjacency_traversal():
     # computeSPHGradientGeometryJVP (CSR, warpier_tier2_jvp_csr_backend_plan.md)
     # also supports grid (CompactHashMap) traversal -- exercised here via a

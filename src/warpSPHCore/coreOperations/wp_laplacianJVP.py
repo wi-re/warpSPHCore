@@ -102,7 +102,7 @@ from warp.types import vector, matrix
 from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
-from ..math import zero_like_warp, safe_sqrt
+from ..math import zero_like_warp, safe_sqrt, matmul
 from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i, getParticleCorrectionTangentData_i
 from ..util import castTorchToWarpAsBuiltins
 from ..util.support import computePairwiseSupport, computePairwiseSupportJVP
@@ -134,6 +134,8 @@ def _laplacianGeometryChainJVP(
     useCRK: wp.bool,
     Ai: scalar_t, Bi: vector(length=dim_t, dtype=scalar_t), gradAi: vector(length=dim_t, dtype=scalar_t), gradBi: matrix(shape=(dim_t, dim_t), dtype=scalar_t), # type: ignore
     dAi: scalar_t, dBi: vector(length=dim_t, dtype=scalar_t), dgradAi: vector(length=dim_t, dtype=scalar_t), dgradBi: matrix(shape=(dim_t, dim_t), dtype=scalar_t), # type: ignore
+    useRenorm: wp.bool,
+    Li: matrix(shape=(dim_t, dim_t), dtype=scalar_t), dLi: matrix(shape=(dim_t, dim_t), dtype=scalar_t), # type: ignore
 ):
     """Shared `(G, dG, n_ij, dn_ij, D_ij, dD_ij, r_ij, dr_ij, h_ij, dh_ij)`
     regularized-distance chain -- `wp_laplacian.py`'s own comment: "the
@@ -150,13 +152,26 @@ def _laplacianGeometryChainJVP(
     (identical result) when `useCRK` is `False`, which is always the case for
     every caller except Brookshaw's own `_Func_i` (Dot/Default stay out of
     CRK scope, enforced centrally in `operations.py`, so `useCRK` is always
-    `False` for them)."""
+    `False` for them).
+
+    Renormalization tangent extension (`warpier_tier2_correction_jvp_plan.md`
+    phase (f)): same `dL_i @ G + L_i @ dG` product rule Gradient's own JVP
+    uses (`wp_gradientJVP.py`, phase (d)), applied AFTER the CRK swap above
+    (matching the primal kernel's own fixed CRK-then-renorm composition
+    order, `wp_laplacian.py`) -- a no-op when `useRenorm` is `False`, which
+    is always the case for every caller except Brookshaw's own `_Func_i`
+    (Dot/Default stay out of renorm scope too, enforced centrally in
+    `operations.py`, same restriction as CRK)."""
     G, dG = computeKernelGradientCRKJVP(
         iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support,
         iTangentPtcl.position, jTangentPtcl.position, iTangentPtcl.support, jTangentPtcl.support,
         kernelProperties, domainState,
         useCRK, Ai, Bi, gradAi, gradBi, dAi, dBi, dgradAi, dgradBi,
     )
+
+    if useRenorm:
+        dG = matmul(dLi, G) + matmul(Li, dG)
+        G = matmul(Li, G)
 
     x_ij = computeDistanceVec(iPtcl.position, jPtcl.position, domainState)
     dx_ij = iTangentPtcl.position - jTangentPtcl.position
@@ -237,6 +252,8 @@ def computeSPHLaplacianBrookshawJVP_Func_i(
             correctionData.useCRK,
             iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB,
             iCorrectionTangentData.A, iCorrectionTangentData.B, iCorrectionTangentData.gradA, iCorrectionTangentData.gradB,
+            correctionData.useGradientRenormalization,
+            iCorrectionData.renormalizationMatrix, iCorrectionTangentData.renormalizationMatrix,
         )
         if r_ij_exp > scalar_t(0.0):
             P, dP = _laplacianPJVP(G, dG, n_ij, dn_ij, D_ij, dD_ij)
@@ -360,6 +377,8 @@ def computeSPHLaplacianBrookshawGeometryJVP(
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
     crkTangentState: Optional[CRKTangentState] = None,
+    renormalizationState: Optional[RenormalizationState] = None,
+    renormalizationTangentState: Optional[RenormalizationTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `[numParticles]`, Brookshaw scheme specifically
@@ -387,6 +406,17 @@ def computeSPHLaplacianBrookshawGeometryJVP(
     `_laplacianGeometryChainJVP`'s `(G, dG)`, feeding Brookshaw's own
     `P = dot(G,n_ij)/D_ij` weighting unchanged. `crkTangentState` may be
     omitted (treated as an all-zero tangent), same as Gradient.
+    `renormalizationState`/`renormalizationTangentState`
+    (`warpier_tier2_correction_jvp_plan.md` phase (f)) enable gradient-
+    renormalization correction and its tangent for this scheme only, matching
+    `operations.py`'s own scope restriction (Naive/Dot/Default have no
+    `renormalizationState` parameter at all). Reuses phase (d)'s
+    `dL_i @ G + L_i @ dG` product rule verbatim through
+    `_laplacianGeometryChainJVP`, applied after the CRK swap (matching the
+    primal kernel's own fixed CRK-then-renorm composition order), feeding
+    Brookshaw's own `P = dot(G,n_ij)/D_ij` weighting unchanged.
+    `renormalizationTangentState` may be omitted (an all-zero tangent,
+    correction held frozen), same as Gradient.
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -436,6 +466,8 @@ def computeSPHLaplacianBrookshawGeometryJVP(
         tangentReferenceVolumes=tangentReferenceVolumes,
         crkState=crkState,
         crkTangentState=crkTangentState,
+        renormalizationState=renormalizationState,
+        renormalizationTangentState=renormalizationTangentState,
         extraTensors=(queryValues, referenceValues),
     )
 
@@ -738,49 +770,66 @@ def computeSPHLaplacianDotJVP_Func_i(
         ##########################################################
         jTangentPtcl = getParticleData(referenceTangentState, j)
 
-        G, dG, n_ij, dn_ij, D_ij, dD_ij, _r_ij, _dr_ij, _h_ij, _dh_ij = _laplacianGeometryChainJVP(
+        G, dG, n_ij, dn_ij, D_ij, dD_ij, r_ij_exp, _dr_ij, _h_ij, _dh_ij = _laplacianGeometryChainJVP(
             iPtcl, jPtcl, iTangentPtcl, jTangentPtcl, kernelProperties, domainState,
             correctionData.useCRK,
             iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB,
             iCorrectionTangentData.A, iCorrectionTangentData.B, iCorrectionTangentData.gradA, iCorrectionTangentData.gradB,
+            correctionData.useGradientRenormalization,
+            iCorrectionData.renormalizationMatrix, iCorrectionTangentData.renormalizationMatrix,
         )
-        # F_ab is computeLaplacianDot2's own name for this quantity -- bit-for-bit
-        # Brookshaw's P (same n_ij/D_ij, same eps=1e-8).
-        F_ab, dF_ab = _laplacianPJVP(G, dG, n_ij, dn_ij, D_ij, dD_ij)
+        # Explicit r_ij > 0 guard, same fix and same reason as Brookshaw's own
+        # (`computeSPHLaplacianBrookshawJVP_Func_i` above, `warpier_tier2_correction_jvp_plan.md`
+        # phase (e)'s "Done" writeup): at an exact self-pair (r_ij == 0) n_ij == 0
+        # by construction, so F_ab = dot(G,n_ij)/D_ij (bit-for-bit Brookshaw's P) is
+        # exactly 0 there regardless of G/dG -- true with or without CRK -- but CRK's
+        # correctGradientCRK is generically nonzero at x_ij == 0, and Warp's
+        # reverse-mode through "a nonzero G dotted against an exactly-zero n_ij,
+        # itself divided by D_ij again inside F_ab" produces a wrong adjoint at that
+        # exact point (confirmed empirically: gradcheck fails on the diagonal
+        # (self-pair) Jacobian entries specifically once crkState is supplied here,
+        # the same failure pattern Brookshaw's own bug had). Skipping the self-pair
+        # term outright changes no forward value (F_ab and dF_ab are both exactly 0
+        # there, CRK or not, so every downstream term this scheme's own contribution
+        # is built from is also exactly 0).
+        if r_ij_exp > scalar_t(0.0):
+            # F_ab is computeLaplacianDot2's own name for this quantity -- bit-for-bit
+            # Brookshaw's P (same n_ij/D_ij, same eps=1e-8).
+            F_ab, dF_ab = _laplacianPJVP(G, dG, n_ij, dn_ij, D_ij, dD_ij)
 
-        _A, B, _dA, dB = _gradientWeightsJVP(
-            jPtcl.mass, iPtcl.density, jPtcl.density,
-            jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
-            kernelProperties.gradientMode,
-            correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
-        )
+            _A, B, _dA, dB = _gradientWeightsJVP(
+                jPtcl.mass, iPtcl.density, jPtcl.density,
+                jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
+                kernelProperties.gradientMode,
+                correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
+            )
 
-        fj = referenceValues[j]
-        q_ij = (fj - fi) * B
-        dq_ij = (fj - fi) * dB
+            fj = referenceValues[j]
+            q_ij = (fj - fi) * B
+            dq_ij = (fj - fi) * dB
 
-        # computeLaplacianDot2's two accumulation loops collapse to
-        # output[k] = -left*F_ab + q_ij[k]*F_ab, left = (dim+2)*proj_b*n_ij[d],
-        # proj_b = dot(q_ij[block b], n_ij), d = k%dim, b = k//dim -- see
-        # math/wp_laplaciandot.py's own derivation comment (DJ Price eq 96).
-        # flatInputShape is threaded explicitly rather than read via q_ij.length
-        # as the loop bound -- see launchGeometryJVP's extraScalars docstring
-        # (math/wp_distance.py's minimumImageDistance has the same guard, for
-        # the same documented Warp .length-as-loop-bound footgun).
-        contribution = zero_like_warp(outputValue)
-        for k in range(flatInputShape):
-            d = k % dim
-            b = k // dim
-            base = b * dim
+            # computeLaplacianDot2's two accumulation loops collapse to
+            # output[k] = -left*F_ab + q_ij[k]*F_ab, left = (dim+2)*proj_b*n_ij[d],
+            # proj_b = dot(q_ij[block b], n_ij), d = k%dim, b = k//dim -- see
+            # math/wp_laplaciandot.py's own derivation comment (DJ Price eq 96).
+            # flatInputShape is threaded explicitly rather than read via q_ij.length
+            # as the loop bound -- see launchGeometryJVP's extraScalars docstring
+            # (math/wp_distance.py's minimumImageDistance has the same guard, for
+            # the same documented Warp .length-as-loop-bound footgun).
+            contribution = zero_like_warp(outputValue)
+            for k in range(flatInputShape):
+                d = k % dim
+                b = k // dim
+                base = b * dim
 
-            proj, dproj = _laplacianDotProjJVP(q_ij, dq_ij, n_ij, dn_ij, dim, base)
+                proj, dproj = _laplacianDotProjJVP(q_ij, dq_ij, n_ij, dn_ij, dim, base)
 
-            left = scalar_t(dim + 2) * proj * n_ij[d]
-            dleft = scalar_t(dim + 2) * (dproj * n_ij[d] + proj * dn_ij[d])
+                left = scalar_t(dim + 2) * proj * n_ij[d]
+                dleft = scalar_t(dim + 2) * (dproj * n_ij[d] + proj * dn_ij[d])
 
-            contribution[k] += -dleft * F_ab - left * dF_ab + dq_ij[k] * F_ab + q_ij[k] * dF_ab
+                contribution[k] += -dleft * F_ab - left * dF_ab + dq_ij[k] * F_ab + q_ij[k] * dF_ab
 
-        out += contribution
+            out += contribution
 
     return out
 
@@ -887,6 +936,10 @@ def computeSPHLaplacianDotGeometryJVP(
     referenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
+    crkState: Optional[CRKState] = None,
+    crkTangentState: Optional[CRKTangentState] = None,
+    renormalizationState: Optional[RenormalizationState] = None,
+    renormalizationTangentState: Optional[RenormalizationTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `queryValues.shape`, Dot scheme
@@ -909,6 +962,22 @@ def computeSPHLaplacianDotGeometryJVP(
     relaunched with the tangent value arrays) for that, or call
     `warpOperationJVP` directly, which sums both automatically
     (`warpier_tier2_combined_jvp_plan.md`).
+
+    `crkState`/`crkTangentState` and `renormalizationState`/
+    `renormalizationTangentState` (`warpier_tier2_correction_jvp_plan.md`
+    follow-up, 2026-08-21) enable CRK correction and gradient-renormalization
+    and their tangents for this scheme, matching
+    `warpOperation(Laplacian, laplacianMode=Dot, crkState=..., ...)`. Both
+    reuse `_laplacianGeometryChainJVP`'s `(G, dG)` verbatim (the same
+    operator-agnostic building block Brookshaw's own JVP uses, phases (c)-(f))
+    -- `F_ab`'s self-pair (`r_ij == 0`) contribution is guarded the same way
+    Brookshaw's own `P` term is (see this file's own `if r_ij > scalar_t(0.0)`
+    guard below), needed for the identical reason: `correctGradientCRK`'s
+    value at `x_ij == 0` is generically nonzero, and `F_ab = dot(G,n_ij)/D_ij`
+    divides by `D_ij` on top of `n_ij`'s own `x_ij/D_ij` division, the same
+    "dot-then-divide-again" shape that produced a wrong reverse-mode adjoint
+    for Brookshaw. Either tangent state may be omitted (an all-zero tangent,
+    correction held frozen).
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -980,6 +1049,10 @@ def computeSPHLaplacianDotGeometryJVP(
         gradientMode=gradientMode,
         referenceVolumes=referenceVolumes,
         tangentReferenceVolumes=tangentReferenceVolumes,
+        crkState=crkState,
+        crkTangentState=crkTangentState,
+        renormalizationState=renormalizationState,
+        renormalizationTangentState=renormalizationTangentState,
         extraTensors=(queryValuesFlat, referenceValuesFlat),
         extraScalars=(wp.int32(flatInputShape),),
     )
@@ -1028,6 +1101,8 @@ def computeSPHLaplacianDefaultJVP_Func_i(
             correctionData.useCRK,
             iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB,
             iCorrectionTangentData.A, iCorrectionTangentData.B, iCorrectionTangentData.gradA, iCorrectionTangentData.gradB,
+            correctionData.useGradientRenormalization,
+            iCorrectionData.renormalizationMatrix, iCorrectionTangentData.renormalizationMatrix,
         )
 
         _A, B, _dA, dB = _gradientWeightsJVP(
@@ -1041,18 +1116,28 @@ def computeSPHLaplacianDefaultJVP_Func_i(
         q_ij = (fj - fi) * B
         dq_ij = (fj - fi) * dB
 
-        # computeDotLaplacian's own second regularized distance (a different
-        # literal eps than D_ij's 1e-8 -- matched exactly, not approximated).
-        eps2 = scalar_t(_LAPLACIAN_DOT2_EPS)
-        D2_ij = r_ij + eps2 * h_ij
-        dD2_ij = dr_ij + eps2 * dh_ij
-        n_ij2 = n_ij / D2_ij
-        dn_ij2 = (dn_ij - n_ij2 * dD2_ij) / D2_ij
+        # Explicit r_ij > 0 guard, same fix and same reason as Dot's own above
+        # (and Brookshaw's, `computeSPHLaplacianBrookshawJVP_Func_i`): n_ij2 divides
+        # by a *second* regularized distance (D2_ij) on top of n_ij's own division,
+        # so dot(n_ij2,G) inherits the identical self-pair reverse-mode-adjoint
+        # hazard once CRK makes G nonzero at x_ij == 0, one quotient-rule level
+        # deeper than Brookshaw/Dot -- confirmed via gradcheck failing on the
+        # self-pair diagonal Jacobian entries the same way. The true contribution
+        # at r_ij == 0 is always exactly 0 (n_ij2 == 0 there by construction, CRK or
+        # not), so this changes no forward value anywhere.
+        if r_ij > scalar_t(0.0):
+            # computeDotLaplacian's own second regularized distance (a different
+            # literal eps than D_ij's 1e-8 -- matched exactly, not approximated).
+            eps2 = scalar_t(_LAPLACIAN_DOT2_EPS)
+            D2_ij = r_ij + eps2 * h_ij
+            dD2_ij = dr_ij + eps2 * dh_ij
+            n_ij2 = n_ij / D2_ij
+            dn_ij2 = (dn_ij - n_ij2 * dD2_ij) / D2_ij
 
-        dotn2G = wp.dot(n_ij2, G)
-        d_dotn2G = wp.dot(dn_ij2, G) + wp.dot(n_ij2, dG)
+            dotn2G = wp.dot(n_ij2, G)
+            d_dotn2G = wp.dot(dn_ij2, G) + wp.dot(n_ij2, dG)
 
-        out += -scalar_t(2.0) * (dq_ij * dotn2G + q_ij * d_dotn2G)
+            out += -scalar_t(2.0) * (dq_ij * dotn2G + q_ij * d_dotn2G)
 
     return out
 
@@ -1158,6 +1243,10 @@ def computeSPHLaplacianDefaultGeometryJVP(
     referenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
+    crkState: Optional[CRKState] = None,
+    crkTangentState: Optional[CRKTangentState] = None,
+    renormalizationState: Optional[RenormalizationState] = None,
+    renormalizationTangentState: Optional[RenormalizationTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `queryValues.shape`, Default scheme
@@ -1177,6 +1266,18 @@ def computeSPHLaplacianDefaultGeometryJVP(
     relaunched with the tangent value arrays) for that, or call
     `warpOperationJVP` directly, which sums both automatically
     (`warpier_tier2_combined_jvp_plan.md`).
+
+    `crkState`/`crkTangentState` and `renormalizationState`/
+    `renormalizationTangentState` (`warpier_tier2_correction_jvp_plan.md`
+    follow-up, 2026-08-21) enable CRK correction and gradient-renormalization
+    and their tangents for this scheme, matching
+    `warpOperation(Laplacian, laplacianMode=Default, crkState=..., ...)`.
+    Both reuse `_laplacianGeometryChainJVP`'s `(G, dG)` verbatim, same as Dot
+    (see `computeSPHLaplacianDotGeometryJVP`'s docstring for the shared
+    self-pair-adjoint rationale, which applies identically here: `n_ij2`
+    divides by `D2_ij` on top of `n_ij`'s own division, guarded the same way
+    below). Either tangent state may be omitted (an all-zero tangent,
+    correction held frozen).
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -1226,6 +1327,10 @@ def computeSPHLaplacianDefaultGeometryJVP(
         gradientMode=gradientMode,
         referenceVolumes=referenceVolumes,
         tangentReferenceVolumes=tangentReferenceVolumes,
+        crkState=crkState,
+        crkTangentState=crkTangentState,
+        renormalizationState=renormalizationState,
+        renormalizationTangentState=renormalizationTangentState,
         extraTensors=(queryValues, referenceValues),
     )
 
