@@ -42,7 +42,14 @@ __all__ = [
 ]
 
 
-from .stateUtil import getParticle, getL_i, getVolume_i, getVolume_j, getGradH_i, getGradH_j, getCRK_i, getCRK_j, getParticleData, getParticleCorrectionData_i, getParticleCorrectionData_j, access_optional, ternary_helper
+from .stateUtil import (
+    getParticle, getL_i, getVolume_i, getVolume_j, getGradH_i, getGradH_j, getCRK_i, getCRK_j,
+    getRenormTangent_i, getVolumeTangent_i, getVolumeTangent_j, getGradHTangent_i, getGradHTangent_j,
+    getCRKTangent_i, getCRKTangent_j,
+    getParticleData, getParticleCorrectionData_i, getParticleCorrectionData_j,
+    getParticleCorrectionTangentData_i,
+    access_optional, ternary_helper,
+)
 
 __all__.extend([
     "getParticle",
@@ -53,9 +60,17 @@ __all__.extend([
     "getGradH_j",
     "getCRK_i",
     "getCRK_j",
+    "getRenormTangent_i",
+    "getVolumeTangent_i",
+    "getVolumeTangent_j",
+    "getGradHTangent_i",
+    "getGradHTangent_j",
+    "getCRKTangent_i",
+    "getCRKTangent_j",
     "getParticleData",
     "getParticleCorrectionData_i",
     "getParticleCorrectionData_j",
+    "getParticleCorrectionTangentData_i",
     "access_optional",
     "ternary_helper"
 

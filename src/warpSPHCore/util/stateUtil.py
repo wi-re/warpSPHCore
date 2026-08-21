@@ -72,6 +72,78 @@ def getCRK_j(
     else:
         return False, zero_like_warp(correctionData.referenceA), zero_like_warp(correctionData.referenceB), zero_like_warp(correctionData.referenceGradA), zero_like_warp(correctionData.referenceGradB)
 
+# Tangent counterparts of getL_i/getVolume_i/getVolume_j/getGradH_i/getGradH_j/getCRK_i/getCRK_j
+# (`warpier_tier2_correction_jvp_plan.md` phase a2). Gating stays on the paired correctionData's
+# own useGradientRenormalization/useVolume/useGradHTerms/useCRK flags -- correctionTangentData
+# carries no enable flag of its own (see corrections_t.py's docstring). getGradHTangent_i/_j have
+# no caller yet (grad-H JVP is unwired, `warpOperationJVP` still rejects `gradHState` outright) --
+# kept for the same structural-symmetry reason `correctionTangentData` carries the field at all.
+@wp.func
+def getRenormTangent_i(
+    correctionData: Any, correctionTangentData: Any, # correctionData_{1,2,3}, correctionTangentData_{1,2,3}
+    i: wp.int32
+):
+    if correctionData.useGradientRenormalization:
+        return True, correctionTangentData.renormalizationMatrices[i]
+    else:
+        return False, zero_like_warp(correctionTangentData.renormalizationMatrices)
+
+@wp.func
+def getVolumeTangent_i(
+    correctionData: Any, correctionTangentData: Any, i: wp.int32
+):
+    if correctionData.useVolume:
+        return True, correctionTangentData.queryVolumes[i]
+    else:
+        return False, zero_like_warp(correctionTangentData.queryVolumes)
+
+@wp.func
+def getVolumeTangent_j(
+    correctionData: Any, correctionTangentData: Any, j: wp.int32
+):
+    if correctionData.useVolume:
+        return True, correctionTangentData.referenceVolumes[j]
+    else:
+        return False, zero_like_warp(correctionTangentData.referenceVolumes)
+
+@wp.func
+def getGradHTangent_i(
+    correctionData: Any, correctionTangentData: Any, i: wp.int32
+):
+    if correctionData.useGradHTerms:
+        return True, correctionTangentData.queryOmegas[i]
+    else:
+        return False, zero_like_warp(correctionTangentData.queryOmegas)
+
+@wp.func
+def getGradHTangent_j(
+    correctionData: Any, correctionTangentData: Any, j: wp.int32
+):
+    if correctionData.useGradHTerms:
+        return True, correctionTangentData.referenceOmegas[j]
+    else:
+        return False, zero_like_warp(correctionTangentData.referenceOmegas)
+
+@wp.func
+def getCRKTangent_i(
+    correctionData: Any, correctionTangentData: Any, # correctionData_{1,2,3}, correctionTangentData_{1,2,3}
+    i: wp.int32
+):
+    if correctionData.useCRK:
+        return True, correctionTangentData.queryA[i], correctionTangentData.queryB[i], correctionTangentData.queryGradA[i], correctionTangentData.queryGradB[i]
+    else:
+        return False, zero_like_warp(correctionTangentData.queryA), zero_like_warp(correctionTangentData.queryB), zero_like_warp(correctionTangentData.queryGradA), zero_like_warp(correctionTangentData.queryGradB)
+
+@wp.func
+def getCRKTangent_j(
+    correctionData: Any, correctionTangentData: Any, # correctionData_{1,2,3}, correctionTangentData_{1,2,3}
+    j: wp.int32
+):
+    if correctionData.useCRK:
+        return True, correctionTangentData.referenceA[j], correctionTangentData.referenceB[j], correctionTangentData.referenceGradA[j], correctionTangentData.referenceGradB[j]
+    else:
+        return False, zero_like_warp(correctionTangentData.referenceA), zero_like_warp(correctionTangentData.referenceB), zero_like_warp(correctionTangentData.referenceGradA), zero_like_warp(correctionTangentData.referenceGradB)
+
 
 # 1D:
 @wp.func
@@ -110,6 +182,22 @@ def getParticleCorrectionData_j(
         V_j,
         omega_j,
         A_j, B_j, gradA_j, gradB_j
+    )
+
+@wp.func
+def getParticleCorrectionTangentData_i(
+    correctionData: correctionData_1, correctionTangentData: correctionTangentData_1, # dim-1/2/3 pair
+    i: wp.int32
+):
+    dGradCorrection, dL_i = getRenormTangent_i(correctionData, correctionTangentData, i)
+    dVolumeCorrection, dV_i = getVolumeTangent_i(correctionData, correctionTangentData, i)
+    dGradHCorrection, dOmega_i = getGradHTangent_i(correctionData, correctionTangentData, i)
+    dCrkCorrection, dA_i, dB_i, dGradA_i, dGradB_i = getCRKTangent_i(correctionData, correctionTangentData, i)
+    return ParticleCorrectionTangentData_1(
+        dL_i,
+        dV_i,
+        dOmega_i,
+        dA_i, dB_i, dGradA_i, dGradB_i
     )
 
 #2D:
@@ -151,6 +239,22 @@ def getParticleCorrectionData_j(
         A_j, B_j, gradA_j, gradB_j
     )
 
+@wp.func
+def getParticleCorrectionTangentData_i(
+    correctionData: correctionData_2, correctionTangentData: correctionTangentData_2, # dim-1/2/3 pair
+    i: wp.int32
+):
+    dGradCorrection, dL_i = getRenormTangent_i(correctionData, correctionTangentData, i)
+    dVolumeCorrection, dV_i = getVolumeTangent_i(correctionData, correctionTangentData, i)
+    dGradHCorrection, dOmega_i = getGradHTangent_i(correctionData, correctionTangentData, i)
+    dCrkCorrection, dA_i, dB_i, dGradA_i, dGradB_i = getCRKTangent_i(correctionData, correctionTangentData, i)
+    return ParticleCorrectionTangentData_2(
+        dL_i,
+        dV_i,
+        dOmega_i,
+        dA_i, dB_i, dGradA_i, dGradB_i
+    )
+
 #3D:
 @wp.func
 def getParticleData(
@@ -188,6 +292,22 @@ def getParticleCorrectionData_j(
         V_j,
         omega_j,
         A_j, B_j, gradA_j, gradB_j
+    )
+
+@wp.func
+def getParticleCorrectionTangentData_i(
+    correctionData: correctionData_3, correctionTangentData: correctionTangentData_3, # dim-1/2/3 pair
+    i: wp.int32
+):
+    dGradCorrection, dL_i = getRenormTangent_i(correctionData, correctionTangentData, i)
+    dVolumeCorrection, dV_i = getVolumeTangent_i(correctionData, correctionTangentData, i)
+    dGradHCorrection, dOmega_i = getGradHTangent_i(correctionData, correctionTangentData, i)
+    dCrkCorrection, dA_i, dB_i, dGradA_i, dGradB_i = getCRKTangent_i(correctionData, correctionTangentData, i)
+    return ParticleCorrectionTangentData_3(
+        dL_i,
+        dV_i,
+        dOmega_i,
+        dA_i, dB_i, dGradA_i, dGradB_i
     )
 
 

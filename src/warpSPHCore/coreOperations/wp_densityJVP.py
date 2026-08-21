@@ -34,7 +34,7 @@ from ..enumTypes import *
 from ..math import zero_like_warp
 from ..kernels.kernelJVP import sphKernelJVP
 from ..radiusSearch.grid_util import getIndexRange
-from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i
+from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i, getParticleCorrectionTangentData_i
 from ._jvpCommon import launchGeometryJVP as _launchGeometryJVP
 
 __all__ = ['computeSPHDensityGeometryJVP']
@@ -52,6 +52,7 @@ def computeSPHDensityJVP_Func_i(
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
+    iCorrectionTangentData: Any, correctionTangentData: Any,
 
     outputValue: Any, # type: ignore
 ):
@@ -84,7 +85,7 @@ def computeSPHDensityJVP_Func_Adjacency(
     i: wp.int32, dim: wp.int32,
     queryState: Any, referenceState: Any,
     queryTangentState: Any, referenceTangentState: Any,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
     kernelProperties: kernelState,
@@ -98,6 +99,7 @@ def computeSPHDensityJVP_Func_Adjacency(
 
     iTangentPtcl = getParticleData(queryTangentState, i)
     iCorrectionData = getParticleCorrectionData_i(correctionData, i)
+    iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -116,6 +118,7 @@ def computeSPHDensityJVP_Func_Adjacency(
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
 
             iCorrectionData, correctionData,
+            iCorrectionTangentData, correctionTangentData,
 
             outputValue,
         )
@@ -131,7 +134,7 @@ def computeSPHDensityJVP_Kernel(
     domainState: domainData,
 
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
 
     kernelProperties: kernelState,
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
@@ -148,7 +151,7 @@ def computeSPHDensityJVP_Kernel(
         i, domainState.dim,
         queryState, referenceState,
         queryTangentState, referenceTangentState,
-        correctionData, domainState,
+        correctionData, correctionTangentData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
 

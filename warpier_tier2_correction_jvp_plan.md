@@ -1,6 +1,6 @@
 # Tier-2 JVP: correction-tangent support (CRK / renormalization / apparent-volume) + interface bundling
 
-## Status: (a1) done (2026-08-20); (a2) next
+## Status: (a1) done (2026-08-20); (a2) done (2026-08-21); (b) next
 
 ## Context
 
@@ -102,15 +102,23 @@ class CRKTangentState:
 class RenormalizationTangentState:
     renormalizationMatrices: torch.Tensor  # [N,D,D]
 ```
-Add a parallel `correctionTangentData_{1,2,3}` `@wp.struct` (mirroring `correctionData_{dim}`'s
-CRK/renorm fields only — no volume/omega tangent fields, those are phase (b)'s concern) plus a
-`getParticleCorrectionTangentData_i`-style extractor in `util/stateUtil.py`, threaded as a new ABI
-parameter through the four CRK/renorm-consuming kernels' `_Func_i`/`_Func_Adjacency` signatures
-(Gradient/Divergence/Curl/Laplacian-Brookshaw). **Deliberately a parallel struct, not an extension of
-the existing `correctionData_{dim}`**: that struct is shared with every primal production kernel;
-adding unused tangent fields to it would grow every non-JVP kernel's ABI for no reason. One-time
-`buildNullCorrectionTangentData` mirrors `buildNullCorrectionData`, fully disabled until (c)-(f)
-populate it.
+Add a parallel `correctionTangentData_{1,2,3}` `@wp.struct` plus a `getParticleCorrectionTangentData_i`
+extractor in `util/stateUtil.py`. **Revised during implementation (2026-08-21) from this plan's original
+"CRK/renorm fields only" scoping**: the struct is instead a **complete field-for-field mirror of
+`correctionData_{dim}`** (renorm + volume + grad-H omega + CRK, minus the `useX` bool flags), and
+`correctionTangentData` is an **unconditional canonical-ABI parameter on every JVP kernel** reachable
+through `launchGeometryJVP` (all nine: Density/Interpolate/Gradient/Divergence/Curl/Laplacian's four
+schemes), not opt-in to just the four CRK/renorm consumers. Rationale (raised by the user against the
+original narrower scoping): phase (b)'s own volume-tangent wiring needs `correctionTangentData` on
+Interpolate and Laplacian-Naive too, which the narrower a2 didn't cover — doing the ABI-threading pass
+once now, on every kernel, avoids a second signature-touching pass later; and carrying the (still
+unwired) grad-H omega fields now means a future grad-H JVP effort never has to widen this struct's
+shape or re-touch every kernel's ABI a second time, even though `GradHTangentState`/`warpOperationJVP`
+wiring for it stays out of scope per this plan's own decision below. **Deliberately a parallel struct,
+not an extension of the existing `correctionData_{dim}`**: that struct is shared with every primal
+production kernel; adding unused tangent fields to it would grow every non-JVP kernel's ABI for no
+reason. One-time `buildNullCorrectionTangentData` mirrors `buildNullCorrectionData`, fully disabled
+until (b)-(f) populate it (grad-H's fields stay permanently disabled, no consumer exists).
 
 **Hard requirement, not optional:** the new tangent tensors (`A`/`B`/`gradA`/`gradB`/
 `renormalizationMatrices` tangents) must be added to `_jvpCommon.py`'s `flat_tensors` list the same

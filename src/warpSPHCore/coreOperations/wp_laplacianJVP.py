@@ -94,7 +94,7 @@ from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
 from ..math import zero_like_warp, safe_sqrt
-from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i
+from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i, getParticleCorrectionTangentData_i
 from ..util import castTorchToWarpAsBuiltins
 from ..util.support import computePairwiseSupport, computePairwiseSupportJVP
 from ..math.wp_distance import computeDistanceVec
@@ -190,6 +190,7 @@ def computeSPHLaplacianBrookshawJVP_Func_i(
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
+    iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: scalar_t, referenceValues: wp.array(dtype = scalar_t), # type: ignore
 
@@ -233,7 +234,7 @@ def computeSPHLaplacianBrookshawJVP_Func_Adjacency(
     i: wp.int32, dim: wp.int32,
     queryState: Any, referenceState: Any,
     queryTangentState: Any, referenceTangentState: Any,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
     kernelProperties: kernelState,
@@ -249,6 +250,7 @@ def computeSPHLaplacianBrookshawJVP_Func_Adjacency(
 
     iTangentPtcl = getParticleData(queryTangentState, i)
     iCorrectionData = getParticleCorrectionData_i(correctionData, i)
+    iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
 
@@ -269,6 +271,7 @@ def computeSPHLaplacianBrookshawJVP_Func_Adjacency(
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
 
             iCorrectionData, correctionData,
+            iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
 
@@ -286,7 +289,7 @@ def computeSPHLaplacianBrookshawJVP_Kernel(
     domainState: domainData,
 
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
 
     kernelProperties: kernelState,
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
@@ -305,7 +308,7 @@ def computeSPHLaplacianBrookshawJVP_Kernel(
         i, domainState.dim,
         queryState, referenceState,
         queryTangentState, referenceTangentState,
-        correctionData, domainState,
+        correctionData, correctionTangentData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
@@ -414,6 +417,7 @@ def computeSPHLaplacianNaiveJVP_Func_i(
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
+    iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: scalar_t, referenceValues: wp.array(dtype = scalar_t), # type: ignore
 
@@ -458,7 +462,7 @@ def computeSPHLaplacianNaiveJVP_Func_Adjacency(
     i: wp.int32, dim: wp.int32,
     queryState: Any, referenceState: Any,
     queryTangentState: Any, referenceTangentState: Any,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
     kernelProperties: kernelState,
@@ -474,6 +478,7 @@ def computeSPHLaplacianNaiveJVP_Func_Adjacency(
 
     iTangentPtcl = getParticleData(queryTangentState, i)
     iCorrectionData = getParticleCorrectionData_i(correctionData, i)
+    iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
 
@@ -494,6 +499,7 @@ def computeSPHLaplacianNaiveJVP_Func_Adjacency(
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
 
             iCorrectionData, correctionData,
+            iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
 
@@ -511,7 +517,7 @@ def computeSPHLaplacianNaiveJVP_Kernel(
     domainState: domainData,
 
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
 
     kernelProperties: kernelState,
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
@@ -530,7 +536,7 @@ def computeSPHLaplacianNaiveJVP_Kernel(
         i, domainState.dim,
         queryState, referenceState,
         queryTangentState, referenceTangentState,
-        correctionData, domainState,
+        correctionData, correctionTangentData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
@@ -664,6 +670,7 @@ def computeSPHLaplacianDotJVP_Func_i(
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
+    iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: Any, referenceValues: wp.array(dtype = Any), # type: ignore
 
@@ -730,7 +737,7 @@ def computeSPHLaplacianDotJVP_Func_Adjacency(
     i: wp.int32, dim: wp.int32, flatInputShape: wp.int32,
     queryState: Any, referenceState: Any,
     queryTangentState: Any, referenceTangentState: Any,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
     kernelProperties: kernelState,
@@ -746,6 +753,7 @@ def computeSPHLaplacianDotJVP_Func_Adjacency(
 
     iTangentPtcl = getParticleData(queryTangentState, i)
     iCorrectionData = getParticleCorrectionData_i(correctionData, i)
+    iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
 
@@ -766,6 +774,7 @@ def computeSPHLaplacianDotJVP_Func_Adjacency(
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
 
             iCorrectionData, correctionData,
+            iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
 
@@ -783,7 +792,7 @@ def computeSPHLaplacianDotJVP_Kernel(
     domainState: domainData,
 
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
 
     kernelProperties: kernelState,
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
@@ -803,7 +812,7 @@ def computeSPHLaplacianDotJVP_Kernel(
         i, domainState.dim, flatInputShape,
         queryState, referenceState,
         queryTangentState, referenceTangentState,
-        correctionData, domainState,
+        correctionData, correctionTangentData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
@@ -938,6 +947,7 @@ def computeSPHLaplacianDefaultJVP_Func_i(
     beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
+    iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: Any, referenceValues: wp.array(dtype = Any), # type: ignore
 
@@ -991,7 +1001,7 @@ def computeSPHLaplacianDefaultJVP_Func_Adjacency(
     i: wp.int32, dim: wp.int32,
     queryState: Any, referenceState: Any,
     queryTangentState: Any, referenceTangentState: Any,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
     domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData, numOffsets: wp.int32,
     kernelProperties: kernelState,
@@ -1007,6 +1017,7 @@ def computeSPHLaplacianDefaultJVP_Func_Adjacency(
 
     iTangentPtcl = getParticleData(queryTangentState, i)
     iCorrectionData = getParticleCorrectionData_i(correctionData, i)
+    iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
 
@@ -1027,6 +1038,7 @@ def computeSPHLaplacianDefaultJVP_Func_Adjacency(
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
 
             iCorrectionData, correctionData,
+            iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
 
@@ -1044,7 +1056,7 @@ def computeSPHLaplacianDefaultJVP_Kernel(
     domainState: domainData,
 
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
-    correctionData: Any,
+    correctionData: Any, correctionTangentData: Any,
 
     kernelProperties: kernelState,
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
@@ -1063,7 +1075,7 @@ def computeSPHLaplacianDefaultJVP_Kernel(
         i, domainState.dim,
         queryState, referenceState,
         queryTangentState, referenceTangentState,
-        correctionData, domainState,
+        correctionData, correctionTangentData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,

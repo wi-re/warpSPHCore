@@ -27,17 +27,32 @@ __all__.extend([
     'WarpParticle_3',
 ])
 
-from .corrections_t import CRKState, GradHState, RenormalizationState, correctionData_1, correctionData_2, correctionData_3, ParticleCorrectionData_1, ParticleCorrectionData_2, ParticleCorrectionData_3
+from .corrections_t import (
+    CRKState, GradHState, RenormalizationState,
+    CRKTangentState, RenormalizationTangentState,
+    correctionData_1, correctionData_2, correctionData_3,
+    correctionTangentData_1, correctionTangentData_2, correctionTangentData_3,
+    ParticleCorrectionData_1, ParticleCorrectionData_2, ParticleCorrectionData_3,
+    ParticleCorrectionTangentData_1, ParticleCorrectionTangentData_2, ParticleCorrectionTangentData_3,
+)
 __all__.extend([
     'CRKState',
     'GradHState',
     'RenormalizationState',
+    'CRKTangentState',
+    'RenormalizationTangentState',
     'correctionData_1',
     'correctionData_2',
     'correctionData_3',
+    'correctionTangentData_1',
+    'correctionTangentData_2',
+    'correctionTangentData_3',
     'ParticleCorrectionData_1',
     'ParticleCorrectionData_2',
-    'ParticleCorrectionData_3'
+    'ParticleCorrectionData_3',
+    'ParticleCorrectionTangentData_1',
+    'ParticleCorrectionTangentData_2',
+    'ParticleCorrectionTangentData_3',
 ])
 
 from .properties_t import OperationProperties

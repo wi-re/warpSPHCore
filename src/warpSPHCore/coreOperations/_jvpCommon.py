@@ -24,8 +24,8 @@ from ..autograd import StateAwareWarpFunction, launch_kernel
 
 __all__ = [
     'buildParticleSoA', 'buildDomainState', 'buildKernelState',
-    'buildAdjacencyOrGridState', 'buildNullCorrectionData', 'gradientWeightsJVP',
-    'launchGeometryJVP',
+    'buildAdjacencyOrGridState', 'buildNullCorrectionData', 'buildNullCorrectionTangentData',
+    'gradientWeightsJVP', 'launchGeometryJVP',
 ]
 
 _SoA_BY_DIM = {1: particleDataSoA_1, 2: particleDataSoA_2, 3: particleDataSoA_3}
@@ -165,6 +165,51 @@ def buildNullCorrectionData(dim: int, device: torch.device) -> Any:
     return corrState
 
 
+_CORRECTION_TANGENT_BY_DIM = {1: correctionTangentData_1, 2: correctionTangentData_2, 3: correctionTangentData_3}
+
+
+def buildNullCorrectionTangentData(dim: int, device: torch.device) -> Any:
+    """Parallel tangent counterpart to `buildNullCorrectionData` -- a
+    `correctionTangentData_{dim}` struct with size-1 zero-filled arrays
+    behind every field (`warpier_tier2_correction_jvp_plan.md` phase a2).
+    Disabled the same way the primal struct is: gating lives entirely on
+    `buildNullCorrectionData`'s `useGradientRenormalization`/`useVolume`/
+    `useGradHTerms`/`useCRK` flags (always `False` today), so this struct
+    carries no enable flag of its own and its arrays are never read while
+    tangent support for the correction they back stays unwired (volume:
+    phase b; CRK/renorm: phases c-f; grad-H: never, no consumer exists).
+
+    **Not yet threaded into `flat_tensors`**: once a later phase adds real
+    `crkTangentState`/`renormalizationTangentState`/volume-tangent inputs
+    here, their backing tensors must be added to `launchGeometryJVP`'s
+    `flat_tensors` list the same way primal position/support/mass/density
+    tangents are -- `StateAwareWarpFunction` only tracks gradients for
+    tensors actually in that list, so skipping this would silently zero
+    `gradcheck` on those tensors (the same failure class
+    `docs/lessons_learned.md` documents for tensors that bypass the bridge).
+    """
+    torchDtype = get_torch_precision()
+    zeroScalar = lambda: castTorchToWarpAsBuiltins(torch.zeros(1, device=device, dtype=torchDtype))
+    zeroVec = lambda: castTorchToWarpAsBuiltins(torch.zeros((1, dim), device=device, dtype=torchDtype))
+    zeroMat = lambda: castTorchToWarpAsBuiltins(torch.zeros((1, dim, dim), device=device, dtype=torchDtype))
+
+    tangentState = _CORRECTION_TANGENT_BY_DIM[dim]()
+    tangentState.renormalizationMatrices = zeroMat()
+    tangentState.queryVolumes = zeroScalar()
+    tangentState.referenceVolumes = zeroScalar()
+    tangentState.queryOmegas = zeroScalar()
+    tangentState.referenceOmegas = zeroScalar()
+    tangentState.queryA = zeroScalar()
+    tangentState.queryB = zeroVec()
+    tangentState.queryGradA = zeroVec()
+    tangentState.queryGradB = zeroMat()
+    tangentState.referenceA = zeroScalar()
+    tangentState.referenceB = zeroVec()
+    tangentState.referenceGradA = zeroVec()
+    tangentState.referenceGradB = zeroMat()
+    return tangentState
+
+
 def buildAdjacencyOrGridState(
     adjacency: Union[AdjacencyList, CompactHashMap],
     domain: 'DomainDescription',
@@ -257,13 +302,13 @@ def launchGeometryJVP(
     """Autograd-bridged launcher for every Tier-2 JVP kernel's shared CSR
     argument order (`queryState, referenceState, queryTangentState,
     referenceTangentState, domainState, useAdjacency, adjacencyState,
-    gridState, correctionData, kernelProperties[, *extraTensors][,
-    *extraScalars], outputValues`) -- routes through `StateAwareWarpFunction`
-    (the same bridge every primal operator reaches via
-    `launchOperator`/`_launch`) instead of a bare `wp.launch`, so gradients
-    flow back through `positions`/`supports`/`masses`/`densities` on both the
-    query and reference roles, their tangent counterparts, and any
-    `extraTensors` (e.g. Gradient/Divergence/Curl/Laplacian's frozen
+    gridState, correctionData, correctionTangentData, kernelProperties[,
+    *extraTensors][, *extraScalars], outputValues`) -- routes through
+    `StateAwareWarpFunction` (the same bridge every primal operator reaches
+    via `launchOperator`/`_launch`) instead of a bare `wp.launch`, so
+    gradients flow back through `positions`/`supports`/`masses`/`densities`
+    on both the query and reference roles, their tangent counterparts, and
+    any `extraTensors` (e.g. Gradient/Divergence/Curl/Laplacian's frozen
     `queryValues`/`referenceValues`) -- closing the reverse-mode gap
     `warpier_tier2_jvp_reverse_mode_plan.md` documents.
 
@@ -277,13 +322,25 @@ def launchGeometryJVP(
     why: older Warp versions silently treated `.length` as zero when used as
     a dynamic for-loop bound).
 
-    `domainState`/`correctionData`/`adjacencyState`/`gridState`/
-    `kernelProperties`/particle `kinds` are built once per call and closed
-    over by `build_fn` rather than threaded through `flat_tensors`: none of
-    them are differentiable (indices, domain bounds, disabled-correction
-    flags), so there is nothing for the bridge to track for them -- only the
-    16 particle-state tensors (8 primal + 8 tangent) and any `extraTensors`
-    participate in `StateAwareWarpFunction`'s autograd bookkeeping.
+    `domainState`/`correctionData`/`correctionTangentData`/`adjacencyState`/
+    `gridState`/`kernelProperties`/particle `kinds` are built once per call
+    and closed over by `build_fn` rather than threaded through
+    `flat_tensors`: none of them are differentiable (indices, domain bounds,
+    disabled-correction flags), so there is nothing for the bridge to track
+    for them -- only the 16 particle-state tensors (8 primal + 8 tangent)
+    and any `extraTensors` participate in `StateAwareWarpFunction`'s
+    autograd bookkeeping.
+
+    `correctionTangentData` (`warpier_tier2_correction_jvp_plan.md` phase
+    a2) is an unconditional canonical-ABI parameter, exactly like
+    `correctionData` itself -- every kernel launched through this function
+    declares it, whether or not it reads it yet, so no caller ever needs to
+    special-case its own signature to add or consume a correction's tangent
+    later. Always the disabled null struct today (`buildNullCorrectionTangentData`)
+    -- real volume/CRK/renorm tangent data is wired in phases (b)-(f);
+    grad-H tangent data is carried in the struct's shape but has no wiring
+    path at all (no consumer exists, `warpOperationJVP` rejects `gradHState`
+    outright).
     """
     device = queryPositions.device
     dtype = queryPositions.dtype
@@ -305,6 +362,7 @@ def launchGeometryJVP(
     domainState = buildDomainState(domain)
     kernelProperties = buildKernelState(kernelFn, supportMode, gradientMode=gradientMode, laplacianMode=laplacianMode)
     correctionData = buildNullCorrectionData(dim, device)
+    correctionTangentData = buildNullCorrectionTangentData(dim, device)
     useAdjacency, adjacencyState, gridState, _numOffsets = buildAdjacencyOrGridState(adjacency, domain)
 
     qKinds = castTorchToWarp(torch.zeros(nQuery, device=device, dtype=torch.int32))
@@ -346,7 +404,7 @@ def launchGeometryJVP(
         return (
             qPart, rPart, qTangent, rTangent, domainState,
             useAdjacency, adjacencyState, gridState,
-            correctionData, kernelProperties,
+            correctionData, correctionTangentData, kernelProperties,
         ) + extra + extraScalars
 
     return StateAwareWarpFunction.apply(
