@@ -81,6 +81,7 @@ def computeSPHCurlJVP_Func_i(
             jPtcl.mass, iPtcl.density, jPtcl.density,
             jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
             kernelProperties.gradientMode,
+            correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
         )
 
         fj = referenceValues[j]
@@ -191,6 +192,8 @@ def computeSPHCurlGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dCurl_i`, shape `[numParticles, 1]` (matching production
@@ -209,7 +212,9 @@ def computeSPHCurlGeometryJVP(
     fields) are required and frozen here. `queryParticles.densities`/
     `referenceParticles.densities` must already hold real values, same
     requirement as `computeSPHGradientGeometryJVP`. `adjacency` is an
-    `AdjacencyList` or `CompactHashMap`.
+    `AdjacencyList` or `CompactHashMap`. `referenceVolumes`/
+    `tangentReferenceVolumes` (`warpier_tier2_correction_jvp_plan.md` phase
+    b) enable apparent-volume support and its tangent, same as Gradient.
     """
     if domain.dim != 2:
         raise ValueError("computeSPHCurlGeometryJVP: only domain.dim == 2 is implemented.")
@@ -257,6 +262,8 @@ def computeSPHCurlGeometryJVP(
         queryDensities=queryParticles.densities,
         referenceDensities=referenceParticles.densities,
         gradientMode=gradientMode,
+        referenceVolumes=referenceVolumes,
+        tangentReferenceVolumes=tangentReferenceVolumes,
         extraTensors=(queryValues, referenceValues),
     )
     return dCurl_t.unsqueeze(-1)

@@ -80,6 +80,7 @@ def computeSPHDivergenceJVP_Func_i(
             jPtcl.mass, iPtcl.density, jPtcl.density,
             jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
             kernelProperties.gradientMode,
+            correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
         )
 
         fj = referenceValues[j]
@@ -190,6 +191,8 @@ def computeSPHDivergenceGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dDivergence_i`, shape `[numParticles]`.
@@ -206,7 +209,12 @@ def computeSPHDivergenceGeometryJVP(
     fields) are required and frozen here. `queryParticles.densities`/
     `referenceParticles.densities` must already hold real values, same
     requirement as `computeSPHGradientGeometryJVP`. `adjacency` is an
-    `AdjacencyList` or `CompactHashMap`.
+    `AdjacencyList` or `CompactHashMap`. `referenceVolumes`/
+    `tangentReferenceVolumes` (`warpier_tier2_correction_jvp_plan.md` phase
+    b) enable apparent-volume support and its tangent, same as Gradient
+    (`consistentDivergence`/`divergenceDotMode` stay unsupported here,
+    rejected centrally by `operations.py`, so the plain `apparentVolume`
+    formula applies unconditionally).
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -252,5 +260,7 @@ def computeSPHDivergenceGeometryJVP(
         queryDensities=queryParticles.densities,
         referenceDensities=referenceParticles.densities,
         gradientMode=gradientMode,
+        referenceVolumes=referenceVolumes,
+        tangentReferenceVolumes=tangentReferenceVolumes,
         extraTensors=(queryValues, referenceValues),
     )

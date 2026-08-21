@@ -85,6 +85,7 @@ def gradientWeightsJVP(
     massJ: scalar_t, densityI: scalar_t, densityJ: scalar_t,
     dMassJ: scalar_t, dDensityI: scalar_t, dDensityJ: scalar_t,
     gradientMode: wp.int32,
+    useVolume: wp.bool, referenceVolumeJ: scalar_t, tangentReferenceVolumeJ: scalar_t,
 ):
     """`coeff_ij = fi*A_ij + fj*B_ij` (`fi`/`fj` frozen -- Tier 1 territory,
     contribute no term of their own here), `A`/`B`/`dA`/`dB` per
@@ -94,9 +95,25 @@ def gradientWeightsJVP(
     from inside seven distinct per-query kernels"), used by
     Gradient/Divergence/Curl/Laplacian(Brookshaw/Naive)'s CSR kernels to
     combine with their own operator-specific `fi`/`fj` weighting.
+
+    `useVolume` (`warpier_tier2_correction_jvp_plan.md` phase b) swaps the
+    apparent volume `Vj` for a directly-supplied `referenceVolumeJ` (matching
+    every primal kernel's own `apparentVolume = ... if not
+    correctionData.useVolume else correctionData.referenceVolumes[j]`
+    branch, e.g. `wp_gradient.py`) -- a pass-through of the caller's own
+    volume tangent, not a re-derivation, so `dVj` becomes
+    `tangentReferenceVolumeJ` directly rather than the quotient rule below.
+    `GradientScheme.Symmetric` never reads `Vj`/`dVj` at all (its `A`/`B`
+    come straight from `massJ`/`densityI`/`densityJ`, matching the primal
+    kernel's own Symmetric branch, which has no `apparentVolume` term either)
+    -- `useVolume` has no effect on it, by construction, not by omission.
     """
-    Vj = massJ / densityJ
-    dVj = dMassJ / densityJ - massJ * dDensityJ / (densityJ * densityJ)
+    if useVolume:
+        Vj = referenceVolumeJ
+        dVj = tangentReferenceVolumeJ
+    else:
+        Vj = massJ / densityJ
+        dVj = dMassJ / densityJ - massJ * dDensityJ / (densityJ * densityJ)
 
     A = scalar_t(0.0)
     dA = scalar_t(0.0)
@@ -296,6 +313,9 @@ def launchGeometryJVP(
     gradientMode: Optional['GradientScheme'] = None,
     laplacianMode: Optional['LaplacianScheme'] = None,
 
+    referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
+
     extraTensors: tuple = (),
     extraScalars: tuple = (),
 ) -> torch.Tensor:
@@ -336,11 +356,25 @@ def launchGeometryJVP(
     `correctionData` itself -- every kernel launched through this function
     declares it, whether or not it reads it yet, so no caller ever needs to
     special-case its own signature to add or consume a correction's tangent
-    later. Always the disabled null struct today (`buildNullCorrectionTangentData`)
-    -- real volume/CRK/renorm tangent data is wired in phases (b)-(f);
-    grad-H tangent data is carried in the struct's shape but has no wiring
-    path at all (no consumer exists, `warpOperationJVP` rejects `gradHState`
-    outright).
+    later. Real data starts landing in phase (b) (`referenceVolumes`/
+    `tangentReferenceVolumes` below); CRK/renorm tangent data is wired in
+    phases (c)-(f); grad-H tangent data is carried in the struct's shape but
+    has no wiring path at all (no consumer exists, `warpOperationJVP`
+    rejects `gradHState` outright).
+
+    `referenceVolumes`/`tangentReferenceVolumes` (phase (b)) populate
+    `correctionData.useVolume`/`.referenceVolumes` and
+    `correctionTangentData.referenceVolumes` for real -- unlike
+    `correctionData`/`correctionTangentData` themselves, these two are
+    differentiable (a caller's own `queryVolumes`/`referenceVolumes` leaf
+    tensors flow through `warpOperationJVP`), so, per the docstring above,
+    they participate in `flat_tensors`/`build_fn` like the particle-state
+    tensors do, unlike the rest of `correctionData`'s fields. Query-side
+    volume is deliberately not threaded here: no primal kernel this plan
+    covers ever reads `correctionData.queryVolumes[i]`, only
+    `.referenceVolumes[j]` (verified against `wp_gradient.py`/`wp_curl.py`/
+    `wp_divergence.py`/`wp_laplacian.py`), so a query-side tangent parameter
+    would sit permanently unused.
     """
     device = queryPositions.device
     dtype = queryPositions.dtype
@@ -359,10 +393,14 @@ def launchGeometryJVP(
     if tangentReferenceDensities is None:
         tangentReferenceDensities = torch.zeros(nRef, device=device, dtype=dtype)
 
+    useVolumeCorrection = referenceVolumes is not None
+    if referenceVolumes is None:
+        referenceVolumes = torch.zeros(nRef, device=device, dtype=dtype)
+    if tangentReferenceVolumes is None:
+        tangentReferenceVolumes = torch.zeros(nRef, device=device, dtype=dtype)
+
     domainState = buildDomainState(domain)
     kernelProperties = buildKernelState(kernelFn, supportMode, gradientMode=gradientMode, laplacianMode=laplacianMode)
-    correctionData = buildNullCorrectionData(dim, device)
-    correctionTangentData = buildNullCorrectionTangentData(dim, device)
     useAdjacency, adjacencyState, gridState, _numOffsets = buildAdjacencyOrGridState(adjacency, domain)
 
     qKinds = castTorchToWarp(torch.zeros(nQuery, device=device, dtype=torch.int32))
@@ -379,8 +417,9 @@ def launchGeometryJVP(
         queryTangentState.supports, referenceTangentState.supports,        # 10-11
         queryTangentState.masses, referenceTangentState.masses,            # 12-13
         tangentQueryDensities, tangentReferenceDensities,                  # 14-15
-    ] + list(extraTensors)
+    ] + list(extraTensors) + [referenceVolumes, tangentReferenceVolumes]
     n_extra = len(extraTensors)
+    _volumeIdx = 16 + n_extra
 
     def build_fn(wa: list, use_bundle: bool = False) -> tuple:
         qPart = _ParticleSoA()
@@ -400,6 +439,17 @@ def launchGeometryJVP(
         rTangent.masses, rTangent.densities, rTangent.kinds = wa[13], wa[15], rKinds
 
         extra = tuple(wa[16 + i] for i in range(n_extra))
+
+        # Rebuilt fresh every call (like qPart/rPart above), not closed over like
+        # domainState/kernelProperties: .referenceVolumes must point at *this*
+        # call's autograd-tracked warp array (wa[_volumeIdx]/wa[_volumeIdx+1]),
+        # not a stale one from a previous forward/backward invocation of the same
+        # build_fn closure.
+        correctionData = buildNullCorrectionData(dim, device)
+        correctionData.useVolume = useVolumeCorrection
+        correctionData.referenceVolumes = wa[_volumeIdx]
+        correctionTangentData = buildNullCorrectionTangentData(dim, device)
+        correctionTangentData.referenceVolumes = wa[_volumeIdx + 1]
 
         return (
             qPart, rPart, qTangent, rTangent, domainState,

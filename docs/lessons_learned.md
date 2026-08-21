@@ -38,11 +38,7 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   problem and is what the rest of the codebase already uses. Forward-only
   checks cannot see this at all; it only shows up in a gradcheck. Prefer
   explicit `if/else` over a ternary for any array read inside kernel code
-  that needs to stay differentiable, and treat a structurally similar
-  ternary elsewhere as worth a gradcheck, not an automatic red flag — a
-  ternary is only dangerous when both branches index the *same* array
-  (confirmed non-issue for the `apparentVolume = mj/rhoj if ... else
-  referenceVolumes[j]` pattern, which indexes different arrays per branch).
+  that needs to stay differentiable.
   **Update 2026-08-11: fixed upstream in warp-lang 1.17.0.dev3.**
   `scripts/repro_ternary_adjoint_zeroing.py` now passes for both the ternary
   and if/else forms under the `warp_dev` conda env (1.17.0.dev3), while still
@@ -57,6 +53,34 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   `wp_gradient.py`, `wp_divergence.py`, `wp_curl.py`, and `wp_laplacian.py`
   (all four share this exact `useGradHTerms` pattern) can be converted back
   to ternaries.
+  **Correction 2026-08-21 (`warpier_tier2_correction_jvp_plan.md` phase b):
+  the "only dangerous when both branches index the same array" caveat above
+  was wrong.** This entry previously claimed the `apparentVolume = mj/rhoj
+  if not correctionData.useVolume else correctionData.referenceVolumes[j]`
+  pattern was a "confirmed non-issue" because its two branches index
+  *different* arrays. Directly tested under the installed warp 1.16.0 while
+  validating phase (b)'s apparent-volume JVP tangent (a spike comparing the
+  production JVP against `torch.autograd.functional.jacobian` on the
+  primal operator kept failing by a few percent on every value-having
+  operator): `torch.autograd.gradcheck` on plain primal
+  `warpOperation(Gradient, ..., referenceVolumes=rv)` w.r.t. `rv` fails
+  outright — the analytical Jacobian is *exactly* zero while the numerical
+  one is not, and `rv.grad` after a bare `.backward()` is all zeros too.
+  Converting this exact ternary to an explicit `if/else` (no other change)
+  fixes it. Root cause not fully isolated (not necessarily the same
+  same-array mechanism as the `referenceValues` case above), but the
+  practical rule is simpler and stricter than the old caveat: **treat every
+  ternary that reads a Warp array inside kernel code needing to stay
+  differentiable as suspect, regardless of whether the two branches touch
+  the same array or different ones** — verify with a gradcheck rather than
+  reasoning about which arrays are indexed. Fixed in `wp_gradient.py`,
+  `wp_divergence.py`, `wp_curl.py`, `wp_laplacian.py`, `wp_interpolate.py`,
+  and `wp_covariance.py` (every primal kernel with an `apparentVolume`/`vj`
+  ternary of this shape) by converting to explicit `if/else`, same pattern
+  as the `useGradHTerms` fix above. This is a **primal** bug, not a JVP one
+  — it silently broke `d(output)/d(referenceVolumes)` for any caller of
+  `warpOperation(..., referenceVolumes=...)` with `requires_grad=True` on
+  that tensor, predating and unrelated to the Tier-2 JVP work.
 
 * **A manual nested `for row / for col: acc[row] += x[col] * mat[row, col]`
   accumulation into a Warp vector/matrix-indexed local can produce a

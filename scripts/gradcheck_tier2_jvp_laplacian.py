@@ -69,29 +69,38 @@ def compute_densities(positions, supports, masses, kinds, domain, adjacency):
     return rho.detach().clone().requires_grad_(True)
 
 
-def run_scheme(name, fn, domain, positions, supports, masses, kinds, adjacency, densities):
+def run_scheme(name, fn, domain, positions, supports, masses, kinds, adjacency, densities,
+                gradientMode=GradientScheme.Symmetric, useVolume=False, label="self-referencing"):
     n = positions.shape[0]
     tqp = (0.1 * torch.randn(n, 1, dtype=DTYPE, device=DEVICE)).requires_grad_(True)
     tqs = (0.01 * torch.randn(n, dtype=DTYPE, device=DEVICE)).requires_grad_(True)
     trm = (0.1 * torch.randn(n, dtype=DTYPE, device=DEVICE)).requires_grad_(True)
     qval = torch.randn(n, dtype=DTYPE, device=DEVICE, requires_grad=True)
     rval = torch.randn(n, dtype=DTYPE, device=DEVICE, requires_grad=True)
+    extra_inputs = ()
+    volume_kwargs = {}
+    if useVolume:
+        rv = (0.5 + torch.rand(n, dtype=DTYPE, device=DEVICE)).requires_grad_(True)
+        trv = (0.1 * torch.randn(n, dtype=DTYPE, device=DEVICE)).requires_grad_(True)
+        extra_inputs = (rv, trv)
+        volume_kwargs = dict(referenceVolumes=rv, tangentReferenceVolumes=trv)
 
-    def f(pos, sup, dens, tqp, tqs, trm, qval, rval):
+    def f(pos, sup, dens, tqp, tqs, trm, qval, rval, *extra):
         p = ParticleState(positions=pos, supports=sup, masses=masses.detach(), densities=dens, kinds=kinds)
         return fn(
             p, domain, KERNEL, SupportScheme.Gather, adjacency,
             queryTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=None),
             referenceTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=trm),
             queryValues=qval, referenceValues=rval,
-            gradientMode=GradientScheme.Symmetric,
+            gradientMode=gradientMode,
+            **volume_kwargs,
         )
 
     pos = positions.detach().clone().requires_grad_(True)
     sup = supports.detach().clone().requires_grad_(True)
     dens = densities.detach().clone().requires_grad_(True)
-    ok = torch.autograd.gradcheck(f, (pos, sup, dens, tqp, tqs, trm, qval, rval), eps=1e-6, atol=1e-5, rtol=1e-4)
-    print(f"Laplacian({name}) Tier-2 JVP gradcheck (self-referencing):", ok)
+    ok = torch.autograd.gradcheck(f, (pos, sup, dens, tqp, tqs, trm, qval, rval) + extra_inputs, eps=1e-6, atol=1e-5, rtol=1e-4)
+    print(f"Laplacian({name}) Tier-2 JVP gradcheck ({label}):", ok)
     assert ok
 
 
@@ -108,6 +117,21 @@ def main():
     run_scheme("Naive", computeSPHLaplacianNaiveGeometryJVP, domain, positions, supports, masses, kinds, adjacency, densities)
     run_scheme("Default", computeSPHLaplacianDefaultGeometryJVP, domain, positions, supports, masses, kinds, adjacency, densities)
     run_scheme("Dot", computeSPHLaplacianDotGeometryJVP, domain, positions, supports, masses, kinds, adjacency, densities)
+
+    # --- useVolume=True (warpier_tier2_correction_jvp_plan.md phase b) ---
+    # GradientScheme.Naive, not Symmetric: Symmetric's coefficient has no
+    # apparent-volume term at all (see gradientWeightsJVP's own docstring),
+    # so it wouldn't exercise this branch. q_ij doesn't depend on
+    # laplacianMode (only on gradientMode, see wp_laplacian.py's own
+    # comment), so all four schemes share the same B/dB volume wiring.
+    for name, fn in (
+        ("Brookshaw", computeSPHLaplacianBrookshawGeometryJVP),
+        ("Naive", computeSPHLaplacianNaiveGeometryJVP),
+        ("Default", computeSPHLaplacianDefaultGeometryJVP),
+        ("Dot", computeSPHLaplacianDotGeometryJVP),
+    ):
+        run_scheme(name, fn, domain, positions, supports, masses, kinds, adjacency, densities,
+                   gradientMode=GradientScheme.Naive, useVolume=True, label="useVolume=True")
 
     print("ALL PASSED.")
 

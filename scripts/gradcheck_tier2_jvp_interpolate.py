@@ -91,6 +91,24 @@ def main():
     print("Interpolate Tier-2 JVP gradcheck (self-referencing):", ok_self)
     assert ok_self
 
+    # --- useVolume=True (warpier_tier2_correction_jvp_plan.md phase b) ---
+    rv = (0.5 + torch.rand(n, dtype=DTYPE, device=DEVICE)).requires_grad_(True)
+    trv = (0.1 * torch.randn(n, dtype=DTYPE, device=DEVICE)).requires_grad_(True)
+
+    def f_volume(pos, sup, dens, tqp, tqs, trm, rval, rv, trv):
+        p = ParticleState(positions=pos, supports=sup, masses=masses.detach(), densities=dens, kinds=kinds)
+        return computeSPHInterpolateGeometryJVP(
+            p, domain, KERNEL, SupportScheme.Gather, adjacency,
+            queryTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=None),
+            referenceTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=trm),
+            referenceValues=rval,
+            referenceVolumes=rv, tangentReferenceVolumes=trv,
+        )
+
+    ok_volume = torch.autograd.gradcheck(f_volume, (pos, sup, dens, tqp, tqs, trm, rval, rv, trv), eps=1e-6, atol=1e-5, rtol=1e-4)
+    print("Interpolate Tier-2 JVP gradcheck (useVolume=True):", ok_volume)
+    assert ok_volume
+
     # --- distinct query/reference roles: KNOWN-FAILING, not asserted ---
     # See module docstring. Reported, not asserted, so this script stays a
     # useful repro without being a broken CI gate for a pre-existing bug

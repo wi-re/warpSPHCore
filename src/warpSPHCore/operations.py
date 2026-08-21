@@ -209,6 +209,7 @@ def warpOperationJVP(
     queryTangentState: Optional[ParticleTangentState] = None, referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None, referenceValues: Optional[torch.Tensor] = None,
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    tangentQueryVolumes: Optional[torch.Tensor] = None, tangentReferenceVolumes: Optional[torch.Tensor] = None,
     adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None, # if none a datastructure is created, same as warpOperation
     referenceParticles: Optional[ParticleState] = None,
     crkState: Optional[CRKState] = None,
@@ -249,7 +250,14 @@ def warpOperationJVP(
       `CompactHashMap`, or `None` (a `CompactHashMap` is then built the same
       way `warpOperation` builds one) -- the CSR-ported kernels
       (`warpier_tier2_jvp_csr_backend_plan.md`) traverse either
-      representation directly.
+      representation directly. `referenceVolumes`/`tangentReferenceVolumes`
+      (`warpier_tier2_correction_jvp_plan.md` phase b) supply apparent-volume
+      support and its tangent for the five value-having operators, matching
+      `warpOperation`'s own `useVolume` correction exactly -- a
+      pass-through, not a re-derivation, since apparent volume is a direct
+      tensor substitution for `mass_j/density_j`. `queryVolumes`/
+      `tangentQueryVolumes` are not supported: no derived formula ever reads
+      a query-side apparent volume, only the reference side.
     * **Both at once** (`warpier_tier2_combined_jvp_plan.md`): for the five
       value-having operators, supplying a value tangent alongside a geometry
       tangent computes both of the above -- the geometry JVP with values
@@ -355,11 +363,17 @@ def warpOperationJVP(
                 "gradHState (CRK/renormalization correction and grad-h coupling are out "
                 "of scope for warpier_tier2_operators_plan.md)."
             )
-        if queryVolumes is not None or referenceVolumes is not None:
+        if queryVolumes is not None or tangentQueryVolumes is not None:
             raise NotImplementedError(
-                "warpOperationJVP: geometry JVP does not support queryVolumes/referenceVolumes "
-                "-- the derived formulas always use mass_j/density_j directly, never a "
-                "volume override."
+                "warpOperationJVP: geometry JVP does not support queryVolumes/tangentQueryVolumes "
+                "-- no derived formula ever reads correctionData.queryVolumes[i], only "
+                ".referenceVolumes[j] (`warpier_tier2_correction_jvp_plan.md` phase b)."
+            )
+        if tangentReferenceVolumes is not None and referenceVolumes is None:
+            raise ValueError(
+                "warpOperationJVP: tangentReferenceVolumes requires referenceVolumes -- there is "
+                "no apparent-volume tangent to take without an apparent-volume primal value to "
+                "perturb."
             )
         if tangentQueryMasses is not None:
             raise NotImplementedError(
@@ -416,6 +430,8 @@ def warpOperationJVP(
             ),
             queryValues=queryValues,
             referenceValues=referenceValues,
+            referenceVolumes=referenceVolumes,
+            tangentReferenceVolumes=tangentReferenceVolumes,
         )
         # Laplacian's q_ij reuses Gradient's own B/dB (warpier_adjoint.md Tier 2.2
         # finding 2), so it needs gradientMode too, not just laplacianMode.

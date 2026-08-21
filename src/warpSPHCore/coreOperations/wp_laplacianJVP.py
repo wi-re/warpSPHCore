@@ -218,6 +218,7 @@ def computeSPHLaplacianBrookshawJVP_Func_i(
             jPtcl.mass, iPtcl.density, jPtcl.density,
             jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
             kernelProperties.gradientMode,
+            correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
         )
 
         fj = referenceValues[j]
@@ -328,6 +329,8 @@ def computeSPHLaplacianBrookshawGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `[numParticles]`, Brookshaw scheme specifically
@@ -392,6 +395,8 @@ def computeSPHLaplacianBrookshawGeometryJVP(
         queryDensities=queryParticles.densities,
         referenceDensities=referenceParticles.densities,
         gradientMode=gradientMode,
+        referenceVolumes=referenceVolumes,
+        tangentReferenceVolumes=tangentReferenceVolumes,
         extraTensors=(queryValues, referenceValues),
     )
 
@@ -446,6 +451,7 @@ def computeSPHLaplacianNaiveJVP_Func_i(
             jPtcl.mass, iPtcl.density, jPtcl.density,
             jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
             kernelProperties.gradientMode,
+            correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
         )
 
         fj = referenceValues[j]
@@ -556,6 +562,8 @@ def computeSPHLaplacianNaiveGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `[numParticles]`, Naive scheme
@@ -618,6 +626,8 @@ def computeSPHLaplacianNaiveGeometryJVP(
         queryDensities=queryParticles.densities,
         referenceDensities=referenceParticles.densities,
         gradientMode=gradientMode,
+        referenceVolumes=referenceVolumes,
+        tangentReferenceVolumes=tangentReferenceVolumes,
         extraTensors=(queryValues, referenceValues),
     )
 
@@ -700,6 +710,7 @@ def computeSPHLaplacianDotJVP_Func_i(
             jPtcl.mass, iPtcl.density, jPtcl.density,
             jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
             kernelProperties.gradientMode,
+            correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
         )
 
         fj = referenceValues[j]
@@ -832,6 +843,8 @@ def computeSPHLaplacianDotGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `queryValues.shape`, Dot scheme
@@ -923,6 +936,8 @@ def computeSPHLaplacianDotGeometryJVP(
         queryDensities=queryParticles.densities,
         referenceDensities=referenceParticles.densities,
         gradientMode=gradientMode,
+        referenceVolumes=referenceVolumes,
+        tangentReferenceVolumes=tangentReferenceVolumes,
         extraTensors=(queryValuesFlat, referenceValuesFlat),
         extraScalars=(wp.int32(flatInputShape),),
     )
@@ -974,6 +989,7 @@ def computeSPHLaplacianDefaultJVP_Func_i(
             jPtcl.mass, iPtcl.density, jPtcl.density,
             jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
             kernelProperties.gradientMode,
+            correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
         )
 
         fj = referenceValues[j]
@@ -1095,6 +1111,8 @@ def computeSPHLaplacianDefaultGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `queryValues.shape`, Default scheme
@@ -1161,6 +1179,8 @@ def computeSPHLaplacianDefaultGeometryJVP(
         queryDensities=queryParticles.densities,
         referenceDensities=referenceParticles.densities,
         gradientMode=gradientMode,
+        referenceVolumes=referenceVolumes,
+        tangentReferenceVolumes=tangentReferenceVolumes,
         extraTensors=(queryValues, referenceValues),
     )
 

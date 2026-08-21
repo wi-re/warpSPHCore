@@ -58,9 +58,22 @@ def computeSPHDivergenceTensor_Func_i(
         #   The core particle-particle interaction starts here   #
         ##########################################################
 
-        apparentVolume = jPtcl.mass / jPtcl.density if not correctionData.useVolume else correctionData.referenceVolumes[j]
-        if consistentDivergence:
-            apparentVolume = jPtcl.mass / iPtcl.density if not correctionData.useVolume else correctionData.referenceVolumes[j] * jPtcl.density / iPtcl.density
+        # Explicit if/else, not a ternary: see this file's own useGradHTerms comment a few
+        # lines down -- confirmed (2026-08-21, `warpier_tier2_correction_jvp_plan.md` phase
+        # b's spike) that this exact "different arrays per branch" ternary DOES silently
+        # zero d(output)/d(referenceVolumes) under the installed warp 1.16.0, contradicting
+        # `docs/lessons_learned.md`'s earlier "confirmed non-issue" note for this pattern --
+        # see that doc's updated entry.
+        if correctionData.useVolume:
+            if consistentDivergence:
+                apparentVolume = correctionData.referenceVolumes[j] * jPtcl.density / iPtcl.density
+            else:
+                apparentVolume = correctionData.referenceVolumes[j]
+        else:
+            if consistentDivergence:
+                apparentVolume = jPtcl.mass / iPtcl.density
+            else:
+                apparentVolume = jPtcl.mass / jPtcl.density
 
         # Explicit if/else, not a ternary: both branches read referenceValues[j], and a
         # ternary assigned to a local where both branches index the *same* array silently

@@ -75,6 +75,28 @@ def main():
     print("Divergence Tier-2 JVP gradcheck (self-referencing):", ok)
     assert ok
 
+    # --- useVolume=True (warpier_tier2_correction_jvp_plan.md phase b) ---
+    # GradientScheme.Naive, not Symmetric: Symmetric's coefficient has no
+    # apparent-volume term at all (see gradientWeightsJVP's own docstring),
+    # so it wouldn't exercise this branch.
+    rv = (0.5 + torch.rand(n, dtype=DTYPE, device=DEVICE)).requires_grad_(True)
+    trv = (0.1 * torch.randn(n, dtype=DTYPE, device=DEVICE)).requires_grad_(True)
+
+    def f_volume(pos, sup, dens, tqp, tqs, trm, qval, rval, rv, trv):
+        p = ParticleState(positions=pos, supports=sup, masses=masses.detach(), densities=dens, kinds=kinds)
+        return computeSPHDivergenceGeometryJVP(
+            p, domain, KERNEL, SupportScheme.Gather, adjacency,
+            queryTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=None),
+            referenceTangentState=ParticleTangentState(positions=tqp, supports=tqs, masses=trm),
+            queryValues=qval, referenceValues=rval,
+            referenceVolumes=rv, tangentReferenceVolumes=trv,
+            gradientMode=GradientScheme.Naive,
+        )
+
+    ok_volume = torch.autograd.gradcheck(f_volume, (pos, sup, dens, tqp, tqs, trm, qval, rval, rv, trv), eps=1e-6, atol=1e-5, rtol=1e-4)
+    print("Divergence Tier-2 JVP gradcheck (useVolume=True):", ok_volume)
+    assert ok_volume
+
     print("ALL PASSED.")
 
 

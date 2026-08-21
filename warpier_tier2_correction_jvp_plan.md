@@ -1,6 +1,6 @@
 # Tier-2 JVP: correction-tangent support (CRK / renormalization / apparent-volume) + interface bundling
 
-## Status: (a1) done (2026-08-20); (a2) done (2026-08-21); (b) next
+## Status: (a1) done (2026-08-20); (a2) done (2026-08-21); (b) done (2026-08-21); (c) next
 
 ## Context
 
@@ -171,6 +171,41 @@ comparing against `torch.autograd.functional.jacobian` on production
 
 **Gate:** spike + updated gradcheck scripts green (both `useVolume=True/False` branches), full sweep
 including a `useVolume=True` case in `operation_matrix.py`'s existing correction-path sweep.
+
+**Done (2026-08-21).** Landed as specified above, with two adjustments discovered during implementation:
+- Because (a2) was widened to thread `correctionTangentData` unconditionally into every JVP kernel
+  (all nine, not just the four `gradientWeightsJVP` consumers), (b) needed **no new ABI-threading
+  work at all** — `useVolume`/`referenceVolumes`/`referenceTangentVolumes` were already reachable
+  inside every `_Func_i`. Actual touch set: `_jvpCommon.py`'s `gradientWeightsJVP` (as specified) and
+  `launchGeometryJVP` (new `referenceVolumes`/`tangentReferenceVolumes` params, threaded through
+  `flat_tensors` for real gradient tracking per (a2)'s "hard requirement"), plus one call-site edit
+  in each of `wp_{gradient,divergence,curl,laplacian}JVP.py` (all four `LaplacianScheme`s, not just
+  Brookshaw/Naive — `wp_laplacianJVP.py`'s `q_ij` reuses the same shared `B_ij`/`dB_ij` regardless of
+  `laplacianMode`, confirmed empirically) and `wp_interpolateJVP.py`. `operations.py`'s
+  `queryVolumes is not None` rejection was split: `queryVolumes`/new `tangentQueryVolumes` stay
+  rejected (never consumed downstream), `referenceVolumes`/new `tangentReferenceVolumes` pass through.
+- **Found and fixed a genuine, pre-existing primal bug while validating**, not introduced by this
+  plan: `apparentVolume = mj/rhoj if not correctionData.useVolume else correctionData.referenceVolumes[j]`
+  (and its five siblings in `wp_divergence.py`/`wp_curl.py`/`wp_laplacian.py`/`wp_interpolate.py`/
+  `wp_covariance.py`) silently zeroed `d(output)/d(referenceVolumes)` under the installed warp 1.16.0
+  — `docs/lessons_learned.md`'s prior "confirmed non-issue... different arrays per branch" caveat for
+  this exact pattern was wrong, corrected there. All six converted to explicit `if/else`, same fix
+  shape as the file's own neighboring `useGradHTerms` ternary fix. This is why the spike compares
+  against production `warpOperation` at all rather than skipping straight to gradcheck: gradcheck on
+  `computeSPH<Op>GeometryJVP` alone already passed even before this fix (it only checks JVP-formula
+  self-consistency, not agreement with the true primal derivative) — only the spike's
+  jacobian-on-primal reference surfaced it.
+- Validation scripts as specified: `scripts/spike_forward_mode_tier2_volume.py` (all 8 cases —
+  Gradient/Divergence/Curl/Interpolate/Laplacian×4 — pass at ~1e-16 relative error) and
+  `useVolume=True` cases added to `scripts/gradcheck_tier2_jvp_{gradient,divergence,curl,interpolate,laplacian}.py`.
+  `operation_matrix.py`'s existing `crk` correction column already exercises `useVolume=True` (CRK
+  always supplies `queryVolumes=referenceVolumes=apparent_area`), so no new column was needed there;
+  full sweep stayed at `OK=258, HIGH=0, ERR=0, NAN=0` throughout (operation_matrix is forward-value-only
+  and would not have caught the reverse-mode bug above either way). One pre-existing test
+  (`test_forward_mode_geometry_jvp_laplacian_naive.py`'s Gather/Symmetric 2D case) needed its
+  tolerance widened slightly (`rtol` 1e-3 → 5e-3) — float32 codegen noise from the ternary fix shifting
+  an unrelated (Symmetric never reads `apparentVolume`) computation by ~1 part in 300, not a
+  correctness change; see that test file's own updated comment.
 
 ### (c) — CRK tangent promotion for Gradient
 

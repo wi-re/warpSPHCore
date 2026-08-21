@@ -87,6 +87,7 @@ def computeSPHGradientJVP_Func_i(
             jPtcl.mass, iPtcl.density, jPtcl.density,
             jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
             kernelProperties.gradientMode,
+            correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
         )
 
         fj = referenceValues[j]
@@ -197,6 +198,8 @@ def computeSPHGradientGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dGradient_i`, shape `[numParticles, dim]`.
@@ -214,7 +217,11 @@ def computeSPHGradientGeometryJVP(
     `referenceParticles.densities` must already hold real (non-dummy) values
     -- `coeff_ij` depends on them directly, same requirement as
     `computeSPHInterpolateGeometryJVP`. `adjacency` is an `AdjacencyList` or
-    `CompactHashMap`.
+    `CompactHashMap`. `referenceVolumes`/`tangentReferenceVolumes`
+    (`warpier_tier2_correction_jvp_plan.md` phase b) enable apparent-volume
+    support and its tangent, matching `warpOperation(..., referenceVolumes=...)`
+    -- `GradientScheme.Symmetric` ignores both (its coefficient has no
+    apparent-volume term).
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -260,5 +267,7 @@ def computeSPHGradientGeometryJVP(
         queryDensities=queryParticles.densities,
         referenceDensities=referenceParticles.densities,
         gradientMode=gradientMode,
+        referenceVolumes=referenceVolumes,
+        tangentReferenceVolumes=tangentReferenceVolumes,
         extraTensors=(queryValues, referenceValues),
     )

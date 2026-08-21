@@ -12,12 +12,14 @@ Step 2): same canonical structured kernel ABI shape as `wp_interpolate.py`'s
 `computeSPHInterpolation_Func_i`/`_Func_Adjacency`/`_Kernel`, reusing
 Density's proven `sphKernelJVP`-per-neighbor building block plus this
 operator's own `Vj`/`dVj` coefficient, no `GradientScheme`-style branching
-either. Unlike the primal kernel, `correctionData.useVolume`/`.useCRK` are
-never read here (the geometry JVP has no CRK/volume support, enforced centrally in
-`operations.py`), so `Vj` is always `mass_j/density_j`, not the CRK-generic
-primal formula. Also supports grid (`CompactHashMap`) traversal. Replaced
-the original pair-indexed (COO) implementation once proven numerically
-equivalent to float32 round-off; see git history around 2026-08-20 for that
+either. `correctionData.useVolume`/`correctionTangentData.referenceVolumes`
+are read (`warpier_tier2_correction_jvp_plan.md` phase b) to swap `Vj` for a
+directly-supplied apparent volume, matching `wp_interpolate.py`'s own
+`useVolume` branch exactly; `.useCRK` stays unread (the geometry JVP has no
+CRK support, enforced centrally in `operations.py`). Also supports grid
+(`CompactHashMap`) traversal. Replaced the original pair-indexed (COO)
+implementation once proven numerically equivalent to float32 round-off; see
+git history around 2026-08-20 for that
 implementation and its own equivalence tests if reference is ever needed.
 """
 
@@ -75,8 +77,12 @@ def computeSPHInterpolateJVP_Func_i(
             kernelProperties, domainState,
         )
 
-        Vj = jPtcl.mass / jPtcl.density
-        dVj = jTangentPtcl.mass / jPtcl.density - jPtcl.mass * jTangentPtcl.density / (jPtcl.density * jPtcl.density)
+        if correctionData.useVolume:
+            Vj = correctionData.referenceVolumes[j]
+            dVj = correctionTangentData.referenceVolumes[j]
+        else:
+            Vj = jPtcl.mass / jPtcl.density
+            dVj = jTangentPtcl.mass / jPtcl.density - jPtcl.mass * jTangentPtcl.density / (jPtcl.density * jPtcl.density)
 
         fv = referenceValues[j]
         out += fv * (dVj * W + Vj * dW)
@@ -181,6 +187,8 @@ def computeSPHInterpolateGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """`dInterpolate_i`, shape `[numParticles, *referenceValues.shape[1:]]`.
 
@@ -195,7 +203,9 @@ def computeSPHInterpolateGeometryJVP(
     `referenceValues` (`fj`) is required and frozen (no tangent on it --
     that would be the value JVP). `queryValues` (`fi`) is not part of Interpolate's
     formula at all and must not be provided. `adjacency` is an `AdjacencyList`
-    or `CompactHashMap`.
+    or `CompactHashMap`. `referenceVolumes`/`tangentReferenceVolumes`
+    (`warpier_tier2_correction_jvp_plan.md` phase b) enable apparent-volume
+    support and its tangent, matching `warpOperation(Interpolate, referenceVolumes=...)`.
     """
     if referenceValues is None:
         raise ValueError("computeSPHInterpolateGeometryJVP: referenceValues (frozen fj) is required.")
@@ -242,5 +252,7 @@ def computeSPHInterpolateGeometryJVP(
         outputShape=nQuery,
         outputDtype=outputDtype,
         referenceDensities=referenceParticles.densities,
+        referenceVolumes=referenceVolumes,
+        tangentReferenceVolumes=tangentReferenceVolumes,
         extraTensors=(referenceValues,),
     )
