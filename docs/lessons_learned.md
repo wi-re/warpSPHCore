@@ -186,6 +186,48 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   via `torch.autograd.gradcheck` (`scripts/gradcheck_tier2_jvp_laplacian.py`, all four
   `LaplacianScheme`s now pass) and finite differences agreeing with the jacobian-based test reference.
 
+* **A quantity that divides by the same regularized pairwise distance twice
+  (once inside building a unit vector `n_ij = x_ij/D_ij`, once again
+  dividing the final `dot(vector, n_ij)` by `D_ij`) can produce a wrong
+  reverse-mode adjoint at an exact self-pair (`r_ij == 0`) when `vector` is
+  CRK-corrected — even though the *forward* contribution there is always
+  exactly `0` (n_ij vanishes identically at `x_ij == 0`, forcing the dot
+  product to `0` regardless of `vector`).** Found in `wp_laplacian.py`'s
+  (primal) and `wp_laplacianJVP.py`'s (Tier-2 JVP) `LaplacianScheme.Brookshaw`
+  formula (`-2*q_ij*dot(kernelGradient, n_ij)/D_ij`) once CRK tangent
+  support was extended to it (`warpier_tier2_correction_jvp_plan.md` phase
+  (e)). Without CRK, `kernelGradient` is itself exactly `0` at a self-pair
+  (a symmetric kernel's gradient vanishes at its own peak, with a *correct*
+  adjoint there too, thanks to `sphGradient_`'s existing custom
+  `@wp.func_grad` — see this doc's self-pair entry above,
+  `project_tier2_jvp_distinct_role_adjoint_bug` in Claude's memory). With
+  CRK enabled, `correctGradientCRK`'s own value at `x_ij == 0` is
+  generically **nonzero** (its `Ai*W_ij*Bi`/`W_ij*gradAi` terms don't vanish
+  at the kernel's own peak the way the plain gradient does) — and Warp's
+  reverse-mode through "a nonzero vector dotted against an exactly-zero
+  `n_ij`, itself then divided by `D_ij` again" at that exact point produces
+  a wrong adjoint (confirmed via a from-scratch minimal repro with no
+  dependency on this codebase's kernel structure: a single query particle
+  summing over several neighbors, `computeKernelGradientCRKJVP` feeding
+  `dot(G, x_ij/D_ij)/D_ij`, reproduced the bad adjoint at `n=2`
+  mutually-neighboring particles; the same pattern with no *second*
+  division — i.e. `dot(G, x_ij/D_ij)` alone, Divergence/Curl's own shape —
+  did **not** reproduce it). **Fixed** by guarding the Brookshaw
+  contribution with an explicit `if r_ij > 0:` in both kernels — the true
+  contribution at `r_ij == 0` is always exactly `0` (CRK or not), so
+  skipping it outright changes no forward value anywhere (confirmed:
+  `operation_matrix.py` and every existing non-CRK gradcheck script stayed
+  bit-identical) while sidestepping the bad adjoint. This mirrors
+  `wp_densityHVP.py`'s own explicit self-pair `pairMask` precedent (a
+  different bug, same "don't rely on `0` falling out of the math naturally"
+  discipline) more than it mirrors the loop-accumulated-local entry above —
+  no loop or accumulation is involved here, just a double division through
+  an exactly-zero intermediate. Divergence/Curl needed no such guard: their
+  own combination formulas (`dot(coeff,G)`, the 2D cross product) have no
+  *second* division by a quantity that itself vanishes at `r_ij == 0` the
+  way Brookshaw's `n_ij` does. Full writeup:
+  `scripts/spike_forward_mode_tier2_crk_extension.py`'s module docstring.
+
 ## AD-bridge / autograd gotchas
 
 * **`warpSPHCore_PRECISION` is baked into every compiled kernel at first

@@ -2,8 +2,12 @@
 (`warpier_tier2_operators_plan.md` Step 4, `warpier_adjoint.md` Tier 2.2):
 `dGradient_i = sum_j [ dcoeff_ij*G_ij + coeff_ij*dG_ij ]`, `coeff_ij =
 fi*A_ij + fj*B_ij` (`fi`/`fj` = frozen `queryValues`/`referenceValues`),
-`(G_ij, dG_ij)` from `kernels.kernelJVP.sphKernelGradientJVP`, `(A, B, dA,
-dB)` from `_jvpCommon.gradientWeightsJVP`.
+`(G_ij, dG_ij)` from `crk.kernel.computeKernelGradientCRKJVP` (which
+dispatches to the plain `kernels.kernelJVP.sphKernelGradientJVP` when
+`correctionData.useCRK` is false, exactly like the primal `wp_gradient.py`
+kernel's own `computeKernelGradientCRK` dispatch -- CRK tangent promotion,
+`warpier_tier2_correction_jvp_plan.md` phase (c)), `(A, B, dA, dB)` from
+`_jvpCommon.gradientWeightsJVP`.
 
 CSR (per-query-particle) launch shape (`warpier_tier2_jvp_csr_backend_plan.md`
 Step 3, first of "the shared-(G,dG) four"): the `A`/`B`/`dA`/`dB`
@@ -28,8 +32,8 @@ import warp as wp
 from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
-from ..math import zero_like_warp
-from ..kernels.kernelJVP import sphKernelGradientJVP
+from ..math import zero_like_warp, matmul
+from ..crk import computeKernelGradientCRKJVP
 from ..radiusSearch.grid_util import getIndexRange
 from ..util import _get_warp_vector_dtype
 from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i, getParticleCorrectionTangentData_i
@@ -77,11 +81,30 @@ def computeSPHGradientJVP_Func_i(
         ##########################################################
         jTangentPtcl = getParticleData(referenceTangentState, j)
 
-        G, dG = sphKernelGradientJVP(
+        # CRK tangent promotion (`warpier_tier2_correction_jvp_plan.md` phase (c)):
+        # computeKernelGradientCRKJVP dispatches on correctionData.useCRK the same
+        # way the primal wp_gradient.py kernel's computeKernelGradientCRK does,
+        # using the query-particle-broadcast correction terms (iCorrectionData/
+        # iCorrectionTangentData.A/B/gradA/gradB) -- constant across this loop.
+        G, dG = computeKernelGradientCRKJVP(
             iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support,
             iTangentPtcl.position, jTangentPtcl.position, iTangentPtcl.support, jTangentPtcl.support,
             kernelProperties, domainState,
+            correctionData.useCRK,
+            iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB,
+            iCorrectionTangentData.A, iCorrectionTangentData.B, iCorrectionTangentData.gradA, iCorrectionTangentData.gradB,
         )
+
+        # Renormalization tangent (`warpier_tier2_correction_jvp_plan.md` phase (d)):
+        # dKernelGradient_final = dL_i @ kernelGradient_corrected + L_i @ dKernelGradient_corrected,
+        # the ordinary product rule on the primal kernel's own
+        # `kernelGradient = matmul(iCorrectionData.renormalizationMatrix, kernelGradient)`
+        # (`wp_gradient.py`), applied AFTER CRK (matching the primal's fixed
+        # CRK-then-renorm composition order) -- L_i/dL_i are constant across
+        # this loop, same broadcast convention as the CRK terms above.
+        if correctionData.useGradientRenormalization:
+            dG = matmul(iCorrectionTangentData.renormalizationMatrix, G) + matmul(iCorrectionData.renormalizationMatrix, dG)
+            G = matmul(iCorrectionData.renormalizationMatrix, G)
 
         A, B, dA, dB = _gradientWeightsJVP(
             jPtcl.mass, iPtcl.density, jPtcl.density,
@@ -200,6 +223,10 @@ def computeSPHGradientGeometryJVP(
     referenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
+    crkState: Optional[CRKState] = None,
+    crkTangentState: Optional[CRKTangentState] = None,
+    renormalizationState: Optional[RenormalizationState] = None,
+    renormalizationTangentState: Optional[RenormalizationTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dGradient_i`, shape `[numParticles, dim]`.
@@ -221,7 +248,17 @@ def computeSPHGradientGeometryJVP(
     (`warpier_tier2_correction_jvp_plan.md` phase b) enable apparent-volume
     support and its tangent, matching `warpOperation(..., referenceVolumes=...)`
     -- `GradientScheme.Symmetric` ignores both (its coefficient has no
-    apparent-volume term).
+    apparent-volume term). `crkState`/`crkTangentState` (phase c) enable CRK
+    correction and its tangent for Gradient, matching
+    `warpOperation(..., crkState=...)` -- `crkTangentState` may be omitted
+    (treated as an all-zero tangent) if the CRK correction itself is meant to
+    be held frozen while only the geometry moves. `renormalizationState`/
+    `renormalizationTangentState` (phase d) enable gradient-renormalization
+    correction and its tangent for Gradient, matching
+    `warpOperation(..., renormalizationState=...)`; `renormalizationTangentState`
+    may likewise be omitted (an all-zero tangent, correction held frozen) --
+    `renorm.py`'s `computeRenormalizationMatricesJVP` is the usual way to
+    derive a real one from the same geometry tangents.
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -269,5 +306,9 @@ def computeSPHGradientGeometryJVP(
         gradientMode=gradientMode,
         referenceVolumes=referenceVolumes,
         tangentReferenceVolumes=tangentReferenceVolumes,
+        crkState=crkState,
+        crkTangentState=crkTangentState,
+        renormalizationState=renormalizationState,
+        renormalizationTangentState=renormalizationTangentState,
         extraTensors=(queryValues, referenceValues),
     )

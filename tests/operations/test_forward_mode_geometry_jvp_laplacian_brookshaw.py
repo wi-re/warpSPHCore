@@ -217,6 +217,55 @@ def test_laplacianBrookshawGeometryJVP_rejects_missing_values():
                          queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None))
 
 
+def test_laplacianBrookshawGeometryJVP_accepts_crkState():
+    # warpier_tier2_correction_jvp_plan.md phase (e): CRK tangent extension
+    # landed for Laplacian's Brookshaw scheme (and Divergence/Curl) --
+    # crkState (with or without crkTangentState) no longer raises here. See
+    # test_gradientGeometryJVP_accepts_crkState in
+    # test_forward_mode_geometry_jvp_gradient.py for phase (c)'s Gradient-only
+    # precedent this extends. Naive/Dot/Default stay out of scope (no
+    # derivation exists) -- see
+    # test_laplacianGeometryJVP_naive_still_rejects_crkState below.
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    from warpSPHCore.dataTypes import CRKState, CRKTangentState
+    n = positions.shape[0]
+    dummy = CRKState(A=torch.zeros(n, dtype=DTYPE), B=torch.zeros(n, 1, dtype=DTYPE),
+                     gradA=torch.zeros(n, 1, dtype=DTYPE), gradB=torch.zeros(n, 1, 1, dtype=DTYPE))
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                              crkState=dummy,
+                              queryValues=qv, referenceValues=rv)
+    assert torch.isfinite(result).all()
+
+    dummyTangent = CRKTangentState(A=torch.zeros(n, dtype=DTYPE), B=torch.zeros(n, 1, dtype=DTYPE),
+                                    gradA=torch.zeros(n, 1, dtype=DTYPE), gradB=torch.zeros(n, 1, 1, dtype=DTYPE))
+    with pytest.raises(ValueError, match="crkTangentState requires crkState"):
+        warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                         crkTangentState=dummyTangent,
+                         queryValues=qv, referenceValues=rv)
+
+
+def test_laplacianGeometryJVP_naive_still_rejects_crkState():
+    # Naive/Dot/Default stay out of CRK scope (warpier_tier2_correction_jvp_plan.md
+    # phase (e) only covers Brookshaw) -- verified here for Naive as the
+    # representative case; operations.py's own scope check is laplacianMode-
+    # generic, not Naive-specific.
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    from warpSPHCore.dataTypes import CRKState
+    n = positions.shape[0]
+    dummy = CRKState(A=torch.zeros(n, dtype=DTYPE), B=torch.zeros(n, 1, dtype=DTYPE),
+                     gradA=torch.zeros(n, 1, dtype=DTYPE), gradB=torch.zeros(n, 1, 1, dtype=DTYPE))
+    naiveProps = OperationProperties(kernel=KERNEL, operation=WarpOperation.Laplacian,
+                                     supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll,
+                                     gradientMode=GradientScheme.Symmetric, laplacianMode=LaplacianScheme.Naive)
+    with pytest.raises(NotImplementedError, match="Brookshaw"):
+        warpOperationJVP(p0, naiveProps, domain, adjacency=adjacency,
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                         crkState=dummy,
+                         queryValues=qv, referenceValues=rv)
+
+
 def test_laplacianBrookshawGeometryJVP_geometryOnly_unchanged_when_combination_allowed():
     # Regression guard (warpier_tier2_combined_jvp_plan.md step 5): the
     # geometry-only path (no value tangent supplied) must return exactly

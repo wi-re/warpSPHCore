@@ -316,6 +316,12 @@ def launchGeometryJVP(
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
 
+    crkState: Optional['CRKState'] = None,
+    crkTangentState: Optional['CRKTangentState'] = None,
+
+    renormalizationState: Optional['RenormalizationState'] = None,
+    renormalizationTangentState: Optional['RenormalizationTangentState'] = None,
+
     extraTensors: tuple = (),
     extraScalars: tuple = (),
 ) -> torch.Tensor:
@@ -375,6 +381,35 @@ def launchGeometryJVP(
     `.referenceVolumes[j]` (verified against `wp_gradient.py`/`wp_curl.py`/
     `wp_divergence.py`/`wp_laplacian.py`), so a query-side tangent parameter
     would sit permanently unused.
+
+    `crkState`/`crkTangentState` (phase (c)) populate
+    `correctionData.useCRK`/`.queryA`/`.queryB`/`.queryGradA`/`.queryGradB`
+    and `correctionTangentData`'s same four fields for real -- query-side
+    only, mirroring `referenceVolumes` above: every consumer
+    (`wp_gradient.py`/`wp_divergence.py`/`wp_curl.py`/`wp_laplacian.py`, all
+    via `computeKernelGradientCRK`) reads only `iCorrectionData.A/B/gradA/
+    gradB` (`getCRK_i`), never the reference-side `getCRK_j` fields, so
+    `correctionData.referenceA/B/gradA/gradB` are deliberately left at
+    `buildNullCorrectionData`'s zero-filled defaults here -- a reference-side
+    CRK tangent parameter would sit permanently unused, same reasoning as
+    query-side volume above. `crkTangentState` defaults to an all-zero
+    tangent when `crkState` is supplied without one (a CRK correction applied
+    but not itself being differentiated through is a legitimate combination,
+    unlike `tangentReferenceVolumes` without `referenceVolumes` -- there is
+    no ordering dependency to enforce here).
+
+    `renormalizationState`/`renormalizationTangentState` (phase (d)) populate
+    `correctionData.useGradientRenormalization`/`.renormalizationMatrices`
+    and `correctionTangentData.renormalizationMatrices` for real -- query-side
+    only (`getL_i`/`getRenormTangent_i` in `util/stateUtil.py` only ever read
+    the query-indexed array), mirroring `crkState`/`crkTangentState` above.
+    Unlike CRK's tangent, `renormalizationTangentState` is not typically
+    supplied by hand: `renorm.py`'s `computeRenormalizationMatricesJVP`
+    derives it from the same geometry tangents this function already threads,
+    via the covariance matrix's own JVP (`wp_covarianceJVP.py`) plus the
+    matrix-inverse-derivative identity -- but the "hold this correction frozen"
+    all-zero default when omitted is still honored, for the same reason it is
+    for CRK.
     """
     device = queryPositions.device
     dtype = queryPositions.dtype
@@ -399,6 +434,39 @@ def launchGeometryJVP(
     if tangentReferenceVolumes is None:
         tangentReferenceVolumes = torch.zeros(nRef, device=device, dtype=dtype)
 
+    useCRKCorrection = crkState is not None
+    if useCRKCorrection:
+        queryCRKA, queryCRKB, queryCRKGradA, queryCRKGradB = crkState.A, crkState.B, crkState.gradA, crkState.gradB
+        if crkTangentState is not None:
+            tangentQueryCRKA, tangentQueryCRKB, tangentQueryCRKGradA, tangentQueryCRKGradB = (
+                crkTangentState.A, crkTangentState.B, crkTangentState.gradA, crkTangentState.gradB,
+            )
+        else:
+            tangentQueryCRKA = torch.zeros(nQuery, device=device, dtype=dtype)
+            tangentQueryCRKB = torch.zeros((nQuery, dim), device=device, dtype=dtype)
+            tangentQueryCRKGradA = torch.zeros((nQuery, dim), device=device, dtype=dtype)
+            tangentQueryCRKGradB = torch.zeros((nQuery, dim, dim), device=device, dtype=dtype)
+    else:
+        queryCRKA = torch.zeros(nQuery, device=device, dtype=dtype)
+        queryCRKB = torch.zeros((nQuery, dim), device=device, dtype=dtype)
+        queryCRKGradA = torch.zeros((nQuery, dim), device=device, dtype=dtype)
+        queryCRKGradB = torch.zeros((nQuery, dim, dim), device=device, dtype=dtype)
+        tangentQueryCRKA = torch.zeros(nQuery, device=device, dtype=dtype)
+        tangentQueryCRKB = torch.zeros((nQuery, dim), device=device, dtype=dtype)
+        tangentQueryCRKGradA = torch.zeros((nQuery, dim), device=device, dtype=dtype)
+        tangentQueryCRKGradB = torch.zeros((nQuery, dim, dim), device=device, dtype=dtype)
+
+    useRenormCorrection = renormalizationState is not None
+    if useRenormCorrection:
+        queryRenormL = renormalizationState.renormalizationMatrices
+        if renormalizationTangentState is not None:
+            tangentQueryRenormL = renormalizationTangentState.renormalizationMatrices
+        else:
+            tangentQueryRenormL = torch.zeros((nQuery, dim, dim), device=device, dtype=dtype)
+    else:
+        queryRenormL = torch.zeros((nQuery, dim, dim), device=device, dtype=dtype)
+        tangentQueryRenormL = torch.zeros((nQuery, dim, dim), device=device, dtype=dtype)
+
     domainState = buildDomainState(domain)
     kernelProperties = buildKernelState(kernelFn, supportMode, gradientMode=gradientMode, laplacianMode=laplacianMode)
     useAdjacency, adjacencyState, gridState, _numOffsets = buildAdjacencyOrGridState(adjacency, domain)
@@ -417,9 +485,14 @@ def launchGeometryJVP(
         queryTangentState.supports, referenceTangentState.supports,        # 10-11
         queryTangentState.masses, referenceTangentState.masses,            # 12-13
         tangentQueryDensities, tangentReferenceDensities,                  # 14-15
-    ] + list(extraTensors) + [referenceVolumes, tangentReferenceVolumes]
+    ] + list(extraTensors) + [referenceVolumes, tangentReferenceVolumes] + [
+        queryCRKA, queryCRKB, queryCRKGradA, queryCRKGradB,
+        tangentQueryCRKA, tangentQueryCRKB, tangentQueryCRKGradA, tangentQueryCRKGradB,
+    ] + [queryRenormL, tangentQueryRenormL]
     n_extra = len(extraTensors)
     _volumeIdx = 16 + n_extra
+    _crkIdx = _volumeIdx + 2
+    _renormIdx = _crkIdx + 8
 
     def build_fn(wa: list, use_bundle: bool = False) -> tuple:
         qPart = _ParticleSoA()
@@ -448,8 +521,22 @@ def launchGeometryJVP(
         correctionData = buildNullCorrectionData(dim, device)
         correctionData.useVolume = useVolumeCorrection
         correctionData.referenceVolumes = wa[_volumeIdx]
+        correctionData.useCRK = useCRKCorrection
+        correctionData.queryA = wa[_crkIdx]
+        correctionData.queryB = wa[_crkIdx + 1]
+        correctionData.queryGradA = wa[_crkIdx + 2]
+        correctionData.queryGradB = wa[_crkIdx + 3]
+
+        correctionData.useGradientRenormalization = useRenormCorrection
+        correctionData.renormalizationMatrices = wa[_renormIdx]
+
         correctionTangentData = buildNullCorrectionTangentData(dim, device)
         correctionTangentData.referenceVolumes = wa[_volumeIdx + 1]
+        correctionTangentData.queryA = wa[_crkIdx + 4]
+        correctionTangentData.queryB = wa[_crkIdx + 5]
+        correctionTangentData.queryGradA = wa[_crkIdx + 6]
+        correctionTangentData.queryGradB = wa[_crkIdx + 7]
+        correctionTangentData.renormalizationMatrices = wa[_renormIdx + 1]
 
         return (
             qPart, rPart, qTangent, rTangent, domainState,

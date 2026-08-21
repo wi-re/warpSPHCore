@@ -1,6 +1,6 @@
 # Tier-2 JVP: correction-tangent support (CRK / renormalization / apparent-volume) + interface bundling
 
-## Status: (a1) done (2026-08-20); (a2) done (2026-08-21); (b) done (2026-08-21); (c) next
+## Status: (a1) done (2026-08-20); (a2) done (2026-08-21); (b) done (2026-08-21); (c) done (2026-08-21); (d) done (2026-08-21); (e) done (2026-08-21); (f) next
 
 ## Context
 
@@ -251,6 +251,74 @@ Register the new script in `tests/operations/test_gradcheck_scripts.py`'s `GRADC
 unaffected (new Stage 1-4 functions must be net-new, not edits to `crk_volume.py`/`crk_moments.py`/
 `crk_terms.py`); full sweep including CRK column; base non-CRK Gradient JVP case unaffected.
 
+**Done (2026-08-21).** Landed as specified, net-new files only:
+- Stages 1-2 promoted verbatim from the spike into `crk/crk_volume_jvp.py`
+  (`computeCRKVolumeJVP_Func_i`/`_Func_Adjacency`/`_Kernel` +
+  `computeCRKVolumeGeometryJVP`) and `crk/crk_moments_jvp.py` (same
+  dual-path shape as `crk_moments.py`, plus `computeCRKMomentsGeometryJVP`)
+  — both reuse phase (b)'s already-shipped `correctionData.referenceVolumes`/
+  `correctionTangentData.referenceVolumes` plumbing for `V_j`/`dV_j` (via
+  `getVolume_j`/`getVolumeTangent_j`) rather than a new `extraTensors` path,
+  since CRK's apparent volume occupies that exact slot. Stage 1's
+  reciprocal is applied in `computeCRKVolumeJVP_Kernel`, outside the
+  dynamic-loop function, mirroring `computeCRKVolume_Func_Adjacency`'s own
+  documented adjoint fix — no new instance of that bug here.
+- Stage 3 landed as `crk/crk_wrapper.py`'s `computeCRKFactorsJVP`, chaining
+  Stages 1-2 into `computeCRKTermsWarp` via `torch.autograd.functional.jvp(...,
+  create_graph=True)` — `create_graph=True` (not in the spike, which never
+  differentiates its assembled JVP again) is required in production so
+  `dA/dB/dgradA/dgradB` stay differentiable back to positions/supports for
+  gradcheck.
+- Stage 4 landed as `crk/kernel.py`'s `correctGradientCRKJVP` (product-rule
+  JVP of `correctGradientCRK`, re-verified the `term4` axis order against
+  that function's own docstring during the port) and
+  `computeKernelGradientCRKJVP` (dispatches on `useCRK`, mirroring
+  `computeKernelGradientCRK`), wired into `wp_gradientJVP.py`'s
+  `computeSPHGradientJVP_Func_i` in place of the direct
+  `sphKernelGradientJVP` call.
+- `_jvpCommon.launchGeometryJVP` gained `crkState`/`crkTangentState`
+  parameters, threading only the **query-side** `A/B/gradA/gradB` (+
+  tangents) into `correctionData`/`correctionTangentData` and `flat_tensors`
+  — confirmed by grep that every value-having operator's
+  `computeKernelGradientCRK` call site reads only `iCorrectionData` (never
+  `getCRK_j`/reference-side), so reference-side CRK fields stay at
+  `buildNullCorrectionData`'s zero defaults, deliberately unwired (same
+  "would sit permanently unused" reasoning phase (b) already applied to
+  query-side volume).
+- `operations.py`'s single `crkState is not None or renormalizationState is
+  not None or gradHState is not None` rejection was split three ways:
+  renorm/gradH stay rejected unconditionally; `crkState` is rejected only
+  for non-Gradient operators; a new `crkTangentState is not None and
+  crkState is None` check raises `ValueError` (nothing to take a tangent
+  of). `crkTangentState` may be omitted with `crkState` present (defaults
+  to an all-zero tangent — a legitimate "correction applied but held
+  frozen" combination, unlike volume's primal/tangent ordering dependency).
+- Validation: `scripts/gradcheck_tier2_jvp_gradient_crk.py`, three layers —
+  (1) a targeted direct-tensor gradcheck with `crkState`/`crkTangentState`
+  as independent synthetic leaves (isolating `_jvpCommon`'s new
+  `flat_tensors` wiring per (a2)'s "hard requirement"), (2) a
+  JVP-vs-`torch.autograd.functional.jacobian` identity check against primal
+  `warpOperation(Gradient, crkState=...)` for every `GradientScheme`, 1D and
+  2D, and (3) an end-to-end `torch.autograd.gradcheck` with `crkState`/
+  `crkTangentState` derived from the same leaf positions/supports via
+  `computeCRKFactorsJVP`, matching `gradcheck_crk_correction_native.py`'s
+  "real force-computation call site" convention. All green; registered in
+  `test_gradcheck_scripts.py`. Existing `gradcheck_crk_native.py`/
+  `gradcheck_crk_correction_native.py` unaffected (no edits to
+  `crk_volume.py`/`crk_moments.py`/`crk_terms.py`/`crk/kernel.py`'s existing
+  functions). Full `pytest tests/` (356 passed, 1 skipped, up from the
+  354/1 baseline by exactly the 2 new tests) and `operation_matrix.py`
+  (`OK=258, HIGH=0, ERR=0, NAN=0`, bit-identical to the pre-phase baseline)
+  both green. Two pre-existing tests needed updating, not for behavior
+  drift but because they asserted the *old* scope boundary this phase
+  deliberately moved: `test_forward_mode_geometry_jvp_gradient.py`'s
+  `test_gradientGeometryJVP_rejects_crkState` became
+  `test_gradientGeometryJVP_accepts_crkState` (now asserts a finite result,
+  plus the new `crkTangentState`-without-`crkState` `ValueError`), and a new
+  `test_divergenceGeometryJVP_still_rejects_crkState` was added to
+  `test_forward_mode_geometry_jvp_divergence.py` to keep that boundary
+  covered for the operator where it's still true.
+
 ### (d) — Renormalization tangent wiring for Gradient
 
 **Covariance-matrix JVP proven; combining it with the corrected-gradient product rule is new.**
@@ -282,6 +350,90 @@ unaffected (new Stage 1-4 functions must be net-new, not edits to `crk_volume.py
 
 **Gate:** spike + gradcheck green, full sweep including renorm column.
 
+**Done (2026-08-21).** Landed as specified, net-new files/additions only:
+- Step 1 landed as new `coreOperations/wp_covarianceJVP.py`
+  (`computeCovarianceJVP_Func_i`/`_Func_Adjacency`/`_Kernel` +
+  `computeCovarianceGeometryJVP`), mirroring `wp_covariance.py`'s structure
+  but deliberately CRK/renorm-free (matching
+  `computeRenormalizationMatrices_`'s own internal covariance call, which is
+  "only ever called here with `crkState=None, renormalizationState=None`").
+  `Vj/dVj` reuse `_jvpCommon.gradientWeightsJVP`'s `GradientScheme.Naive`
+  branch directly (`B_ij`/`dB_ij` is literally the same formula) rather than
+  duplicating the `useVolume` quotient-rule logic a second time; `(G_ij,
+  dG_ij)` come straight from `kernels.kernelJVP.sphKernelGradientJVP`. This
+  file produces only the RAW (unmasked) `dC_i` -- the low-neighbor-count
+  mask and `-L(dC)L` identity are `renorm.py`'s job, same split as the
+  primal `wp_covariance.py`/`renorm.py` pair.
+- The mask + pseudo-inverse-derivative step landed as `renorm.py`'s new
+  `computeRenormalizationMatricesJVP`, mirroring `crk_wrapper.py`'s
+  `computeCRKFactorsJVP`: computes the correction (`L`, via the existing
+  `computeRenormalizationMatrices_`) AND its tangent (`dL`) together from
+  geometry tangents alone, rather than requiring a caller to supply `L` by
+  hand. `num_nbrs` (needed to mask `dC` the same way `computeRenormalizationMatrices_`
+  masks `C`, but not returned by that function) is recomputed via one extra
+  `warpOperation(Covariance, covarianceReturnNumNeighbors=True)` call --
+  the same "consume production's own count" pattern the Tier 2.4 spike
+  itself already used, not a new inefficiency introduced here.
+- `_jvpCommon.launchGeometryJVP` gained `renormalizationState`/
+  `renormalizationTangentState` parameters, threading the **query-side**
+  `renormalizationMatrices` (+ tangent) into `correctionData.useGradientRenormalization`/
+  `.renormalizationMatrices` and `correctionTangentData.renormalizationMatrices`
+  and `flat_tensors` (phase (a2)'s "hard requirement") -- mirroring `crkState`/
+  `crkTangentState`'s existing wiring field-for-field. No new extraction code
+  was needed: `util/stateUtil.py`'s `getL_i`/`getRenormTangent_i` (phase
+  (a2)) already read exactly these fields.
+- `wp_gradientJVP.py`'s `computeSPHGradientJVP_Func_i` gained the product-rule
+  step (`dG = matmul(dL,G) + matmul(L,dG); G = matmul(L,G)`, gated on
+  `correctionData.useGradientRenormalization`) immediately after the CRK
+  dispatch, matching the primal kernel's own fixed CRK-then-renorm
+  composition order. `computeSPHGradientGeometryJVP` gained
+  `renormalizationState`/`renormalizationTangentState` parameters, threaded
+  straight through to `_launchGeometryJVP`.
+- `operations.py`'s single `renormalizationState is not None or gradHState
+  is not None` rejection was split: `gradHState` stays rejected
+  unconditionally; `renormalizationState` is rejected only for non-Gradient
+  operators; a new `renormalizationTangentState is not None and
+  renormalizationState is None` check raises `ValueError`; a new
+  `crkState is not None and renormalizationState is not None` check raises
+  `NotImplementedError` (CRK+renorm simultaneous stays out of scope, per
+  this phase's own "renorm alone first" decision -- deferred as a fast
+  follow-up, not because the math is known to fail, but because it isn't
+  validated yet). `renormalizationTangentState` may be omitted with
+  `renormalizationState` present (an all-zero tangent, correction held
+  frozen), same as `crkTangentState`. The raw-tensor-to-`RenormalizationState`
+  normalization `warpOperation` already does for its own `renormalizationState`
+  parameter was added to `warpOperationJVP` too (it previously had none,
+  since the parameter was always rejected before this phase).
+- Validation: `scripts/spike_forward_mode_tier2_renorm_gradient.py` (the new
+  derivation -- see `warpier_adjoint.md`'s "Tier 2.4b addendum" -- validated
+  against production `warpOperation(Gradient, renormalizationState=...)`,
+  `rel_err ~1e-15`-`1e-16` across every `GradientScheme`/`SupportScheme`,
+  plus an explicit low-neighbor-count zero-tangent check at `dim=1`/`dim=2`)
+  and `scripts/gradcheck_tier2_jvp_gradient_renorm.py` (the same three-layer
+  pattern (c) established: direct-tensor gradcheck isolating the new
+  `flat_tensors` wiring, JVP-vs-jacobian identity through the real production
+  call graph, end-to-end gradcheck with `renormalizationState`/
+  `renormalizationTangentState` derived from the same leaves being
+  perturbed). All green; registered in `test_gradcheck_scripts.py`.
+  `gradcheck_renorm_native.py`/`gradcheck_pinv_native.py` unaffected (no
+  edits to `renorm.py`'s existing functions or `pinv/`). Full `pytest
+  tests/` and `operation_matrix.py` (`OK=258, HIGH=0, ERR=0, NAN=0`,
+  bit-identical to the pre-phase baseline) both green.
+- **Two bugs found and fixed, both in the new gradcheck script, not in
+  production code** (caught by comparing against the independently-passing
+  spike, same discipline phase (b) used for its own primal-bug find):
+  (1) the JVP-vs-jacobian identity case initially omitted the reference-side
+  mass/density tangent when calling `computeRenormalizationMatricesJVP`
+  (`Vj = mass_j/density_j` depends on both, unlike CRK's Stage 1/2, which
+  have no mass/density term at all); (2) the same case's 2D grid test used
+  perfectly uniform, unperturbed supports, which makes `pinv2x2_warpBackend`
+  return `NaN` for that exact geometry -- unrelated to this phase's own JVP
+  correctness (`wp_covarianceJVP.py`'s raw `dC_i` and
+  `computeRenormalizationMatricesJVP`'s `dL_i` both independently matched
+  their production references to `1e-16` when isolated), fixed by applying
+  the same `+-15%` support perturbation every other Tier-2.4-touching script
+  already uses (`spike_forward_mode_tier2_renorm.py`'s `_perturbed_case`).
+
 ### (e) — CRK tangent extension to Divergence/Curl/Laplacian(Brookshaw)
 
 **New derivation per operator, reusing (c)'s Stages 1-4 verbatim** (all four stages are
@@ -310,6 +462,77 @@ operators) before production wiring.
 **Gate:** spike + all three gradcheck scripts green; `gradcheck_crk_native.py`/
 `gradcheck_crk_correction_native.py` unaffected; full sweep including CRK column for all three
 operators.
+
+**Done (2026-08-21).** Landed as specified above, with one significant addition discovered during
+implementation:
+- The `computeKernelGradientCRKJVP` swap landed exactly as specified in all three files:
+  `wp_divergenceJVP.py`'s `computeSPHDivergenceJVP_Func_i` and `wp_curlJVP.py`'s
+  `computeSPHCurlJVP_Func_i` each swap their `sphKernelGradientJVP` call for
+  `computeKernelGradientCRKJVP(..., correctionData.useCRK, iCorrectionData.A/B/gradA/gradB,
+  iCorrectionTangentData.A/B/gradA/gradB)` verbatim (a no-op when `useCRK` is `False`, identical to
+  the call it replaces). `wp_laplacianJVP.py`'s shared `_laplacianGeometryChainJVP` (used by
+  Brookshaw/Dot/Default) gained the same `useCRK`/CRK-term parameters and does the same swap once,
+  centrally — safe for Dot/Default too since `operations.py`'s own scope check (below) guarantees
+  `useCRK` is always `False` for them. `computeSPHDivergenceGeometryJVP`/`computeSPHCurlGeometryJVP`/
+  `computeSPHLaplacianBrookshawGeometryJVP` each gained `crkState`/`crkTangentState` parameters,
+  threaded straight through to `_launchGeometryJVP` (which already had unconditional CRK wiring from
+  phase (a2)/(c) — no new ABI-threading work needed, same "already reachable" finding phase (b) hit
+  for volume tangents).
+- `operations.py`'s single `crkState is not None and operation is not Gradient` rejection was split:
+  a new `_CRK_GEOMETRY_JVP_OPERATIONS` tuple (Gradient/Divergence/Curl/Laplacian) replaces the
+  Gradient-only check; a second, Laplacian-specific check rejects `crkState` whenever
+  `laplacianMode is not LaplacianScheme.Brookshaw` (Naive/Dot/Default stay out of scope, no
+  derivation exists). Dispatch-kwargs assembly only adds `crkState`/`crkTangentState` to
+  `dispatchKwargs` for Gradient/Divergence/Curl, or for Laplacian when `laplacianMode is Brookshaw`
+  — Naive/Dot/Default's own `computeSPHLaplacian{Naive,Dot,Default}GeometryJVP` take no
+  `crkState` parameter at all, so this avoids ever passing them an unsupported kwarg rather than
+  relying on every callee to silently ignore one.
+- **Found and fixed a genuine, pre-existing reverse-mode adjoint bug in production code, not
+  introduced by this phase, discovered while validating**: `wp_laplacian.py`'s (primal) and
+  `wp_laplacianJVP.py`'s (this phase's own new code) `LaplacianScheme.Brookshaw` formula divides
+  `dot(kernelGradient, n_ij)` by `D_ij` a *second* time (`n_ij` itself is already `x_ij/D_ij`). At an
+  exact self-pair (`r_ij == 0`, always present in any `referenceParticles=None` self-referencing
+  adjacency — the standard gradcheck convention this whole plan uses), `n_ij` is exactly `0` by
+  construction, forcing the forward contribution to exactly `0` regardless of `kernelGradient`, CRK
+  or not. Without CRK this was never a problem (the plain kernel gradient is *also* exactly `0` at a
+  self-pair, with a correct adjoint there too, via `sphGradient_`'s existing custom `@wp.func_grad`
+  from `project_tier2_jvp_distinct_role_adjoint_bug`'s earlier fix). With CRK enabled, though,
+  `correctGradientCRK`'s own value at `x_ij == 0` is generically **nonzero** (its
+  `Ai*W_ij*Bi`/`W_ij*gradAi` terms don't vanish at the kernel's own peak the way the plain gradient
+  does), and Warp's reverse-mode through "a nonzero vector dotted against an exactly-zero `n_ij`,
+  itself divided by `D_ij` again" produced a wrong adjoint — confirmed via
+  `torch.autograd.gradcheck` failing directly on both `warpOperation(Laplacian, Brookshaw,
+  crkState=...)` and the new `computeSPHLaplacianBrookshawGeometryJVP(..., crkState=...,
+  crkTangentState=...)`, and via a from-scratch minimal repro with no dependency on this codebase's
+  kernel structure (isolated to exactly this "dot-then-divide-again" shape; the "dot-only" shape
+  Divergence/Curl use did not reproduce it). **Fixed** in both `wp_laplacian.py` and
+  `wp_laplacianJVP.py` by guarding the Brookshaw contribution with an explicit `if r_ij > 0:` — the
+  true contribution there is always exactly `0` (CRK or not), so this changes no forward value
+  anywhere (confirmed: `operation_matrix.py` stayed bit-identical at `OK=258, HIGH=0, ERR=0, NAN=0`,
+  and every existing non-CRK gradcheck script, including `gradcheck_tier2_jvp_laplacian.py` and
+  `gradcheck_laplacian_native.py`, stayed green with unchanged output). Full write-up in
+  `docs/lessons_learned.md`'s "Warp kernel authoring gotchas" section.
+- Validation: `scripts/spike_forward_mode_tier2_crk_extension.py` (one combined spike, all three
+  operators, production `warpOperationJVP` vs. `torch.autograd.functional.jacobian` on primal
+  `warpOperation(<op>, crkState=...)`, `rel_err` ~1e-16 for all three) and three new gradcheck
+  scripts (`gradcheck_tier2_jvp_{divergence,curl,laplacian_brookshaw}_crk.py`), each a two-layer
+  version of (c)'s three-layer pattern (direct-tensor gradcheck isolating the CRK `flat_tensors`
+  wiring for each operator's own new parameters, plus an end-to-end gradcheck with `crkState`/
+  `crkTangentState` derived from the same leaves via `computeCRKFactorsJVP` — the "hand-Jacobian vs.
+  jacobian-identity" middle layer (c)'s script has was judged redundant here since the spike already
+  covers exactly that check for all three operators at once). All green; registered in
+  `test_gradcheck_scripts.py` (both the spike and all three gradcheck scripts).
+  `gradcheck_crk_native.py`/`gradcheck_crk_correction_native.py` unaffected (no edits to
+  `crk_volume.py`/`crk_moments.py`/`crk_terms.py`/`crk/kernel.py`). Full `pytest tests/` (357 passed,
+  1 skipped, up from the 356/1 baseline by the 4 new CRK-acceptance tests minus 1 stale
+  still-rejects test converted to an accepts test) and `operation_matrix.py` (`OK=258, HIGH=0,
+  ERR=0, NAN=0`, bit-identical to the pre-phase baseline) both green. Updated tests that asserted the
+  *old* scope boundary this phase deliberately moved:
+  `test_forward_mode_geometry_jvp_divergence.py`'s `test_divergenceGeometryJVP_still_rejects_crkState`
+  became `test_divergenceGeometryJVP_accepts_crkState`; new
+  `test_curlGeometryJVP_accepts_crkState`/`test_laplacianBrookshawGeometryJVP_accepts_crkState`/
+  `test_laplacianGeometryJVP_naive_still_rejects_crkState` were added to keep both the new acceptance
+  and the still-out-of-scope Naive/Dot/Default boundary covered.
 
 ### (f) — Renormalization tangent extension to Divergence/Curl/Laplacian(Brookshaw)
 
@@ -364,7 +587,11 @@ bug, not an expected side effect, per this repo's own standing discipline.
 - `src/warpSPHCore/crk/kernel.py` — `correctGradientCRK`/`correctGradientCRKJVP` (c)
 - `src/warpSPHCore/crk/crk_terms.py` — `computeCRKTermsWarp`, consumed via `torch.autograd.functional.jvp`
   directly, not ported to Warp (c)
-- new `coreOperations/wp_covarianceJVP.py` — renormalization matrix JVP (d)
+- `src/warpSPHCore/crk/crk_volume_jvp.py`/`crk_moments_jvp.py` — Stages 1-2, operator-agnostic,
+  built once for reuse by phase (e) (c)
+- `src/warpSPHCore/crk/crk_wrapper.py` — `computeCRKFactorsJVP`, Stage 3 orchestration (c)
+- new `coreOperations/wp_covarianceJVP.py` — raw covariance matrix JVP (d)
+- `src/warpSPHCore/renorm.py` — `computeRenormalizationMatricesJVP`, mask + `-L(dC)L` orchestration (d)
 - `warpier_adjoint.md` — append phase (d)'s new derivation write-up; update status header once each
   phase lands, matching this repo's existing convention
 - `tests/operations/test_gradcheck_scripts.py` — register every new `gradcheck_tier2_jvp_*.py` script

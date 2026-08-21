@@ -183,6 +183,13 @@ _GEOMETRY_JVP_OPERATIONS = (
     WarpOperation.Divergence, WarpOperation.Curl, WarpOperation.Laplacian,
 )
 
+# Operators the geometry JVP's CRK tangent support (`warpier_tier2_correction_jvp_plan.md`
+# phases (c)/(e)) covers -- Gradient landed in phase (c); Divergence/Curl/
+# Laplacian(Brookshaw only, enforced separately below) landed in phase (e).
+_CRK_GEOMETRY_JVP_OPERATIONS = (
+    WarpOperation.Gradient, WarpOperation.Divergence, WarpOperation.Curl, WarpOperation.Laplacian,
+)
+
 # Populated incrementally as `warpier_tier2_operators_plan.md`'s steps 2-7
 # land each operator's `computeSPH<Op>GeometryJVP`. An operator in
 # `_GEOMETRY_JVP_OPERATIONS` but not yet a key here still raises
@@ -213,8 +220,10 @@ def warpOperationJVP(
     adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None, # if none a datastructure is created, same as warpOperation
     referenceParticles: Optional[ParticleState] = None,
     crkState: Optional[CRKState] = None,
+    crkTangentState: Optional[CRKTangentState] = None,
     gradHState: Optional[Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor], GradHState]] = None,
     renormalizationState: Optional[Union[torch.Tensor, RenormalizationState]] = None,
+    renormalizationTangentState: Optional[RenormalizationTangentState] = None,
     consistentDivergence: bool = False,
 ):
     """The JVP entry point `warpier_forward_mode_plan.md` Phase 2 promotes
@@ -257,7 +266,27 @@ def warpOperationJVP(
       pass-through, not a re-derivation, since apparent volume is a direct
       tensor substitution for `mass_j/density_j`. `queryVolumes`/
       `tangentQueryVolumes` are not supported: no derived formula ever reads
-      a query-side apparent volume, only the reference side.
+      a query-side apparent volume, only the reference side. `crkState`/
+      `crkTangentState` (`warpier_tier2_correction_jvp_plan.md` phases
+      (c)/(e)) supply CRK correction and its tangent for **Gradient/
+      Divergence/Curl/Laplacian(`LaplacianScheme.Brookshaw` only)** --
+      Laplacian's Naive/Dot/Default schemes raise `NotImplementedError`
+      (out of scope, no derivation exists). `crkTangentState` may be
+      omitted (treated as an all-zero tangent) to hold the CRK correction
+      itself frozen while only the geometry moves.
+      `renormalizationState`/`renormalizationTangentState`
+      (`warpier_tier2_correction_jvp_plan.md` phase (d)) supply gradient-
+      renormalization correction and its tangent -- **Gradient only so far**;
+      Divergence/Curl/Laplacian raise `NotImplementedError` until phase (f).
+      `renormalizationTangentState` may be omitted (treated as an all-zero
+      tangent) the same way `crkTangentState` may -- `renorm.py`'s
+      `computeRenormalizationMatricesJVP` is the usual way to derive a real
+      one from the same geometry tangents supplied here. CRK and
+      renormalization applied simultaneously is not supported by either
+      phase (c) or (d) (each is independently derived/wired; the combination
+      is a documented fast follow-up, not required by this plan).
+      `gradHState` remains unsupported for every geometry-JVP operator (no
+      consumer exists).
     * **Both at once** (`warpier_tier2_combined_jvp_plan.md`): for the five
       value-having operators, supplying a value tangent alongside a geometry
       tangent computes both of the above -- the geometry JVP with values
@@ -273,6 +302,12 @@ def warpOperationJVP(
       so this combination doesn't apply to it -- supplying a value tangent
       for Density still raises `NotImplementedError`.
     """
+    if renormalizationState is not None and not isinstance(renormalizationState, RenormalizationState):
+        if isinstance(renormalizationState, torch.Tensor):
+            renormalizationState = RenormalizationState(renormalizationMatrices=renormalizationState)
+        else:
+            raise ValueError("Invalid type for renormalizationState: {}. Must be either RenormalizationState or torch.Tensor.".format(type(renormalizationState)))
+
     geometryTangentArgs = {
         "queryTangentState.positions": queryTangentState.positions if queryTangentState is not None else None,
         "referenceTangentState.positions": referenceTangentState.positions if referenceTangentState is not None else None,
@@ -357,11 +392,49 @@ def warpOperationJVP(
         # (warpier_tier2_operators_plan.md's "Scope boundaries" section) so individual
         # wp_<op>JVP.py files stay focused on the math, mirroring wp_densityJVP.py
         # (which has no internal validation of its own).
-        if crkState is not None or renormalizationState is not None or gradHState is not None:
+        if gradHState is not None:
             raise NotImplementedError(
-                "warpOperationJVP: geometry JVP does not support crkState/renormalizationState/"
-                "gradHState (CRK/renormalization correction and grad-h coupling are out "
-                "of scope for warpier_tier2_operators_plan.md)."
+                "warpOperationJVP: geometry JVP does not support gradHState -- grad-h coupling is "
+                "out of scope entirely (no consumer exists)."
+            )
+        if renormalizationState is not None and operationProperties.operation is not WarpOperation.Gradient:
+            raise NotImplementedError(
+                "warpOperationJVP: geometry JVP renormalization tangent support is implemented for "
+                "Gradient only so far (warpier_tier2_correction_jvp_plan.md phase (d)); "
+                "Divergence/Curl/Laplacian land in phase (f)."
+            )
+        if renormalizationTangentState is not None and renormalizationState is None:
+            raise ValueError(
+                "warpOperationJVP: renormalizationTangentState requires renormalizationState -- "
+                "there is no renormalization correction tangent to take without a renormalization "
+                "correction to perturb."
+            )
+        if crkState is not None and operationProperties.operation not in _CRK_GEOMETRY_JVP_OPERATIONS:
+            raise NotImplementedError(
+                "warpOperationJVP: geometry JVP CRK tangent support is implemented for "
+                "Gradient/Divergence/Curl/Laplacian(Brookshaw) only "
+                "(warpier_tier2_correction_jvp_plan.md phases (c)/(e))."
+            )
+        if (
+            crkState is not None
+            and operationProperties.operation is WarpOperation.Laplacian
+            and operationProperties.laplacianMode is not LaplacianScheme.Brookshaw
+        ):
+            raise NotImplementedError(
+                "warpOperationJVP: geometry JVP CRK tangent support for Laplacian is implemented "
+                "for LaplacianScheme.Brookshaw only (warpier_tier2_correction_jvp_plan.md phase "
+                "(e)) -- Naive/Dot/Default stay out of scope."
+            )
+        if crkTangentState is not None and crkState is None:
+            raise ValueError(
+                "warpOperationJVP: crkTangentState requires crkState -- there is no CRK "
+                "correction tangent to take without a CRK correction to perturb."
+            )
+        if crkState is not None and renormalizationState is not None:
+            raise NotImplementedError(
+                "warpOperationJVP: geometry JVP does not support CRK and renormalization applied "
+                "simultaneously -- each is independently supported (phases (c)/(d)); the combination "
+                "is a documented fast follow-up, not yet implemented."
             )
         if queryVolumes is not None or tangentQueryVolumes is not None:
             raise NotImplementedError(
@@ -440,6 +513,19 @@ def warpOperationJVP(
             dispatchKwargs["gradientMode"] = operationProperties.gradientMode
         if operationProperties.operation is WarpOperation.Laplacian:
             dispatchKwargs["laplacianMode"] = operationProperties.laplacianMode
+        # Naive/Dot/Default's own computeSPHLaplacian<Scheme>GeometryJVP take no
+        # crkState/crkTangentState parameter at all (out of scope, enforced above) --
+        # only pass these through for the operators/schemes that actually accept them,
+        # rather than relying on every callee to silently ignore an unsupported kwarg.
+        if operationProperties.operation in (WarpOperation.Gradient, WarpOperation.Divergence, WarpOperation.Curl) or (
+            operationProperties.operation is WarpOperation.Laplacian
+            and operationProperties.laplacianMode is LaplacianScheme.Brookshaw
+        ):
+            dispatchKwargs["crkState"] = crkState
+            dispatchKwargs["crkTangentState"] = crkTangentState
+        if operationProperties.operation is WarpOperation.Gradient:
+            dispatchKwargs["renormalizationState"] = renormalizationState
+            dispatchKwargs["renormalizationTangentState"] = renormalizationTangentState
         geometryResult = dispatchFn(
             queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
             queryTangentStateForDispatch,

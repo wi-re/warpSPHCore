@@ -131,7 +131,19 @@ def computeSPHLaplacianTensor_Func_i(
         if kernelProperties.laplacianMode == wp.static(LaplacianScheme.Naive.value): # Naive
             laplacian_contribution = q_ij * sphKernelLaplacian(iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support, kernelProperties, domainState)
         elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Brookshaw.value): # Brookshaw
-            laplacian_contribution = -scalar_t(2.0) * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
+            # Explicit r_ij > 0 guard, not relied on falling out of dot(kernelGradient, n_ij)
+            # naturally: at an exact self-pair (r_ij == 0) n_ij == 0 by construction, so the
+            # *forward* contribution is always exactly 0 here regardless of kernelGradient --
+            # but with CRK enabled, correctGradientCRK's own r=0 value is generically nonzero
+            # (its W_ij*Bi/W_ij*gradAi terms don't vanish at x_ij=0 the way the plain kernel
+            # gradient does), and Warp's reverse-mode through "nonzero vector dotted against an
+            # exactly-zero n_ij" at that exact point produces a wrong adjoint (confirmed via
+            # gradcheck on a from-scratch minimal repro and on this kernel directly -- see
+            # warpier_tier2_correction_jvp_plan.md phase (e)'s own "Done" writeup). Skipping the
+            # self-pair term outright sidesteps the bad adjoint with zero change to any forward
+            # value (CRK or not).
+            if r_ij > scalar_t(0.0):
+                laplacian_contribution = -scalar_t(2.0) * q_ij * wp.dot(kernelGradient, n_ij) / (r_ij + eps * h_ij)
         elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Dot.value): # Dot
             laplacian_contribution = computeLaplacianDot2(q_ij, n_ij, kernelGradient, r_ij, h_ij, flatInputShape, dim)
         elif kernelProperties.laplacianMode == wp.static(LaplacianScheme.Default.value): # Default

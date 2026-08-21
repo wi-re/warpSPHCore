@@ -744,6 +744,64 @@ KernelMeanSymmetric in 2D -- no tuning or tolerance-loosening needed.
 
 ---
 
+### Tier 2.4b addendum -- renormalization-corrected Gradient composition (2026-08-21)
+
+**Context.** `warpier_tier2_correction_jvp_plan.md` phase (d) promotes Tier 2.4's `dL_i` (above)
+into production (`coreOperations/wp_covarianceJVP.py`'s `computeCovarianceGeometryJVP` for the raw
+`dC_i`, `renorm.py`'s `computeRenormalizationMatricesJVP` for the masking + `-L(dC)L` step, both
+ported verbatim from Tier 2.4's own math with no changes) and wires it into `wp_gradientJVP.py`.
+That wiring needed exactly one piece of new derivation beyond what Tier 2.4/2.2 already proved --
+recorded here per the plan's own "write a short addendum" instruction, rather than as a full new
+tier (it is a two-line product rule, not a new derivation stage).
+
+**The new piece.** `wp_gradient.py`'s renormalization composition is
+`kernelGradient_final = L_i @ kernelGradient_corrected` (a `matmul` of the per-query renormalization
+matrix against whatever the CRK dispatch already produced -- plain `kernelGradient` when CRK is off,
+which is this phase's own "renorm alone first" scope). Its JVP is the ordinary product rule on that
+matrix-vector product:
+
+```
+dKernelGradient_final = dL_i @ kernelGradient_corrected + L_i @ dKernelGradient_corrected
+```
+
+`dL_i` is Tier 2.4's already-validated JVP (above); `(kernelGradient_corrected,
+dKernelGradient_corrected)` is Tier 2.2's already-validated plain (non-CRK) kernel-gradient JVP
+(`computeKernelGradientCRKJVP` with `useCRK=False`, which reduces to `sphKernelGradientJVP`
+directly). No new matrix calculus -- just chaining two already-proven JVPs through a bilinear
+contraction, the same "ordinary product rule on a proven building block" shape as Tier 2.5's own
+CRK product-rule stage. `Gradient_i = Sum_j coeff_ij * kernelGradient_final_ij`'s own JVP
+(`dcoeff_ij*kernelGradient_final + coeff_ij*dKernelGradient_final`) is unchanged Tier 2.2 --
+renormalization does not touch `coeff_ij` at all, only the kernel-gradient factor it multiplies.
+
+**Validation.** `scripts/spike_forward_mode_tier2_renorm_gradient.py` -- a hand-assembled
+`(L, dL)` (Tier 2.4's own dense assembly, duplicated verbatim per this file's standing per-script
+convention) chained into a hand-assembled dense `(G, dG)` (Tier 2.2's), against
+`torch.autograd.functional.jacobian` on production `warpOperation(Gradient,
+renormalizationState=...)` with `renormalizationState` itself computed from the SAME leaf
+positions/supports being differentiated (mirroring Tier 2.5's own `run_crk_gradient_case`
+convention: the production call graph really does differentiate through both the correction-state
+computation and the operator that consumes it). Matches to `rel_err ~1e-15`-`1e-16` across every
+`GradientScheme`/`SupportScheme` combination tested (1D line of 7, 2D 3x3 grid), plus an explicit
+low-neighbor-count check (`dL_i` exactly zero, `L_i` exactly identity, reducing to Tier 2.2's plain
+JVP) at both `dim=1` and `dim=2`.
+
+**One process note, not a math bug:** the production gradcheck script
+(`scripts/gradcheck_tier2_jvp_gradient_renorm.py`) initially failed its JVP-vs-jacobian identity
+check on a 2D 3x3 grid at `rel_err ~0.02`-`0.4` -- traced to `computeRenormalizationMatrices`
+itself returning `NaN` for that exact test geometry (a perfectly uniform, unperturbed grid produces
+a covariance matrix `pinv2x2_warpBackend` cannot invert cleanly), **not** a bug in this phase's new
+wiring -- `wp_covarianceJVP.py`'s raw `dC_i` and `computeRenormalizationMatricesJVP`'s `dL_i` both
+independently matched their own production references to `1e-16` when checked in isolation first.
+Fixed by applying the same `+-15%` non-uniform-support perturbation
+`spike_forward_mode_tier2_renorm.py`'s own `_perturbed_case` already uses for every 2D grid test --
+a standing discipline this new gradcheck script had initially skipped, not a new discontinuity. A
+second, smaller version of the same class of script bug (reference-side mass/density tangent
+omitted when calling `computeRenormalizationMatricesJVP`, since covariance's `Vj = mass_j/density_j`
+depends on both, unlike CRK's Stage 1/2 which have no mass/density term at all) was caught and
+fixed the same way, by comparison against the independently-passing spike.
+
+---
+
 ## Tier 2.5 -- CRK correction (hardest tier)
 
 **Scope.** `crk/kernel.py`'s `correctGradientCRK`/`computeKernelCRK` consume `A_i, B_i, gradA_i,

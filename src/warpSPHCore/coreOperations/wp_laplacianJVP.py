@@ -83,12 +83,21 @@ replaced their original pair-indexed (COO) implementations once proven
 numerically equivalent to float32 round-off; see git history around
 2026-08-20 for those implementations and their own equivalence tests if
 reference is ever needed.
+
+**CRK tangent extension** (`warpier_tier2_correction_jvp_plan.md` phase (e)):
+`_laplacianGeometryChainJVP`'s `(G, dG)` now come from
+`crk.computeKernelGradientCRKJVP` instead of the plain `sphKernelGradientJVP`
+directly -- a no-op for Naive/Dot/Default (their `useCRK` is always `False`,
+enforced centrally in `operations.py`) and Brookshaw's own CRK correction
+path when `computeSPHLaplacianBrookshawGeometryJVP` is given `crkState`.
+Naive/Dot/Default have no `crkState` parameter of their own -- CRK stays out
+of scope for them (no derivation exists).
 """
 
 from typing import Any, Optional
 import torch
 import warp as wp
-from warp.types import vector
+from warp.types import vector, matrix
 
 from ..type_config import *
 from ..dataTypes import *
@@ -103,7 +112,8 @@ from ._jvpCommon import (
     gradientWeightsJVP as _gradientWeightsJVP,
     launchGeometryJVP as _launchGeometryJVP,
 )
-from ..kernels.kernelJVP import sphKernelGradientJVP, sphKernelLaplacianJVP
+from ..kernels.kernelJVP import sphKernelLaplacianJVP
+from ..crk import computeKernelGradientCRKJVP
 
 __all__ = [
     'computeSPHLaplacianGeometryJVP',
@@ -121,6 +131,9 @@ _LAPLACIAN_DOT2_EPS = 1e-12  # matches math/wp_laplaciandot.py's computeDotLapla
 def _laplacianGeometryChainJVP(
     iPtcl: Any, jPtcl: Any, iTangentPtcl: Any, jTangentPtcl: Any,
     kernelProperties: kernelState, domainState: domainData,
+    useCRK: wp.bool,
+    Ai: scalar_t, Bi: vector(length=dim_t, dtype=scalar_t), gradAi: vector(length=dim_t, dtype=scalar_t), gradBi: matrix(shape=(dim_t, dim_t), dtype=scalar_t), # type: ignore
+    dAi: scalar_t, dBi: vector(length=dim_t, dtype=scalar_t), dgradAi: vector(length=dim_t, dtype=scalar_t), dgradBi: matrix(shape=(dim_t, dim_t), dtype=scalar_t), # type: ignore
 ):
     """Shared `(G, dG, n_ij, dn_ij, D_ij, dD_ij, r_ij, dr_ij, h_ij, dh_ij)`
     regularized-distance chain -- `wp_laplacian.py`'s own comment: "the
@@ -128,11 +141,21 @@ def _laplacianGeometryChainJVP(
     K_ij*q_ij" where `K_ij` is built from this same `(G, n_ij, D_ij)` triple,
     just combined differently per scheme. Derived once here (was inlined in
     Brookshaw's `_Func_i` before Dot/Default needed the identical chain) --
-    same math, zero behavior change for Brookshaw."""
-    G, dG = sphKernelGradientJVP(
+    same math, zero behavior change for Brookshaw.
+
+    CRK tangent extension (`warpier_tier2_correction_jvp_plan.md` phase (e)):
+    `(G, dG)` come from `crk.computeKernelGradientCRKJVP` (the same
+    operator-agnostic building block Gradient/Divergence/Curl's own JVPs use)
+    instead of the plain `sphKernelGradientJVP` directly -- a no-op
+    (identical result) when `useCRK` is `False`, which is always the case for
+    every caller except Brookshaw's own `_Func_i` (Dot/Default stay out of
+    CRK scope, enforced centrally in `operations.py`, so `useCRK` is always
+    `False` for them)."""
+    G, dG = computeKernelGradientCRKJVP(
         iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support,
         iTangentPtcl.position, jTangentPtcl.position, iTangentPtcl.support, jTangentPtcl.support,
         kernelProperties, domainState,
+        useCRK, Ai, Bi, gradAi, gradBi, dAi, dBi, dgradAi, dgradBi,
     )
 
     x_ij = computeDistanceVec(iPtcl.position, jPtcl.position, domainState)
@@ -209,23 +232,27 @@ def computeSPHLaplacianBrookshawJVP_Func_i(
         ##########################################################
         jTangentPtcl = getParticleData(referenceTangentState, j)
 
-        G, dG, n_ij, dn_ij, D_ij, dD_ij, _r_ij, _dr_ij, _h_ij, _dh_ij = _laplacianGeometryChainJVP(
+        G, dG, n_ij, dn_ij, D_ij, dD_ij, r_ij_exp, _dr_ij, _h_ij, _dh_ij = _laplacianGeometryChainJVP(
             iPtcl, jPtcl, iTangentPtcl, jTangentPtcl, kernelProperties, domainState,
+            correctionData.useCRK,
+            iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB,
+            iCorrectionTangentData.A, iCorrectionTangentData.B, iCorrectionTangentData.gradA, iCorrectionTangentData.gradB,
         )
-        P, dP = _laplacianPJVP(G, dG, n_ij, dn_ij, D_ij, dD_ij)
+        if r_ij_exp > scalar_t(0.0):
+            P, dP = _laplacianPJVP(G, dG, n_ij, dn_ij, D_ij, dD_ij)
 
-        _A, B, _dA, dB = _gradientWeightsJVP(
-            jPtcl.mass, iPtcl.density, jPtcl.density,
-            jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
-            kernelProperties.gradientMode,
-            correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
-        )
+            _A, B, _dA, dB = _gradientWeightsJVP(
+                jPtcl.mass, iPtcl.density, jPtcl.density,
+                jTangentPtcl.mass, iTangentPtcl.density, jTangentPtcl.density,
+                kernelProperties.gradientMode,
+                correctionData.useVolume, correctionData.referenceVolumes[j], correctionTangentData.referenceVolumes[j],
+            )
 
-        fj = referenceValues[j]
-        q = (fj - fi) * B
-        dq = (fj - fi) * dB
+            fj = referenceValues[j]
+            q = (fj - fi) * B
+            dq = (fj - fi) * dB
 
-        out += -scalar_t(2.0) * (dq * P + q * dP)
+            out += -scalar_t(2.0) * (dq * P + q * dP)
 
     return out
 
@@ -331,6 +358,8 @@ def computeSPHLaplacianBrookshawGeometryJVP(
     referenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
+    crkState: Optional[CRKState] = None,
+    crkTangentState: Optional[CRKTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `[numParticles]`, Brookshaw scheme specifically
@@ -349,7 +378,15 @@ def computeSPHLaplacianBrookshawGeometryJVP(
     and frozen here. `queryParticles.densities`/`referenceParticles.densities`
     must already hold real values, same requirement as
     `computeSPHGradientGeometryJVP`. `adjacency` is an `AdjacencyList` or
-    `CompactHashMap`.
+    `CompactHashMap`. `crkState`/`crkTangentState`
+    (`warpier_tier2_correction_jvp_plan.md` phase (e)) enable CRK correction
+    and its tangent for this scheme only (`LaplacianScheme.Brookshaw`) --
+    Naive/Dot/Default have no `crkState` parameter at all, matching
+    `operations.py`'s own scope restriction. Reuses phase (c)'s CRK JVP
+    building block (`crk.computeKernelGradientCRKJVP`) verbatim through
+    `_laplacianGeometryChainJVP`'s `(G, dG)`, feeding Brookshaw's own
+    `P = dot(G,n_ij)/D_ij` weighting unchanged. `crkTangentState` may be
+    omitted (treated as an all-zero tangent), same as Gradient.
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -397,6 +434,8 @@ def computeSPHLaplacianBrookshawGeometryJVP(
         gradientMode=gradientMode,
         referenceVolumes=referenceVolumes,
         tangentReferenceVolumes=tangentReferenceVolumes,
+        crkState=crkState,
+        crkTangentState=crkTangentState,
         extraTensors=(queryValues, referenceValues),
     )
 
@@ -701,6 +740,9 @@ def computeSPHLaplacianDotJVP_Func_i(
 
         G, dG, n_ij, dn_ij, D_ij, dD_ij, _r_ij, _dr_ij, _h_ij, _dh_ij = _laplacianGeometryChainJVP(
             iPtcl, jPtcl, iTangentPtcl, jTangentPtcl, kernelProperties, domainState,
+            correctionData.useCRK,
+            iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB,
+            iCorrectionTangentData.A, iCorrectionTangentData.B, iCorrectionTangentData.gradA, iCorrectionTangentData.gradB,
         )
         # F_ab is computeLaplacianDot2's own name for this quantity -- bit-for-bit
         # Brookshaw's P (same n_ij/D_ij, same eps=1e-8).
@@ -983,6 +1025,9 @@ def computeSPHLaplacianDefaultJVP_Func_i(
 
         G, dG, n_ij, dn_ij, _D_ij, _dD_ij, r_ij, dr_ij, h_ij, dh_ij = _laplacianGeometryChainJVP(
             iPtcl, jPtcl, iTangentPtcl, jTangentPtcl, kernelProperties, domainState,
+            correctionData.useCRK,
+            iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB,
+            iCorrectionTangentData.A, iCorrectionTangentData.B, iCorrectionTangentData.gradA, iCorrectionTangentData.gradB,
         )
 
         _A, B, _dA, dB = _gradientWeightsJVP(

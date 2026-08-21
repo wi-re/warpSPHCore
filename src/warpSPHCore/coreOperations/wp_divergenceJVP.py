@@ -23,7 +23,7 @@ from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
 from ..math import zero_like_warp
-from ..kernels.kernelJVP import sphKernelGradientJVP
+from ..crk import computeKernelGradientCRKJVP
 from ..radiusSearch.grid_util import getIndexRange
 from ..util import checkDirectionality_i, checkDirectionality_j, getParticleData, getParticleCorrectionData_i, getParticleCorrectionTangentData_i
 from ._jvpCommon import (
@@ -70,10 +70,18 @@ def computeSPHDivergenceJVP_Func_i(
         ##########################################################
         jTangentPtcl = getParticleData(referenceTangentState, j)
 
-        G, dG = sphKernelGradientJVP(
+        # CRK tangent extension (`warpier_tier2_correction_jvp_plan.md` phase (e)):
+        # same computeKernelGradientCRKJVP swap Gradient's own JVP uses
+        # (wp_gradientJVP.py) -- dispatches on correctionData.useCRK, so this is a
+        # no-op (identical to the plain sphKernelGradientJVP call it replaces) when
+        # CRK isn't in use.
+        G, dG = computeKernelGradientCRKJVP(
             iPtcl.position, jPtcl.position, iPtcl.support, jPtcl.support,
             iTangentPtcl.position, jTangentPtcl.position, iTangentPtcl.support, jTangentPtcl.support,
             kernelProperties, domainState,
+            correctionData.useCRK,
+            iCorrectionData.A, iCorrectionData.B, iCorrectionData.gradA, iCorrectionData.gradB,
+            iCorrectionTangentData.A, iCorrectionTangentData.B, iCorrectionTangentData.gradA, iCorrectionTangentData.gradB,
         )
 
         A, B, dA, dB = _gradientWeightsJVP(
@@ -193,6 +201,8 @@ def computeSPHDivergenceGeometryJVP(
     referenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
+    crkState: Optional[CRKState] = None,
+    crkTangentState: Optional[CRKTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
 ) -> torch.Tensor:
     """`dDivergence_i`, shape `[numParticles]`.
@@ -214,7 +224,13 @@ def computeSPHDivergenceGeometryJVP(
     b) enable apparent-volume support and its tangent, same as Gradient
     (`consistentDivergence`/`divergenceDotMode` stay unsupported here,
     rejected centrally by `operations.py`, so the plain `apparentVolume`
-    formula applies unconditionally).
+    formula applies unconditionally). `crkState`/`crkTangentState` (phase
+    (e)) enable CRK correction and its tangent, matching
+    `warpOperation(..., crkState=...)` -- reuses phase (c)'s CRK JVP
+    building block (`crk.computeKernelGradientCRKJVP`) verbatim, combined
+    via Divergence's own `dot(dcoeff,G) + dot(coeff,dG)` formula instead of
+    Gradient's `dcoeff*G + coeff*dG`. `crkTangentState` may be omitted
+    (treated as an all-zero tangent), same as Gradient.
     """
     if queryValues is None or referenceValues is None:
         raise ValueError(
@@ -262,5 +278,7 @@ def computeSPHDivergenceGeometryJVP(
         gradientMode=gradientMode,
         referenceVolumes=referenceVolumes,
         tangentReferenceVolumes=tangentReferenceVolumes,
+        crkState=crkState,
+        crkTangentState=crkTangentState,
         extraTensors=(queryValues, referenceValues),
     )

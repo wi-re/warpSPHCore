@@ -203,6 +203,33 @@ def test_curlGeometryJVP_rejects_missing_values():
                          queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None))
 
 
+def test_curlGeometryJVP_accepts_crkState():
+    # warpier_tier2_correction_jvp_plan.md phase (e): CRK tangent extension
+    # landed for Curl (and Divergence/Laplacian(Brookshaw)) -- crkState (with
+    # or without crkTangentState) no longer raises here. See
+    # test_gradientGeometryJVP_accepts_crkState in
+    # test_forward_mode_geometry_jvp_gradient.py for phase (c)'s Gradient-only
+    # precedent this extends.
+    positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
+    from warpSPHCore.dataTypes import CRKState, CRKTangentState
+    n = positions.shape[0]
+    dummy = CRKState(A=torch.zeros(n, dtype=DTYPE), B=torch.zeros(n, 2, dtype=DTYPE),
+                     gradA=torch.zeros(n, 2, dtype=DTYPE), gradB=torch.zeros(n, 2, 2, dtype=DTYPE))
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                              crkState=dummy,
+                              queryValues=qv, referenceValues=rv)
+    assert torch.isfinite(result).all()
+
+    dummyTangent = CRKTangentState(A=torch.zeros(n, dtype=DTYPE), B=torch.zeros(n, 2, dtype=DTYPE),
+                                    gradA=torch.zeros(n, 2, dtype=DTYPE), gradB=torch.zeros(n, 2, 2, dtype=DTYPE))
+    with pytest.raises(ValueError, match="crkTangentState requires crkState"):
+        warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                         crkTangentState=dummyTangent,
+                         queryValues=qv, referenceValues=rv)
+
+
 def test_curlGeometryJVP_none_adjacency_matches_explicit():
     # warpOperationJVP builds a CompactHashMap when adjacency=None, same as
     # warpOperation's own primal path (autograd/arg_extract.py Section 4) --

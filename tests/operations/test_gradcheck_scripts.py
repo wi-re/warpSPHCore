@@ -45,9 +45,14 @@ GRADCHECK_SCRIPTS = [
     "gradcheck_tier2_jvp_density.py",
     "gradcheck_tier2_jvp_interpolate.py",
     "gradcheck_tier2_jvp_gradient.py",
+    "gradcheck_tier2_jvp_gradient_crk.py",
+    "gradcheck_tier2_jvp_gradient_renorm.py",
     "gradcheck_tier2_jvp_divergence.py",
+    "gradcheck_tier2_jvp_divergence_crk.py",
     "gradcheck_tier2_jvp_curl.py",
+    "gradcheck_tier2_jvp_curl_crk.py",
     "gradcheck_tier2_jvp_laplacian.py",
+    "gradcheck_tier2_jvp_laplacian_brookshaw_crk.py",
     "gradcheck_tier2_jvp_chained_backprop.py",
 ]
 
@@ -76,6 +81,7 @@ GRADCHECK_SCRIPTS = [
 SPIKE_SCRIPTS = [
     "spike_forward_mode_tier1.py",
     "spike_forward_mode_tier2_density_hvp.py",
+    "spike_forward_mode_tier2_crk_extension.py",
 ]
 
 

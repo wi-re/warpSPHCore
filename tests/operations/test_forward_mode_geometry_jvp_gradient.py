@@ -286,16 +286,30 @@ def test_gradientGeometryJVP_rejects_volumes():
                          queryValues=qv, referenceValues=rv)
 
 
-def test_gradientGeometryJVP_rejects_crkState():
+def test_gradientGeometryJVP_accepts_crkState():
+    # warpier_tier2_correction_jvp_plan.md phase (c): CRK tangent promotion
+    # landed for Gradient -- crkState (with or without crkTangentState) no
+    # longer raises here. Phase (e) later extended this same acceptance to
+    # Divergence/Curl/Laplacian(Brookshaw); see
+    # test_divergenceGeometryJVP_accepts_crkState in
+    # test_forward_mode_geometry_jvp_divergence.py for that boundary.
     positions, p0, domain, adjacency, props, qv, rv = _minimal_case()
-    from warpSPHCore.dataTypes import CRKState
+    from warpSPHCore.dataTypes import CRKState, CRKTangentState
     n = positions.shape[0]
     dummy = CRKState(A=torch.zeros(n, dtype=DTYPE), B=torch.zeros(n, 1, dtype=DTYPE),
                      gradA=torch.zeros(n, 1, dtype=DTYPE), gradB=torch.zeros(n, 1, 1, dtype=DTYPE))
-    with pytest.raises(NotImplementedError, match="geometry JVP"):
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
+                              crkState=dummy,
+                              queryValues=qv, referenceValues=rv)
+    assert torch.isfinite(result).all()
+
+    dummyTangent = CRKTangentState(A=torch.zeros(n, dtype=DTYPE), B=torch.zeros(n, 1, dtype=DTYPE),
+                                    gradA=torch.zeros(n, 1, dtype=DTYPE), gradB=torch.zeros(n, 1, 1, dtype=DTYPE))
+    with pytest.raises(ValueError, match="crkTangentState requires crkState"):
         warpOperationJVP(p0, props, domain, adjacency=adjacency,
                          queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None),
-                         crkState=dummy,
+                         crkTangentState=dummyTangent,
                          queryValues=qv, referenceValues=rv)
 
 

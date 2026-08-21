@@ -10,6 +10,7 @@
 # )
 
 from .wp_covariance import _computeSPHCovariance_stateBackend
+from .wp_covarianceJVP import computeCovarianceGeometryJVP
 from .wp_curl import _computeSPHCurl_stateBackend
 from .wp_density import _computeSPHDensity_stateBackend
 from .wp_interpolate import _computeSPHInterpolant_stateBackend
@@ -32,6 +33,7 @@ from .wp_laplacianJVP import (
 
 __all__ = [
     "_computeSPHCovariance_stateBackend",
+    "computeCovarianceGeometryJVP",
     "_computeSPHCurl_stateBackend",
     "_computeSPHDensity_stateBackend",
     "_computeSPHInterpolant_stateBackend",

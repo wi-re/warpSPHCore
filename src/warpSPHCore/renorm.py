@@ -24,6 +24,7 @@ from .dataTypes import *
 
 from .operations import warpOperation
 from .pinv import pinv2x2_warpBackend, pinv_warp
+from .coreOperations.wp_covarianceJVP import computeCovarianceGeometryJVP
 
 
 def computeRenormalizationMatrices_(
@@ -142,6 +143,93 @@ def computeRenormalizationMatrices(
         else:
             return RenormalizationState(renormalizationMatrices = L)
 
+
+def computeRenormalizationMatricesJVP(
+    queryParticles: ParticleState,
+    operationProperties: OperationProperties,
+    domain: DomainDescription,
+
+    queryTangentState: 'ParticleTangentState',
+
+    queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
+    tangentReferenceVolumes: Optional[torch.Tensor] = None,
+    adjacency: Optional[Union[AdjacencyList, CompactHashMap]] = None,
+    referenceParticles: Optional[ParticleState] = None,
+    referenceTangentState: Optional['ParticleTangentState'] = None,
+    returnEigVals: bool = True,
+):
+    """JVP counterpart to `computeRenormalizationMatrices`
+    (`warpier_tier2_correction_jvp_plan.md` phase (d)): given
+    `queryTangentState`/`referenceTangentState` (position/support/mass/
+    density tangents), returns `dL_i`, obtained from `wp_covarianceJVP.py`'s
+    raw `dC_i` by the same two steps `computeRenormalizationMatrices_` itself
+    applies to the primal `C_i` -- the low-neighbor-count identity fallback's
+    exact-zero tangent (`dC = where(lowNbrMask, 0, dC_raw)`), then the
+    standard matrix-inverse-derivative identity `d(C^-1) = -C^-1(dC)C^-1`
+    (`scripts/spike_forward_mode_tier2_renorm.py`, already validated to
+    float64 round-off). `L` itself is consumed from this function's own
+    primal `computeRenormalizationMatrices_` call rather than re-derived --
+    same "consume an already-validated value" pattern the spike uses and
+    `crk_wrapper.computeCRKFactorsJVP` uses for its own already-validated
+    inputs.
+
+    Like `computeCRKFactorsJVP`, this computes the correction (`L`) AND its
+    tangent (`dL`) together -- a caller only supplies geometry tangents, not
+    a pre-existing `RenormalizationState`. `crkState`/`gradHState` are not
+    accepted here (unlike `computeRenormalizationMatrices`'s own signature):
+    `wp_covarianceJVP.py`'s kernel is deliberately CRK/grad-h-free, matching
+    `computeRenormalizationMatrices_`'s own internal covariance call under
+    the "renorm alone first" scoping this plan phase settled on (CRK+renorm
+    simultaneous is a fast follow-up, not required here).
+
+    Returns `(C, eigVals, RenormalizationState, RenormalizationTangentState)`
+    (or the two states only if `returnEigVals=False`), mirroring
+    `computeRenormalizationMatrices`'s own return shape plus the tangent.
+    """
+    with record_function("[warpSPH] - computeRenormalizationMatricesJVP"):
+        C, eigVals, L = computeRenormalizationMatrices_(
+            queryParticles, operationProperties, domain,
+            queryVolumes = queryVolumes, referenceVolumes = referenceVolumes,
+            adjacency = adjacency,
+            referenceParticles = referenceParticles,
+        )
+
+        with record_function("[warpSPH] - RenormJVP - Compute Covariance Neighbor Counts"):
+            # Needed for the same low-neighbor-count mask computeRenormalizationMatrices_
+            # itself applies to C -- not returned by that function, so recomputed here via
+            # its own internal Covariance call (mirrors the spike's own
+            # `assembled_renorm_jvp`, which likewise calls the primal Covariance operator
+            # a second time purely for `num_nbrs`).
+            covarianceProperties = replace(operationProperties, operation=WarpOperation.Covariance)
+            _, num_nbrs = warpOperation(
+                queryParticles, covarianceProperties, domain,
+                queryVolumes = queryVolumes, referenceVolumes = referenceVolumes,
+                adjacency = adjacency,
+                referenceParticles = referenceParticles,
+                covarianceReturnNumNeighbors = True,
+            )
+
+        with record_function("[warpSPH] - RenormJVP - Covariance JVP"):
+            dC_raw = computeCovarianceGeometryJVP(
+                queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+                queryTangentState=queryTangentState,
+                referenceParticles=referenceParticles, referenceTangentState=referenceTangentState,
+                referenceVolumes=referenceVolumes, tangentReferenceVolumes=tangentReferenceVolumes,
+            )
+
+        with record_function("[warpSPH] - RenormJVP - Pseudo Inverse Derivative"):
+            dim = queryParticles.positions.shape[1]
+            lowNbrMask = (num_nbrs < dim + 2).view(-1, 1, 1)
+            dC = torch.where(lowNbrMask, torch.zeros_like(dC_raw), dC_raw)
+            dL = -torch.matmul(L, torch.matmul(dC, L))
+
+        if returnEigVals:
+            return C, eigVals, RenormalizationState(renormalizationMatrices=L), RenormalizationTangentState(renormalizationMatrices=dL)
+        else:
+            return RenormalizationState(renormalizationMatrices=L), RenormalizationTangentState(renormalizationMatrices=dL)
+
+
 __all__ = [
     "computeRenormalizationMatrices",
+    "computeRenormalizationMatricesJVP",
 ]
