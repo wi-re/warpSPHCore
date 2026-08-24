@@ -274,7 +274,16 @@ class StateAwareWarpFunction(torch.autograd.Function):
         # genuinely non-Tensor forward() arguments (build_fn, launcher,
         # kernel, ..., Field placeholders) come back as None. So "no live
         # tangent anywhere in this call" must be checked as None-or-all-zero.
-        if not any(hasLiveTangent(t) for t in flat_tangents):
+        # Compute the liveness mask ONCE and hand it to the jvp_fn closure
+        # (which re-consults the same flat positions many times over -- see
+        # _build_geometry_jvp_fn). Each hasLiveTangent call is a GPU->CPU sync
+        # (a full .abs().max() reduction plus a DtoH copy), and torch's
+        # zero-tangent fillers mean there is one per non-dual argument in the
+        # call, so the per-call-site checks cost ~2x more syncs than there are
+        # arguments. Caching the mask collapses that to exactly
+        # len(flat_tangents) syncs per matvec.
+        live_mask = [hasLiveTangent(t) for t in flat_tangents]
+        if not any(live_mask):
             return None
 
         if ctx.jvp_fn is None:
@@ -284,6 +293,9 @@ class StateAwareWarpFunction(torch.autograd.Function):
                 "for this kernel) -- raising rather than silently returning a "
                 "tangent-free dual output. See warpier_unified_operator_wrapper_plan.md."
             )
+        # ctx is per-apply() call, so stashing the mask here never leaks across
+        # calls; jvp_fn reads it back via autogradCtx._jvp_live_mask.
+        ctx._jvp_live_mask = live_mask
         return ctx.jvp_fn(ctx, flat_tangents)
 
 

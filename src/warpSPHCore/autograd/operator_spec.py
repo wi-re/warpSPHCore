@@ -340,8 +340,25 @@ def _build_geometry_jvp_fn(spec: OperatorSpec, sphCtx: SPHContext, extras: Dict[
     )
 
     def jvp_fn(autogradCtx, flat_tangents):
+        # Reuse the liveness mask StateAwareWarpFunction.jvp() computed and
+        # stashed on the autograd ctx -- every hasLiveTangent is a GPU->CPU
+        # sync and the positions below are consulted repeatedly (field() plus
+        # the _NO_TANGENT_HOME guard), so re-checking would re-pay that sync
+        # per call site. Fall back to computing it if absent (jvp_fn is only
+        # ever invoked through jvp(), which always sets it; this keeps a
+        # direct call well-defined).
+        live_mask = getattr(autogradCtx, "_jvp_live_mask", None)
+        n = len(flat_tangents)
+        if live_mask is None:
+            live_mask = [hasLiveTangent(t) for t in flat_tangents]
+
+        def isLive(i):
+            if i is None or i < 0 or i >= n:
+                return False
+            return live_mask[i]
+
         for i in _NO_TANGENT_HOME:
-            if i < len(flat_tangents) and hasLiveTangent(flat_tangents[i]):
+            if isLive(i):
                 raise NotImplementedError(
                     "StateAwareWarpFunction.jvp: a live (non-zero) tangent on a domain-bounds "
                     f"or grid-traversal argument (flat position {i}) has no JVP formula -- no "
@@ -350,7 +367,7 @@ def _build_geometry_jvp_fn(spec: OperatorSpec, sphCtx: SPHContext, extras: Dict[
                 )
 
         def field(i):
-            return flat_tangents[i] if hasLiveTangent(flat_tangents[i]) else None
+            return flat_tangents[i] if isLive(i) else None
 
         queryTangentState = ParticleTangentState(
             positions=field(_QPOS), supports=field(_QSUP), masses=field(_QMAS), densities=field(_QDEN),

@@ -357,3 +357,12 @@ bash scripts/publish_pypi.sh --testpypi
 ```
 
 Before publishing, bump the package version in both `pyproject.toml` and `src/warpSPHCore/__init__.py`. The publish script checks that these two versions match and stops if they do not.
+
+## Benchmarking
+
+To run the current benchmark scripts for integration and forward mode run
+```bash
+python benchmarks/wave/bench_performance.py --nxs 32 64 128 256 --steps 128 --schemes all --out results/
+python benchmarks/wave/bench_performance.py --schemes rk4 sdirk2_jfnk_jvp_1e-6 sdirk2_jfnk_fd_1e-6 --out results/
+python -m benchmarks.wave.bench_plots results
+```
