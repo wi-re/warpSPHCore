@@ -22,15 +22,22 @@ forward-mode directional derivative):
    Gradient call but shows ~0% effect on this benchmark specifically.
 
 2. **Even on that already-minimal value-only path, an isolated dual JVP call
-   still costs ~1.9x two plain (non-dual) calls of the same kernel**, and the
-   difference is torch's own `torch.autograd.Function.apply()`/`.jvp()`
-   dispatch allocating a fresh zero-filled tensor as the synthesized tangent
-   for every non-dual real-Tensor argument, once any argument to that call is
-   dual (confirmed here via `torch.profiler`: ~12 `aten::zeros_like`/
-   `aten::empty_like` calls per dual call, absent from the plain-call
-   baseline's profile -- roughly matching the ~8-10 structurally-constant
-   arguments -- positions/supports/masses/densities x query/reference role --
-   a Laplacian(u, u) call carries alongside its one genuinely-dual argument).
+   still costs ~3.7x one plain (non-dual) call of the same kernel** -- the
+   correct fd-equivalent baseline (`jfnk.py`'s real `fd_matvec` calls `step()`
+   exactly once per matvec, reusing the already-computed `G_y`; an earlier
+   version of this script compared against *two* plain calls under a
+   "fd-equivalent" label, which was wrong and overstated a mechanism fix
+   below as a much bigger win than it actually was -- see
+   `warpier_jvp_dual_argument_pruning_plan.md`'s "Correction" section). Of
+   that 3.7x, CUDA kernel-name-level profiling shows ~2x is architecturally
+   inherent (the value-only path genuinely launches the same primal kernel
+   twice -- once for the primal, once relaunched on the tangent value,
+   `operations.py`'s `warpOperationJVP` -- with identical per-launch GPU
+   cost either way); the rest is CPU-side dispatch overhead, only partly
+   explained: `aten::zeros_like`/`aten::empty_like` synthesis (~12 calls/call
+   before `warpier_jvp_dual_argument_pruning_plan.md`'s Phase 1 pruning fix,
+   0 after) plus a further `aten::to`/`_to_copy`/`copy_` chain (~77us/call)
+   present only in the dual path and not yet traced to an exact call site.
 
 Needs the sibling `warpSPH` repo checked out next to this one (this
 workspace's convention: `dev/{warpSPHCore,warpSPH,warpSPHIntegrators}`) --
@@ -110,7 +117,7 @@ def part1_geometry_tangent_liveness(ctx, system) -> None:
 
 
 def part2_isolated_dual_vs_plain(ctx, system) -> None:
-    print("\n=== Part 2: isolated dual Laplacian(u,u) JVP call vs. two plain calls ===")
+    print("\n=== Part 2: isolated dual Laplacian(u,u) JVP call vs. one plain call ===")
     state = system.initializeNewState()
     u = state.state.u.clone()
     v_tangent = torch.randn_like(u)
@@ -126,8 +133,8 @@ def part2_isolated_dual_vs_plain(ctx, system) -> None:
         return warpOperation(state.state, queryValues=uval, domain=system.domain,
                               adjacency=system.adjacency, operationProperties=props)
 
-    def two_plain_calls():
-        return call_plain(u), call_plain(u)
+    def one_plain_call():
+        return call_plain(u)
 
     def one_dual_call():
         with fwAD.dual_level():
@@ -135,7 +142,14 @@ def part2_isolated_dual_vs_plain(ctx, system) -> None:
             result = call_plain(u_dual)
             return fwAD.unpack_dual(result)
 
-    def bench(fn, n_warmup=20, n_iter=200):
+    def bench(fn, n_warmup=200, n_iter=1000):
+        # n_warmup=200 (not 50): this call runs right after Part 1's real DIRK/
+        # JFNK steps above, and a too-short warmup measures residual GPU
+        # clock-ramp/cache-state noise from that -- confirmed directly: at
+        # n_warmup=50 in-process here, the plain baseline measured ~484us
+        # (vs. this function's own steady-state ~161us in isolation), enough
+        # noise to invert the qualitative finding (see
+        # warpier_jvp_dual_argument_pruning_plan.md's "Correction" section).
         for _ in range(n_warmup):
             fn()
         torch.cuda.synchronize()
@@ -145,10 +159,10 @@ def part2_isolated_dual_vs_plain(ctx, system) -> None:
         torch.cuda.synchronize()
         return (time.perf_counter() - t0) / n_iter * 1e6  # us/call
 
-    t_plain = bench(two_plain_calls)
+    t_plain = bench(one_plain_call)
     t_dual = bench(one_dual_call)
     print(f"  nx={NX}, particle count={u.shape[0]}")
-    print(f"  two plain calls (fd-equivalent, no AD):           {t_plain:.2f} us")
+    print(f"  one plain call  (fd-equivalent, no AD):           {t_plain:.2f} us")
     print(f"  one dual call   (real jvp path, forward+jvp):     {t_dual:.2f} us")
     print(f"  ratio (dual/plain): {t_dual / t_plain:.3f}x")
 
@@ -168,11 +182,11 @@ def part2_isolated_dual_vs_plain(ctx, system) -> None:
 
     print("\n  --- profiling the plain baseline (for comparison) ---")
     for _ in range(20):
-        two_plain_calls()
+        one_plain_call()
     torch.cuda.synchronize()
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as prof:
         for _ in range(200):
-            two_plain_calls()
+            one_plain_call()
         torch.cuda.synchronize()
     events = {e.key: e for e in prof.key_averages()}
     for name in ("aten::zeros_like", "aten::empty_like", "cudaStreamSynchronize", "StateAwareWarpFunction"):
@@ -186,4 +200,14 @@ def part2_isolated_dual_vs_plain(ctx, system) -> None:
 if __name__ == "__main__":
     ctx, system, buildSeconds = buildWaveCase(NX, device=DEVICE)
     part1_geometry_tangent_liveness(ctx, system)
+    # Part 1's real DIRK/JFNK steps leave measurable residual GPU-state noise
+    # behind (confirmed directly: without this settle, Part 2's own 200-warmup
+    # bench() still sometimes reports a plain-call baseline 2-3x its clean,
+    # isolated-process steady state) -- a plain sync doesn't fully clear it,
+    # so Part 2's ratio here is a noisier, upper-bound-leaning reading than
+    # running it in its own process; the clean, repeated (3-run) reading is
+    # ~3.6-3.7x, recorded in warpier_jvp_dual_argument_pruning_plan.md's
+    # "Correction" section -- trust that number over a single run of this
+    # combined script if they disagree.
+    torch.cuda.synchronize()
     part2_isolated_dual_vs_plain(ctx, system)

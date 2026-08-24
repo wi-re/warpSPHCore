@@ -359,3 +359,58 @@ for both jvp and fd, isolated-call win is real) as a worthwhile incremental clea
 merits, but this specific investigation (`warpSPHCore`'s forward-mode-AD dispatch overhead) is
 **closed**. Any further work on the ~1.8-2x jvp/fd gap belongs in `warpSPHIntegrators`'s DIRK/JFNK
 driver code — a different codebase, a different investigation, out of this doc's scope.
+
+## Correction (same day, follow-on session): the "0.566x, faster than 2 plain calls" claim above was wrong
+
+The isolated-call comparison this doc's Time-boxed-spike-result section relies on
+(`scripts/spike_jvp_wave_case_overhead_profile.py`'s Part 2) benchmarks "two plain calls" and
+labels that baseline **"(fd-equivalent, no AD)"**. That label is incorrect: `jfnk.py`'s real
+`fd_matvec` calls `step()` (hence the underlying kernel) **exactly once** per matvec — `G_y` is
+computed once outside the whole GMRES loop and reused, so a forward-difference matvec is one new
+evaluation, not two. The correct fd-equivalent baseline is **one** plain call, not two.
+
+Re-measured directly (`nx=128`, same isolated Laplacian(u,u) setup): **one dual call vs. one plain
+call is 3.68x**, not 0.566x — and this is essentially unchanged from *before* the pruning fix above
+(3.76x measured against the pre-fix code via a throwaway worktree). The pruning fix is real and
+does exactly what it claims (zeros_like/empty_like: 12→0), but that mechanism was never the
+dominant cost — it's a small correction on top of a much larger, still-unaddressed gap. This fully
+reconciles the "isolated win, zero benchmark win" puzzle: there never was a large isolated win by
+the correct measure, so it's unsurprising the benchmark didn't move.
+
+Root-caused via `torch.profiler`, kernel-name-level breakdown (CUDA activity only, so calls without
+GPU work are excluded):
+
+- **~2x is architecturally inherent, not a bug.** A dual call on this codebase's value-only Tier-1
+  JVP path launches the *same* kernel (`computeSPHLaplacianTensor_Kernel`) **twice** — once for the
+  primal (`StateAwareWarpFunction.forward()`), once more for the tangent value, via
+  `operations.py`'s `warpOperationJVP` relaunching the public `warpOperation()` on
+  `tangentQueryValues` in place of `queryValues` (line ~739) — the value-only fallback Fix 1's
+  fusion never reaches, confirmed geometry tangent is never live in this benchmark. Per-launch GPU
+  cost is *identical* either way (125.79us plain vs. 124.16us/launch dual, 200/400 launches
+  respectively) — this really is "twice the unavoidable minimum work", exactly what this doc's own
+  opening paragraph called the expected floor.
+- **The remaining ~1.85x is CPU-side, not GPU compute.** Self-CPU-time ratio (dual/plain) is
+  ~3.64x while GPU-kernel-time ratio is ~2.0x. A `aten::to` → `aten::_to_copy` → `aten::copy_`
+  chain (~77us/call self-CPU) is present in every dual call and **completely absent** from plain
+  calls. Confirmed **not** an explicit `.to()` call anywhere in `warpSPHCore`'s own Python (a
+  direct monkeypatch of `torch.Tensor.to` around one live dual call caught zero invocations) — it
+  originates inside some lower-level ATen/Warp-internal conversion path not reachable from Python,
+  not pinned to an exact line in the time available this session. `_isInertTensor` (this doc's own
+  Phase 1 addition) contributes a further, smaller, real cost of its own (~39us/call: `_fw_primal`/
+  `_unpack_dual` bookkeeping) — worth revisiting (e.g. skip the per-tensor dual/grad check
+  entirely on a call where nothing anywhere is dual, via one cheap up-front check) if this path is
+  optimized further.
+- `launchGeometryJVP`/`_jvpCommon.py` (the Tier-2 geometry-JVP kernel path, `coreOperations/`) has
+  its **own separate, unpruned** `flat_tensors` → `StateAwareWarpFunction.apply()` call, entirely
+  outside this doc's Phase 1 fix's reach — confirmed **not exercised** by this specific benchmark
+  (its geometry tangent is never live, so `warpOperationJVP` never takes that branch), but relevant
+  to note for a future genuinely-Lagrangian benchmark, where it would need the same pruning
+  treatment as a separate follow-up.
+
+**Updated bottom line**: of the real benchmark's ~1.9-2x jvp/fd `msPerRhs` gap, roughly half traces
+to `warpSPHCore`'s own operator-launch cost (this ~3.7x-per-matched-pair-of-launches finding, now
+correctly measured) and roughly half to `warpSPHIntegrators`' DIRK/JFNK driver-level Python
+overhead (GMRES's own O(k²) small-tensor arithmetic, `updateStateEuler`'s per-call state cloning,
+`fd_matvec`'s own `_fd_epsilon` paying 2 redundant host syncs every matvec call) — see
+`JFNK_DRIVER_OVERHEAD_NOTES.md` (new, `warpSPHIntegrators` repo root) for that side. Both
+halves are real and independently worth pursuing; neither alone explains the whole gap.
