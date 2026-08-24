@@ -24,8 +24,9 @@ had a stale bullet claiming Tier-2 forward-mode wiring was still in progress and
 `Field.tangent`, corrected in place.
 
 This doc is what's left: **nine open items, no single unifying thread**, so it's organized as a flat
-punch list rather than a phased plan. (Item 1 was investigated and closed 2026-08-24, in this same
-session that also identified it — kept in place, marked closed, rather than renumbering everything.)
+punch list rather than a phased plan. (Items 1 and 3 were investigated/implemented and closed 2026-08-24,
+in this same session that also identified them — kept in place, marked closed, rather than renumbering
+everything.)
 
 ## Open items
 
@@ -154,14 +155,92 @@ full coupled solve still wanted at all; if so does it merge the EOS/incompressib
 or stay pressure-only; is the bounded clamp-Newton candidate worth doing on its own) before either
 direction gets an implementation plan.
 
-### 3. Registering an implicit scheme in `warpSPHIntegrators` as a first-class driver
+### 3. Registering an implicit scheme in `warpSPHIntegrators` as a first-class driver — CLOSED 2026-08-24 (all three phases done)
 
 Source: same predecessor plan, explicitly out of scope there. The implicit wave-equation step used a
 hand-rolled CG loop in a standalone test rather than `warpSPHIntegrators`'s own DIRK/Picard machinery
 (`NOTES.md` §3.0-3.1/§3.8 — the library already carries the state algebra needed; a ~60-line probe over
 existing primitives reportedly already reaches full order). `NOTES.md` §3.8 estimates ~2 weeks total for
-the phased effort, gated on nothing from `warpSPHCore`. Not started; worth scoping only if a one-off
-script needs to become a reusable, registered scheme.
+the phased effort (Phase 0 → 2 → 1), gated on nothing from `warpSPHCore`.
+
+**Phase 0 (groundwork, S1-S5, NOTES.md §3.5) implemented and committed 2026-08-24** (commit `cd2a32f` in
+`warpSPHIntegrators`), at the user's direction after confirming scope: `state_norm`/`state_difference`
+(`fields.py`), `StepHistory`/`HistoryEntry` with the `dt`/`uid` restart guards (new `history.py`),
+`IntegrationScheme` metadata (`implicit`, `steps`, `stiffly_accurate`, `stability`, `startup_order` —
+`util.py`), the `NonlinearSolver` protocol + `FixedPointSolver` (new `solvers.py`), and an opt-in
+`history=` kwarg threaded through `RungeKuttaB` and `testing.run`. `butcher._error_estimate` was
+refactored to use `state_difference` rather than a hand-rolled linear combination of raw stage
+derivatives, per NOTES.md S1's "generalise rather than duplicate." 48 new tests.
+
+**One real bug caught and fixed during Phase 0, not just theoretical groundwork risk:** a first draft had
+`history=` auto-derive `priorStep` inside `RungeKuttaB` when no explicit `priorStep` was given. That
+silently turned on first-stage reuse — and its order cost, per `reuse.py` — for *any* caller that merely
+wanted history threaded, on non-FSAL tableaus too (RK4 drifted ~1e-4 per step), with none of
+`integration._with_reuse_guard`'s warnings, since those only fire when `priorStep` itself is a kwarg.
+Caught by a same-session test, fixed by keeping `history=` strictly bookkeeping-only: it populates
+`IntegrationResult.history` but never seeds `priorStep`. A caller that wants reuse still opts in
+explicitly, exactly as before: `priorStep=history.as_prior_step()` alongside `history=`.
+
+**Phase 2 (the DIRK driver, NOTES.md §3.6) implemented and committed 2026-08-24** (commit `710ede7`),
+continuing directly on Phase 0's primitives at the user's direction ("keep working on the plan"): new
+`dirk.py` reuses `butcher.py`'s `_weighted_update`/`_error_estimate`/`finalizeSystem` machinery, closing
+each stage's diagonal term through `FixedPointSolver`. Four of the six planned tableaus shipped — Backward
+Euler, Implicit Midpoint, Trapezoidal/Crank-Nicolson, SDIRK2 — each verified two ways (by hand against its
+own order conditions before coding, and empirically via `testing.convergence` after: all four reach their
+claimed order to within 0.01). **TR-BDF2 and ESDIRK3(2)4L[2]SA were deliberately not implemented**: both
+are embedded, higher-stage tableaus whose published coefficients are easy to transcribe wrong in a way a
+smoke test wouldn't catch (a 2nd/3rd-order convergence measurement looks the same whether the low-order
+embedded weights are exactly right or merely close). 34 new tests (`tests/test_dirk.py`).
+
+**Two more real findings from Phase 2, not just design risk:**
+- **Implicit midpoint's headline symplectic property needs a caveat the original NOTES.md scoping
+  missed.** It is the textbook symplectic Gauss-Legendre s=1 method only when its stage equation is
+  solved to convergence. At the shipped 2-iteration Picard default (NOTES.md's own "2 iterations reach
+  full order" recommendation), measured long-run energy drift *grows secularly* — the signature of a
+  dissipative scheme, not a symplectic one — confirmed by a check that the bound recovers (to ~1e-15,
+  flat with `T`) once the solver runs enough iterations (~16) to actually converge. The convergence-order
+  claim is unaffected (verified exactly at 2 iterations); only the qualitative long-run energy behavior,
+  arguably the scheme's main selling point, needs more iterations than "ship 2" to recover. Registered
+  `dissipation=True` to describe the shipped default honestly, and corrected NOTES.md's own headline
+  framing of this scheme rather than leaving the overclaim in place.
+- **The existing (pre-DIRK) test suite caught a real implementation bug immediately, for free**, the
+  moment the four new schemes joined the shared `scheme` fixture every test file already parametrizes
+  over: `tests/test_copied_fields.py`'s 12 tests failed because the Picard loop's `step_fn` returned a
+  fresh clone as the next iterate, discarding the object that had actually run `preprocess()` — so
+  `copied()`-behavior fields (e.g. a summation density, exactly the SPH case this mechanism exists for)
+  arrived as `None` at the caller. Fixed by capturing the evaluated stage buffer in the closure instead of
+  using the solver's returned iterate for anything but the stage's own derivative. This is the kind of bug
+  that stays invisible in an isolated new-feature test file and only surfaces when a broad, pre-existing
+  regression suite gets to run against the new code — exactly what happened here.
+
+**Phase 1 (explicit multistep, NOTES.md §3.6) implemented and committed 2026-08-24** (commit `fc5a0ad`),
+closing out all three phases in the same session ("keep going"): new `multistep.py` adds Adams-Bashforth
+2-5 and Adams-Bashforth-Moulton 2-4 (PECE), reusing `butcher._weighted_update` directly — it never cared
+whether its `ks` came from this step's stages or past steps' `StepHistory` entries, exactly the "free
+lunch" NOTES.md §3.1 predicted. Bootstraps from Dormand-Prince 5(4) for the first `order-1` steps (order 5,
+at or above every shipped order, so none of them lose order to a low-quality cold start). The starter is
+hard-coded, not caller-configurable, per NOTES.md's own conclusion that it "must be registered scheme
+metadata, not caller policy" — a caller-suppliable lower-order starter would silently cap the whole run at
+its own order. 67 new tests (`tests/test_multistep.py`). **Landed with zero comparable bugs to Phase 2's**
+— the design leaned entirely on already-battle-tested primitives (`_weighted_update`, `StepHistory`), and
+the full suite went green on the first run after widening one pre-existing test's exclusion criteria (not
+a bug in the new code).
+
+**A real design question resolved during implementation, not just documented risk:** these multistep
+schemes' past derivatives only exist if a caller threads `IntegrationResult.history` forward — unlike
+every one-step scheme, where `history=` is pure opt-in bookkeeping. Rather than leave "you must thread
+history correctly or get silently wrong results" as a documentation-only warning, made the failure mode
+itself safe: without history, a scheme keeps re-running its Dormand-Prince starter forever, verified
+bit-for-bit identical to calling `DormandPrince` directly — a caller who forgets gets a correct but more
+expensive trajectory (DP5 is higher-order than any of these), never a silently wrong one. Also updated
+`warpSPHIntegrators/README.md`'s stale "Known Limitations" section, which had claimed no implicit or
+multistep support at all after eleven new schemes (four DIRK + seven multistep) landed this session.
+
+Full `warpSPHIntegrators` suite: 1380 passed, 114 skipped (was 906/54 at the start of this session), no
+regressions across all three commits. **Nothing is open in this item** — everything NOTES.md §3.8
+recommended (Phase 0 → 2 → 1) is done; what remains (TR-BDF2, ESDIRK3(2), fully implicit RK, BDF, IMEX/ARK,
+a stiff `NonlinearSolver`) is each individually scoped and gated on a concrete downstream need, per
+NOTES.md's own updated recommendation to stop and reassess rather than build further speculatively.
 
 ### 4. Tier-2 JVP / forward-mode AD beyond the six core operators
 
@@ -306,9 +385,13 @@ work, for a different reason than originally assumed) and there's no existing co
 to build an automatic one against (unlike shifting's `exactHessian`) — so the plan recommends *not*
 building the full coupled solve speculatively, and instead flags three open questions plus one small,
 concretely bounded candidate (`solveIncompressible`'s `clamp(p, min=0)` as a projected-Newton target)
-for you to weigh in on before anything gets implemented. Items 4/5/6 aren't backlog items — they're "if
-a concrete consumer shows up, expect this shape of work," not something to build speculatively. Item 9
-is background hygiene, pick up opportunistically.
+for you to weigh in on before anything gets implemented. **Item 3 is now CLOSED**: all three phases
+(0, 2, 1) implemented and committed 2026-08-24 (`warpSPHIntegrators` commits `cd2a32f`/`710ede7`/`fc5a0ad`),
+eleven new schemes registered (four DIRK, seven multistep), plus a real finding that corrects NOTES.md's
+own original claim that implicit midpoint's symplectic property comes for free at the recommended
+2-iteration solver default (it doesn't — see Item 3). Items 4/5/6 aren't backlog items — they're "if a
+concrete consumer shows up, expect this shape of work," not
+something to build speculatively. Item 9 is background hygiene, pick up opportunistically.
 
 ## Critical files
 
@@ -325,6 +408,16 @@ is background hygiene, pick up opportunistically.
   `warpSPH/modules/pressure/iisph.py`, `modules/incompressible/drift.py` — the IISPH matvec that
   plan shows needs no JVP; `warpSPH/schemes/dfsph.py`, `schemes/deltaSPH.py`,
   `modules/eos/weaklyCompressible.py` — where that plan confirms EOS is/isn't wired in
+- `warpSPHIntegrators/NOTES.md` §3.5-3.8, `README.md` — Item 3's scope and 2026-08-24 status for all
+  three landed phases, and the user-facing scheme docs/limitations list;
+  `src/warpSPHIntegrators/{fields,history,solvers,util,butcher,testing}.py`, `tests/test_groundwork.py` —
+  the Phase 0 code (new `history.py`/`solvers.py`; `state_difference`/`state_norm` in `fields.py`;
+  `IntegrationScheme` metadata in `util.py`; `history=` wiring + the `_error_estimate` refactor in
+  `butcher.py`); `src/warpSPHIntegrators/dirk.py`, `tests/test_dirk.py` — the Phase 2 DIRK driver, its
+  four registered schemes, and the `dissipation=True` correction for Implicit Midpoint;
+  `src/warpSPHIntegrators/multistep.py`, `tests/test_multistep.py` — the Phase 1 Adams-Bashforth/-Moulton
+  driver and its seven registered schemes; `src/warpSPHIntegrators/{enums,integration}.py` — all eleven
+  new schemes' registry entries
 - `src/warpSPHCore/coreOperations/wp_densityHVP.py` — Item 5's existing reference pattern
 - `scripts/repro_warp_dynamic_loop_division.py` — Item 7
 - `pyproject.toml`, `.github/workflows/tests.yml` — Items 8/9
