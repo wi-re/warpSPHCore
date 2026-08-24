@@ -177,7 +177,13 @@ def test_forwardOperationJVP_combines_value_and_geometry_tangent():
                                 queryTangentState=ParticleTangentState(positions=dpos, supports=None, masses=None),
                                 tangentQueryValues=dq, tangentReferenceValues=dr,
                                 queryValues=queryValues, referenceValues=referenceValues)
-    torch.testing.assert_close(combined, tier2Only + tier1Only, rtol=0, atol=0)
+    # Gradient is in `operations.py`'s `_FUSED_VALUE_JVP_OPERATIONS`: `combined`
+    # is computed by a single kernel that accumulates `dcoeff*G + coeff*dG +
+    # (dfi*A + dfj*B)*G` per neighbor pair in one pass, rather than by summing
+    # two independently-accumulated arrays (`tier2Only`, `tier1Only`) after the
+    # fact -- mathematically identical, but a different floating-point
+    # summation order, so bit-exactness (`rtol=0, atol=0`) no longer holds.
+    torch.testing.assert_close(combined, tier2Only + tier1Only, rtol=1e-5, atol=1e-6)
 
 
 def test_forwardOperationJVP_rejects_operations_without_a_value_input():

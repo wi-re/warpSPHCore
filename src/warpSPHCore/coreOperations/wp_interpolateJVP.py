@@ -55,6 +55,7 @@ def computeSPHInterpolateJVP_Func_i(
     iCorrectionTangentData: Any, correctionTangentData: Any,
 
     referenceValues: wp.array(dtype = Any), # type: ignore
+    tangentReferenceValues: wp.array(dtype = Any), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -85,7 +86,12 @@ def computeSPHInterpolateJVP_Func_i(
             dVj = jTangentPtcl.mass / jPtcl.density - jPtcl.mass * jTangentPtcl.density / (jPtcl.density * jPtcl.density)
 
         fv = referenceValues[j]
-        out += fv * (dVj * W + Vj * dW)
+        # Value-tangent contribution, fused into this same loop (see
+        # `wp_gradientJVP.py`'s identical comment / `operations.py`'s
+        # `_FUSED_VALUE_JVP_OPERATIONS`): d(fv*Vj*W)/d(fv) = dfv*(Vj*W),
+        # reusing this loop's own Vj/W.
+        dfv = tangentReferenceValues[j]
+        out += fv * (dVj * W + Vj * dW) + dfv * (Vj * W)
 
     return out
 
@@ -101,6 +107,7 @@ def computeSPHInterpolateJVP_Func_Adjacency(
     kernelProperties: kernelState,
 
     referenceValues: Any, # type: ignore
+    tangentReferenceValues: Any, # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -133,6 +140,7 @@ def computeSPHInterpolateJVP_Func_Adjacency(
             iCorrectionTangentData, correctionTangentData,
 
             referenceValues,
+            tangentReferenceValues,
 
             outputValue,
         )
@@ -154,6 +162,7 @@ def computeSPHInterpolateJVP_Kernel(
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     referenceValues: Any, # type: ignore
+    tangentReferenceValues: Any, # type: ignore
 
     # The last parameter is always the output array and should not be changed
     outputValues: wp.array(dtype = Any) # type: ignore
@@ -171,6 +180,7 @@ def computeSPHInterpolateJVP_Kernel(
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         referenceValues,
+        tangentReferenceValues,
 
         zero_like_warp(outputValues[i]),
     )
@@ -187,18 +197,24 @@ def computeSPHInterpolateGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    tangentReferenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """`dInterpolate_i`, shape `[numParticles, *referenceValues.shape[1:]]`.
 
-    This is the geometry/mass/density-tangent **partial** contribution to
-    Interpolate's JVP -- `referenceValues` is held at its **primal**
-    (non-tangent) value here. It is **not** the full derivative on its own;
-    add the value-tangent (value JVP) contribution (`warpOperation` relaunched
-    with the tangent value array) for that, or call `warpOperationJVP`
-    directly, which sums both automatically
-    (`warpier_tier2_combined_jvp_plan.md`).
+    This is the geometry/mass/density-tangent contribution to Interpolate's
+    JVP, `referenceValues` held at its **primal** (non-tangent) value --
+    unless `tangentReferenceValues` is also supplied, in which case the
+    value-tangent contribution is folded into the same neighbor loop and this
+    returns the **full** combined JVP directly (`operations.py`'s
+    `_FUSED_VALUE_JVP_OPERATIONS`, same fusion as
+    `computeSPHGradientGeometryJVP`; Interpolate has no `queryValues` term at
+    all, so unlike the other four value-having operators there is no
+    `tangentQueryValues` counterpart here). Omitting it is still supported and
+    returns only the geometry-tangent partial, same as before;
+    `warpOperationJVP` is still the right entry point for callers rather than
+    this function directly.
 
     `referenceValues` (`fj`) is required and frozen (no tangent on it --
     that would be the value JVP). `queryValues` (`fi`) is not part of Interpolate's
@@ -243,6 +259,14 @@ def computeSPHInterpolateGeometryJVP(
 
     outputDtype = castTorchToWarpAsBuiltins(referenceValues).dtype
 
+    # Value-tangent contribution is optional (see docstring): default to a
+    # zero array so the kernel's `dfv*(Vj*W)` term is exactly zero and this
+    # call reduces to the pure geometry-tangent partial, same as before this
+    # parameter existed.
+    tangentReferenceValues = (
+        tangentReferenceValues if tangentReferenceValues is not None else torch.zeros_like(referenceValues)
+    )
+
     return _launchGeometryJVP(
         computeSPHInterpolateJVP_Kernel,
         domain, kernel, supportMode, adjacency,
@@ -254,5 +278,5 @@ def computeSPHInterpolateGeometryJVP(
         referenceDensities=referenceParticles.densities,
         referenceVolumes=referenceVolumes,
         tangentReferenceVolumes=tangentReferenceVolumes,
-        extraTensors=(referenceValues,),
+        extraTensors=(referenceValues, tangentReferenceValues),
     )

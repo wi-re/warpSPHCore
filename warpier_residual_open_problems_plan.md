@@ -23,10 +23,10 @@ delivering forward-mode AD capability — and has been removed; `warpier_core.md
 had a stale bullet claiming Tier-2 forward-mode wiring was still in progress and would route through
 `Field.tangent`, corrected in place.
 
-This doc is what's left: **nine open items, no single unifying thread**, so it's organized as a flat
-punch list rather than a phased plan. (Items 1 and 3 were investigated/implemented and closed 2026-08-24,
-in this same session that also identified them — kept in place, marked closed, rather than renumbering
-everything.)
+This doc is what's left: **ten open items, no single unifying thread**, so it's organized as a flat
+punch list rather than a phased plan. (Items 1, 3, and parts of 10 were investigated/implemented and
+closed 2026-08-24, in this same session that also identified them — kept in place, marked closed,
+rather than renumbering everything.)
 
 ## Open items
 
@@ -349,6 +349,52 @@ findings that need triage.
   it in CI because no sound threshold has been worked out. Any future CI/tooling work involving jitter
   above ~0.01 needs that investigation first; it cannot reuse the existing `--threshold 0.4` default.
 
+### 10. JFNK `jvp` matvec cost vs. pure forward mode — two of three sub-causes CLOSED 2026-08-24; third scoped, not implemented
+
+Triggered by a user report: `warpSPH/benchmarks/wave`'s `sdirk2_jfnk_jvp_1e-6` scheme measured
+~4x the cost of a pure forward-mode RHS evaluation, against an expected ~2x. Investigated the same
+session and found three independent, layered cost centers in `src/warpSPHCore/autograd/`, not one.
+Full detail, evidence, and the ruled-out alternative designs (including one the user proposed and
+one corrected by the user mid-investigation) are in the new
+`warpier_jvp_dual_argument_pruning_plan.md`; summarized here:
+
+- **CLOSED**: combined geometry+value JVP was doing 3 kernel launches where 2 suffice (a redundant
+  `warpOperation` relaunch for the value-tangent term, when the geometry-JVP kernel's own loop
+  already has everything needed to fold that term in for free). Fixed for all 5 value-having
+  operators (`operations.py`'s new `_FUSED_VALUE_JVP_OPERATIONS`, each `wp_<op>JVP.py`). Validated
+  exact (float32 roundoff) against the old computation, full test suite green; **1.35x** isolated
+  Gradient speedup. Confirmed via direct instrumentation to have ~0% effect on the wave-equation
+  benchmark specifically, because that case's particle positions are `constant()`, never part of
+  the JFNK-integrated state — the combined-tangent path this fix targets is never reached there
+  (0/212 calls, counted directly). Matters for a genuinely Lagrangian (moving-particle) JFNK case.
+- **CLOSED**: `hasLiveTangent`'s per-argument `.abs().max()>0` GPU→CPU sync (needed because torch's
+  forward-mode dispatch synthesizes a real zero tensor, not `None`, as the tangent for every
+  non-dual argument once any argument to the same call is dual) was paying one sync per flat
+  tensor argument — up to ~10 per operator call. Batched into one sync per call
+  (`stateAwareWarpFunction.py`'s new `_liveTangentMask`). Validated: full test suite green;
+  profiler-confirmed sync count 14→1/call; modest real benchmark win (jvp/fd `msPerRhs` ratio
+  ~2.0-2.1x → ~1.84-1.99x across nx=32-256).
+- **Scoped, not implemented**: even after both fixes, an isolated dual JVP call still costs ~1.9x
+  two plain calls — torch's own `Function.apply()` dispatch allocates a fresh zero-filled tensor
+  as the synthesized tangent for every non-dual argument (confirmed: ~12 `aten::zeros_like`/
+  `aten::empty_like` calls per dual call, absent from the plain-call baseline). Two "wrap more
+  fields as dual" directions were tested empirically and both made things *worse* (1.08x and 1.99x
+  respectively, not better) — real evidence, not just reasoning, against that whole family of
+  fix. A third direction (statically classify fields as constant vs. differentiable) was proposed
+  and then correctly rejected: a field's `constant()`-at-the-integrator-level tag doesn't mean
+  "never differentiable" — mass, e.g., stays constant across time-stepping but can legitimately be
+  dual if a caller is differentiating the pipeline w.r.t. an upstream sizing parameter (a
+  design-sensitivity use case this codebase's whole AD bridge exists to support), so a static
+  schema would silently break that. The corrected mechanism — per-call runtime detection via
+  `torch.autograd.forward_ad.unpack_dual()`, confirmed cheap (0.14-0.89us vs. `hasLiveTangent`'s
+  14.3us) and correct from a nested callee — is sound, but the actual obstacle is architectural:
+  `operator_spec.py`'s JVP dispatch reads `flat_tensors` by fixed absolute index (`_QPOS`, `_RPOS`,
+  ... `_STATE_N=36`), which breaks if inert tensors are dynamically dropped per call. Fixing this
+  needs a semantic-keyed lookup built fresh per call instead of the fixed-position convention —
+  touching `arg_extract.py`, `operator_spec.py`'s dispatch constants, and all five `wp_<op>JVP.py`
+  files. `warpier_jvp_dual_argument_pruning_plan.md` has the full phased plan (design → prototype
+  on Laplacian → rollout) and three open questions for you before Phase 1 starts.
+
 ## Fully closed (pointer only)
 
 - `docs/historic_plans/warpier_tier2_correction_jvp_plan.md` — all phases (a1)-(f) plus same-day
@@ -403,7 +449,16 @@ specific WCSPH sub-problem becomes the real target, deliberately not speculating
 the actual WCSPH implicit target before Phase B can be scoped (see the plan's "Open questions"). Items
 4/5/6 aren't backlog items — they're "if a concrete consumer shows up, expect this shape of work," not
 something to build speculatively, though Item 4 specifically now has a plausible path to becoming one via
-this plan's Phase B. Item 9 is background hygiene, pick up opportunistically.
+this plan's Phase B. Item 9 is background hygiene, pick up opportunistically. **Item 10's first two
+sub-causes are now CLOSED** (2026-08-24, same session that identified them via a user benchmark report):
+a redundant kernel relaunch in the combined geometry+value JVP path (fixed for all 5 operators, 1.35x
+isolated speedup, correctly ~0% effect on the wave-equation benchmark since it never exercises that
+path) and per-argument sync overhead in `hasLiveTangent` (batched to one sync per call, modest real
+benchmark win). The third sub-cause — torch's own forward-mode dispatch allocating a fresh zero tensor
+per non-dual argument — has a validated-cheap runtime detection mechanism (`unpack_dual`) but needs an
+architectural change (`operator_spec.py`'s fixed-position convention doesn't survive dynamically pruning
+arguments) bigger than this session's other two fixes; scoped in `warpier_jvp_dual_argument_pruning_plan.md`,
+not started, three open questions there need your input before Phase 1.
 
 ## Critical files
 
@@ -437,4 +492,20 @@ this plan's Phase B. Item 9 is background hygiene, pick up opportunistically.
   and the "unwrapped operator raises `NotImplementedError`" safety property actually live
 - `src/warpSPHCore/coreOperations/wp_densityHVP.py` — Item 5's existing reference pattern
 - `scripts/repro_warp_dynamic_loop_division.py` — Item 7
+- `warpier_jvp_dual_argument_pruning_plan.md` (new, 2026-08-24) — Item 10's full investigation and
+  scoping plan; `src/warpSPHCore/operations.py` (`_FUSED_VALUE_JVP_OPERATIONS` and the dispatch
+  around it) and all five `src/warpSPHCore/coreOperations/wp_<op>JVP.py` files — Item 10's first,
+  closed sub-fix; `src/warpSPHCore/autograd/stateAwareWarpFunction.py` (`_liveTangentMask`,
+  `hasLiveTangent`) and `autograd/operator_spec.py`'s fallback liveness check — Item 10's second,
+  closed sub-fix, and the fixed-position (`_QPOS`/`_RPOS`/... `_STATE_N=36`) convention that blocks
+  the third, open sub-fix; `warpSPHIntegrators/src/warpSPHIntegrators/jfnk.py` — `jvp_matvec`, the
+  actual call site exercising all of this; `warpSPH/benchmarks/wave/{bench_performance.py,
+  ../common/{runner,schemes}.py}` — the benchmark harness Item 10 was measured against;
+  `warpSPH/src/warpSPH/{systems/waveSystem.py,schemes/waveEquation.py}` — the wave case's state
+  (why positions are `constant()` there) and its single Laplacian(u,u) RHS call;
+  `scripts/spike_jvp_wave_case_overhead_profile.py`, `scripts/spike_jvp_dual_wrapping_alternatives.py`,
+  `scripts/spike_jvp_unpack_dual_pruning_mechanism.py` (new, 2026-08-24) — checked-in, independently
+  runnable reproductions of every isolated-call finding in Item 10's plan doc (exact commands and
+  the `bench_performance.py` baseline numbers are in the plan doc's "Reproducing this from scratch"
+  section)
 - `pyproject.toml`, `.github/workflows/tests.yml` — Items 8/9

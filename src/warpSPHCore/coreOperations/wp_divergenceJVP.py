@@ -54,6 +54,7 @@ def computeSPHDivergenceJVP_Func_i(
     iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: Any, referenceValues: wp.array(dtype = Any), # type: ignore
+    dfi: Any, tangentReferenceValues: wp.array(dtype = Any), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -104,7 +105,13 @@ def computeSPHDivergenceJVP_Func_i(
         coeff = fi * A + fj * B
         dcoeff = fi * dA + fj * dB
 
-        out += wp.dot(dcoeff, G) + wp.dot(coeff, dG)
+        # Value-tangent contribution, fused into this same loop (see
+        # `wp_gradientJVP.py`'s identical comment / `operations.py`'s
+        # `_FUSED_VALUE_JVP_OPERATIONS`): d(dot(coeff,G))/d(fi,fj) =
+        # dot(dfi*A + dfj*B, G), reusing this loop's own A/B/G.
+        dfj = tangentReferenceValues[j]
+
+        out += wp.dot(dcoeff, G) + wp.dot(coeff, dG) + wp.dot(dfi * A + dfj * B, G)
 
     return out
 
@@ -120,6 +127,7 @@ def computeSPHDivergenceJVP_Func_Adjacency(
     kernelProperties: kernelState,
 
     queryValue: Any, referenceValues: Any, # type: ignore
+    tangentQueryValue: Any, tangentReferenceValues: Any, # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -133,6 +141,7 @@ def computeSPHDivergenceJVP_Func_Adjacency(
     iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
+    dfi = tangentQueryValue[i]
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -154,6 +163,7 @@ def computeSPHDivergenceJVP_Func_Adjacency(
             iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
+            dfi, tangentReferenceValues,
 
             outputValue,
         )
@@ -175,6 +185,7 @@ def computeSPHDivergenceJVP_Kernel(
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     queryValues: Any, referenceValues: Any, # type: ignore
+    tangentQueryValues: Any, tangentReferenceValues: Any, # type: ignore
 
     # The last parameter is always the output array and should not be changed
     outputValues: wp.array(dtype = Any) # type: ignore
@@ -192,6 +203,7 @@ def computeSPHDivergenceJVP_Kernel(
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
+        tangentQueryValues, tangentReferenceValues,
 
         zero_like_warp(outputValues[i]),
     )
@@ -208,6 +220,8 @@ def computeSPHDivergenceGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    tangentQueryValues: Optional[torch.Tensor] = None,
+    tangentReferenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
@@ -218,13 +232,16 @@ def computeSPHDivergenceGeometryJVP(
 ) -> torch.Tensor:
     """`dDivergence_i`, shape `[numParticles]`.
 
-    This is the geometry/mass/density-tangent **partial** contribution to
-    Divergence's JVP -- `queryValues`/`referenceValues` are held at their
-    **primal** (non-tangent) value here. It is **not** the full derivative
-    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
-    relaunched with the tangent value arrays) for that, or call
-    `warpOperationJVP` directly, which sums both automatically
-    (`warpier_tier2_combined_jvp_plan.md`).
+    This is the geometry/mass/density-tangent contribution to Divergence's
+    JVP, `queryValues`/`referenceValues` held at their **primal**
+    (non-tangent) value -- unless `tangentQueryValues`/`tangentReferenceValues`
+    are also supplied, in which case the value-tangent contribution is folded
+    into the same neighbor loop and this returns the **full** combined JVP
+    directly (`operations.py`'s `_FUSED_VALUE_JVP_OPERATIONS`, same fusion as
+    `computeSPHGradientGeometryJVP`). Omitting both is still supported and
+    returns only the geometry-tangent partial, same as before;
+    `warpOperationJVP` is still the right entry point for callers rather than
+    this function directly.
 
     `queryValues`/`referenceValues` (`fi`/`fj`, `[numParticles, dim]` vector
     fields) are required and frozen here. `queryParticles.densities`/
@@ -286,6 +303,13 @@ def computeSPHDivergenceGeometryJVP(
             densities=referenceTangentState.densities if referenceTangentState.densities is not None else zerosScalar(nRef),
         )
 
+    # Value-tangent contribution is optional (see docstring): default to
+    # zero vectors so the kernel's `dot(dfi*A + dfj*B, G)` term is exactly
+    # zero and this call reduces to the pure geometry-tangent partial, same
+    # as before this parameter existed.
+    tangentQueryValues = tangentQueryValues if tangentQueryValues is not None else zerosVec(nQuery)
+    tangentReferenceValues = tangentReferenceValues if tangentReferenceValues is not None else zerosVec(nRef)
+
     return _launchGeometryJVP(
         computeSPHDivergenceJVP_Kernel,
         domain, kernel, supportMode, adjacency,
@@ -303,5 +327,5 @@ def computeSPHDivergenceGeometryJVP(
         crkTangentState=crkTangentState,
         renormalizationState=renormalizationState,
         renormalizationTangentState=renormalizationTangentState,
-        extraTensors=(queryValues, referenceValues),
+        extraTensors=(queryValues, referenceValues, tangentQueryValues, tangentReferenceValues),
     )

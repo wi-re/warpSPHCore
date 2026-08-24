@@ -65,6 +65,7 @@ def computeSPHGradientJVP_Func_i(
     iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: scalar_t, referenceValues: wp.array(dtype = scalar_t), # type: ignore
+    dfi: scalar_t, tangentReferenceValues: wp.array(dtype = scalar_t), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -117,7 +118,14 @@ def computeSPHGradientJVP_Func_i(
         coeff = fi * A + fj * B
         dcoeff = fi * dA + fj * dB
 
-        out += dcoeff * G + coeff * dG
+        # Value-tangent (Tier-1) contribution, fused into this same loop
+        # rather than a separate `warpOperation` relaunch with tangent values
+        # substituted for fi/fj (`operations.py`'s `_FUSED_VALUE_JVP_OPERATIONS`):
+        # d(coeff*G)/d(fi,fj) = (dfi*A + dfj*B)*G, using the identical A/B/G
+        # this loop already computed for the geometry-tangent terms above.
+        dfj = tangentReferenceValues[j]
+
+        out += dcoeff * G + coeff * dG + (dfi * A + dfj * B) * G
 
     return out
 
@@ -133,6 +141,7 @@ def computeSPHGradientJVP_Func_Adjacency(
     kernelProperties: kernelState,
 
     queryValue: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+    tangentQueryValue: wp.array(dtype = scalar_t), tangentReferenceValues: wp.array(dtype = scalar_t), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -146,6 +155,7 @@ def computeSPHGradientJVP_Func_Adjacency(
     iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
+    dfi = tangentQueryValue[i]
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -167,6 +177,7 @@ def computeSPHGradientJVP_Func_Adjacency(
             iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
+            dfi, tangentReferenceValues,
 
             outputValue,
         )
@@ -188,6 +199,7 @@ def computeSPHGradientJVP_Kernel(
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     queryValues: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+    tangentQueryValues: wp.array(dtype = scalar_t), tangentReferenceValues: wp.array(dtype = scalar_t), # type: ignore
 
     # The last parameter is always the output array and should not be changed
     outputValues: wp.array(dtype = Any) # type: ignore
@@ -205,6 +217,7 @@ def computeSPHGradientJVP_Kernel(
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
+        tangentQueryValues, tangentReferenceValues,
 
         zero_like_warp(outputValues[i]),
     )
@@ -221,6 +234,8 @@ def computeSPHGradientGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    tangentQueryValues: Optional[torch.Tensor] = None,
+    tangentReferenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
@@ -231,13 +246,17 @@ def computeSPHGradientGeometryJVP(
 ) -> torch.Tensor:
     """`dGradient_i`, shape `[numParticles, dim]`.
 
-    This is the geometry/mass/density-tangent **partial** contribution to
-    Gradient's JVP -- `queryValues`/`referenceValues` are held at their
-    **primal** (non-tangent) value here. It is **not** the full derivative
-    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
-    relaunched with the tangent value arrays) for that, or call
-    `warpOperationJVP` directly, which sums both automatically
-    (`warpier_tier2_combined_jvp_plan.md`).
+    This is the geometry/mass/density-tangent contribution to Gradient's JVP,
+    `queryValues`/`referenceValues` held at their **primal** (non-tangent)
+    value -- unless `tangentQueryValues`/`tangentReferenceValues` are also
+    supplied, in which case the value-tangent (Tier-1) contribution is folded
+    into the same neighbor loop and this returns the **full** combined JVP
+    directly (`operations.py`'s `_FUSED_VALUE_JVP_OPERATIONS`: `d(coeff*G) =
+    dcoeff*G + coeff*dG + (dfi*A + dfj*B)*G`, using the same `A`/`B`/`G` this
+    loop already computes -- no separate `warpOperation` relaunch needed).
+    Omitting both (or passing `None`) is still supported and returns only the
+    geometry-tangent partial, same as before; `warpOperationJVP` is still the
+    right entry point for callers rather than this function directly.
 
     `queryValues`/`referenceValues` (`fi`/`fj`, scalar fields) are required
     and frozen (no tangent on them here). `queryParticles.densities`/
@@ -293,6 +312,13 @@ def computeSPHGradientGeometryJVP(
             densities=referenceTangentState.densities if referenceTangentState.densities is not None else zerosScalar(nRef),
         )
 
+    # Value-tangent contribution is optional (see docstring): default to
+    # zero arrays so the kernel's `(dfi*A + dfj*B)*G` term is exactly zero
+    # and this call reduces to the pure geometry-tangent partial, same as
+    # before this parameter existed.
+    tangentQueryValues = tangentQueryValues if tangentQueryValues is not None else zerosScalar(nQuery)
+    tangentReferenceValues = tangentReferenceValues if tangentReferenceValues is not None else zerosScalar(nRef)
+
     return _launchGeometryJVP(
         computeSPHGradientJVP_Kernel,
         domain, kernel, supportMode, adjacency,
@@ -310,5 +336,5 @@ def computeSPHGradientGeometryJVP(
         crkTangentState=crkTangentState,
         renormalizationState=renormalizationState,
         renormalizationTangentState=renormalizationTangentState,
-        extraTensors=(queryValues, referenceValues),
+        extraTensors=(queryValues, referenceValues, tangentQueryValues, tangentReferenceValues),
     )

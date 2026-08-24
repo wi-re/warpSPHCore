@@ -231,6 +231,7 @@ def computeSPHLaplacianBrookshawJVP_Func_i(
     iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: scalar_t, referenceValues: wp.array(dtype = scalar_t), # type: ignore
+    dfi: scalar_t, tangentReferenceValues: wp.array(dtype = scalar_t), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -267,7 +268,15 @@ def computeSPHLaplacianBrookshawJVP_Func_i(
 
             fj = referenceValues[j]
             q = (fj - fi) * B
-            dq = (fj - fi) * dB
+            # `dq` folds in the value-tangent contribution (`operations.py`'s
+            # `_FUSED_VALUE_JVP_OPERATIONS`, same fusion as `wp_gradientJVP.py`):
+            # q = (fj-fi)*B is linear in both (fj-fi) and B, so d(q) by the
+            # product rule is (fj-fi)*dB (geometry, B's own tangent) +
+            # (dfj-dfi)*B (value, (fj-fi)'s own tangent) -- everything
+            # downstream of `dq` (here, just `-2*(dq*P + q*dP)`) already
+            # differentiates correctly through either or both at once.
+            dfj = tangentReferenceValues[j]
+            dq = (fj - fi) * dB + (dfj - dfi) * B
 
             out += -scalar_t(2.0) * (dq * P + q * dP)
 
@@ -285,6 +294,7 @@ def computeSPHLaplacianBrookshawJVP_Func_Adjacency(
     kernelProperties: kernelState,
 
     queryValue: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+    tangentQueryValue: wp.array(dtype = scalar_t), tangentReferenceValues: wp.array(dtype = scalar_t), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -298,6 +308,7 @@ def computeSPHLaplacianBrookshawJVP_Func_Adjacency(
     iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
+    dfi = tangentQueryValue[i]
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -319,6 +330,7 @@ def computeSPHLaplacianBrookshawJVP_Func_Adjacency(
             iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
+            dfi, tangentReferenceValues,
 
             outputValue,
         )
@@ -340,6 +352,7 @@ def computeSPHLaplacianBrookshawJVP_Kernel(
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     queryValues: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+    tangentQueryValues: wp.array(dtype = scalar_t), tangentReferenceValues: wp.array(dtype = scalar_t), # type: ignore
 
     # The last parameter is always the output array and should not be changed
     outputValues: wp.array(dtype = Any) # type: ignore
@@ -357,6 +370,7 @@ def computeSPHLaplacianBrookshawJVP_Kernel(
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
+        tangentQueryValues, tangentReferenceValues,
 
         zero_like_warp(outputValues[i]),
     )
@@ -373,6 +387,8 @@ def computeSPHLaplacianBrookshawGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    tangentQueryValues: Optional[torch.Tensor] = None,
+    tangentReferenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
@@ -385,13 +401,16 @@ def computeSPHLaplacianBrookshawGeometryJVP(
     (see `computeSPHLaplacianNaiveGeometryJVP` for Naive; `computeSPHLaplacianGeometryJVP`
     is the dispatcher between the two that `operations.py` actually calls).
 
-    This is the geometry/mass/density-tangent **partial** contribution to
-    Laplacian's JVP -- `queryValues`/`referenceValues` are held at their
-    **primal** (non-tangent) value here. It is **not** the full derivative
-    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
-    relaunched with the tangent value arrays) for that, or call
-    `warpOperationJVP` directly, which sums both automatically
-    (`warpier_tier2_combined_jvp_plan.md`).
+    This is the geometry/mass/density-tangent contribution to Laplacian's
+    (Brookshaw) JVP, `queryValues`/`referenceValues` held at their **primal**
+    (non-tangent) value -- unless `tangentQueryValues`/`tangentReferenceValues`
+    are also supplied, in which case the value-tangent contribution is folded
+    into the same neighbor loop and this returns the **full** combined JVP
+    directly (`operations.py`'s `_FUSED_VALUE_JVP_OPERATIONS`, same fusion as
+    `computeSPHGradientGeometryJVP`). Omitting both is still supported and
+    returns only the geometry-tangent partial, same as before;
+    `warpOperationJVP` is still the right entry point for callers rather than
+    this function directly.
 
     `queryValues`/`referenceValues` (`fi`/`fj`, scalar fields) are required
     and frozen here. `queryParticles.densities`/`referenceParticles.densities`
@@ -451,6 +470,13 @@ def computeSPHLaplacianBrookshawGeometryJVP(
             densities=referenceTangentState.densities if referenceTangentState.densities is not None else zerosScalar(nRef),
         )
 
+    # Value-tangent contribution is optional (see docstring): default to
+    # zero arrays so the fused value term is exactly zero and this call
+    # reduces to the pure geometry-tangent partial, same as before this
+    # parameter existed.
+    tangentQueryValues = tangentQueryValues if tangentQueryValues is not None else zerosScalar(nQuery)
+    tangentReferenceValues = tangentReferenceValues if tangentReferenceValues is not None else zerosScalar(nRef)
+
     return _launchGeometryJVP(
         computeSPHLaplacianBrookshawJVP_Kernel,
         domain, kernel, supportMode, adjacency,
@@ -468,7 +494,7 @@ def computeSPHLaplacianBrookshawGeometryJVP(
         crkTangentState=crkTangentState,
         renormalizationState=renormalizationState,
         renormalizationTangentState=renormalizationTangentState,
-        extraTensors=(queryValues, referenceValues),
+        extraTensors=(queryValues, referenceValues, tangentQueryValues, tangentReferenceValues),
     )
 
 
@@ -496,6 +522,7 @@ def computeSPHLaplacianNaiveJVP_Func_i(
     iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: scalar_t, referenceValues: wp.array(dtype = scalar_t), # type: ignore
+    dfi: scalar_t, tangentReferenceValues: wp.array(dtype = scalar_t), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -527,7 +554,10 @@ def computeSPHLaplacianNaiveJVP_Func_i(
 
         fj = referenceValues[j]
         q = (fj - fi) * B
-        dq = (fj - fi) * dB
+        # `dq` folds in the value-tangent contribution, same fusion as
+        # Brookshaw's own (`computeSPHLaplacianBrookshawJVP_Func_i` above).
+        dfj = tangentReferenceValues[j]
+        dq = (fj - fi) * dB + (dfj - dfi) * B
 
         out += dq * L + q * dL
 
@@ -545,6 +575,7 @@ def computeSPHLaplacianNaiveJVP_Func_Adjacency(
     kernelProperties: kernelState,
 
     queryValue: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+    tangentQueryValue: wp.array(dtype = scalar_t), tangentReferenceValues: wp.array(dtype = scalar_t), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -558,6 +589,7 @@ def computeSPHLaplacianNaiveJVP_Func_Adjacency(
     iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
+    dfi = tangentQueryValue[i]
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -579,6 +611,7 @@ def computeSPHLaplacianNaiveJVP_Func_Adjacency(
             iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
+            dfi, tangentReferenceValues,
 
             outputValue,
         )
@@ -600,6 +633,7 @@ def computeSPHLaplacianNaiveJVP_Kernel(
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     queryValues: wp.array(dtype = scalar_t), referenceValues: wp.array(dtype = scalar_t), # type: ignore
+    tangentQueryValues: wp.array(dtype = scalar_t), tangentReferenceValues: wp.array(dtype = scalar_t), # type: ignore
 
     # The last parameter is always the output array and should not be changed
     outputValues: wp.array(dtype = Any) # type: ignore
@@ -617,6 +651,7 @@ def computeSPHLaplacianNaiveJVP_Kernel(
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
+        tangentQueryValues, tangentReferenceValues,
 
         zero_like_warp(outputValues[i]),
     )
@@ -633,6 +668,8 @@ def computeSPHLaplacianNaiveGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    tangentQueryValues: Optional[torch.Tensor] = None,
+    tangentReferenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
@@ -646,13 +683,16 @@ def computeSPHLaplacianNaiveGeometryJVP(
     (`kernels/kernelJVP.py`). `adjacency` is an `AdjacencyList` or
     `CompactHashMap`.
 
-    This is the geometry/mass/density-tangent **partial** contribution to
-    Laplacian's JVP -- `queryValues`/`referenceValues` are held at their
-    **primal** (non-tangent) value here. It is **not** the full derivative
-    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
-    relaunched with the tangent value arrays) for that, or call
-    `warpOperationJVP` directly, which sums both automatically
-    (`warpier_tier2_combined_jvp_plan.md`)."""
+    This is the geometry/mass/density-tangent contribution to Laplacian's
+    (Naive) JVP, `queryValues`/`referenceValues` held at their **primal**
+    (non-tangent) value -- unless `tangentQueryValues`/`tangentReferenceValues`
+    are also supplied, in which case the value-tangent contribution is folded
+    into the same neighbor loop and this returns the **full** combined JVP
+    directly (`operations.py`'s `_FUSED_VALUE_JVP_OPERATIONS`, same fusion as
+    `computeSPHGradientGeometryJVP`). Omitting both is still supported and
+    returns only the geometry-tangent partial, same as before;
+    `warpOperationJVP` is still the right entry point for callers rather than
+    this function directly."""
     if queryValues is None or referenceValues is None:
         raise ValueError(
             "computeSPHLaplacianNaiveGeometryJVP: queryValues and "
@@ -686,6 +726,13 @@ def computeSPHLaplacianNaiveGeometryJVP(
             densities=referenceTangentState.densities if referenceTangentState.densities is not None else zerosScalar(nRef),
         )
 
+    # Value-tangent contribution is optional (see docstring): default to
+    # zero arrays so the fused value term is exactly zero and this call
+    # reduces to the pure geometry-tangent partial, same as before this
+    # parameter existed.
+    tangentQueryValues = tangentQueryValues if tangentQueryValues is not None else zerosScalar(nQuery)
+    tangentReferenceValues = tangentReferenceValues if tangentReferenceValues is not None else zerosScalar(nRef)
+
     return _launchGeometryJVP(
         computeSPHLaplacianNaiveJVP_Kernel,
         domain, kernel, supportMode, adjacency,
@@ -699,7 +746,7 @@ def computeSPHLaplacianNaiveGeometryJVP(
         gradientMode=gradientMode,
         referenceVolumes=referenceVolumes,
         tangentReferenceVolumes=tangentReferenceVolumes,
-        extraTensors=(queryValues, referenceValues),
+        extraTensors=(queryValues, referenceValues, tangentQueryValues, tangentReferenceValues),
     )
 
 
@@ -754,6 +801,7 @@ def computeSPHLaplacianDotJVP_Func_i(
     iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: Any, referenceValues: wp.array(dtype = Any), # type: ignore
+    dfi: Any, tangentReferenceValues: wp.array(dtype = Any), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -806,7 +854,12 @@ def computeSPHLaplacianDotJVP_Func_i(
 
             fj = referenceValues[j]
             q_ij = (fj - fi) * B
-            dq_ij = (fj - fi) * dB
+            # `dq_ij` folds in the value-tangent contribution, same fusion as
+            # Brookshaw's own (`computeSPHLaplacianBrookshawJVP_Func_i`) --
+            # everything below (`proj`/`dproj`, `left`/`dleft`, `contribution`)
+            # already differentiates correctly through whatever `dq_ij` holds.
+            dfj = tangentReferenceValues[j]
+            dq_ij = (fj - fi) * dB + (dfj - dfi) * B
 
             # computeLaplacianDot2's two accumulation loops collapse to
             # output[k] = -left*F_ab + q_ij[k]*F_ab, left = (dim+2)*proj_b*n_ij[d],
@@ -845,6 +898,7 @@ def computeSPHLaplacianDotJVP_Func_Adjacency(
     kernelProperties: kernelState,
 
     queryValue: wp.array(dtype = Any), referenceValues: wp.array(dtype = Any), # type: ignore
+    tangentQueryValue: wp.array(dtype = Any), tangentReferenceValues: wp.array(dtype = Any), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -858,6 +912,7 @@ def computeSPHLaplacianDotJVP_Func_Adjacency(
     iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
+    dfi = tangentQueryValue[i]
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -879,6 +934,7 @@ def computeSPHLaplacianDotJVP_Func_Adjacency(
             iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
+            dfi, tangentReferenceValues,
 
             outputValue,
         )
@@ -900,6 +956,7 @@ def computeSPHLaplacianDotJVP_Kernel(
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     queryValues: wp.array(dtype = Any), referenceValues: wp.array(dtype = Any), # type: ignore
+    tangentQueryValues: wp.array(dtype = Any), tangentReferenceValues: wp.array(dtype = Any), # type: ignore
     flatInputShape: wp.int32,
 
     # The last parameter is always the output array and should not be changed
@@ -918,6 +975,7 @@ def computeSPHLaplacianDotJVP_Kernel(
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
+        tangentQueryValues, tangentReferenceValues,
 
         zero_like_warp(outputValues[i]),
     )
@@ -934,6 +992,8 @@ def computeSPHLaplacianDotGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    tangentQueryValues: Optional[torch.Tensor] = None,
+    tangentReferenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
@@ -955,13 +1015,16 @@ def computeSPHLaplacianDotGeometryJVP(
     plain scalar field does not have blocks to project). `adjacency` is an
     `AdjacencyList` or `CompactHashMap`.
 
-    This is the geometry/mass/density-tangent **partial** contribution to
-    Laplacian's JVP -- `queryValues`/`referenceValues` are held at their
-    **primal** (non-tangent) value here. It is **not** the full derivative
-    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
-    relaunched with the tangent value arrays) for that, or call
-    `warpOperationJVP` directly, which sums both automatically
-    (`warpier_tier2_combined_jvp_plan.md`).
+    This is the geometry/mass/density-tangent contribution to Laplacian's
+    (Dot) JVP, `queryValues`/`referenceValues` held at their **primal**
+    (non-tangent) value -- unless `tangentQueryValues`/`tangentReferenceValues`
+    are also supplied, in which case the value-tangent contribution is folded
+    into the same neighbor loop and this returns the **full** combined JVP
+    directly (`operations.py`'s `_FUSED_VALUE_JVP_OPERATIONS`, same fusion as
+    `computeSPHGradientGeometryJVP`). Omitting both is still supported and
+    returns only the geometry-tangent partial, same as before;
+    `warpOperationJVP` is still the right entry point for callers rather than
+    this function directly.
 
     `crkState`/`crkTangentState` and `renormalizationState`/
     `renormalizationTangentState` (`warpier_tier2_correction_jvp_plan.md`
@@ -1007,6 +1070,18 @@ def computeSPHLaplacianDotGeometryJVP(
     # q_ij[base+c] block indexing requires an indexable vector unconditionally.
     queryValuesFlat = queryValues.reshape(-1, flatInputShape)
     referenceValuesFlat = referenceValues.reshape(-1, flatInputShape)
+    # Value-tangent contribution is optional (see docstring): default to
+    # zero arrays (same flattened shape as the primal values) so the fused
+    # value term is exactly zero and this call reduces to the pure
+    # geometry-tangent partial, same as before this parameter existed.
+    tangentQueryValuesFlat = (
+        tangentQueryValues.reshape(-1, flatInputShape) if tangentQueryValues is not None
+        else torch.zeros_like(queryValuesFlat)
+    )
+    tangentReferenceValuesFlat = (
+        tangentReferenceValues.reshape(-1, flatInputShape) if tangentReferenceValues is not None
+        else torch.zeros_like(referenceValuesFlat)
+    )
 
     referenceParticles = referenceParticles if referenceParticles is not None else queryParticles
     device, dtype = queryParticles.positions.device, queryParticles.positions.dtype
@@ -1053,7 +1128,7 @@ def computeSPHLaplacianDotGeometryJVP(
         crkTangentState=crkTangentState,
         renormalizationState=renormalizationState,
         renormalizationTangentState=renormalizationTangentState,
-        extraTensors=(queryValuesFlat, referenceValuesFlat),
+        extraTensors=(queryValuesFlat, referenceValuesFlat, tangentQueryValuesFlat, tangentReferenceValuesFlat),
         extraScalars=(wp.int32(flatInputShape),),
     )
     return result.reshape(nQuery, *inputShape)
@@ -1080,6 +1155,7 @@ def computeSPHLaplacianDefaultJVP_Func_i(
     iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: Any, referenceValues: wp.array(dtype = Any), # type: ignore
+    dfi: Any, tangentReferenceValues: wp.array(dtype = Any), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -1114,7 +1190,10 @@ def computeSPHLaplacianDefaultJVP_Func_i(
 
         fj = referenceValues[j]
         q_ij = (fj - fi) * B
-        dq_ij = (fj - fi) * dB
+        # `dq_ij` folds in the value-tangent contribution, same fusion as
+        # Brookshaw's own (`computeSPHLaplacianBrookshawJVP_Func_i`).
+        dfj = tangentReferenceValues[j]
+        dq_ij = (fj - fi) * dB + (dfj - dfi) * B
 
         # Explicit r_ij > 0 guard, same fix and same reason as Dot's own above
         # (and Brookshaw's, `computeSPHLaplacianBrookshawJVP_Func_i`): n_ij2 divides
@@ -1153,6 +1232,7 @@ def computeSPHLaplacianDefaultJVP_Func_Adjacency(
     kernelProperties: kernelState,
 
     queryValue: wp.array(dtype = Any), referenceValues: wp.array(dtype = Any), # type: ignore
+    tangentQueryValue: wp.array(dtype = Any), tangentReferenceValues: wp.array(dtype = Any), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -1166,6 +1246,7 @@ def computeSPHLaplacianDefaultJVP_Func_Adjacency(
     iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
+    dfi = tangentQueryValue[i]
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -1187,6 +1268,7 @@ def computeSPHLaplacianDefaultJVP_Func_Adjacency(
             iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
+            dfi, tangentReferenceValues,
 
             outputValue,
         )
@@ -1208,6 +1290,7 @@ def computeSPHLaplacianDefaultJVP_Kernel(
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     queryValues: wp.array(dtype = Any), referenceValues: wp.array(dtype = Any), # type: ignore
+    tangentQueryValues: wp.array(dtype = Any), tangentReferenceValues: wp.array(dtype = Any), # type: ignore
 
     # The last parameter is always the output array and should not be changed
     outputValues: wp.array(dtype = Any) # type: ignore
@@ -1225,6 +1308,7 @@ def computeSPHLaplacianDefaultJVP_Kernel(
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
+        tangentQueryValues, tangentReferenceValues,
 
         zero_like_warp(outputValues[i]),
     )
@@ -1241,6 +1325,8 @@ def computeSPHLaplacianDefaultGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    tangentQueryValues: Optional[torch.Tensor] = None,
+    tangentReferenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
@@ -1259,13 +1345,16 @@ def computeSPHLaplacianDefaultGeometryJVP(
     `dLaplacian_i` by the ordinary product/quotient rule through every
     factor. `adjacency` is an `AdjacencyList` or `CompactHashMap`.
 
-    This is the geometry/mass/density-tangent **partial** contribution to
-    Laplacian's JVP -- `queryValues`/`referenceValues` are held at their
-    **primal** (non-tangent) value here. It is **not** the full derivative
-    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
-    relaunched with the tangent value arrays) for that, or call
-    `warpOperationJVP` directly, which sums both automatically
-    (`warpier_tier2_combined_jvp_plan.md`).
+    This is the geometry/mass/density-tangent contribution to Laplacian's
+    (Default) JVP, `queryValues`/`referenceValues` held at their **primal**
+    (non-tangent) value -- unless `tangentQueryValues`/`tangentReferenceValues`
+    are also supplied, in which case the value-tangent contribution is folded
+    into the same neighbor loop and this returns the **full** combined JVP
+    directly (`operations.py`'s `_FUSED_VALUE_JVP_OPERATIONS`, same fusion as
+    `computeSPHGradientGeometryJVP`). Omitting both is still supported and
+    returns only the geometry-tangent partial, same as before;
+    `warpOperationJVP` is still the right entry point for callers rather than
+    this function directly.
 
     `crkState`/`crkTangentState` and `renormalizationState`/
     `renormalizationTangentState` (`warpier_tier2_correction_jvp_plan.md`
@@ -1314,6 +1403,15 @@ def computeSPHLaplacianDefaultGeometryJVP(
 
     outputDtype = castTorchToWarpAsBuiltins(queryValues).dtype
 
+    # Value-tangent contribution is optional (see docstring): default to
+    # zero arrays so the fused value term is exactly zero and this call
+    # reduces to the pure geometry-tangent partial, same as before this
+    # parameter existed.
+    tangentQueryValues = tangentQueryValues if tangentQueryValues is not None else torch.zeros_like(queryValues)
+    tangentReferenceValues = (
+        tangentReferenceValues if tangentReferenceValues is not None else torch.zeros_like(referenceValues)
+    )
+
     return _launchGeometryJVP(
         computeSPHLaplacianDefaultJVP_Kernel,
         domain, kernel, supportMode, adjacency,
@@ -1331,7 +1429,7 @@ def computeSPHLaplacianDefaultGeometryJVP(
         crkTangentState=crkTangentState,
         renormalizationState=renormalizationState,
         renormalizationTangentState=renormalizationTangentState,
-        extraTensors=(queryValues, referenceValues),
+        extraTensors=(queryValues, referenceValues, tangentQueryValues, tangentReferenceValues),
     )
 
 

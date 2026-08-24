@@ -276,13 +276,16 @@ class StateAwareWarpFunction(torch.autograd.Function):
         # tangent anywhere in this call" must be checked as None-or-all-zero.
         # Compute the liveness mask ONCE and hand it to the jvp_fn closure
         # (which re-consults the same flat positions many times over -- see
-        # _build_geometry_jvp_fn). Each hasLiveTangent call is a GPU->CPU sync
-        # (a full .abs().max() reduction plus a DtoH copy), and torch's
-        # zero-tangent fillers mean there is one per non-dual argument in the
-        # call, so the per-call-site checks cost ~2x more syncs than there are
-        # arguments. Caching the mask collapses that to exactly
-        # len(flat_tangents) syncs per matvec.
-        live_mask = [hasLiveTangent(t) for t in flat_tangents]
+        # _build_geometry_jvp_fn). Profiled on the wave-equation JFNK(jvp)
+        # benchmark (2026-08-24): this GPU->CPU sync accounted for ~16% of
+        # wall-clock time, ~95% of those checks finding nothing live -- most
+        # positions in a typical call are exactly this zero-tangent filler
+        # (e.g. position/support/mass/density arguments when only a value
+        # field is actually being differentiated, as in that benchmark).
+        # _liveTangentMask batches every tensor's own .abs().max() reduction
+        # on-device (no sync each) and pays exactly ONE GPU->CPU round trip
+        # for the whole call, instead of one per tensor.
+        live_mask = _liveTangentMask(flat_tangents)
         if not any(live_mask):
             return None
 
@@ -305,8 +308,30 @@ def hasLiveTangent(t) -> bool:
     propagate here"; only a tensor with at least one non-zero entry is a
     real tangent. Shared between `jvp()`'s own "anything live at all?" check
     and each `jvp_fn` closure's "is this a supported combination?" check
-    (`wrapper.py`), so both apply the same definition of "live"."""
+    (`wrapper.py`), so both apply the same definition of "live". Single-
+    tensor primitive kept for that shared definition and for any direct
+    caller; `jvp()` itself uses the batched `_liveTangentMask` below rather
+    than calling this once per tensor (each call is its own GPU->CPU sync)."""
     return t is not None and bool(t.abs().max() > 0)
+
+
+def _liveTangentMask(tangents) -> list:
+    """Batched form of ``[hasLiveTangent(t) for t in tangents]``: reduces
+    every non-None tensor's ``.abs().max()`` on-device (no sync per tensor --
+    ``torch.Tensor.max()`` returns a GPU-resident 0-d tensor), stacks the
+    results, and pays exactly ONE GPU->CPU round trip for the whole call via
+    a single ``.tolist()`` instead of one round trip per tensor. Equivalent
+    to (not an approximation of) the per-tensor version -- same "> 0" test,
+    same None-stays-False handling -- just batched. See `jvp()`'s own comment
+    for the profiled cost this replaces."""
+    idx = [i for i, t in enumerate(tangents) if t is not None]
+    mask = [False] * len(tangents)
+    if not idx:
+        return mask
+    reduced = torch.stack([tangents[i].abs().max() for i in idx])
+    for pos, isLive in zip(idx, (reduced > 0).tolist()):
+        mask[pos] = isLive
+    return mask
 
 
 warpWrapperStateaware = StateAwareWarpFunction.apply

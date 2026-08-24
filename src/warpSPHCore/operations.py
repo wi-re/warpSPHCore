@@ -219,6 +219,27 @@ _LAPLACIAN_CORRECTION_SCHEMES = (
     LaplacianScheme.Brookshaw, LaplacianScheme.Dot, LaplacianScheme.Default,
 )
 
+# Operators whose `computeSPH<Op>GeometryJVP` kernel folds the value-tangent
+# (`fi`/`fj`-tangent) contribution into the same neighbor loop that already
+# computes the geometry-tangent contribution, so `warpOperationJVP`'s "both at
+# once" case (below) can skip the separate `warpOperation(...)` relaunch that
+# would otherwise recompute the same `A`/`B`/`G` a second time from scratch --
+# this is a pure performance fusion, not new math: the geometry-JVP kernel's
+# inner loop already holds `A`, `B`, `G` per pair (needed for `dcoeff*G +
+# coeff*dG`), and `(dfi*A + dfj*B)*G` is exactly what a `warpOperation`
+# relaunch with tangent values substituted for `fi`/`fj` would compute, using
+# the identical (already CRK/renorm-corrected, already-primal-volume-weighted)
+# `A`/`B`/`G`. All five value-having operators (`_VALUE_JVP_OPERATIONS`) now
+# fold this in -- Interpolate has no `queryValues` term at all (only
+# `referenceValues`/`fj`), so its dispatch below only ever threads
+# `tangentReferenceValues`, never `tangentQueryValues`. An operator absent
+# from this set would still get the correct (just slower) geometryResult +
+# valueResult path below; none currently are.
+_FUSED_VALUE_JVP_OPERATIONS = (
+    WarpOperation.Interpolate, WarpOperation.Gradient, WarpOperation.Divergence,
+    WarpOperation.Curl, WarpOperation.Laplacian,
+)
+
 # Populated incrementally as `warpier_tier2_operators_plan.md`'s steps 2-7
 # land each operator's `computeSPH<Op>GeometryJVP`. An operator in
 # `_GEOMETRY_JVP_OPERATIONS` but not yet a key here still raises
@@ -650,6 +671,26 @@ def warpOperationJVP(
             dispatchKwargs["crkTangentState"] = crkTangentState
             dispatchKwargs["renormalizationState"] = renormalizationState
             dispatchKwargs["renormalizationTangentState"] = renormalizationTangentState
+
+        # Performance fusion (see `_FUSED_VALUE_JVP_OPERATIONS`'s docstring):
+        # for operators whose geometry-JVP kernel can also fold in the
+        # value-tangent term, hand tangentQueryValues/tangentReferenceValues
+        # straight to dispatchFn instead of relaunching `warpOperation`
+        # separately below -- geometryResult already IS the full (geometry +
+        # value) JVP in that case.
+        fusedValueJVP = (
+            operationProperties.operation in _FUSED_VALUE_JVP_OPERATIONS
+            and (tangentQueryValues is not None or tangentReferenceValues is not None)
+        )
+        if fusedValueJVP:
+            # Interpolate has no queryValues (fi) term at all -- its own
+            # computeSPHInterpolateGeometryJVP declares no tangentQueryValues
+            # parameter to match (same shape as its primal warpOperation
+            # branch, which never reads queryValues either).
+            if operationProperties.operation is not WarpOperation.Interpolate:
+                dispatchKwargs["tangentQueryValues"] = tangentQueryValues
+            dispatchKwargs["tangentReferenceValues"] = tangentReferenceValues
+
         geometryResult = dispatchFn(
             queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
             queryTangentStateForDispatch,
@@ -657,6 +698,9 @@ def warpOperationJVP(
         )
 
         if tangentQueryValues is None and tangentReferenceValues is None:
+            return geometryResult
+
+        if fusedValueJVP:
             return geometryResult
 
         # Combined value+geometry JVP: `warpier_tier2_combined_jvp_plan.md` --
@@ -668,6 +712,13 @@ def warpOperationJVP(
         # plus the value JVP contribution below (value tangent, geometry frozen
         # at primal). Verified against `torch.autograd.functional.jacobian`
         # differentiating w.r.t. every input at once, see the plan doc.
+        #
+        # Operators in `_FUSED_VALUE_JVP_OPERATIONS` skip this relaunch
+        # entirely (returned above) -- their geometry-JVP kernel already
+        # folded this same contribution in using the identical A/B/G its own
+        # loop already computed, so this second pass would only recompute (and
+        # then discard, via the addition immediately below) exactly the same
+        # numbers.
         valueResult = warpOperation(
             queryParticles, operationProperties, domain,
             queryValues=tangentQueryValues, referenceValues=tangentReferenceValues,

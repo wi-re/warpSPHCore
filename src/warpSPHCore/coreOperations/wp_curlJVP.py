@@ -55,6 +55,7 @@ def computeSPHCurlJVP_Func_i(
     iCorrectionTangentData: Any, correctionTangentData: Any,
 
     fi: Any, referenceValues: wp.array(dtype = Any), # type: ignore
+    dfi: Any, tangentReferenceValues: wp.array(dtype = Any), # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -105,7 +106,18 @@ def computeSPHCurlJVP_Func_i(
         coeff = fi * A + fj * B
         dcoeff = fi * dA + fj * dB
 
-        out += G[0] * dcoeff[1] - G[1] * dcoeff[0] + dG[0] * coeff[1] - dG[1] * coeff[0]
+        # Value-tangent contribution, fused into this same loop (see
+        # `wp_gradientJVP.py`'s identical comment / `operations.py`'s
+        # `_FUSED_VALUE_JVP_OPERATIONS`): the same cross-product formula
+        # applied to `G` and `(dfi*A + dfj*B)` (the value-only part of
+        # `dcoeff`), reusing this loop's own A/B/G.
+        dfj = tangentReferenceValues[j]
+        valueCoeff = dfi * A + dfj * B
+
+        out += (
+            G[0] * dcoeff[1] - G[1] * dcoeff[0] + dG[0] * coeff[1] - dG[1] * coeff[0]
+            + G[0] * valueCoeff[1] - G[1] * valueCoeff[0]
+        )
 
     return out
 
@@ -121,6 +133,7 @@ def computeSPHCurlJVP_Func_Adjacency(
     kernelProperties: kernelState,
 
     queryValue: Any, referenceValues: Any, # type: ignore
+    tangentQueryValue: Any, tangentReferenceValues: Any, # type: ignore
 
     outputValue: Any, # type: ignore
 ):
@@ -134,6 +147,7 @@ def computeSPHCurlJVP_Func_Adjacency(
     iCorrectionTangentData = getParticleCorrectionTangentData_i(correctionData, correctionTangentData, i)
 
     fi = queryValue[i]
+    dfi = tangentQueryValue[i]
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
@@ -155,6 +169,7 @@ def computeSPHCurlJVP_Func_Adjacency(
             iCorrectionTangentData, correctionTangentData,
 
             fi, referenceValues,
+            dfi, tangentReferenceValues,
 
             outputValue,
         )
@@ -176,6 +191,7 @@ def computeSPHCurlJVP_Kernel(
     # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
 
     queryValues: Any, referenceValues: Any, # type: ignore
+    tangentQueryValues: Any, tangentReferenceValues: Any, # type: ignore
 
     # The last parameter is always the output array and should not be changed
     outputValues: wp.array(dtype = Any) # type: ignore
@@ -193,6 +209,7 @@ def computeSPHCurlJVP_Kernel(
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
         queryValues, referenceValues,
+        tangentQueryValues, tangentReferenceValues,
 
         zero_like_warp(outputValues[i]),
     )
@@ -209,6 +226,8 @@ def computeSPHCurlGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     queryValues: Optional[torch.Tensor] = None,
     referenceValues: Optional[torch.Tensor] = None,
+    tangentQueryValues: Optional[torch.Tensor] = None,
+    tangentReferenceValues: Optional[torch.Tensor] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
@@ -221,13 +240,16 @@ def computeSPHCurlGeometryJVP(
     `warpOperation(Curl)`'s own `[1]`-forced output shape for a 2D
     vector-field input, `wp_curl.py`).
 
-    This is the geometry/mass/density-tangent **partial** contribution to
-    Curl's JVP -- `queryValues`/`referenceValues` are held at their
-    **primal** (non-tangent) value here. It is **not** the full derivative
-    on its own; add the value-tangent (value JVP) contribution (`warpOperation`
-    relaunched with the tangent value arrays) for that, or call
-    `warpOperationJVP` directly, which sums both automatically
-    (`warpier_tier2_combined_jvp_plan.md`).
+    This is the geometry/mass/density-tangent contribution to Curl's JVP,
+    `queryValues`/`referenceValues` held at their **primal** (non-tangent)
+    value -- unless `tangentQueryValues`/`tangentReferenceValues` are also
+    supplied, in which case the value-tangent contribution is folded into the
+    same neighbor loop and this returns the **full** combined JVP directly
+    (`operations.py`'s `_FUSED_VALUE_JVP_OPERATIONS`, same fusion as
+    `computeSPHGradientGeometryJVP`). Omitting both is still supported and
+    returns only the geometry-tangent partial, same as before;
+    `warpOperationJVP` is still the right entry point for callers rather than
+    this function directly.
 
     `queryValues`/`referenceValues` (`fi`/`fj`, `[numParticles, 2]` vector
     fields) are required and frozen here. `queryParticles.densities`/
@@ -285,6 +307,13 @@ def computeSPHCurlGeometryJVP(
             densities=referenceTangentState.densities if referenceTangentState.densities is not None else zerosScalar(nRef),
         )
 
+    # Value-tangent contribution is optional (see docstring): default to
+    # zero vectors so the fused value term is exactly zero and this call
+    # reduces to the pure geometry-tangent partial, same as before this
+    # parameter existed.
+    tangentQueryValues = tangentQueryValues if tangentQueryValues is not None else zerosVec(nQuery)
+    tangentReferenceValues = tangentReferenceValues if tangentReferenceValues is not None else zerosVec(nRef)
+
     dCurl_t = _launchGeometryJVP(
         computeSPHCurlJVP_Kernel,
         domain, kernel, supportMode, adjacency,
@@ -302,6 +331,6 @@ def computeSPHCurlGeometryJVP(
         crkTangentState=crkTangentState,
         renormalizationState=renormalizationState,
         renormalizationTangentState=renormalizationTangentState,
-        extraTensors=(queryValues, referenceValues),
+        extraTensors=(queryValues, referenceValues, tangentQueryValues, tangentReferenceValues),
     )
     return dCurl_t.unsqueeze(-1)
