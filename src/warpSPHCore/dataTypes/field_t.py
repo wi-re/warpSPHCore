@@ -21,12 +21,12 @@ import warp as wp
 
 
 class Role(Enum):
-    """Which value a Field view represents. One role is live today; TANGENT
-    is Phase 6's forward-mode affordance (Section 3.6, requirement 2) -- the
-    slot costs one dict entry and is otherwise inert until something writes
-    into it."""
+    """Which value a Field view represents. PRIMAL is the only role that has
+    ever been populated -- forward-mode AD ended up landing via
+    `StateAwareWarpFunction.jvp()` delegating to `warpOperationJVP`'s
+    flat-tensor tangent arguments (`warpier_unified_operator_wrapper_plan.md`),
+    not via a second Field role, so no second member was ever added here."""
     PRIMAL = 0
-    TANGENT = 1
 
 
 class ExecutionMode(Enum):
@@ -81,7 +81,7 @@ class Field:
     any particular call.
     """
 
-    __slots__ = ("views", "tangent", "_ptr", "_shape", "_strides", "_dtype", "_owner")
+    __slots__ = ("views", "_ptr", "_shape", "_strides", "_dtype", "_owner")
 
     def __init__(
         self,
@@ -93,7 +93,6 @@ class Field:
         owner: Optional[torch.Tensor] = None,
     ):
         self.views: Dict[Role, "wp.array"] = {Role.PRIMAL: view}
-        self.tangent: Optional["Field"] = None
         self._ptr = ptr
         self._shape = shape
         self._strides = strides

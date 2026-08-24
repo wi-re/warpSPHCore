@@ -331,16 +331,25 @@ The big remaining piece, in priority order — no re-investigation needed, this 
    infrastructure the tangent slot rides on -- the slot itself is still inert (nothing writes into
    it yet). Read `warpier_fields.md` Section 3.6 and its "Status as of 2026-08-18" section before
    touching this again; do not re-derive whether `Field` exists.
-2. **Tier-2 forward-mode wiring (Phase 6's remaining piece, `warpier_forward_mode_plan.md` Phase 4).**
-   Tier 1 (the value-only JVP slice, `warpOperationJVP`) needed no new struct/kernel math and has
-   already landed (`warpier_forward_mode_plan.md` Phase 2, 2026-08-18). Tier 2 (position/support/
-   mass/density tangents) does not need `Field` built -- it already is -- but does need two things
-   on top of it that are *not* done yet: (a) the already-derived, already-validated per-operator JVP
-   math (`warpier_adjoint.md` Tiers 2.0-2.5) promoted from throwaway `scripts/spike_forward_mode_tier2_*.py`
-   dense-all-pairs form into real `kernels/` functions, and (b) production JVP kernel/spec pairs
-   (mirroring e.g. `computeSPHDensity_Kernel`) that traverse the real adjacency list and route
-   tangent arrays through the existing `Field.tangent`/`StateBundle` machinery, wired into
-   `warpOperationJVP`. In progress as of 2026-08-18, `warpier_forward_mode_plan.md` Phase 4.
+2. ~~**Tier-2 forward-mode wiring (Phase 6's remaining piece, `warpier_forward_mode_plan.md` Phase 4).**~~
+   — **done, corrected 2026-08-24 (this section was stale).** Both sub-items this bullet originally
+   flagged as not-yet-done are done: (a) the per-operator JVP math promoted into real `kernels/`
+   functions across three follow-on plans (`warpier_forward_mode_plan.md`'s "Tier-2 JVP for the
+   remaining five operators" section, `warpier_tier2_correction_jvp_plan.md` for CRK/renormalization/
+   apparent-volume, `warpier_tier2_jvp_remaining_work_plan.md` for the combined-tangent and
+   reverse-mode-bridge follow-ups), and (b) production JVP dispatch wired into `warpOperationJVP` for
+   all six operators (pair-indexed CSR kernels, not adjacency-traversal `_Kernel`s mirroring
+   `computeSPHDensity_Kernel` as originally sketched — see `warpier_tier2_jvp_remaining_work_plan.md`'s
+   predecessor `docs/historic_plans/warpier_tier2_jvp_csr_backend_plan.md` for why). **One correction to
+   this bullet's own original text, not just its status**: tangent arrays never ended up routed through
+   `Field.tangent`/dual struct types at all — that mechanism, sketched here and in `warpier_fields.md`
+   §3.6, was superseded by plain parallel tangent dataclasses (`ParticleTangentState`/`CRKTangentState`/
+   `RenormalizationTangentState`, `warpier_tier2_correction_jvp_plan.md` phase a1/a2) and, for real
+   `torch.autograd.forward_ad` dual-tensor support, by a `jvp()` staticmethod on
+   `StateAwareWarpFunction` delegating to those same flat-tensor functions
+   (`warpier_unified_operator_wrapper_plan.md`, done 2026-08-24). `Field.tangent` was never written to
+   by any of this and has been removed as dead code (`dataTypes/field_t.py`) — see
+   `warpier_residual_open_problems_plan.md`'s "Context" section for the full account.
 
 Smaller open items, independent of the above, each already root-caused (no re-investigation needed, just implementation):
 
