@@ -2,9 +2,10 @@ import torch
 import warp as wp
 from ..util import *
 from .cache import *
-from typing import Optional, Union, Tuple
+from typing import Callable, Optional
 from .stateAwareWarpFunction import StateAwareWarpFunction
 from .arg_extract import extractStateInfo
+
 
 def _launch(
     launcher,
@@ -14,6 +15,7 @@ def _launch(
     defaultStateArguments: tuple,
     additionalArguments: tuple = (),
     numThreads: Optional[int] = None,
+    jvp_fn: Optional[Callable] = None,
 ):
     """Shared engine behind both ``warpWrapper2`` (the untyped, positional
     legacy entry point) and ``launchOperator`` (Step I, ``operator_spec.py``
@@ -22,6 +24,18 @@ def _launch(
     surfaces cannot drift: same struct assembly, same autograd bridge, same
     behaviour, differing only in how a caller arrives at these arguments.
     See warpier_fields.md Section 8 / Step I.
+
+    ``jvp_fn`` (warpier_unified_operator_wrapper_plan.md): an already-built
+    ``StateAwareWarpFunction.jvp()`` delegate, or ``None``.
+    ``launchOperator`` builds this (``_build_geometry_jvp_fn``, Phase 2 --
+    supersedes Phase 1's flat-position-only value-tangent closure, which
+    delegated to ``warpOperationJVP``'s own value-tangent fallback path
+    anyway) from ``OperatorSpec.jvp`` and this call's ``SPHContext`` before
+    calling ``_launch``; it needs no further translation here since it is
+    built with the flat-tensor layout *this* call will produce already in
+    mind. ``None`` (the default, and always for ``warpWrapper2``, which has
+    no ``OperatorSpec``) means no JVP support: passed straight through to
+    ``StateAwareWarpFunction.apply``, unaffected.
     """
     with record_function("warpWrapper2 [WW2]"):
         # --- extract state tensors and the struct-building closure ---
@@ -66,7 +80,7 @@ def _launch(
             launcher = launcher_with_threads
 
         return StateAwareWarpFunction.apply(
-            build_fn, launcher, kernel, outputSizes, outputDtypes,
+            jvp_fn, build_fn, launcher, kernel, outputSizes, outputDtypes,
             *flat_tensors,
         )
 

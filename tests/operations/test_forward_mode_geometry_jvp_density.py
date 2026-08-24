@@ -221,12 +221,17 @@ def test_densityGeometryJVP_grid_traversal_matches_adjacency_traversal():
     torch.testing.assert_close(viaGrid, viaAdjacency, rtol=1e-5, atol=1e-6)
 
 
-def test_otherOperators_geometryJVP_still_raise():
+def test_covarianceGeometryJVP_no_longer_raises():
     # Density, Interpolate, Gradient, Divergence, Curl, and Laplacian(Brookshaw)
-    # are all implemented now (warpier_tier2_operators_plan.md steps 0-7) --
-    # Covariance is the one operator that stays out of geometry JVP scope throughout
-    # (no geometry JVP formula was ever derived for it), so it's what's left to prove
-    # "still not implemented" here, per the plan's own "Tests" section.
+    # were implemented by warpier_tier2_operators_plan.md steps 0-7; Covariance
+    # (warpier_unified_operator_wrapper_plan.md Phase 2) was the last operator
+    # in _GEOMETRY_JVP_OPERATIONS still gated out here as "not yet implemented"
+    # -- computeCovarianceGeometryJVP already existed (consumed internally by
+    # renorm.py) and was simply promoted into public dispatch, so this
+    # placeholder gate (this test's previous form, `test_otherOperators_
+    # geometryJVP_still_raise`) has no operator left to point at. Its own
+    # numerical correctness is gated by test_forward_mode_geometry_jvp_covariance.py;
+    # this just confirms the call that used to raise here no longer does.
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)
     kinds = torch.zeros(positions.shape[0], dtype=torch.int32, device=DEVICE)
@@ -234,6 +239,7 @@ def test_otherOperators_geometryJVP_still_raise():
     adjacency = radiusSearchCompactHashMap(p0, domain, mode=SupportScheme.Gather)
     props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Covariance,
                                 supportMode=SupportScheme.Gather, operationMode=OperationDirection.AllToAll)
-    with pytest.raises(NotImplementedError, match="geometry JVP"):
-        warpOperationJVP(p0, props, domain, adjacency=adjacency,
-                         queryTangentState=ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None))
+    tangentState = ParticleTangentState(positions=torch.zeros_like(positions), supports=None, masses=None)
+    result = warpOperationJVP(p0, props, domain, adjacency=adjacency,
+                              queryTangentState=tangentState, referenceTangentState=tangentState)
+    assert result.shape == (positions.shape[0], domain.dim, domain.dim)

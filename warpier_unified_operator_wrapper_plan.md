@@ -1,6 +1,128 @@
 # Unified operator wrapper: `torch.autograd.forward_ad` dual tensors drive JVP auto-dispatch via `StateAwareWarpFunction.jvp()`
 
-## Status: planned, not started (2026-08-21)
+## Status: all phases resolved (2026-08-24) -- Phases 0-3 landed; Phase 4 closed with a conclusive negative finding (no follow-up plan to scope)
+
+Phase 0's spike (throwaway, since deleted -- its finding is now load-bearing
+production code) confirmed the design cleanly: `StateAwareWarpFunction.jvp()`
+unblocks `torch.autograd.forward_ad` dual tensors end-to-end for Interpolate's
+value tangent, `ctx.save_for_forward`/`ctx.save_for_backward` coexist on one
+`ctx` without conflict, the no-dual path is unaffected, and `.backward()`
+through the unpacked tangent reaches the original leaves without
+cross-contaminating the primal leaf. One correction to this doc's own
+phrasing surfaced during the spike and is now load-bearing in `jvp_fn`'s
+design (`wrapper.py`): torch's `jvp()` dispatch does **not** pass `None` for
+"no tangent" real-Tensor arguments once *any* argument in the same
+`apply()` call is dual -- it synthesizes a zero tensor instead, and only
+genuinely non-Tensor arguments (closures, `Field` placeholders) come back as
+`None`. "Live tangent" must be checked as `not None and nonzero`, not `not
+None` alone (`hasLiveTangent`, `stateAwareWarpFunction.py`).
+
+Phase 1 landed: `OperatorSpec.jvp`/`JVPSpec` (`operator_spec.py`), the new
+leading `jvp_fn` argument on `StateAwareWarpFunction.forward`/`jvp`
+(`_N_NON_TENSOR` 5→6), and (that phase's own) `_build_value_jvp_fn`
+(`wrapper.py`) wired for all five `_VALUE_JVP_OPERATIONS`
+(Interpolate/Gradient/Divergence/Curl/Laplacian) -- **superseded by Phase 2**,
+see below.
+
+Phase 2 landed, and turned out larger than "same treatment, reused gating"
+suggested -- three real correctness gaps surfaced and got fixed, not just
+mechanical registration:
+
+1. **Design change from Phase 1**: `_build_value_jvp_fn`'s flat-position-only
+   relaunch (Phase 1) is replaced by `_build_geometry_jvp_fn`
+   (`operator_spec.py`), built once per `launchOperator` call, closing over
+   *this call's* `SPHContext` (so every primal semantic object -- `ParticleState`,
+   `CRKState`, `RenormalizationState`, `adjacency`, `domain` -- is the
+   caller's own Python object, never reconstructed from flat tensors) and
+   delegating **entirely to `warpOperationJVP`** for both the value tangent
+   and the geometry tangent (and their sum) in one path, reusing its already-
+   exhaustively-tested CRK/renorm/Laplacian-scheme/Divergence/Curl gating
+   rather than re-deriving any of it. `JVPSpec.valueExtras` (a positional
+   tuple, Phase 1) became `queryValueExtra`/`referenceValueExtra` (named,
+   unambiguous) in the same change.
+2. **Covariance promoted into public dispatch**: `_GEOMETRY_JVP_OPERATIONS`/
+   a new special-cased branch in `warpOperationJVP` (`operations.py`, mirroring
+   Density's own branch -- `computeCovarianceGeometryJVP`'s signature has no
+   `queryValues`/CRK/renorm/gradH parameters at all, so it doesn't fit the
+   five-value-having-operators' generic dispatch shape) -- `computeCovarianceGeometryJVP`
+   already existed and was already consumed internally by `renorm.py`, just
+   never reachable as a standalone call. New test:
+   `tests/operations/test_forward_mode_geometry_jvp_covariance.py`. Verified
+   independently against a hand-rolled finite-difference check before writing
+   the production branch (rel err ~7e-11 at float64).
+3. **Two real shape bugs found and fixed while wiring the dual-tensor bridge**,
+   both because `jvp_fn` calls the *public* `warpOperationJVP`/`warpOperation`
+   API while `StateAwareWarpFunction.forward`/`jvp` operate on that API's
+   internal, pre-reshape representation:
+   - *Input side* (`_unflattenValue`): Gradient/Divergence/Curl/Laplacian's
+     `queryValuesFlat`/`referenceValuesFlat` extras are `.view(-1, flatInputShape)`
+     of the caller's original value tensor -- an identity reshape for a vector
+     field, but `[N]` → `[N,1]` for a genuinely scalar one, which the public
+     API doesn't expect. Inverted via the `numDims` extra; rank≥2 fields raise
+     rather than guess.
+   - *Output side* (`_reflattenResult`): `StateAwareWarpFunction.forward()`
+     returns the kernel's *raw* `[N, flatOutputShape]` output; only each
+     operator's own `_computeSPH<Op>_stateBackend` wrapper reshapes that to
+     the public `[N, *outputShape]` shape, *after* `launchOperator` returns.
+     `outputShape` only equals `(flatOutputShape,)` for Gradient (always
+     appends exactly one spatial dim) -- Laplacian (`outputShape = inputShape`)
+     and Divergence (`outputShape = inputShape[:-1]`) both collapse a
+     dimension the flat form still carries, so a `jvp_fn` result built from
+     the public API has the wrong shape for `jvp()` to hand back to torch
+     unless reshaped back. Found via `RuntimeError: Trying to set a forward
+     gradient that has a different size...` on Laplacian/Divergence
+     specifically (not Gradient) -- exactly the operators where this
+     collapse happens.
+   - Also fixed while chasing the second bug: an operator needing *both*
+     `queryValues`/`referenceValues` (unlike Interpolate) rejects a bare
+     `None` on either side even when only one side carries a live tangent --
+     `jvp_fn` now zero-fills the missing side from its primal shape,
+     mirroring Phase 1's own equivalent fallback.
+
+New/updated coverage: `tests/operations/test_forward_mode_dual_wrapper.py`
+gained geometry-tangent, Covariance, combined value+geometry, and a
+corrected "unsupported combination raises" case (query-mass tangent, since
+geometry tangents themselves are no longer unsupported);
+`tests/operations/test_forward_mode_geometry_jvp_density.py`'s
+`test_otherOperators_geometryJVP_still_raise` (a placeholder gate that had no
+operator left to point at) became `test_covarianceGeometryJVP_no_longer_raises`.
+Reverified clean against every change in this phase: `pytest tests/` (397
+passed, 1 pre-existing skip) and `operation_matrix.py --ci` (OK=258, HIGH=0,
+ERR=0, NAN=0 -- unchanged baseline).
+
+Phase 3 landed: extended `test_forward_mode_dual_wrapper.py` with per-operator
+geometry-tangent coverage (Gradient/Divergence/Curl/Laplacian -- each has its
+own `outputShape` formula, the exact thing `_reflattenResult` had to correct
+for at the value-tangent level for Laplacian/Divergence specifically, so this
+checks the same shape-correctness claim holds for the geometry tangent on
+every operator, not just Gradient) and CRK/gradient-renormalization tangent
+wiring smoke tests (dummy zero-valued states, matching this codebase's own
+existing convention for exercising "does the plumbing reach this branch at
+all" rather than re-deriving CRK/renorm math `warpOperationJVP`'s own suite
+already covers exhaustively). No new production bugs surfaced -- the shared
+`_build_geometry_jvp_fn`/`_reflattenResult` design generalized correctly to
+every registered operator on the first attempt. No new subprocess spike
+scripts were added in Phases 2/3 (only in-process `pytest` files, matching
+`test_forward_mode_value_jvp.py`'s own precedent), so nothing needed
+registering in `test_gradcheck_scripts.py`. Reverified clean: `pytest tests/`
+(full suite) and `operation_matrix.py --ci` (OK=258, HIGH=0, ERR=0, NAN=0).
+
+Phase 4 closed, negative result -- **not a bug in this plan's bridge, a hard
+PyTorch limitation, confirmed independent of any warp/SPH involvement
+whatsoever**: nesting `fwAD.dual_level()` a second time, on the installed
+torch 2.13, raises `RuntimeError: Nested forward mode AD is not supported at
+the moment` immediately, reproduced on a bare `x ** 3` scalar with zero
+warp/SPH code in the loop. `wp_densityHVP.py`'s own docstring (written before
+this plan) describes the earlier attempt as "runs but silently drops the
+tangent" -- this repro shows the *current* torch build actually raises
+outright rather than dropping silently, a stronger and more precise finding
+than what motivated Phase 4's retry. Since the failure is torch's own engine
+refusing nested dual levels categorically, `StateAwareWarpFunction.jvp()`
+being registered (this plan's entire contribution) cannot change the
+outcome, with Density or any other operator -- there is no follow-up plan to
+scope here; `computeSPHDensityPositionHVP`'s existing hand-derived closed-form
+HVP (`warpOperationHVP`) remains the only path to a Density Hessian-vector
+product in this codebase.
 
 ## Context
 

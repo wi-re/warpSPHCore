@@ -234,6 +234,7 @@ _GRADIENT_SPEC = OperatorSpec(
         ExtraSpec("queryValuesFlat", ExtraKind.TENSOR),
         ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR),
     ),
+    jvp=JVPSpec(queryValueExtra="queryValuesFlat", referenceValueExtra="referenceValuesFlat"),
 )
 
 

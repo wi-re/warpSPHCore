@@ -545,5 +545,5 @@ def launchGeometryJVP(
         ) + extra + extraScalars
 
     return StateAwareWarpFunction.apply(
-        build_fn, launch_kernel, kernel, outputShape, outputDtype, *flat_tensors,
+        None, build_fn, launch_kernel, kernel, outputShape, outputDtype, *flat_tensors,
     )

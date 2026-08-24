@@ -146,6 +146,7 @@ def computeSPHDensity_Kernel(
 _DENSITY_SPEC = OperatorSpec(
     kernel=computeSPHDensity_Kernel,
     outputs=(OutputSpec(dtype=lambda ctx, extras: castTorchToWarpAsBuiltins(ctx.query.masses).dtype),),
+    jvp=JVPSpec(),  # geometry-tangent only -- no queryValues/referenceValues input
 )
 
 

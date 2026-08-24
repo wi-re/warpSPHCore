@@ -171,6 +171,7 @@ _INTERPOLATE_SPEC = OperatorSpec(
     kernel=computeSPHInterpolation_Kernel,
     outputs=(OutputSpec(dtype=lambda ctx, extras: castTorchToWarpAsBuiltins(extras["referenceValues"]).dtype),),
     extras=(ExtraSpec("referenceValues", ExtraKind.TENSOR),),
+    jvp=JVPSpec(referenceValueExtra="referenceValues"),
 )
 
 

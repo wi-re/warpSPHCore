@@ -41,6 +41,12 @@ class StateAwareWarpFunction(torch.autograd.Function):
     that had requires_grad=True.
 
     Forward signature (excluding ctx):
+        jvp_fn          - closure: (ctx, flat_tangents) -> tangent output(s), or
+                          None (warpier_unified_operator_wrapper_plan.md Phase 1:
+                          built by `_launch` from `OperatorSpec.jvp`; None means
+                          this call site has no JVP support registered -- a live
+                          tangent reaching `jvp()` then raises rather than
+                          silently dropping it, see `jvp()` below)
         build_fn        - closure: List[wp.array] -> tuple of kernel args
         launcher        - e.g. launch_kernel
         kernel          - the wp.kernel to execute
@@ -54,19 +60,25 @@ class StateAwareWarpFunction(torch.autograd.Function):
                           save_for_backward)
     """
 
-    # Number of non-tensor leading arguments (build_fn, launcher, kernel,
-    # output_shape, output_dtype).  backward() must return this many Nones
-    # before the per-tensor gradients.
-    _N_NON_TENSOR = 5
+    # Number of non-tensor leading arguments (jvp_fn, build_fn, launcher,
+    # kernel, output_shape, output_dtype).  backward() must return this many
+    # Nones before the per-tensor gradients.
+    _N_NON_TENSOR = 6
 
     @staticmethod
-    def forward(ctx, build_fn, launcher, kernel, output_shape, output_dtype, *flat_tensors):
+    def forward(ctx, jvp_fn, build_fn, launcher, kernel, output_shape, output_dtype, *flat_tensors):
         # with record_function(f"Warp Function State Aware Forward"):
+        ctx.jvp_fn = jvp_fn
         ctx.build_fn = build_fn
         ctx.launcher = launcher
         ctx.kernel = kernel
         ctx.output_shape = output_shape
         ctx.output_dtype = output_dtype
+        # jvp()'s own reconstruction needs the *original* (Tensor-or-Field)
+        # flat_tensors list positionally, not just the converted wp arrays
+        # below -- Field entries pass straight through a nested relaunch
+        # unchanged, and save_for_forward (below) only accepts real Tensors.
+        ctx.flat_tensors_raw = flat_tensors
 
         # flat_tensors is heterogeneous from Step C on: Field entries are the
         # null-field registry's standalone, permanent placeholders (never
@@ -85,6 +97,17 @@ class StateAwareWarpFunction(torch.autograd.Function):
         else:
             # Avoid save_for_backward overhead when gradients are not requested.
             ctx.save_for_backward()
+
+        # save_for_forward: PyTorch's documented mechanism for what jvp() may
+        # read back via ctx.saved_tensors -- a *separate* store from
+        # save_for_backward above (confirmed empirically, Phase 0 spike: the
+        # two coexist on the same ctx without conflict, each resolving to the
+        # right set of tensors in backward() vs. jvp() respectively). Gated on
+        # jvp_fn being set, mirroring save_for_backward's own
+        # any_requires_grad gate above -- no forward-mode caller, no reason to
+        # pay for it.
+        if jvp_fn is not None:
+            ctx.save_for_forward(*(t for t, tt in zip(flat_tensors, is_tensor) if tt))
 
         # Detach → warp, preserving requires_grad so the tape tracks them.
         # The no-grad path always caches (Step D). The grad path caches too
@@ -232,6 +255,47 @@ class StateAwareWarpFunction(torch.autograd.Function):
         ctx.tape.zero()  # Clear any accumulated gradients in the tape to avoid affecting future computations
 
         return (None,) * N + tuple(input_grads)
-    
+
+    @staticmethod
+    def jvp(ctx, *tangents):
+        # warpier_unified_operator_wrapper_plan.md Phase 1. tangents aligns
+        # positionally with forward()'s (jvp_fn, build_fn, launcher, kernel,
+        # output_shape, output_dtype, *flat_tensors) -- torch guarantees this
+        # (confirmed against the installed torch 2.13 source in Phase 0).
+        N = StateAwareWarpFunction._N_NON_TENSOR
+        flat_tangents = tangents[N:]
+
+        # Empirical finding from the Phase 0 spike (verified directly against
+        # torch, not assumed from its docs): once ANY argument of this
+        # apply() call is a dual tensor, torch's jvp() dispatch synthesizes a
+        # ZERO tensor -- not None -- as the tangent for every OTHER
+        # real-Tensor argument in the same call, even ones with
+        # requires_grad=False that were never wrapped as dual at all. Only
+        # genuinely non-Tensor forward() arguments (build_fn, launcher,
+        # kernel, ..., Field placeholders) come back as None. So "no live
+        # tangent anywhere in this call" must be checked as None-or-all-zero.
+        if not any(hasLiveTangent(t) for t in flat_tangents):
+            return None
+
+        if ctx.jvp_fn is None:
+            raise NotImplementedError(
+                "StateAwareWarpFunction.jvp: a live (non-zero) tangent reached an "
+                "operator launch with no JVPSpec registered (OperatorSpec.jvp is None "
+                "for this kernel) -- raising rather than silently returning a "
+                "tangent-free dual output. See warpier_unified_operator_wrapper_plan.md."
+            )
+        return ctx.jvp_fn(ctx, flat_tangents)
+
+
+def hasLiveTangent(t) -> bool:
+    """None (no tensor / no tangent) and an all-zero synthesized filler
+    (torch's own convention -- see `jvp()` above) both mean "nothing to
+    propagate here"; only a tensor with at least one non-zero entry is a
+    real tangent. Shared between `jvp()`'s own "anything live at all?" check
+    and each `jvp_fn` closure's "is this a supported combination?" check
+    (`wrapper.py`), so both apply the same definition of "live"."""
+    return t is not None and bool(t.abs().max() > 0)
+
+
 warpWrapperStateaware = StateAwareWarpFunction.apply
     

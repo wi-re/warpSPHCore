@@ -210,6 +210,7 @@ _COVARIANCE_SPEC = OperatorSpec(
         OutputSpec(dtype=_covarianceMatrixDtype),
         OutputSpec(dtype=wp.int32),
     ),
+    jvp=JVPSpec(),  # geometry-tangent only -- no queryValues/referenceValues input
 )
 
 

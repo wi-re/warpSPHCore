@@ -173,14 +173,18 @@ _VALUE_JVP_OPERATIONS = (
 
 # Operators the geometry-tangent (formerly "Tier 2") JVP path
 # (`warpier_tier2_operators_plan.md`) covers at all -- Density (position/
-# support/mass tangent, no queryValues/referenceValues) plus the five
-# value-having operators (position/support tangent with frozen fi/fj values).
-# Covariance is not in this set: no geometry-tangent formula was ever derived
-# for it, so it always falls through to the generic "not in geometry-JVP
-# scope" NotImplementedError below, same as before this plan.
+# support/mass tangent, no queryValues/referenceValues), the five
+# value-having operators (position/support tangent with frozen fi/fj values),
+# plus Covariance (`warpier_unified_operator_wrapper_plan.md` Phase 2):
+# `wp_covarianceJVP.py`'s `computeCovarianceGeometryJVP` already existed and
+# was already consumed internally by `renorm.py`'s
+# `computeRenormalizationMatricesJVP`, just never registered here for public
+# `warpOperationJVP(Covariance, ...)` dispatch -- mechanical promotion, not
+# new math (see the Covariance special case below).
 _GEOMETRY_JVP_OPERATIONS = (
     WarpOperation.Density, WarpOperation.Interpolate, WarpOperation.Gradient,
     WarpOperation.Divergence, WarpOperation.Curl, WarpOperation.Laplacian,
+    WarpOperation.Covariance,
 )
 
 # Operators the geometry JVP's CRK tangent support (`warpier_tier2_correction_jvp_plan.md`
@@ -274,7 +278,15 @@ def warpOperationJVP(
       reference-side mass tangent
       (`coreOperations.wp_densityJVP.computeSPHDensityGeometryJVP`, gated by
       `tests/operations/test_forward_mode_geometry_jvp_density.py`) was Phase
-      4's scope. `warpier_tier2_operators_plan.md` extended this to the five
+      4's scope. Covariance's own position/support/density tangent
+      (`coreOperations.wp_covarianceJVP.computeCovarianceGeometryJVP`,
+      deliberately plain/uncorrected -- no CRK, no renormalization dispatch,
+      no query-mass term, no value input at all) was promoted into this
+      public dispatch by `warpier_unified_operator_wrapper_plan.md` Phase 2 --
+      the function already existed and was already consumed internally by
+      `renorm.py`'s `computeRenormalizationMatricesJVP`, just never reachable
+      as a standalone `warpOperationJVP(Covariance, ...)` call before.
+      `warpier_tier2_operators_plan.md` extended this to the five
       value-having operators' own position/support tangent, each computed
       with `queryValues`/`referenceValues` held at their **primal** value
       (`fi`/`fj` frozen) -- landed one at a time in `_GEOMETRY_JVP_DISPATCH`;
@@ -420,6 +432,75 @@ def warpOperationJVP(
                     supports=tangentReferenceSupports,
                     masses=tangentReferenceMasses,
                 ),
+            )
+
+        if operationProperties.operation is WarpOperation.Covariance:
+            # warpier_unified_operator_wrapper_plan.md Phase 2: Covariance's geometry JVP
+            # (`computeCovarianceGeometryJVP`) is deliberately plain/uncorrected (its own
+            # module docstring -- no CRK, no renormalization dispatch inside that kernel,
+            # matching `computeRenormalizationMatrices_`'s own internal covariance call)
+            # and has no queryValues/referenceValues input at all (same shape as Density).
+            # Scope boundaries enforced here, mirroring the five value-having operators'
+            # own block below, rather than inside `wp_covarianceJVP.py`.
+            if gradHState is not None:
+                raise NotImplementedError(
+                    "warpOperationJVP: Covariance's geometry JVP does not support gradHState "
+                    "-- grad-h coupling is out of scope entirely (no consumer exists)."
+                )
+            if crkState is not None or crkTangentState is not None:
+                raise NotImplementedError(
+                    "warpOperationJVP: Covariance's geometry JVP does not support CRK correction "
+                    "-- computeCovarianceGeometryJVP is deliberately plain/uncorrected "
+                    "(wp_covarianceJVP.py's module docstring); renorm.py's own internal "
+                    "covariance call never passes crkState either."
+                )
+            if renormalizationState is not None or renormalizationTangentState is not None:
+                raise NotImplementedError(
+                    "warpOperationJVP: Covariance's geometry JVP does not support gradient-"
+                    "renormalization correction -- computeCovarianceGeometryJVP is deliberately "
+                    "plain/uncorrected (wp_covarianceJVP.py's module docstring)."
+                )
+            if tangentQueryValues is not None or tangentReferenceValues is not None:
+                raise NotImplementedError(
+                    "warpOperationJVP: Covariance has no queryValues/referenceValues input -- a "
+                    "value tangent has nothing to apply to (same shape as Density)."
+                )
+            if queryVolumes is not None or tangentQueryVolumes is not None:
+                raise NotImplementedError(
+                    "warpOperationJVP: geometry JVP does not support queryVolumes/tangentQueryVolumes "
+                    "-- no derived formula ever reads correctionData.queryVolumes[i], only "
+                    ".referenceVolumes[j] (`warpier_tier2_correction_jvp_plan.md` phase b)."
+                )
+            if tangentReferenceVolumes is not None and referenceVolumes is None:
+                raise ValueError(
+                    "warpOperationJVP: tangentReferenceVolumes requires referenceVolumes -- there is "
+                    "no apparent-volume tangent to take without an apparent-volume primal value to "
+                    "perturb."
+                )
+            if tangentQueryMasses is not None:
+                raise NotImplementedError(
+                    "warpOperationJVP: Covariance's geometry JVP has no query-mass term "
+                    "(wp_covariance.py never reads iPtcl.mass)."
+                )
+            nQuery = queryParticles.positions.shape[0]
+            zeroPositions = lambda n: torch.zeros((n, domain.dim), device=queryParticles.positions.device, dtype=queryParticles.positions.dtype)
+            return computeCovarianceGeometryJVP(
+                queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+                queryTangentState=ParticleTangentState(
+                    positions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
+                    supports=tangentQuerySupports,
+                    masses=None,
+                    densities=tangentQueryDensities,
+                ),
+                referenceParticles=referenceParticles,
+                referenceTangentState=ParticleTangentState(
+                    positions=tangentReferencePositions,
+                    supports=tangentReferenceSupports,
+                    masses=tangentReferenceMasses,
+                    densities=tangentReferenceDensities,
+                ),
+                referenceVolumes=referenceVolumes,
+                tangentReferenceVolumes=tangentReferenceVolumes,
             )
 
         # The five value-having operators: scope boundaries enforced centrally here

@@ -28,14 +28,18 @@ from ..dataTypes import (
     AdjacencyListWarp,
     CompactHashMap,
     CRKState,
+    CRKTangentState,
     DomainDescription,
     ExecutionMode,
     GradHState,
     OperationProperties,
     ParticleState,
+    ParticleTangentState,
     RenormalizationState,
+    RenormalizationTangentState,
 )
 from .launcher import launch_kernel
+from .stateAwareWarpFunction import hasLiveTangent
 from .wrapper import _launch
 
 
@@ -122,6 +126,33 @@ class ThreadSpec(Enum):
 
 
 @dataclass(frozen=True)
+class JVPSpec:
+    """Opts a kernel into ``StateAwareWarpFunction.jvp()`` dispatch
+    (``warpier_unified_operator_wrapper_plan.md``): a dual-tensor argument
+    reaching this kernel's launch is turned into a tangent output by
+    delegating to ``warpOperationJVP`` -- the same, already-exhaustively-
+    tested dispatch/gating logic (CRK/renormalization scope tables,
+    Laplacian-scheme restrictions, Divergence/Curl restrictions, Density's
+    and Covariance's own narrower scopes) a caller gets from an explicit
+    ``warpOperationJVP`` call, reused rather than re-derived here.
+
+    ``queryValueExtra``/``referenceValueExtra`` name the declared
+    ``OperatorSpec.extras`` entries (if any) eligible for a Tier-1 value
+    tangent -- Interpolate: ``referenceValueExtra="referenceValues"`` only
+    (its kernel never reads ``queryValues``); Gradient/Divergence/Curl/
+    Laplacian: ``queryValueExtra="queryValuesFlat"``,
+    ``referenceValueExtra="referenceValuesFlat"``; Density/Covariance: both
+    ``None`` (geometry-tangent only, no value input at all). A live tangent
+    anywhere else in the call this ``JVPSpec`` cannot account for (domain
+    bounds, grid-traversal structure) still raises ``NotImplementedError``
+    rather than silently dropping it.
+    """
+
+    queryValueExtra: Optional[str] = None
+    referenceValueExtra: Optional[str] = None
+
+
+@dataclass(frozen=True)
 class OperatorSpec:
     """Declared once per kernel, at import time, next to the kernel itself.
     See warpier_fields.md Section 8.2.
@@ -131,6 +162,12 @@ class OperatorSpec:
     kernel whose thread count is not the shape of its first output (see
     ``ThreadSpec``'s docstring). ``None`` (the default) preserves today's
     behaviour: ``_launch`` derives it from the first output's shape.
+
+    ``jvp``, when set, opts this kernel into ``StateAwareWarpFunction``'s
+    ``jvp()`` dispatch (``warpier_unified_operator_wrapper_plan.md``).
+    ``None`` (the default) preserves today's behaviour exactly -- a
+    dual-tensor argument reaching this kernel's launch raises a clear error
+    rather than silently returning a tangent-free dual output.
     """
 
     kernel: Any
@@ -138,6 +175,7 @@ class OperatorSpec:
     extras: Tuple[ExtraSpec, ...] = ()
     threads: ThreadSpec = ThreadSpec.QUERY_COUNT
     numThreads: Optional[Callable[["SPHContext", Dict[str, Any]], int]] = None
+    jvp: Optional[JVPSpec] = None
 
 
 @dataclass
@@ -175,6 +213,230 @@ class SPHContext:
     reference: Optional[ParticleState] = None
     corrections: Corrections = field(default_factory=Corrections)
     mode: ExecutionMode = ExecutionMode.AUTO
+
+
+# extractStateInfo's fixed 36-slot flat-tensor layout (arg_extract.py's own
+# docstring) -- stable, documented positions this module reads directly
+# rather than re-deriving. Positions not named here (8/9 kinds; 11/12
+# grad-h omegas; 19-22 the reference-role CRK slot, which -- since every
+# current operator's stateBackend accepts only a single CRKState shared by
+# both roles, never a query/reference pair -- always aliases the same tensor
+# objects as 15-18, so torch's per-object tangent lookup reports identical
+# values at both and only 15-18 need reading; 23-32/35 adjacency/grid
+# traversal) are never real Tensor positions with a meaningful tangent, or
+# are read via a primal object captured by closure instead (see
+# ``_build_geometry_jvp_fn``).
+_QPOS, _RPOS, _QSUP, _RSUP, _QMAS, _RMAS, _QDEN, _RDEN = range(8)
+_RENORM_MAT = 10
+_QVOL, _RVOL = 13, 14
+_QCRK_A, _QCRK_B, _QCRK_GRADA, _QCRK_GRADB = 15, 16, 17, 18
+_STATE_N = 36
+# grid_qMin/qMax, domainMin/domainMax: the one case with no warpOperationJVP
+# kwarg to naturally reject a live tangent here (every other structural
+# position either can't carry a float tangent at all -- kinds, adjacency
+# index arrays are integer -- or maps to a primal object warpOperationJVP
+# itself already validates, e.g. gradHState/queryVolumes). No operator's
+# geometry JVP differentiates w.r.t. domain bounds or grid structure, so
+# this is an explicit guard rather than a silent drop.
+_NO_TANGENT_HOME = (27, 28, 33, 34)
+
+
+def _unflattenValue(spec: OperatorSpec, extras: Dict[str, Any], flatTensor: Optional[torch.Tensor]):
+    """Gradient/Divergence/Curl/Laplacian's ``queryValuesFlat``/
+    ``referenceValuesFlat`` extras are `.view(-1, flatInputShape)` of the
+    caller's original ``queryValues``/``referenceValues`` (``_computeSPH*
+    _stateBackend``'s own preprocessing) -- a no-op reshape for a scalar or
+    already-rank-1 (vector) field, but for a genuinely scalar field
+    (``inputShape == ()``) it turns ``[N]`` into ``[N, 1]``, which
+    ``warpOperationJVP``/``computeSPH<Op>GeometryJVP`` (same unflattened
+    shape contract as the public ``warpOperation`` API) do not expect --
+    inverted here via the ``numDims`` scalar extra every one of those four
+    operators also declares. Interpolate declares no ``numDims`` extra at
+    all (it reshapes only for rank>2 fields, via a different mechanism) --
+    passed through unchanged for it, and for any operator with no such
+    extra.
+    """
+    if flatTensor is None:
+        return None
+    extraNames = {e.name for e in spec.extras}
+    if "numDims" not in extraNames:
+        return flatTensor
+    numDims = int(extras["numDims"])
+    if numDims == 0:
+        return flatTensor.view(-1)
+    if numDims == 1:
+        return flatTensor
+    raise NotImplementedError(
+        "StateAwareWarpFunction.jvp: value-tangent reconstruction for rank>=2 fields "
+        "(matrix or higher) is not supported by this bridge -- the flattened shape "
+        "cannot be inverted without the field's original per-dimension shape, which "
+        "OperatorSpec.extras does not carry. Call warpOperationJVP directly for this case."
+    )
+
+
+def _reflattenResult(spec: OperatorSpec, extras: Dict[str, Any], result: torch.Tensor) -> torch.Tensor:
+    """``StateAwareWarpFunction.forward()`` returns the kernel's *raw*
+    output -- shape ``[N, flatOutputShape]``, matching the warp dtype
+    ``_get_warp_vector_dtype(flatOutputShape, ...)`` resolved for it -- and
+    only each operator's own ``_computeSPH<Op>_stateBackend`` wrapper
+    reshapes that to the public ``[N, *outputShape]`` shape, *after*
+    ``launchOperator`` (and so ``StateAwareWarpFunction``) has already
+    returned. ``jvp_fn`` delegates to ``warpOperationJVP``, which goes
+    through that same public (already-reshaped) path -- so its result must
+    be reshaped back to the raw flat form before ``jvp()`` hands it to
+    torch, which checks the tangent against ``forward()``'s raw output
+    shape specifically. A no-op for Interpolate/Density/Covariance, whose
+    raw and public shapes already coincide (no ``flatOutputShape`` extra).
+    Found the hard way: ``outputShape`` only equals ``(flatOutputShape,)``
+    for Gradient (which always appends exactly one spatial dimension) --
+    Laplacian (``outputShape = inputShape``, rank 0 for a scalar field) and
+    Divergence (``outputShape = inputShape[:-1]``, also rank 0 for a vector
+    field) both collapse a dimension the flat form still carries, and hit
+    this mismatch even though Gradient never does.
+    """
+    extraNames = {e.name for e in spec.extras}
+    if "flatOutputShape" not in extraNames:
+        return result
+    flatOutputShape = int(extras["flatOutputShape"])
+    return result.reshape(-1, flatOutputShape)
+
+
+def _extraFlatPosition(spec: OperatorSpec, extras: Dict[str, Any], name: str) -> int:
+    """Maps a declared ``OperatorSpec.extras`` name to its position in
+    ``_launch``'s flat tensor list: ``additionalArguments`` (built in
+    ``spec.extras`` order) keeps only the ``ExtraKind.TENSOR`` entries when
+    flattened (``_launch``'s own ``add_tensor_pos``), appended after the
+    36-slot state prefix -- mirrored here rather than threaded out of
+    ``_launch``, since ``launchOperator`` already has ``spec``/``extras`` in
+    scope to compute it directly."""
+    tensorExtraNames = [e.name for e in spec.extras if e.kind is ExtraKind.TENSOR]
+    return _STATE_N + tensorExtraNames.index(name)
+
+
+def _build_geometry_jvp_fn(spec: OperatorSpec, sphCtx: SPHContext, extras: Dict[str, Any]):
+    """warpier_unified_operator_wrapper_plan.md Phase 2. Builds the
+    ``jvp_fn`` closure ``StateAwareWarpFunction.jvp()`` delegates to for any
+    ``OperatorSpec.jvp``-declaring kernel, covering the Tier-1 value tangent,
+    the Tier-2 geometry tangent, and their sum (when both are live) in one
+    path by delegating entirely to ``warpOperationJVP`` -- not re-deriving
+    any of its dispatch/gating logic here.
+
+    Captures *sphCtx* (this call's ``SPHContext``) and *extras* by closure,
+    so every PRIMAL semantic object (``ParticleState``, ``CRKState``,
+    ``RenormalizationState``, ``adjacency``, ``domain``, the primal
+    ``queryValues``/``referenceValues`` tensors) is the caller's own
+    original Python object -- never reconstructed from flat tensors. Only
+    the TANGENT objects need reconstructing, from ``flat_tangents``'s
+    positions, using ``extractStateInfo``'s fixed layout (the ``_Q*``/``_R*``
+    constants above).
+    """
+    queryValuePos = (
+        _extraFlatPosition(spec, extras, spec.jvp.queryValueExtra)
+        if spec.jvp.queryValueExtra else None
+    )
+    referenceValuePos = (
+        _extraFlatPosition(spec, extras, spec.jvp.referenceValueExtra)
+        if spec.jvp.referenceValueExtra else None
+    )
+
+    def jvp_fn(autogradCtx, flat_tangents):
+        for i in _NO_TANGENT_HOME:
+            if i < len(flat_tangents) and hasLiveTangent(flat_tangents[i]):
+                raise NotImplementedError(
+                    "StateAwareWarpFunction.jvp: a live (non-zero) tangent on a domain-bounds "
+                    f"or grid-traversal argument (flat position {i}) has no JVP formula -- no "
+                    "operator's geometry JVP differentiates w.r.t. domain bounds or grid "
+                    "structure."
+                )
+
+        def field(i):
+            return flat_tangents[i] if hasLiveTangent(flat_tangents[i]) else None
+
+        queryTangentState = ParticleTangentState(
+            positions=field(_QPOS), supports=field(_QSUP), masses=field(_QMAS), densities=field(_QDEN),
+        )
+        referenceTangentState = ParticleTangentState(
+            positions=field(_RPOS), supports=field(_RSUP), masses=field(_RMAS), densities=field(_RDEN),
+        )
+
+        crkTangentState = None
+        if sphCtx.corrections.crk is not None:
+            crkFields = (field(_QCRK_A), field(_QCRK_B), field(_QCRK_GRADA), field(_QCRK_GRADB))
+            if any(f is not None for f in crkFields):
+                # CRKTangentState has no Optional fields (a caller supplying CRK tangent
+                # support supplies all four) -- substitute a primal-shaped zero for
+                # whichever of the four has no live tangent of its own.
+                crk = sphCtx.corrections.crk
+                crkTangentState = CRKTangentState(
+                    A=crkFields[0] if crkFields[0] is not None else torch.zeros_like(crk.A),
+                    B=crkFields[1] if crkFields[1] is not None else torch.zeros_like(crk.B),
+                    gradA=crkFields[2] if crkFields[2] is not None else torch.zeros_like(crk.gradA),
+                    gradB=crkFields[3] if crkFields[3] is not None else torch.zeros_like(crk.gradB),
+                )
+
+        renormalizationTangentState = None
+        renormMatTangent = field(_RENORM_MAT)
+        if sphCtx.corrections.renorm is not None and renormMatTangent is not None:
+            renormalizationTangentState = RenormalizationTangentState(renormalizationMatrices=renormMatTangent)
+
+        tangentQueryValues = _unflattenValue(
+            spec, extras, field(queryValuePos) if queryValuePos is not None else None,
+        )
+        tangentReferenceValues = _unflattenValue(
+            spec, extras, field(referenceValuePos) if referenceValuePos is not None else None,
+        )
+        primalQueryValues = _unflattenValue(
+            spec, extras, extras[spec.jvp.queryValueExtra] if spec.jvp.queryValueExtra else None,
+        )
+        primalReferenceValues = _unflattenValue(
+            spec, extras, extras[spec.jvp.referenceValueExtra] if spec.jvp.referenceValueExtra else None,
+        )
+        # An operator needing BOTH queryValues/referenceValues (Gradient/
+        # Divergence/Curl/Laplacian -- unlike Interpolate, which only ever
+        # reads referenceValues) rejects a bare None on either side
+        # (warpOperation's own validation). Only one side carrying a live
+        # tangent still means "a value tangent is being requested" -- the
+        # other side's contribution is exactly zero, matching Phase 1's own
+        # zeros_like fallback for the equivalent case.
+        if tangentQueryValues is not None or tangentReferenceValues is not None:
+            if spec.jvp.queryValueExtra and tangentQueryValues is None:
+                tangentQueryValues = torch.zeros_like(primalQueryValues)
+            if spec.jvp.referenceValueExtra and tangentReferenceValues is None:
+                tangentReferenceValues = torch.zeros_like(primalReferenceValues)
+
+        queryVolumes, referenceVolumes = sphCtx.corrections.volumes
+
+        # local import: operations.py imports coreOperations, which imports
+        # autograd -- importing warpOperationJVP at module scope here would
+        # be circular. By the time jvp_fn is actually invoked (runtime, not
+        # import time), every module involved is already fully loaded.
+        from ..operations import warpOperationJVP
+
+        result = warpOperationJVP(
+            sphCtx.query, sphCtx.properties, sphCtx.domain,
+            tangentQueryValues=tangentQueryValues, tangentReferenceValues=tangentReferenceValues,
+            queryTangentState=queryTangentState, referenceTangentState=referenceTangentState,
+            queryValues=primalQueryValues, referenceValues=primalReferenceValues,
+            queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
+            tangentReferenceVolumes=field(_RVOL),
+            adjacency=sphCtx.adjacency,
+            referenceParticles=sphCtx.reference,
+            crkState=sphCtx.corrections.crk, crkTangentState=crkTangentState,
+            gradHState=sphCtx.corrections.gradH,
+            renormalizationState=sphCtx.corrections.renorm,
+            renormalizationTangentState=renormalizationTangentState,
+        )
+        result = _reflattenResult(spec, extras, result)
+        if len(spec.outputs) > 1:
+            # Multi-output kernels (Covariance: matrix + numNeighbors) --
+            # warpOperationJVP only ever returns the differentiable output's
+            # tangent; every other output (an integer neighbor count here)
+            # has none, mirroring how backward() never seeds a grad for it
+            # either. jvp() must return one entry per forward() output.
+            return (result,) + (None,) * (len(spec.outputs) - 1)
+        return result
+
+    return jvp_fn
 
 
 def launchOperator(
@@ -220,6 +482,8 @@ def launchOperator(
     if len(spec.outputs) == 1:
         outputSizes, outputDtypes = outputSizes[0], outputDtypes[0]
 
+    jvp_fn = _build_geometry_jvp_fn(spec, ctx, extras) if spec.jvp is not None else None
+
     queryVolumes, referenceVolumes = ctx.corrections.volumes
 
     defaultStateArguments = (
@@ -240,4 +504,5 @@ def launchOperator(
         defaultStateArguments=defaultStateArguments,
         additionalArguments=additionalArguments,
         numThreads=spec.numThreads(ctx, extras) if spec.numThreads is not None else None,
+        jvp_fn=jvp_fn,
     )
