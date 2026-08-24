@@ -272,12 +272,90 @@ is available, since that's where Fix 1 *and* this fix should compound.
    the isolated-call micro-benchmark level (1.91x → target ~1.0x on that specific measurement).
    Worth a small time-boxed Phase 1 spike to get a real `bench_performance.py` number before
    committing to Phases 2-3's broader refactor, or proceed straight to the full design?
+   **Answered 2026-08-24 (user): time-boxed spike first.** See "Time-boxed spike result" below —
+   the answer this produced was "no, don't proceed to Phases 2-3."
 2. Does the semantic-keyed lookup replace `operator_spec.py`'s fixed-position convention
    *everywhere* (a codebase-wide change to how `extractStateInfo` communicates its layout), or
    coexist as a parallel path used only by the JVP dispatch machinery, leaving the plain
    forward/backward path's positional convention untouched? The latter is smaller and lower-risk;
    the former removes a second parallel convention from the codebase permanently.
+   **Answered 2026-08-24 (user): parallel path, JVP-only.** Implemented that way (see below):
+   `arg_extract.py`'s and `operator_spec.py`'s `_QPOS`/etc. positional convention is completely
+   unchanged; the remap lives entirely in `wrapper.py`'s `_launch`.
 3. Does reverse-mode (`backward()`/`gradcheck`) need an equivalent pruning pass for consistency,
    or is this scoped to forward-mode only? Reverse-mode's cost shape is different — there's no
    torch-side "synthesize a zero tangent" step for `backward()`, so the motivating problem may be
    forward-mode-specific; worth confirming rather than assuming before Phase 1 locks scope.
+   **Answered 2026-08-24 (user): forward-mode only.** Confirmed correct in the implementation: a
+   tensor is pruned only when it is *both* non-dual *and* `requires_grad=False`, so any
+   backward-mode-relevant tensor (`requires_grad=True`, dual or not) always stays in the tracked
+   list — reverse-mode gradient flow is untouched by this change, by construction, with no
+   separate reverse-mode pruning pass needed.
+
+## Time-boxed spike result (2026-08-24) — implemented, validated, benchmarked, NOT worth Phases 2-3
+
+Per the answer to question 1 above, rather than write a throwaway prototype, the actual
+minimal-footprint mechanism was implemented directly in `wrapper.py`'s `_launch` (new
+`_isInertTensor` helper + a prune/remap pass), since it turned out to be small enough not to
+need a separate spike/production split. **This is a real, committed-quality change**, not a
+disposable spike — but per the finding below, its benchmark-level payoff was negative, so Phases
+2-3 (extending the same idea via a codebase-wide semantic-keyed lookup) are **not being pursued**.
+
+**Mechanism actually implemented** (smaller than the "semantic-keyed dataclass" sketched in the
+"actual obstacle" section above): at the point `_launch` assembles `flat_tensors` before calling
+`StateAwareWarpFunction.apply()`, each entry is classified via `unpack_dual`+`requires_grad`
+(`_isInertTensor`). An inert real Tensor is converted to its `wp.array` view immediately (outside
+`apply()`'s tracked-argument boundary, so torch's dispatch never sees it as a Tensor call argument
+to synthesize a filler tangent for) and excluded from what's passed to `.apply()`; `build_fn` and
+a `jvp_fn` wrapper both merge it back into its original absolute position (`_QPOS`/etc.) before
+handing off to `state_build_fn`/`operator_spec.py`'s `_build_geometry_jvp_fn` — so *neither*
+`arg_extract.py` nor `operator_spec.py` needed a single line changed. Field-registry entries
+(never `torch.Tensor`) are left exactly where they were, unaffected (they already bypassed
+synthesis).
+
+**Validated correct**: full `tests/operations/` suite — 403 passed, 1 skipped, same one
+pre-existing *unrelated* `test_field_abstraction.py` failure as this session's baseline (confirmed
+present before this change too).
+
+**Validated at the isolated-call level — large, real win**: re-running
+`scripts/spike_jvp_wave_case_overhead_profile.py`'s Part 2 (one dual Laplacian(u,u) call vs. two
+plain calls) after this change: ratio **1.91x → 0.566x** — the dual call is now *faster* than two
+plain calls, not slower. `aten::zeros_like`/`aten::empty_like` counts: both **0**, matching the
+plain baseline exactly (were 12/12 before). The mechanism works exactly as designed.
+
+**Benchmark-level result — did NOT move**: re-ran the exact reproduction command from the top of
+this doc. jvp/fd `msPerRhs` ratio: **~1.80–1.98x**, statistically indistinguishable from the
+~1.84–1.99x baseline this doc already had after Fixes 1+2 (both jvp and fd got ~3% faster in
+absolute terms — a small general win from the same restructuring — but the *ratio*, the number
+this whole investigation is chasing, did not move):
+
+| nx  | jvp (Fixes 1+2 only) | jvp (+ this fix) | fd (Fixes 1+2 only) | fd (+ this fix) | ratio before | ratio after |
+|-----|----------------------:|-------------------:|----------------------:|-------------------:|--------------:|--------------:|
+| 32  | 1.3950                | 1.348               | 0.7594                 | 0.750                | 1.837          | 1.797          |
+| 64  | 1.6176                | 1.564               | 0.8299                 | 0.811                | 1.949          | 1.929          |
+| 128 | 1.6293                | 1.570               | 0.8399                 | 0.808                | 1.940          | 1.943          |
+| 256 | 1.6643                | 1.608               | 0.8369                 | 0.813                | 1.989          | 1.978          |
+
+**Why, root-caused by profiling** (`torch.profiler` around 10 timed real
+`sdirk2_jfnk_jvp_1e-6` DIRK steps at nx=128 — script not checked in, ad hoc for this finding):
+`StateAwareWarpFunction`/`warpSPH - Operation` (the actual SPH kernel launch machinery this whole
+doc, and Fixes 1+2, have been optimizing) account for only **~26-40% of CPU time** in a real step.
+The dominant costs are all **outside `warpSPHCore` entirely**, in `warpSPHIntegrators`'
+DIRK/JFNK driver's own per-step Python/tensor-op bookkeeping:
+`aten::mul`/`aten::add` (168ms/153ms self-CPU across 17652/10565 calls — plain elementwise
+Krylov/Newton vector algebra), `cudaLaunchKernel` (139ms self-CPU, **61057 calls**), and
+`cudaMemcpyAsync` (163ms self-CPU, **43842 calls**) — thousands of tiny individually-cheap
+operations whose *sheer count*, not any one of them, dominates wall time. This mechanism's target
+(torch's dual-argument dispatch overhead *inside* each `StateAwareWarpFunction.apply()` call) was
+real and is now essentially eliminated at that level, but that level was never the dominant cost
+at the whole-benchmark scale — the JFNK/DIRK driver's own Python-level vector-algebra overhead is.
+
+**Conclusion**: Phases 2-3 of this plan (extending the same pruning idea to a codebase-wide
+semantic-keyed replacement of `operator_spec.py`'s fixed-position convention, across all 5
+operators) are **not being pursued** — the mechanism they'd extend is already proven not to move
+the benchmark number that motivates this whole doc. The Phase 1 mechanism implemented above is
+being **kept** (small, validated, no regressions, modestly positive — ~3% faster in absolute terms
+for both jvp and fd, isolated-call win is real) as a worthwhile incremental cleanup on its own
+merits, but this specific investigation (`warpSPHCore`'s forward-mode-AD dispatch overhead) is
+**closed**. Any further work on the ~1.8-2x jvp/fd gap belongs in `warpSPHIntegrators`'s DIRK/JFNK
+driver code — a different codebase, a different investigation, out of this doc's scope.
