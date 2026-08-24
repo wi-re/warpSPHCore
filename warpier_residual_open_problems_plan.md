@@ -389,9 +389,21 @@ for you to weigh in on before anything gets implemented. **Item 3 is now CLOSED*
 (0, 2, 1) implemented and committed 2026-08-24 (`warpSPHIntegrators` commits `cd2a32f`/`710ede7`/`fc5a0ad`),
 eleven new schemes registered (four DIRK, seven multistep), plus a real finding that corrects NOTES.md's
 own original claim that implicit midpoint's symplectic property comes for free at the recommended
-2-iteration solver default (it doesn't — see Item 3). Items 4/5/6 aren't backlog items — they're "if a
-concrete consumer shows up, expect this shape of work," not
-something to build speculatively. Item 9 is background hygiene, pick up opportunistically.
+2-iteration solver default (it doesn't — see Item 3). **A genuine follow-on landed the same session**: a
+user question about the fixed-Picard-iteration limitation surfaced that `warpSPHIntegrators`' NOTES.md
+still claimed "warp has no forward-mode AD" — stale now that this repo's Tier-2 JVP work (Items closed
+earlier this session and before) gives `warpSPHCore` a real, narrowly-scoped JVP layer for six operators.
+Verified against current source (not assumed) and corrected (`warpSPHIntegrators` commit `34ccc1b`), then
+turned into `warpSPHIntegrators/JFNK_PLAN.md` (commit `6e1b0ac`): a phased plan to build the still-missing
+Newton-Krylov (JFNK) solver rung, validated first against `warpSPH`'s implicit wave-equation test — which
+needs none of the still-unwrapped frontend operators and, found during scoping, already fully implements
+this repo's integrator protocol with no adapter work needed — before closing the JVP gap for whichever
+specific WCSPH sub-problem becomes the real target, deliberately not speculating across the whole
+`deltaSPH_step` RHS at once (same discipline Item 6 already established). Not started; needs you to name
+the actual WCSPH implicit target before Phase B can be scoped (see the plan's "Open questions"). Items
+4/5/6 aren't backlog items — they're "if a concrete consumer shows up, expect this shape of work," not
+something to build speculatively, though Item 4 specifically now has a plausible path to becoming one via
+this plan's Phase B. Item 9 is background hygiene, pick up opportunistically.
 
 ## Critical files
 
@@ -418,6 +430,11 @@ something to build speculatively. Item 9 is background hygiene, pick up opportun
   `src/warpSPHIntegrators/multistep.py`, `tests/test_multistep.py` — the Phase 1 Adams-Bashforth/-Moulton
   driver and its seven registered schemes; `src/warpSPHIntegrators/{enums,integration}.py` — all eleven
   new schemes' registry entries
+- `warpSPHIntegrators/JFNK_PLAN.md` (new, 2026-08-24) — the JFNK follow-on plan; `warpSPHIntegrators/
+  NOTES.md` §3.4 — the corrected forward-mode-AD state; `warpSPH/tests/test_implicitWaveEquation.py`,
+  `warpSPH/src/warpSPH/systems/waveSystem.py` — the wave-equation bridge case the plan's Phase A targets;
+  `src/warpSPHCore/autograd/{operator_spec,stateAwareWarpFunction}.py` — where the six-operator JVP scope
+  and the "unwrapped operator raises `NotImplementedError`" safety property actually live
 - `src/warpSPHCore/coreOperations/wp_densityHVP.py` — Item 5's existing reference pattern
 - `scripts/repro_warp_dynamic_loop_division.py` — Item 7
 - `pyproject.toml`, `.github/workflows/tests.yml` — Items 8/9
