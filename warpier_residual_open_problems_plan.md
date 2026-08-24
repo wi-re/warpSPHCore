@@ -95,46 +95,64 @@ translation," per `implicitShifting.py`'s module docstring) the same way it fit 
 operator — untested here, and the fallback chain's alternation is still only BiCGStab↔GMRES, but the
 building block already exists.
 
-### 2. Automatic Newton-Krylov vs. IISPH for incompressibility — adjacent groundwork now landed, core idea still unbuilt
+### 2. Automatic Newton-Krylov vs. IISPH for incompressibility — scoping plan written 2026-08-24; original premise partly corrected
 
-`docs/historic_plans/warpier_forward_mode_plan.md`'s own Phase 6/Goal 4. **Re-checked 2026-08-24:**
-warpSPH landed `INCOMPRESSIBLE_SOLVER_PLAN.md` (commits 2026-08-19 to 08-21, all 7 phases done,
-20 tests green) in the interim, and it's adjacent to this item but **not** the same thing — worth
-being precise about which part is now done and which isn't.
+`docs/historic_plans/warpier_forward_mode_plan.md`'s own Phase 6/Goal 4, which explicitly asked to
+be "scoped as its own plan" before any implementation. **That plan is now written**:
+`warpSPH/COUPLED_INCOMPRESSIBLE_NEWTON_PLAN.md` (2026-08-24, scoping only, nothing implemented). Its
+central finding corrects an assumption baked into this item's original framing, so it's worth
+stating precisely here too.
 
-**What actually landed:** `solveDivergenceFree`'s pressure-Poisson solve (`A_op · p = b`, the scalar
-IISPH pressure field) got five new opt-in Krylov solvers — CG, BiCG, BiCGStab, GMRES, and MINRES
-(`PressureSolverType` enum, `modules/incompressible/krylov.py` dispatch) — as alternatives to the
-shipped relaxed-Jacobi smoother, reusing and extending the shifting work's matrix-free Krylov library
-(`modules/shifting/cg.py`, `bicg.py`, and a new `minres.py` were added). A Phase-0 operator probe
-measured the *existing* IISPH operator directly: symmetric to fp32 (`‖A−Aᵀ‖/‖A‖ ≈ 1e-6`),
-negative-semi-definite with a gauge null space, ill-conditioned (`κ ≈ 2.4e7`), not diagonally dominant.
-MINRES — whose design domain is exactly symmetric/NSD/gauge-singular — turned out to be the best
-all-round method; relaxed-Jacobi's own stability window was pinned down exactly (`ω < 2/ρ(D⁻¹A) ≈
-0.355`, shrinking further in 3D) and a window-free `relaxationMode: optimal` was added alongside it.
-Full findings in warpSPH's `docs/regression/incompressible_pressure_solver_choice.md`.
+**What actually landed adjacent to this (recap, unchanged from before):** warpSPH's
+`INCOMPRESSIBLE_SOLVER_PLAN.md` (commits 2026-08-19 to 08-21, all 7 phases done) added five opt-in
+Krylov solvers — CG, BiCG, BiCGStab, GMRES, MINRES (`modules/incompressible/krylov.py`) — as
+alternatives to `solveDivergenceFree`'s relaxed-Jacobi smoother, with a Phase-0 operator probe
+showing the IISPH pressure operator is symmetric (`‖A−Aᵀ‖/‖A‖ ≈ 1e-6`), negative-semi-definite with
+a gauge null space, ill-conditioned (`κ ≈ 2.4e7`) — MINRES (its exact design domain) is the best
+all-round method. Full findings in warpSPH's
+`docs/regression/incompressible_pressure_solver_choice.md`.
 
-**What this is *not*:** the matvec in all five new solvers is still the same hand-written,
-two-SPH-pass composition (`computePressureAccelIISPH` ∘ `computePressureShiftIISPH`) IISPH always
-used — nothing here is built from composed `warpOperationJVP` calls. The unknown is still the single
-scalar pressure field per particle; there is no coupled pressure/velocity DOF system, no new
-boundary/free-surface handling, and no EOS coupling. In `warpSPHIntegrators/NOTES.md` §3.4's
-solver-ladder terms, this is still solving the same rung-1 linear system with better linear algebra
-(Krylov instead of a damped Jacobi smoother) — it is not the rung-3 "automatic, JVP-composed" solver
-this item originally scoped, and the materially-bigger-lift pieces called out when this item was
-deferred (coupled DOFs, boundary/free-surface, EOS coupling, the JVP composition itself) remain
-completely untouched.
+**The corrected finding (2026-08-24):** Phase 6's own sketch — "an automatic Newton-Krylov
+pressure-Poisson solve built from composed `warpOperationJVP` calls... rung 3" — turns out to be
+based on a premise that doesn't hold for the sub-problem IISPH actually solves. Reading
+`computePressureAccelIISPH`/`computePressureShiftIISPH` directly: the IISPH matvec is
+`Divergence(Gradient(p)/rho)`, i.e. two plain `warpOperation` calls (the same generic,
+already-general-purpose operator dispatch every explicit scheme uses) applied *directly* to the
+trial pressure field `p`. There's no hand-rolled per-pair kernel to replace here the way
+`implicitShifting.py`'s Hessian was (a raw `sphKernelHessian` call bypassing `OperatorSpec`
+entirely) — `p` **is** the unknown the operator acts on, not a tangent direction through some other
+computation, so there was never a differentiation step for `warpOperationJVP` to automate on this
+sub-problem. The Krylov work above therefore already *is* "automatic vs. hand-built, on ease not
+speed" fully resolved in the automatic path's favor, with zero new derivation needed — it just
+didn't need JVP to get there, which is a materially different (and smaller) finding than Phase 6
+assumed.
 
-**How this changes the scoping for this item, if it's picked up:** the Krylov-solver toolbox a
-JVP-composed automatic solve would need (CG/BiCG/BiCGStab/GMRES/MINRES, the fallback-chain dispatch
-pattern in `solverDriver.py`, and the operator-probe pattern for measuring symmetry/definiteness
-before trusting CG/MINRES) now exists, is tested, and is proven against a closely analogous elliptic
-pressure operator — that's directly reusable rather than something a future plan would need to build
-from scratch. The empirical characterization (symmetric, NSD, ill-conditioned, MINRES-favoring) is
-also a reasonable prior for what a JVP-composed version of the *same* discretization would likely
-find, though it isn't a substitute for re-running the probe once such an operator actually exists.
-Still needs its own plan before any implementation starts — the hard, novel parts (coupled DOFs,
-boundary/free-surface, EOS coupling, and the JVP composition itself) are unaffected by this work.
+**What's genuinely still missing** (re-examined against the current tree, not assumed): confirmed
+real, but bigger than a mechanical follow-on. `schemes/dfsph.py`'s `dfsph_step` is a
+splitting/projection scheme — `dvdt` (forces/gravity/diffusion) is computed explicitly once, then
+`solveDivergenceFree` solves a **linear** correction against that frozen `dvdt`; nothing in this
+codebase re-linearizes momentum and pressure together inside an outer Newton loop, so — unlike
+shifting, which had `exactHessian` as pre-existing hand-built ground truth — **there is no existing
+coupled hand-built solve to compare an automatic one against.** EOS coupling is confirmed **not
+currently exercised on the incompressible path at all**: `weaklyCompressibleEOS` is called from the
+*explicit* `schemes/deltaSPH.py` but is dead-commented in `schemes/dfsph.py` — weakly-compressible
+and incompressible are two structurally separate scheme families today, not two modes of one
+nonlinear system, so "EOS coupling" means a scheme-architecture merge decision, not a solver
+derivation.
+
+**Recommendation (in the new plan doc, not acted on):** don't build the full coupled solve
+speculatively — there's no reference implementation to validate against and no motivating bug/
+request. Instead it proposes a much smaller, concretely bounded candidate Phase 1 with a real
+success metric and no new architecture: `solveIncompressible`'s `clamp(pressure, min=0.0)` is
+currently only approximated (solve the unconstrained linear system, then clamp — already flagged
+as an approximation in `INCOMPRESSIBLE_SOLVER_PLAN.md`'s own Scope section); a projected/
+semismooth-Newton treatment of that box constraint is a legitimate, bounded place for
+`warpOperationJVP`-style automatic-linearization reasoning to actually do real work (the active set
+changes iteration to iteration, so the effective operator isn't fixed the way the plain Poisson
+solve's is). Not started; the doc lists three open questions needing a decision from you (is the
+full coupled solve still wanted at all; if so does it merge the EOS/incompressible scheme families
+or stay pressure-only; is the bounded clamp-Newton candidate worth doing on its own) before either
+direction gets an implementation plan.
 
 ### 3. Registering an implicit scheme in `warpSPHIntegrators` as a first-class driver
 
@@ -281,13 +299,16 @@ investigation, to be one documentation bug (a troubleshooting script's claim, fi
 API-drift regression (this repo's `warpOperationJVP` signature change breaking a warpSPH consumer,
 fixed, 207/207 warpSPH tests now passing) — nothing was actually open in the production path. Items 2-3
 remain in the `warpSPH`/`warpSPHIntegrators` incompressible-flow thread — worth deciding whether that's
-still a live priority before scoping either further. **Item 2's "materially bigger lift" framing still
-holds** — the adjacent Krylov-solver work that landed (CG/BiCG/BiCGStab/GMRES/MINRES on IISPH's existing
-linear system) is genuinely useful groundwork (reusable solvers, a proven operator-probe pattern,
-empirical conditioning data) but doesn't touch the coupled-DOF/boundary/EOS/JVP-composition parts that
-make this item hard — still needs its own plan. Items 4/5/6 aren't backlog items — they're "if a
-concrete consumer shows up, expect this shape of work," not something to build speculatively. Item 9 is
-background hygiene, pick up opportunistically.
+still a live priority before scoping either further. **Item 2 now has its requested scoping plan**
+(`warpSPH/COUPLED_INCOMPRESSIBLE_NEWTON_PLAN.md`, 2026-08-24): the linear pressure-Poisson sub-problem
+Phase 6 sketched turned out to need no `warpOperationJVP` at all (already closed by the landed Krylov
+work, for a different reason than originally assumed) and there's no existing coupled hand-built solve
+to build an automatic one against (unlike shifting's `exactHessian`) — so the plan recommends *not*
+building the full coupled solve speculatively, and instead flags three open questions plus one small,
+concretely bounded candidate (`solveIncompressible`'s `clamp(p, min=0)` as a projected-Newton target)
+for you to weigh in on before anything gets implemented. Items 4/5/6 aren't backlog items — they're "if
+a concrete consumer shows up, expect this shape of work," not something to build speculatively. Item 9
+is background hygiene, pick up opportunistically.
 
 ## Critical files
 
@@ -300,6 +321,10 @@ background hygiene, pick up opportunistically.
   API-drift regression found and fixed in Item 1; `warpOperationHVP` was unaffected)
 - `warpSPH/INCOMPRESSIBLE_SOLVER_PLAN.md`, `warpSPH/modules/incompressible/krylov.py`,
   `warpSPH/docs/regression/incompressible_pressure_solver_choice.md` — Item 2's landed groundwork
+- `warpSPH/COUPLED_INCOMPRESSIBLE_NEWTON_PLAN.md` (new, 2026-08-24) — Item 2's scoping plan;
+  `warpSPH/modules/pressure/iisph.py`, `modules/incompressible/drift.py` — the IISPH matvec that
+  plan shows needs no JVP; `warpSPH/schemes/dfsph.py`, `schemes/deltaSPH.py`,
+  `modules/eos/weaklyCompressible.py` — where that plan confirms EOS is/isn't wired in
 - `src/warpSPHCore/coreOperations/wp_densityHVP.py` — Item 5's existing reference pattern
 - `scripts/repro_warp_dynamic_loop_division.py` — Item 7
 - `pyproject.toml`, `.github/workflows/tests.yml` — Items 8/9
