@@ -75,8 +75,7 @@ def warpOperation(
         # shouldn't flow through the queryValues/preScatteredQuantities validation below.
         if operation == WarpOperation.Density:
             return _computeSPHDensity_stateBackend(
-                queryParticles, referenceParticles, domain,
-                operationProperties.supportMode, operationProperties.kernel, operationProperties.operationMode,
+                queryParticles, referenceParticles, domain, operationProperties,
                 adjacency,
             )
         elif operation == WarpOperation.Covariance:
@@ -112,7 +111,7 @@ def warpOperation(
             if referenceValues is None:
                 raise ValueError("referenceValues must be provided for the interpolation computation.")
             return _computeSPHInterpolant_stateBackend(
-                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.operationMode,
+                queryParticles, referenceParticles, domain, operationProperties,
                 adjacency, referenceValues,
                 queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
                 crkState=crkState,
@@ -121,7 +120,7 @@ def warpOperation(
             if queryValues is None or referenceValues is None:
                 raise ValueError("queryValues and referenceValues must be provided for the gradient computation.")
             return _computeSPHGradient_stateBackend(
-                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.gradientMode, operationProperties.operationMode,
+                queryParticles, referenceParticles, domain, operationProperties,
                 adjacency, queryValues, referenceValues,
                 queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
                 crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,
@@ -130,9 +129,9 @@ def warpOperation(
             if queryValues is None or referenceValues is None:
                 raise ValueError("queryValues and referenceValues must be provided for the divergence computation.")
             return _computeSPHDivergence_stateBackend(
-                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.gradientMode, operationProperties.operationMode,
+                queryParticles, referenceParticles, domain, operationProperties,
                 adjacency, queryValues, referenceValues,
-                consistentDivergence=consistentDivergence, dotMode=operationProperties.divergenceDotMode,
+                consistentDivergence=consistentDivergence,
                 queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
                 crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,
             )
@@ -140,7 +139,7 @@ def warpOperation(
             if queryValues is None or referenceValues is None:
                 raise ValueError("queryValues and referenceValues must be provided for the curl computation.")
             return _computeSPHCurl_stateBackend(
-                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.gradientMode, operationProperties.operationMode,
+                queryParticles, referenceParticles, domain, operationProperties,
                 adjacency, queryValues, referenceValues,
                 queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
                 crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,
@@ -149,7 +148,7 @@ def warpOperation(
             if queryValues is None or referenceValues is None:
                 raise ValueError("queryValues and referenceValues must be provided for the laplacian computation.")
             return _computeSPHLaplacian_stateBackend(
-                queryParticles, referenceParticles, domain, operationProperties.supportMode, operationProperties.kernel, operationProperties.gradientMode, operationProperties.laplacianMode, operationProperties.positiveDivergence, operationProperties.operationMode,
+                queryParticles, referenceParticles, domain, operationProperties,
                 adjacency, queryValues, referenceValues,
                 queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
                 crkState=crkState, gradHState=gradHState, renormalizationState=renormalizationState,

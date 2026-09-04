@@ -2,6 +2,7 @@ import warp as wp
 from typing import NamedTuple, Union, Tuple, List, Optional, Any
 from warp.types import vector, matrix
 import torch
+from dataclasses import replace
 from ..profiling import record_function
 
 from ..type_config import *
@@ -179,9 +180,7 @@ def _computeSPHInterpolant_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
     domain: DomainDescription,
-    mode: SupportScheme,
-    kernel: KernelFunctions,
-    operationMode: OperationDirection,
+    operationProperties: OperationProperties,
     adjacency, # AdjacencyList | CompactHashMap | None
     referenceValues: torch.Tensor,
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
@@ -210,12 +209,11 @@ def _computeSPHInterpolant_stateBackend(
                 flat_len = referenceValues[0].numel()
                 referenceValues = referenceValues.reshape(referenceValues.shape[0], flat_len).contiguous()
 
-            operationProperties = OperationProperties(
-                kernel=kernel,
-                operation=WarpOperation.Interpolate,
-                supportMode=mode,
-                operationMode=operationMode,
-            )
+            # `operation` is the only field the caller cannot have set correctly
+            # for this backend; everything else -- including n_h /
+            # calibrateNormalization -- is carried through untouched.
+            operationProperties = replace(operationProperties,
+                                          operation=WarpOperation.Interpolate)
 
         with record_function("warpSPH[Interpolation] - Kernel Execution"):
             ctx = SPHContext(

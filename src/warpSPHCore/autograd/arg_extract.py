@@ -1,3 +1,5 @@
+import math
+
 import torch
 import warp as wp
 from ..util import *
@@ -7,6 +9,7 @@ from typing import Optional, Union, Tuple
 from .arg_check import *
 from ..radiusSearch import buildCompactHashMap
 from ..util.stateBundle import getStateBundle
+from ..util.latticeDensity import latticeDensityFactor
 
 def extractStateInfo(
     queryParticles: ParticleState,
@@ -213,6 +216,25 @@ def extractStateInfo(
 
             opInt          = wp.int32(operationMode.value)
 
+            # Lattice-normalisation correction (LATTICE_DENSITY_PLAN.md). Pure
+            # function of (kernel, n_h, dim), so `latticeDensityFactor`'s own
+            # lru_cache makes this a dict hit on every call after the first --
+            # negligible against everything else this function does per call.
+            # The check is deliberately loud: `__post_init__` already rejected a
+            # missing n_h, so anything failing here is a bad (kernel, n_h, dim)
+            # combination that would otherwise reach a kernel as a NaN.
+            calibrateNormalization = bool(operationProperties.calibrateNormalization)
+            normalizationCoefficient = scalar_t(1.0)
+            if calibrateNormalization:
+                factor = latticeDensityFactor(
+                    operationProperties.kernel, float(operationProperties.n_h), int(dim))
+                if not (factor > 0.0 and math.isfinite(factor)):
+                    raise ValueError(
+                        'lattice normalization coefficient must be finite and positive, '
+                        f'got {factor!r} for kernel={operationProperties.kernel}, '
+                        f'n_h={operationProperties.n_h}, dim={dim}')
+                normalizationCoefficient = scalar_t(factor)
+
             cfg = {
                 'dim':                      dim,
                 'useAdjacency':             useAdjacency,
@@ -229,6 +251,8 @@ def extractStateInfo(
                 'positiveDivergence':       positiveDivergence,
                 'divergenceMode':           divergenceMode,
                 'opInt':                    opInt,
+                'calibrateNormalization':   calibrateNormalization,
+                'normalizationCoefficient': normalizationCoefficient,
             }
         with record_function("[ESI] 6. assemble flat tensor list"):
             # ------------------------------------------------------------------ #
@@ -297,6 +321,8 @@ def extractStateInfo(
     _positiveDivergence          = cfg['positiveDivergence']
     _divergenceMode              = cfg['divergenceMode']
     _opInt                       = cfg['opInt']
+    _calibrateNormalization      = cfg['calibrateNormalization']
+    _normalizationCoefficient    = cfg['normalizationCoefficient']
 
     def build_fn(wa: list, use_bundle: bool = False) -> tuple:
         if use_bundle:
@@ -381,6 +407,8 @@ def extractStateInfo(
         kernProps.positiveDivergenceMode = _positiveDivergence
         kernProps.divergenceMode        = _divergenceMode
         kernProps.operationMode         = _opInt
+        kernProps.calibrateNormalization  = _calibrateNormalization
+        kernProps.normalizationCoefficient = _normalizationCoefficient
 
         return (
             qPart, rPart, domState,

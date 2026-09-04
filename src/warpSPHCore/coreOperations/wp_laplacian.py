@@ -2,6 +2,7 @@ import warp as wp
 from typing import NamedTuple, Union, Tuple, List, Optional, Any
 from warp.types import vector, matrix
 import torch
+from dataclasses import replace
 from ..profiling import record_function
 
 from ..type_config import *
@@ -282,12 +283,7 @@ def _computeSPHLaplacian_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
     domain: DomainDescription,
-    mode: SupportScheme,
-    kernel: KernelFunctions,
-    gradientMode: GradientScheme,
-    laplacianMode: LaplacianScheme,
-    positiveDivergence: bool,
-    operationMode: OperationDirection,
+    operationProperties: OperationProperties,
     adjacency, # AdjacencyList | CompactHashMap | None
     queryValues: torch.Tensor, referenceValues: torch.Tensor,
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
@@ -306,7 +302,7 @@ def _computeSPHLaplacian_stateBackend(
                 flatInputShape *= d
 
             spatialDim = queryPositions.shape[1]
-            if laplacianMode == LaplacianScheme.Dot and spatialDim > 1 and flatInputShape % spatialDim != 0:
+            if operationProperties.laplacianMode == LaplacianScheme.Dot and spatialDim > 1 and flatInputShape % spatialDim != 0:
                 raise ValueError(
                     f"LaplacianScheme.Dot's computeLaplacianDot2 assumes the field's flattened size is a multiple "
                     f"of the spatial dimension ({spatialDim}) -- it indexes q_ij[block*dim + k] for k in range(dim), "
@@ -323,15 +319,11 @@ def _computeSPHLaplacian_stateBackend(
                 flatOutputShape *= d
             numDims = len(inputShape)
 
-            operationProperties = OperationProperties(
-                kernel=kernel,
-                operation=WarpOperation.Laplacian,
-                gradientMode=gradientMode,
-                laplacianMode=laplacianMode,
-                positiveDivergence=positiveDivergence,
-                supportMode=mode,
-                operationMode=operationMode,
-            )
+            # `operation` is the only field the caller cannot have set correctly
+            # for this backend; everything else -- including n_h /
+            # calibrateNormalization -- is carried through untouched.
+            operationProperties = replace(operationProperties,
+                                          operation=WarpOperation.Laplacian)
 
         with record_function("warpSPH[Laplacian] - Kernel Execution"):
             ctx = SPHContext(

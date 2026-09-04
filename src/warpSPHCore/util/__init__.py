@@ -15,6 +15,13 @@ from .wp_util import (
 # )
 
 from .support import volumeToSupport, volumeToSupport_tensor, n_h_to_nH, volumeToSupport_warp, computePairwiseSupport, nH_to_n_h
+from .latticeDensity import (
+    latticeDensity, latticeDensityFactor,
+    latticeDensityShells, latticeDensityFourier, latticeDensityClosed,
+    latticeDensityIsStrictlyAbove1,
+    kernelFourierTransform, epsteinZeta, shellCounts, jacobiR2,
+    WENDLAND_TAIL_COEFFICIENTS,
+)
 
 
 __all__ = [
@@ -37,6 +44,17 @@ __all__ = [
     "volumeToSupport_warp",
     "computePairwiseSupport",
     "generateNeighborTestData",
+    "latticeDensity",
+    "latticeDensityFactor",
+    "latticeDensityShells",
+    "latticeDensityFourier",
+    "latticeDensityClosed",
+    "latticeDensityIsStrictlyAbove1",
+    "kernelFourierTransform",
+    "epsteinZeta",
+    "shellCounts",
+    "jacobiR2",
+    "WENDLAND_TAIL_COEFFICIENTS",
 
     # "StateAwareWarpFunction"
 ]

@@ -2,7 +2,7 @@ from typing import Any
 from ..type_config import *
 import warp as wp
 from warp.types import vector, matrix
-from .properties import eval_C_d
+from .properties import eval_C_d, resolveNormalization
 from .eval_kernel import *
 import numpy as np
 from ..math import *
@@ -129,13 +129,15 @@ def sphKernelGradient(
     kernelProperties: kernelState,
     domainState: domainData,
 ):
+    # Lattice-normalisation correction; 1.0 unless enabled (kernels/properties.py).
+    norm = resolveNormalization(kernelProperties)
     hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
     xij = computeDistanceVec(xi, xj, domainState)
     if kernelProperties.supportMode == wp.static(SupportScheme.KernelMeanSymmetric.value): # KernelMeanSymmetric
-        return (sphGradient_(xij,hi,kernelProperties.kernelFunction) + sphGradient_(xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0)
+        return norm * ((sphGradient_(xij,hi,kernelProperties.kernelFunction) + sphGradient_(xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0))
     elif kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
-        return (sphGradient_(xij,hi,kernelProperties.kernelFunction) - sphGradient_(-xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0)
-    return sphGradient_(xij, hij, kernelProperties.kernelFunction)
+        return norm * ((sphGradient_(xij,hi,kernelProperties.kernelFunction) - sphGradient_(-xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0))
+    return norm * (sphGradient_(xij, hij, kernelProperties.kernelFunction))
 
 
 @wp.func
@@ -146,9 +148,11 @@ def sphKernelGradient_ij(
     kernelProperties: kernelState,
     domainState: domainData,
 ):
+    # Lattice-normalisation correction; 1.0 unless enabled (kernels/properties.py).
+    norm = resolveNormalization(kernelProperties)
     hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
     if kernelProperties.supportMode == wp.static(SupportScheme.KernelMeanSymmetric.value): # KernelMeanSymmetric
-        return (sphGradient_(xij,hi,kernelProperties.kernelFunction) + sphGradient_(xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0)
+        return norm * ((sphGradient_(xij,hi,kernelProperties.kernelFunction) + sphGradient_(xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0))
     if kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
-        return (sphGradient_(xij,hi,kernelProperties.kernelFunction) - sphGradient_(-xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0)
-    return sphGradient_(xij, hij, kernelProperties.kernelFunction)
+        return norm * ((sphGradient_(xij,hi,kernelProperties.kernelFunction) - sphGradient_(-xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0))
+    return norm * (sphGradient_(xij, hij, kernelProperties.kernelFunction))

@@ -6,6 +6,7 @@ __all__.extend([
     'sphKernelC_d',
     'sphKernelN_H',
     'sphKernel_xi',
+    'resolveNormalization',
 ])
 
 # These should not be used directly thus they are not exported by default

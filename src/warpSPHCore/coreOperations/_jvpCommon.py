@@ -63,6 +63,8 @@ def buildKernelState(
     kernel: KernelFunctions, supportMode: SupportScheme,
     gradientMode: Optional[GradientScheme] = None,
     laplacianMode: Optional[LaplacianScheme] = None,
+    calibrateNormalization: bool = False,
+    normalizationCoefficient: float = 1.0,
 ) -> kernelState:
     k = kernelState()
     k.kernelFunction = kernel.value
@@ -77,6 +79,13 @@ def buildKernelState(
         k.gradientMode = gradientMode.value
     if laplacianMode is not None:
         k.laplacianMode = laplacianMode.value
+    # Lattice-normalisation correction: this MUST match the forward operator's
+    # kernelState. If the primal is corrected and the tangent is not, the JVP no
+    # longer differentiates the function that was actually evaluated and
+    # scripts/gradcheck_*.py fails -- the same trap as the gradientMode /
+    # laplacianMode zero-default above, one field along.
+    k.calibrateNormalization = calibrateNormalization
+    k.normalizationCoefficient = scalar_t(normalizationCoefficient)
     return k
 
 

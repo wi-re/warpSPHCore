@@ -16,7 +16,7 @@ from typing import Any
 from ..type_config import *
 import warp as wp
 from warp.types import vector, matrix
-from .properties import eval_C_d
+from .properties import eval_C_d, resolveNormalization
 from .eval_kernel import *
 import numpy as np
 from ..math import *
@@ -43,6 +43,8 @@ def sphKernelJVP_ij(
     kernelProperties: kernelState,
     domainState: domainData,
 ):
+    # Lattice-normalisation correction; 1.0 unless enabled (kernels/properties.py).
+    norm = resolveNormalization(kernelProperties)
     if kernelProperties.supportMode == wp.static(SupportScheme.KernelMeanSymmetric.value) or kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value):
         Wi = sphKernel_(xij, hi, kernelProperties.kernelFunction)
         Wj = sphKernel_(xij, hj, kernelProperties.kernelFunction)
@@ -52,14 +54,14 @@ def sphKernelJVP_ij(
         dWdhj = sphKernelDkDh_(xij, hj, kernelProperties.kernelFunction)
         W = (Wi + Wj) * scalar_t(0.5)
         dW = scalar_t(0.5) * (wp.dot(gWi, dxij) + wp.dot(gWj, dxij) + dWdhi * dhi + dWdhj * dhj)
-        return W, dW
+        return norm * (W), norm * (dW)
     hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
     dhij = computePairwiseSupportJVP(hi, hj, dhi, dhj, kernelProperties.supportMode)
     W = sphKernel_(xij, hij, kernelProperties.kernelFunction)
     gW = sphGradient_(xij, hij, kernelProperties.kernelFunction)
     dWdh = sphKernelDkDh_(xij, hij, kernelProperties.kernelFunction)
     dW = wp.dot(gW, dxij) + dWdh * dhij
-    return W, dW
+    return norm * (W), norm * (dW)
 
 
 @wp.func
@@ -107,6 +109,8 @@ def sphKernelGradientJVP_ij(
     ported here byte-for-byte (only the vector/matrix types are the
     module's fixed `dim_t`/`scalar_t` rather than the spike's generic `Any`,
     matching every other function in this file)."""
+    # Lattice-normalisation correction; 1.0 unless enabled (kernels/properties.py).
+    norm = resolveNormalization(kernelProperties)
     if kernelProperties.supportMode == wp.static(SupportScheme.KernelMeanSymmetric.value) or kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value):
         Gi = sphGradient_(xij, hi, kernelProperties.kernelFunction)
         Gj = sphGradient_(xij, hj, kernelProperties.kernelFunction)
@@ -116,14 +120,14 @@ def sphKernelGradientJVP_ij(
         dGdhj = sphGradientDkDh_(xij, hj, kernelProperties.kernelFunction)
         G = (Gi + Gj) * scalar_t(0.5)
         dG = (matmul(Hi, dxij) + matmul(Hj, dxij) + dGdhi * dhi + dGdhj * dhj) * scalar_t(0.5)
-        return G, dG
+        return norm * (G), norm * (dG)
     hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
     dhij = computePairwiseSupportJVP(hi, hj, dhi, dhj, kernelProperties.supportMode)
     G = sphGradient_(xij, hij, kernelProperties.kernelFunction)
     H = sphKernelHessian_(xij, hij, kernelProperties.kernelFunction)
     dGdh = sphGradientDkDh_(xij, hij, kernelProperties.kernelFunction)
     dG = matmul(H, dxij) + dGdh * dhij
-    return G, dG
+    return norm * (G), norm * (dG)
 
 
 @wp.func
@@ -174,6 +178,8 @@ def sphKernelLaplacianJVP_ij(
     own reverse-mode Jacobian, for every `GradientScheme`/`SupportScheme`
     combination, including the KernelMeanSymmetric-vs-SuperSymmetric
     genuinely-differ check)."""
+    # Lattice-normalisation correction; 1.0 unless enabled (kernels/properties.py).
+    norm = resolveNormalization(kernelProperties)
     if kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value):
         Li = sphKernelLaplacian_(xij, hi, kernelProperties.kernelFunction)
         Lj = sphKernelLaplacian_(xij, hj, kernelProperties.kernelFunction)
@@ -183,14 +189,14 @@ def sphKernelLaplacianJVP_ij(
         DhI = sphKernelLaplacianDkDh_(xij, hi, kernelProperties.kernelFunction)
         DhJ = sphKernelLaplacianDkDh_(xij, hj, kernelProperties.kernelFunction)
         dL = (wp.dot(Gi, dxij) + DhI * dhi + wp.dot(Gj, dxij) + DhJ * dhj) * scalar_t(0.5)
-        return L, dL
+        return norm * (L), norm * (dL)
     hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
     dhij = computePairwiseSupportJVP(hi, hj, dhi, dhj, kernelProperties.supportMode)
     L = sphKernelLaplacian_(xij, hij, kernelProperties.kernelFunction)
     G = sphKernelLaplacianGradient_(xij, hij, kernelProperties.kernelFunction)
     Dh = sphKernelLaplacianDkDh_(xij, hij, kernelProperties.kernelFunction)
     dL = wp.dot(G, dxij) + Dh * dhij
-    return L, dL
+    return norm * (L), norm * (dL)
 
 
 @wp.func

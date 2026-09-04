@@ -2,6 +2,7 @@ import warp as wp
 from typing import NamedTuple, Union, Tuple, List, Optional, Any
 from warp.types import vector, matrix
 import torch
+from dataclasses import replace
 from ..profiling import record_function
 
 from ..type_config import *
@@ -242,10 +243,7 @@ def _computeSPHGradient_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
     domain: DomainDescription,
-    mode: SupportScheme,
-    kernel: KernelFunctions,
-    gradientMode: GradientScheme,
-    operationMode: OperationDirection,
+    operationProperties: OperationProperties,
     adjacency, # AdjacencyList | CompactHashMap | None -- both traversal modes go through this one path
     queryValues: torch.Tensor, referenceValues: torch.Tensor,
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
@@ -269,13 +267,11 @@ def _computeSPHGradient_stateBackend(
                 flatOutputShape *= d
             numDims = len(inputShape)
 
-            operationProperties = OperationProperties(
-                kernel=kernel,
-                operation=WarpOperation.Gradient,
-                gradientMode=gradientMode,
-                supportMode=mode,
-                operationMode=operationMode,
-            )
+            # `operation` is the only field the caller cannot have set correctly
+            # for this backend; everything else -- including n_h /
+            # calibrateNormalization -- is carried through untouched.
+            operationProperties = replace(operationProperties,
+                                          operation=WarpOperation.Gradient)
 
         with record_function("warpSPH[Gradient] - Kernel Execution"):
             ctx = SPHContext(

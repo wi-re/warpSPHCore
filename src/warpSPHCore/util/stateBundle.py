@@ -145,6 +145,11 @@ class StateBundle:
         self.kernelProperties.positiveDivergenceMode = cfg["positiveDivergence"]
         self.kernelProperties.divergenceMode = cfg["divergenceMode"]
         self.kernelProperties.operationMode = cfg["opInt"]
+        # Lattice-normalisation correction -- must be set on BOTH kernelState
+        # build paths (here and arg_extract.py's per-call construction) or the
+        # correction applies to whichever one a given operator happens to take.
+        self.kernelProperties.calibrateNormalization = cfg["calibrateNormalization"]
+        self.kernelProperties.normalizationCoefficient = cfg["normalizationCoefficient"]
 
 
 # dim in {1, 2, 3}: at most three bundles ever exist, so a plain dict with no

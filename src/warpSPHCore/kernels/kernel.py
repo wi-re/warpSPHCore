@@ -2,7 +2,7 @@ from typing import Any
 from ..type_config import *
 import warp as wp
 from warp.types import vector, matrix
-from .properties import eval_C_d
+from .properties import eval_C_d, resolveNormalization
 from .eval_kernel import *
 import numpy as np
 from ..math import *
@@ -31,11 +31,13 @@ def sphKernel(
     kernelProperties: kernelState,
     domainState: domainData,
 ):
+    # Lattice-normalisation correction; 1.0 unless enabled (kernels/properties.py).
+    norm = resolveNormalization(kernelProperties)
     hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
     xij = computeDistanceVec(xi, xj, domainState)
     if kernelProperties.supportMode == wp.static(SupportScheme.KernelMeanSymmetric.value) or kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value): # KernelMeanSymmetric or SuperSymmetric
-        return (sphKernel_(xij,hi,kernelProperties.kernelFunction) + sphKernel_(xij,hj,kernelProperties.kernelFunction))/scalar(2.0)
-    return sphKernel_(xij, hij, kernelProperties.kernelFunction)
+        return norm * ((sphKernel_(xij,hi,kernelProperties.kernelFunction) + sphKernel_(xij,hj,kernelProperties.kernelFunction))/scalar(2.0))
+    return norm * (sphKernel_(xij, hij, kernelProperties.kernelFunction))
 
 @wp.func
 def sphKernel_ij(
@@ -45,7 +47,9 @@ def sphKernel_ij(
     kernelProperties: kernelState,
     domainState: domainData,
 ):
+    # Lattice-normalisation correction; 1.0 unless enabled (kernels/properties.py).
+    norm = resolveNormalization(kernelProperties)
     hij = computePairwiseSupport(hi, hj, kernelProperties.supportMode)
     if kernelProperties.supportMode == wp.static(SupportScheme.KernelMeanSymmetric.value) or kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value): # KernelMeanSymmetric or SuperSymmetric
-        return (sphKernel_(xij,hi,kernelProperties.kernelFunction) + sphKernel_(xij,hj,kernelProperties.kernelFunction))/scalar(2.0)
-    return sphKernel_(xij, hij, kernelProperties.kernelFunction)
+        return norm * ((sphKernel_(xij,hi,kernelProperties.kernelFunction) + sphKernel_(xij,hj,kernelProperties.kernelFunction))/scalar(2.0))
+    return norm * (sphKernel_(xij, hij, kernelProperties.kernelFunction))

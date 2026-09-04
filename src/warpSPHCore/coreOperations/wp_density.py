@@ -2,6 +2,7 @@ import warp as wp
 from typing import NamedTuple, Union, Tuple, List, Optional, Any
 from warp.types import vector, matrix
 import torch
+from dataclasses import replace
 from ..profiling import record_function
 
 from ..type_config import *
@@ -154,9 +155,7 @@ def _computeSPHDensity_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
     domain: DomainDescription,
-    mode: SupportScheme,
-    kernel: KernelFunctions,
-    operationMode: OperationDirection,
+    operationProperties: OperationProperties,
     adjacency: Optional[Union[AdjacencyList, CompactHashMap]],
 ):
     """Unified state-based Density backend -- see warpier_core.md's "Working Prototype ->
@@ -168,12 +167,11 @@ def _computeSPHDensity_stateBackend(
     """
     with record_function("warpSPH[Density]"):
         with record_function("warpSPH[Density] - Preprocessing"):
-            operationProperties = OperationProperties(
-                kernel=kernel,
-                operation=WarpOperation.Density,
-                supportMode=mode,
-                operationMode=operationMode,
-            )
+            # `operation` is the only field the caller cannot have set correctly
+            # for this backend; everything else -- including n_h /
+            # calibrateNormalization -- is carried through untouched.
+            operationProperties = replace(operationProperties,
+                                          operation=WarpOperation.Density)
 
         with record_function("warpSPH[Density] - Kernel Execution"):
             ctx = SPHContext(

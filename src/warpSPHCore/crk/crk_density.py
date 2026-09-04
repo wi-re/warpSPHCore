@@ -53,6 +53,13 @@ def computeCRKDensity_Func_i(
     # mode/useCRK are hardcoded here (not kernelProperties.supportMode/a useCRK flag) --
     # pre-existing behavior carried over unchanged from the neighbor-list-only kernel
     # this replaces; not touched by this traversal-style migration.
+    #
+    # The lattice-normalisation correction is deliberately NOT copied over: the
+    # fresh struct leaves calibrateNormalization at its zero default (False), and
+    # that is the intended behaviour, not an oversight. CRK already enforces the
+    # reproducing conditions and reconstructs a constant field exactly, so the
+    # lattice-sum defect the correction exists to remove is not present here;
+    # applying 1/L on top would double-correct. See LATTICE_DENSITY_PLAN.md 3.3.
     crkKernelProperties = kernelState()
     crkKernelProperties.kernelFunction = kernelProperties.kernelFunction
     crkKernelProperties.supportMode = wp.uint32(12)

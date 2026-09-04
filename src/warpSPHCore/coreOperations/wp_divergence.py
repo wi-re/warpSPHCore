@@ -2,6 +2,7 @@ import warp as wp
 from typing import NamedTuple, Union, Tuple, List, Optional, Any
 from warp.types import vector, matrix
 import torch
+from dataclasses import replace
 from ..profiling import record_function
 
 from ..type_config import *
@@ -222,14 +223,10 @@ def _computeSPHDivergence_stateBackend(
     queryParticles: ParticleState,
     referenceParticles: ParticleState,
     domain: DomainDescription,
-    mode: SupportScheme,
-    kernel: KernelFunctions,
-    gradientMode: GradientScheme,
-    operationMode: OperationDirection,
+    operationProperties: OperationProperties,
     adjacency, # AdjacencyList | CompactHashMap | None
     queryValues: torch.Tensor, referenceValues: torch.Tensor,
     consistentDivergence: bool = False,
-    dotMode: bool = False,
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
     gradHState: Optional[GradHState] = None,
@@ -245,20 +242,18 @@ def _computeSPHDivergence_stateBackend(
             for d in inputShape:
                 flatInputShape *= d
 
-            outputShape = inputShape[1:] if dotMode else inputShape[:-1]
+            outputShape = (inputShape[1:] if operationProperties.divergenceDotMode
+                           else inputShape[:-1])
             flatOutputShape = 1
             for d in outputShape:
                 flatOutputShape *= d
             numDims = len(inputShape)
 
-            operationProperties = OperationProperties(
-                kernel=kernel,
-                operation=WarpOperation.Divergence,
-                gradientMode=gradientMode,
-                supportMode=mode,
-                operationMode=operationMode,
-                divergenceDotMode=dotMode,
-            )
+            # `operation` is the only field the caller cannot have set correctly
+            # for this backend; everything else -- including n_h /
+            # calibrateNormalization -- is carried through untouched.
+            operationProperties = replace(operationProperties,
+                                          operation=WarpOperation.Divergence)
 
         with record_function("warpSPH[Divergence] - Kernel Execution"):
             ctx = SPHContext(
