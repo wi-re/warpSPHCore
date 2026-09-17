@@ -1,0 +1,55 @@
+/* KaTeX's own stylesheet — without it, $$...$$ blocks render as unstyled
+   spans (fractions/arrays collapse onto one line instead of stacking). */
+@import 'katex/dist/katex.min.css';
+
+/* A wide display equation (long tableau, multi-clause $$...$$ block) must
+   scroll within its own box, not force the whole page to scroll sideways. */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+}
+
+/* Primary palette (matches the repo's matplotlib accent). */
+:root {
+  --ifm-color-primary: #2563eb;
+  --ifm-color-primary-dark: #2158d3;
+  --ifm-color-primary-darker: #1e50c7;
+  --ifm-color-primary-darkest: #1a41a3;
+  --ifm-color-primary-light: #3f73ee;
+  --ifm-color-primary-lighter: #4c7ef0;
+  --ifm-color-primary-lightest: #749af5;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(37, 99, 235, 0.1);
+}
+
+/* Landing hero. */
+.hero--primary {
+  padding: 4.5rem 0 3.5rem;
+}
+
+.heroSubtitle {
+  display: block;
+  font-size: 1.1rem;
+  font-weight: 500;
+  margin-top: 0.5rem;
+  opacity: 0.85;
+}
+
+.heroTagline {
+  max-width: 46rem;
+  margin: 1.5rem auto 2rem;
+  font-size: 1.15rem;
+}
+
+/* Landing feature cards. */
+.featureCard {
+  padding: 2rem 1.5rem;
+  border-radius: var(--ifm-border-radius);
+  background: var(--ifm-color-emphasis-100);
+}
+
+.featureCard h3 {
+  font-size: 1.3rem;
+  margin-bottom: 0.75rem;
+}
