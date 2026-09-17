@@ -165,7 +165,7 @@ and returns `(positions, supports, n, domain, dx)`.
 `n_h_to_nH(n_h, dim)` / `nH_to_nH` convert between the resolution knob
 $n_h$ (particles per smoothing length, the dimension-comparable
 quantity used by the [lattice
-calibration](renorm#lattice-normalization-calibration)) and the
+calibration](lattice-calibration)) and the
 dimension-specific target neighbor count $N_h$.
 
 ## See also

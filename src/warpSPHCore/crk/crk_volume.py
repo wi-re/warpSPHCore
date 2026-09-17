@@ -83,7 +83,7 @@ def computeCRKVolume_Func_Adjacency(
     # constant) that accumulates into a local via += and then feeds that local into a
     # nonlinear post-loop op (division), all inside the same @wp.func, produces NaN
     # gradients here (confirmed via a minimal standalone repro against just this
-    # function -- see scripts/debug_crk_backward.py). Every other migrated operator's
+    # function -- see scripts/diagnostics/debug_crk_backward.py). Every other migrated operator's
     # _Func_Adjacency avoids this because it returns the loop-accumulated value
     # directly with no further transform. The reciprocal is applied one level up, in
     # computeCRKVolume_Kernel, outside the function that contains the loop -- verified

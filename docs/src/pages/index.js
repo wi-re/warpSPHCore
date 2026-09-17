@@ -22,7 +22,7 @@ export default () => (
           <div className="col">
             <Link
               className="button button--primary button--lg"
-              to="docs/operations/density"
+              to="docs"
             >
               Browse the wiki →
             </Link>

@@ -78,7 +78,7 @@ const config = {
             type: 'docSidebar',
             sidebarId: 'wiki',
             position: 'left',
-            label: 'Operations',
+            label: 'Wiki',
           },
           { to: 'docs/kernels', position: 'left', label: 'Kernels' },
           { to: 'docs/autograd', position: 'left', label: 'Autodiff' },

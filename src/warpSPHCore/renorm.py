@@ -166,7 +166,7 @@ def computeRenormalizationMatricesJVP(
     applies to the primal `C_i` -- the low-neighbor-count identity fallback's
     exact-zero tangent (`dC = where(lowNbrMask, 0, dC_raw)`), then the
     standard matrix-inverse-derivative identity `d(C^-1) = -C^-1(dC)C^-1`
-    (`scripts/spike_forward_mode_tier2_renorm.py`, already validated to
+    (`scripts/spikes/spike_forward_mode_tier2_renorm.py`, already validated to
     float64 round-off). `L` itself is consumed from this function's own
     primal `computeRenormalizationMatrices_` call rather than re-derived --
     same "consume an already-validated value" pattern the spike uses and

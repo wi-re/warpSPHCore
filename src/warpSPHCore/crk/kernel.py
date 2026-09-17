@@ -43,7 +43,7 @@ def correctGradientCRKJVP(
 ):
     """JVP of `correctGradientCRK` (`warpier_tier2_correction_jvp_plan.md`
     phase (c), Stage 4): ordinary product rule on that function's four-term
-    formula, ported from `scripts/spike_forward_mode_tier2_crk.py`'s
+    formula, ported from `scripts/spikes/spike_forward_mode_tier2_crk.py`'s
     `assembled_correctedGradient_jvp`. `Ai`/`Bi`/`gradAi`/`gradBi` are the
     per-QUERY-particle CRK correction terms (constant across the neighbor
     loop, matching `correctGradientCRK`'s own convention -- see that

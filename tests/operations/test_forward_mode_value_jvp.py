@@ -1,5 +1,5 @@
 """In-process standing test for `warpOperationJVP` (`warpier_forward_mode_plan.md`
-Phase 2): asserts it reproduces `scripts/spike_forward_mode_tier1.py`'s value
+Phase 2): asserts it reproduces `scripts/spikes/spike_forward_mode_tier1.py`'s value
 JVP identity for each of the five value-consuming operators, the same way
 `test_gradcheck_scripts.py` gates the spike script itself as a subprocess.
 

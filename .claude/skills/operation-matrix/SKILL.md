@@ -1,11 +1,11 @@
 ---
 name: operation-matrix
-description: Run scripts/operation_matrix.py, the forward-value diagnostic matrix for warpSPHCore's SPH operators (Density, Interpolate, Gradient, Divergence, Curl, Laplacian) across GradientScheme/LaplacianScheme variants, both traversal modes (adjacency/grid), and all three correction paths (none/CRK/renorm). Use a quick 2D/float32 smoke sweep for routine iteration on operator or kernel code, and the full precision x dim x jitter x device sweep sparingly -- before merging a change that touches kernel math broadly, not on every edit. Pair with the gradcheck skill, which checks backward-mode (gradients) instead of forward values.
+description: Run scripts/diagnostics/operation_matrix.py, the forward-value diagnostic matrix for warpSPHCore's SPH operators (Density, Interpolate, Gradient, Divergence, Curl, Laplacian) across GradientScheme/LaplacianScheme variants, both traversal modes (adjacency/grid), and all three correction paths (none/CRK/renorm). Use a quick 2D/float32 smoke sweep for routine iteration on operator or kernel code, and the full precision x dim x jitter x device sweep sparingly -- before merging a change that touches kernel math broadly, not on every edit. Pair with the gradcheck skill, which checks backward-mode (gradients) instead of forward values.
 ---
 
 # Running the operation matrix
 
-`scripts/operation_matrix.py` builds a deterministic (or lightly jittered)
+`scripts/diagnostics/operation_matrix.py` builds a deterministic (or lightly jittered)
 particle lattice with a linear test field, runs every operator/scheme/
 traversal/correction combination against it, and prints an MAE-vs-analytic
 pass/fail table. It has directly found 5+ real defects (Symmetric-scheme
@@ -21,9 +21,9 @@ recipe for going wider:
 ## Quick smoke sweep (routine iteration -- run freely)
 
 ```bash
-scripts/run_operation_matrix_sweep.sh --quick
+scripts/diagnostics/run_operation_matrix_sweep.sh --quick
 # equivalent to:
-python scripts/operation_matrix.py --device cpu --ci --verbose
+python scripts/diagnostics/operation_matrix.py --device cpu --ci --verbose
 ```
 
 2D, float32, non-jittered, `nx=32` (~1000 particles), ~10-15s. This is
@@ -41,11 +41,11 @@ bug (see `warpier_core.md`'s CI Wiring section for the reasoning behind
 each):
 
 ```bash
-python scripts/operation_matrix.py --device cpu --ci --verbose                                    # 2D float32 baseline
-python scripts/operation_matrix.py --device cpu --precision float64 --nx 24 --ci --verbose         # float64: catches raw-literal type-promotion bugs
-python scripts/operation_matrix.py --device cpu --dim 1 --nx 64 --ci --verbose                     # 1D: catches bugs 2D can't reach (e.g. the grid-path stride bug)
-python scripts/operation_matrix.py --device cpu --jitter 0.01 --ci --verbose                       # confirmed-clean light jitter, actually exercises CRK/renorm a little
-python scripts/operation_matrix.py --device cuda --dim 3 --nx 8 --ci --verbose                     # 3D, CUDA only -- see below
+python scripts/diagnostics/operation_matrix.py --device cpu --ci --verbose                                    # 2D float32 baseline
+python scripts/diagnostics/operation_matrix.py --device cpu --precision float64 --nx 24 --ci --verbose         # float64: catches raw-literal type-promotion bugs
+python scripts/diagnostics/operation_matrix.py --device cpu --dim 1 --nx 64 --ci --verbose                     # 1D: catches bugs 2D can't reach (e.g. the grid-path stride bug)
+python scripts/diagnostics/operation_matrix.py --device cpu --jitter 0.01 --ci --verbose                       # confirmed-clean light jitter, actually exercises CRK/renorm a little
+python scripts/diagnostics/operation_matrix.py --device cuda --dim 3 --nx 8 --ci --verbose                     # 3D, CUDA only -- see below
 ```
 
 **3D must run on CUDA, not CPU.** Warp's CPU backend is single-core and
@@ -59,7 +59,7 @@ smaller `--nx` -- it's not a like-for-like check at any particle count.
 ## Full sweep (run sparingly, not per-edit)
 
 ```bash
-scripts/run_operation_matrix_sweep.sh --full
+scripts/diagnostics/run_operation_matrix_sweep.sh --full
 ```
 
 Loops `--precision {float32,float64} x --dim {1,2} x --jitter {0.0,0.01} x
@@ -103,7 +103,7 @@ signal. Read that table with your eyes, don't key off its exit code. If you
 need to sanity-check a specific heavier-jitter case yourself:
 
 ```bash
-python scripts/operation_matrix.py --device cpu --jitter 0.15 --verbose   # no --ci: reports, doesn't gate
+python scripts/diagnostics/operation_matrix.py --device cpu --jitter 0.15 --verbose   # no --ci: reports, doesn't gate
 ```
 
 ## Useful flags when running ad hoc
@@ -118,4 +118,4 @@ python scripts/operation_matrix.py --device cpu --jitter 0.15 --verbose   # no -
 * `--verbose` -- also print notes for `HIGH`-error cells.
 * `--seed` -- RNG seed for `--jitter` (default `0`).
 
-Full flag reference: `python scripts/operation_matrix.py --help`.
+Full flag reference: `python scripts/diagnostics/operation_matrix.py --help`.

@@ -103,7 +103,7 @@ def sphKernelGradientJVP_ij(
     `d(sphGradient_)/dh`) plus `computePairwiseSupport`/
     `computePairwiseSupportJVP` for the non-KernelMeanSymmetric/SuperSymmetric
     branches. Validated in dense all-pairs form by
-    `scripts/spike_forward_mode_tier2_gradient.py`'s `_kernelGradientJVP`
+    `scripts/spikes/spike_forward_mode_tier2_gradient.py`'s `_kernelGradientJVP`
     (`rel_err ~1e-9` in float64 against `warpOperation`'s own reverse-mode
     Jacobian, for every `GradientScheme`/`SupportScheme` combination) --
     ported here byte-for-byte (only the vector/matrix types are the
@@ -173,7 +173,7 @@ def sphKernelLaplacianJVP_ij(
     (`d(sphKernelLaplacian_)/dx`) and `sphKernelLaplacianDkDh_`
     (`d(sphKernelLaplacian_)/dh`), both already validated against `wp.Tape`
     (`kernel_sanity_native.py` Section K). Ported byte-for-byte from
-    `scripts/spike_forward_mode_tier2_laplacian_naive.py`'s already-validated
+    `scripts/spikes/spike_forward_mode_tier2_laplacian_naive.py`'s already-validated
     `_kernelLaplacianJVP` (`rel_err ~1e-9` in float64 against `warpOperation`'s
     own reverse-mode Jacobian, for every `GradientScheme`/`SupportScheme`
     combination, including the KernelMeanSymmetric-vs-SuperSymmetric

@@ -29,7 +29,7 @@ up**, in `computeCRKVolume_Kernel`, outside the function containing the
 dynamic neighbor loop. That placement is load-bearing: Warp's
 automatic reverse-mode adjoint for "accumulate into a local in a
 runtime-length loop, then divide" in a single `@wp.func` produces NaN
-gradients (reproduced in `scripts/debug_crk_backward.py`).
+gradients (reproduced in `scripts/diagnostics/debug_crk_backward.py`).
 
 ## Public API
 

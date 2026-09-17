@@ -30,6 +30,9 @@ notebooks = [
     "matplotlib",
     "ipympl",
     "ipywidgets",
+    "pandas",
+    "seaborn",
+    "tqdm",
 ]
 dev = [
     "pytest",

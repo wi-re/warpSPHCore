@@ -14,7 +14,7 @@ No call site in either repo hit this, because they all construct a fresh
 test rather than just a fix: warpier_fields.md Section 3.5 wants to hoist those
 constructions out of the hot path so a reusable, hashable properties object can
 key the StateBundle, which would have *introduced* the bug instead of finding
-it. Found by scripts/spike_forward_mode_tier1.py (Step G), which reuses one
+it. Found by scripts/spikes/spike_forward_mode_tier1.py (Step G), which reuses one
 properties object across both calls.
 """
 

@@ -33,7 +33,7 @@ $$
 $$
 
 $$
-\frac{\partial^2 m_2}{\partial \gamma_\gamma \partial \gamma_\beta}
+\frac{\partial m_2}{\partial \gamma}
   = \sum_j V_j\Big(
       x_{\alpha} x_{\beta}\, (\nabla W)_{\gamma}
     + W_{ij}\big(x_{\alpha}\,\delta_{\beta\gamma}
@@ -87,7 +87,7 @@ output). It is stage 2 of `computeCRKFactorsJVP`.
   analytic references.
 - `tests/operations/test_forward_mode_geometry_jvp_gradient.py`
   (siblings) — through the full CRK-tangent pipeline.
-- `scripts/spike_forward_mode_tier2_crk.py` — the stage assembly,
+- `scripts/spikes/spike_forward_mode_tier2_crk.py` — the stage assembly,
   float64, gated by `test_gradcheck_scripts.py`.
 
 ## See also

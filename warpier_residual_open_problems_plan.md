@@ -1,5 +1,39 @@
 # Residual open problems (consolidated, 2026-08-24)
 
+## Open right now (at a glance)
+
+Everything below is a live, unresolved sub-problem. Items 1, 3, and 10 are fully
+CLOSED and not repeated here — see "Open items" below for their full writeups
+and the "Fully closed" section for everything else that's done.
+
+- [ ] **Item 2 — coupled incompressible Newton solve.** Scoping plan written
+      (`warpSPH/COUPLED_INCOMPRESSIBLE_NEWTON_PLAN.md`); needs your decision on:
+  - [ ] Is the full coupled solve (momentum+pressure as one nonlinear system) still wanted at all?
+  - [ ] If so: does it merge the EOS/incompressible scheme families, or stay pressure-only?
+  - [ ] Is the smaller, bounded candidate on its own worth doing — a projected/semismooth-Newton
+        treatment of `solveIncompressible`'s `clamp(p, min=0)` — independent of the above?
+- [ ] **Item 4 — Tier-2 JVP/forward-mode AD beyond the six core operators** (momentum equation,
+      mDBC, surface detection, ...). Not actionable: no concrete consumer yet; would be new
+      derivation from scratch whenever one shows up.
+- [ ] **Item 5 — HVP for the five non-Density operators.** Both generic-composition routes are
+      confirmed dead ends (PyTorch engine limitations, not workarounds-not-yet-tried). Not
+      actionable: only a hand-derived closed form would work, and there's no concrete consumer yet.
+- [ ] **Item 6 — Grad-H/Omega adaptive-smoothing-length tangent support.** Building blocks already
+      derived and validated, zero production consumers. Blocked on a concrete consumer landing in
+      `warpSPH`'s `adaptiveSupport` module first.
+- [ ] **Item 7 — File the Warp-lang dynamic-loop/nonlinear-op NaN-gradient bug upstream.** Issue
+      text is drafted and ready to go. Blocked only on `gh` CLI credentials/a token — hand them
+      over, or paste the draft in yourself, and it's done in one step.
+- [ ] **Item 8 — Turn on static analysis/linting.** No linter or type checker runs anywhere today.
+      Needs you to pick `ruff` (lint-only) vs. `python -m py_compile` before it goes into CI.
+- [ ] **Item 9 — Deliberately-deferred CI/testing gaps** (background hygiene, pick up
+      opportunistically, no blocker):
+  - [ ] No `tests/data/` golden-data baseline fixtures.
+  - [ ] No nightly CI sweep of the full precision×dim×jitter product.
+  - [ ] CUDA CI coverage stops at one 3D smoke step; no broader CUDA matrix.
+  - [ ] No per-test behavior-spec docs.
+  - [ ] Jitter beyond ~0.01 has no validated MAE threshold, so nothing above it gates CI.
+
 ## Context
 
 Every plan doc that has ever lived at repo root was read in full and cross-checked against the current
@@ -12,10 +46,15 @@ the existing convention throughout this codebase's docstrings and other plan doc
 the four earlier moved docs' ~40 cross-references elsewhere were ever updated after their move either),
 so nothing needed touching for the move itself.
 
-`warpier_core.md`/`warpier_fields.md`/`warpier_adjoint.md` stay at root — they are living
-architecture/derivation references (not scoped task lists), heavily cross-referenced from source
-docstrings throughout `src/`, and their own content is a mix of done-and-recorded history plus the
-still-live "Repository Reality Check" framing the rest of the codebase points back to.
+**Update (later session): `warpier_core.md`/`warpier_fields.md`/`warpier_adjoint.md` have since moved
+to `docs/historic_plans/` too.** They were kept at root when this doc was first written because they
+were still living architecture/derivation references, heavily cross-referenced from source docstrings
+throughout `src/` — but a later re-check confirmed their own content is now entirely
+done-and-recorded history (the two forward-pointing items in `warpier_core.md`'s "What's Next" were
+already just Items 7/8 below), so they were archived like everything else, per this doc's own
+established convention. `warpier_jvp_dual_argument_pruning_plan.md` (Item 10's investigation) moved
+the same way once Item 10 closed out. Cross-references to all of them are left as bare filenames,
+same convention as above.
 
 **Two small cleanups already landed this session, not carried forward as action items:** `Field.tangent`
 (`dataTypes/field_t.py`) was dead code — never written to by any of the three designs that ended up
@@ -80,7 +119,7 @@ genuine regression: this repo's `warpOperationJVP` signature moved from loose
 `implicitShiftingAutomatic.py` plus one test were never updated to match (`warpOperationHVP`, used
 elsewhere in the same file, kept its old flat-kwarg signature, so this was easy to miss). Fixed both
 call sites to build a `ParticleTangentState(positions=..., supports=<zeros>, masses=None)`, matching
-the pattern already used in this repo's own `scripts/gradcheck_tier2_jvp_*.py`. Full warpSPH suite:
+the pattern already used in this repo's own `scripts/gradcheck/gradcheck_tier2_jvp_*.py`. Full warpSPH suite:
 207 passed, 1 skipped, 0 failed (was 5 failed before this fix).
 
 Not the same thing as, and not fixed by, the already-shipped `legacyPairwise` production default — that
@@ -275,7 +314,7 @@ been declined every time it came up. Not actionable until that consumer exists.
 
 ### 7. Warp-lang upstream bug report — drafted, blocked on submission tooling
 
-The dynamic-loop + nonlinear-op NaN-gradient bug (`scripts/repro_warp_dynamic_loop_division.py`: a
+The dynamic-loop + nonlinear-op NaN-gradient bug (`scripts/repro/repro_warp_dynamic_loop_division.py`: a
 **linear** read of a loop accumulator is safe inside the same `@wp.func` as the loop; a **nonlinear**
 read — division, squaring — is not, coming back `-inf` or a silently-wrong `0.0`) is isolated to a
 ~20-line, warpSPHCore-independent minimal repro, worked around locally
@@ -349,7 +388,7 @@ findings that need triage.
   it in CI because no sound threshold has been worked out. Any future CI/tooling work involving jitter
   above ~0.01 needs that investigation first; it cannot reuse the existing `--threshold 0.4` default.
 
-### 10. JFNK `jvp` matvec cost vs. pure forward mode — two of three sub-causes CLOSED 2026-08-24; third scoped, not implemented
+### 10. JFNK `jvp` matvec cost vs. pure forward mode — CLOSED 2026-08-24 (all three sub-causes accounted for; the actual 4x/2x benchmark gap was never this repo's bridge, it was a `warpSPHIntegrators` Newton-convergence bug)
 
 Triggered by a user report: `warpSPH/benchmarks/wave`'s `sdirk2_jfnk_jvp_1e-6` scheme measured
 ~4x the cost of a pure forward-mode RHS evaluation, against an expected ~2x. Investigated the same
@@ -374,26 +413,38 @@ one corrected by the user mid-investigation) are in the new
   (`stateAwareWarpFunction.py`'s new `_liveTangentMask`). Validated: full test suite green;
   profiler-confirmed sync count 14→1/call; modest real benchmark win (jvp/fd `msPerRhs` ratio
   ~2.0-2.1x → ~1.84-1.99x across nx=32-256).
-- **Scoped, not implemented**: even after both fixes, an isolated dual JVP call still costs ~1.9x
-  two plain calls — torch's own `Function.apply()` dispatch allocates a fresh zero-filled tensor
-  as the synthesized tangent for every non-dual argument (confirmed: ~12 `aten::zeros_like`/
-  `aten::empty_like` calls per dual call, absent from the plain-call baseline). Two "wrap more
-  fields as dual" directions were tested empirically and both made things *worse* (1.08x and 1.99x
-  respectively, not better) — real evidence, not just reasoning, against that whole family of
-  fix. A third direction (statically classify fields as constant vs. differentiable) was proposed
-  and then correctly rejected: a field's `constant()`-at-the-integrator-level tag doesn't mean
-  "never differentiable" — mass, e.g., stays constant across time-stepping but can legitimately be
-  dual if a caller is differentiating the pipeline w.r.t. an upstream sizing parameter (a
-  design-sensitivity use case this codebase's whole AD bridge exists to support), so a static
-  schema would silently break that. The corrected mechanism — per-call runtime detection via
-  `torch.autograd.forward_ad.unpack_dual()`, confirmed cheap (0.14-0.89us vs. `hasLiveTangent`'s
-  14.3us) and correct from a nested callee — is sound, but the actual obstacle is architectural:
-  `operator_spec.py`'s JVP dispatch reads `flat_tensors` by fixed absolute index (`_QPOS`, `_RPOS`,
-  ... `_STATE_N=36`), which breaks if inert tensors are dynamically dropped per call. Fixing this
-  needs a semantic-keyed lookup built fresh per call instead of the fixed-position convention —
-  touching `arg_extract.py`, `operator_spec.py`'s dispatch constants, and all five `wp_<op>JVP.py`
-  files. `warpier_jvp_dual_argument_pruning_plan.md` has the full phased plan (design → prototype
-  on Laplacian → rollout) and three open questions for you before Phase 1 starts.
+- **Implemented and kept, same day (later in the session than this doc's own original write-up
+  below implies)**: the third sub-cause — torch's `Function.apply()` dispatch allocating a fresh
+  zero-filled tensor as the synthesized tangent for every non-dual argument — got a real fix after
+  all, without the architectural rewrite this doc originally said it needed: `_isInertTensor`
+  (`autograd/wrapper.py`) prunes provably-inert tensors (no live forward tangent *and*
+  `requires_grad=False`) out of the tracked-argument list *before* calling
+  `StateAwareWarpFunction.apply`, sidestepping the `operator_spec.py` fixed-position rewrite
+  entirely (~80 lines, no changes to `arg_extract.py`/the `_QPOS`/`_RPOS`/...`_STATE_N=36`
+  convention). Validated: full suite green, `zeros_like`/`empty_like` counts 12→0. Kept as a real,
+  general ~3% win — but it is **not** what closes this item; see below.
+- **The actual motivating benchmark gap (this doc's whole reason for existing) was root-caused and
+  fixed, just not in this repo.** The corrected isolated-call measurement (the "0.566x, faster than
+  two plain calls" claim in the pruning plan's own first pass was wrong — a mislabeled baseline;
+  see that plan's "Correction" section) puts the true dual-vs-plain gap at a stubborn ~3.7x, roughly
+  half architecturally inherent (the value-only JVP path launches the same kernel twice) and half
+  unexplained CPU overhead — none of which moved the real `warpSPH` wave-equation benchmark either
+  way. Profiling *that* benchmark end-to-end (not just the isolated call) found the dominant cost
+  was never `warpSPHCore`'s bridge at all: `warpSPHIntegrators`' `JFNKSolver` was comparing its
+  outer Newton convergence check against the wrong tolerance whenever driven through `dirk.py` (a
+  norm/tol convention mismatch — `dirk.py`'s weighted-RMS norm needs its own `newton_tol`, not
+  `JFNKSolver`'s default `tol`, which was leaking through unchanged and was essentially never
+  satisfiable), so every stage-solve burned its full 15-iteration budget regardless of how cheap
+  each iteration was. Fixed in two passes (a decoupled `newton_tol=1e-3`, then resolution-independent
+  stagnation detection once `nx=1024` showed the fixed threshold straddling a resolution-dependent
+  float32 noise floor) — **3-4.6x real wall-clock speedup, zero accuracy cost, by a wide margin the
+  largest win of this whole investigation** (see `warpSPHIntegrators/JFNK_DRIVER_OVERHEAD_NOTES.md`).
+  This is the actual answer to "why is jvp 4x instead of 2x": it mostly wasn't a JVP-cost question at
+  all, it was a convergence-detection bug one layer up. `warpier_jvp_dual_argument_pruning_plan.md`
+  (now archived to `docs/historic_plans/`, its own text corrected in place) has the full investigation;
+  Phases 2-3 of its original phased plan (a codebase-wide semantic-keyed argument rollout) are **not
+  being pursued** — the pruning fix already landed cheaply without them, and the gap they would have
+  chased turned out to live in a different repo.
 
 ## Fully closed (pointer only)
 
@@ -414,6 +465,9 @@ one corrected by the user mid-investigation) are in the new
 - `warpier_core.md` — Phases 0-5 done for the operator-migration narrative; every "smaller open item" in
   its own "What's Next" section is closed except Items 7/8 above.
 - `warpier_fields.md` — Steps 0 and A-J all complete and gated.
+- `docs/historic_plans/warpier_jvp_dual_argument_pruning_plan.md` — Item 10, all three sub-causes
+  accounted for (see Item 10 above); the pruning fix landed and was kept, but the actual benchmark
+  gap turned out to be a `warpSPHIntegrators` Newton-convergence bug, fixed there.
 
 ## Suggested next step
 
@@ -449,16 +503,13 @@ specific WCSPH sub-problem becomes the real target, deliberately not speculating
 the actual WCSPH implicit target before Phase B can be scoped (see the plan's "Open questions"). Items
 4/5/6 aren't backlog items — they're "if a concrete consumer shows up, expect this shape of work," not
 something to build speculatively, though Item 4 specifically now has a plausible path to becoming one via
-this plan's Phase B. Item 9 is background hygiene, pick up opportunistically. **Item 10's first two
-sub-causes are now CLOSED** (2026-08-24, same session that identified them via a user benchmark report):
-a redundant kernel relaunch in the combined geometry+value JVP path (fixed for all 5 operators, 1.35x
-isolated speedup, correctly ~0% effect on the wave-equation benchmark since it never exercises that
-path) and per-argument sync overhead in `hasLiveTangent` (batched to one sync per call, modest real
-benchmark win). The third sub-cause — torch's own forward-mode dispatch allocating a fresh zero tensor
-per non-dual argument — has a validated-cheap runtime detection mechanism (`unpack_dual`) but needs an
-architectural change (`operator_spec.py`'s fixed-position convention doesn't survive dynamically pruning
-arguments) bigger than this session's other two fixes; scoped in `warpier_jvp_dual_argument_pruning_plan.md`,
-not started, three open questions there need your input before Phase 1.
+this plan's Phase B. Item 9 is background hygiene, pick up opportunistically. **Item 10 is now fully
+CLOSED** (2026-08-24, same session that identified it via a user benchmark report): all three
+`warpSPHCore`-side sub-causes were addressed (two kernel-launch/sync fixes kept, plus the pruning fix
+that landed without needing the architectural rewrite originally scoped for it), and the actual
+motivating 4x-vs-2x benchmark gap turned out to live one layer up, in `warpSPHIntegrators`'s JFNK/DIRK
+Newton-convergence check — fixed there for a 3-4.6x real speedup, the largest single win of the whole
+investigation. Nothing remains open in this item.
 
 ## Critical files
 
@@ -491,7 +542,7 @@ not started, three open questions there need your input before Phase 1.
   `src/warpSPHCore/autograd/{operator_spec,stateAwareWarpFunction}.py` — where the six-operator JVP scope
   and the "unwrapped operator raises `NotImplementedError`" safety property actually live
 - `src/warpSPHCore/coreOperations/wp_densityHVP.py` — Item 5's existing reference pattern
-- `scripts/repro_warp_dynamic_loop_division.py` — Item 7
+- `scripts/repro/repro_warp_dynamic_loop_division.py` — Item 7
 - `warpier_jvp_dual_argument_pruning_plan.md` (new, 2026-08-24) — Item 10's full investigation and
   scoping plan; `src/warpSPHCore/operations.py` (`_FUSED_VALUE_JVP_OPERATIONS` and the dispatch
   around it) and all five `src/warpSPHCore/coreOperations/wp_<op>JVP.py` files — Item 10's first,
@@ -503,8 +554,8 @@ not started, three open questions there need your input before Phase 1.
   ../common/{runner,schemes}.py}` — the benchmark harness Item 10 was measured against;
   `warpSPH/src/warpSPH/{systems/waveSystem.py,schemes/waveEquation.py}` — the wave case's state
   (why positions are `constant()` there) and its single Laplacian(u,u) RHS call;
-  `scripts/spike_jvp_wave_case_overhead_profile.py`, `scripts/spike_jvp_dual_wrapping_alternatives.py`,
-  `scripts/spike_jvp_unpack_dual_pruning_mechanism.py` (new, 2026-08-24) — checked-in, independently
+  `scripts/spikes/spike_jvp_wave_case_overhead_profile.py`, `scripts/spikes/spike_jvp_dual_wrapping_alternatives.py`,
+  `scripts/spikes/spike_jvp_unpack_dual_pruning_mechanism.py` (new, 2026-08-24) — checked-in, independently
   runnable reproductions of every isolated-call finding in Item 10's plan doc (exact commands and
   the `bench_performance.py` baseline numbers are in the plan doc's "Reproducing this from scratch"
   section)

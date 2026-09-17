@@ -56,13 +56,13 @@ aggregation).
 | `sphKernelLaplacian(…)` | the analytic kernel Laplacian (the `Naive` Laplacian scheme's estimator) | [Kernel library — naive Laplacian](kernels#the-naive-kernel-laplacian) |
 | `sphKernelJVP(…)` / `sphKernelJVP_ij(…)` | $(W_{ij}, dW_{ij})$ — forward-mode building block | [Kernel library — JVPs](kernels#kernel-jvps) |
 | `sphKernelScale` / `sphKernelC_d` / `sphKernelN_H` / `sphKernel_xi` | Dehnen & Aly packing/support *properties* (not evaluations — the lattice factor is deliberately not applied to them) | [Kernel library — packing](kernels#packing-and-support-properties) |
-| `resolveNormalization(kernelProperties)` | the $1/L$ lattice factor (1.0 when the calibration is off) | [Renormalization — lattice calibration](renorm#lattice-normalization-calibration) |
+| `resolveNormalization(kernelProperties)` | the $1/L$ lattice factor (1.0 when the calibration is off) | [Lattice calibration](lattice-calibration) |
 
 ## Lattice density — `util/latticeDensity.py`
 
 | function | what it does | details |
 |---|---|---|
-| `latticeDensity(kernel, n_h, dim, method='shells')` | $L(n_h)$ — what a perfect lattice at $h/s = n_h$ measures, in units of $\rho_0$ (cached) | [Renormalization — the math](renorm#the-math-three-ways--utillatticedensitypy) |
+| `latticeDensity(kernel, n_h, dim, method='shells')` | $L(n_h)$ — what a perfect lattice at $h/s = n_h$ measures, in units of $\rho_0$ (cached) | [Lattice calibration — the math](lattice-calibration#the-math-three-ways--utillatticedensitypy) |
 | `latticeDensityFactor(kernel, n_h, dim, method='shells')` | $1/L$ — the mass/kernel scaling | same |
 | `latticeDensityShells` / `latticeDensityFourier` / `latticeDensityClosed` | the three evaluation methods (exact shell sum / Poisson identity / Wendland-only Epstein-zeta tail) | same |
 | `latticeDensityIsStrictlyAbove1(kernel)` | Wendland ⇒ $L > 1$ for all $n_h$ (no root in $h$) | same |

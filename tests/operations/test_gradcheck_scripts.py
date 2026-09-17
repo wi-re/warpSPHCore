@@ -1,4 +1,4 @@
-"""Runs the scripts/gradcheck_*.py canary scripts as pytest cases.
+"""Runs the scripts/gradcheck/gradcheck_*.py canary scripts as pytest cases.
 
 Phase 0's "gradient/finite checks" task (see warpier_core.md's Gradcheck
 Script Rollout Plan) produced these as standalone scripts, one per operator,
@@ -26,6 +26,8 @@ from pathlib import Path
 import pytest
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+GRADCHECK_DIR = SCRIPTS_DIR / "gradcheck"
+SPIKES_DIR = SCRIPTS_DIR / "spikes"
 
 GRADCHECK_SCRIPTS = [
     "gradcheck_density.py",
@@ -112,7 +114,13 @@ KERNEL_SANITY_SCRIPTS = [
 
 @pytest.mark.parametrize("script_name", GRADCHECK_SCRIPTS + SPIKE_SCRIPTS + KERNEL_SANITY_SCRIPTS)
 def test_gradcheck_script(script_name):
-    script_path = SCRIPTS_DIR / script_name
+    # GRADCHECK_SCRIPTS and KERNEL_SANITY_SCRIPTS live in scripts/gradcheck/,
+    # SPIKE_SCRIPTS in scripts/spikes/ -- both dirs have unique filenames, so
+    # a plain existence check disambiguates without three separate lists.
+    script_path = GRADCHECK_DIR / script_name
+    if not script_path.exists():
+        script_path = SPIKES_DIR / script_name
+    assert script_path.exists(), f"{script_name} not found under {GRADCHECK_DIR} or {SPIKES_DIR}"
     result = subprocess.run(
         [sys.executable, str(script_path)],
         capture_output=True,

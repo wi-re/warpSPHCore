@@ -40,12 +40,12 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   explicit `if/else` over a ternary for any array read inside kernel code
   that needs to stay differentiable.
   **Update 2026-08-11: fixed upstream in warp-lang 1.17.0.dev3.**
-  `scripts/repro_ternary_adjoint_zeroing.py` now passes for both the ternary
+  `scripts/repro/repro_ternary_adjoint_zeroing.py` now passes for both the ternary
   and if/else forms under the `warp_dev` conda env (1.17.0.dev3), while still
   failing the ternary case under the pinned/installed `warp` env (1.12.0).
   Verified by temporarily restoring the ternary in `wp_gradient.py`'s
   `computeSPHGradientTensor_Func_i` (the `useGradHTerms` branch) and rerunning
-  `scripts/gradcheck_gradient_native.py`: PASSED under `warp_dev`, FAILED
+  `scripts/gradcheck/gradcheck_gradient_native.py`: PASSED under `warp_dev`, FAILED
   (zeroed analytical Jacobian) under `warp` 1.12.0 — then reverted back to
   the explicit `if/else` since 1.17 isn't on PyPI yet and `pyproject.toml`
   doesn't pin a `warp-lang` floor. Once a 1.17+ release is published and the
@@ -183,7 +183,7 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   practical) is not the same as restructuring the multiply within one function (`leftVec = proj * n`,
   then read `leftVec[d]` instead of `n[d]` a second time — bug survives identically); the loop itself
   has to move to a separate function, not just the multiply that consumes its result. Confirmed fixed
-  via `torch.autograd.gradcheck` (`scripts/gradcheck_tier2_jvp_laplacian.py`, all four
+  via `torch.autograd.gradcheck` (`scripts/gradcheck/gradcheck_tier2_jvp_laplacian.py`, all four
   `LaplacianScheme`s now pass) and finite differences agreeing with the jacobian-based test reference.
 
 * **A quantity that divides by the same regularized pairwise distance twice
@@ -226,7 +226,7 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   own combination formulas (`dot(coeff,G)`, the 2D cross product) have no
   *second* division by a quantity that itself vanishes at `r_ij == 0` the
   way Brookshaw's `n_ij` does. Full writeup:
-  `scripts/spike_forward_mode_tier2_crk_extension.py`'s module docstring.
+  `scripts/spikes/spike_forward_mode_tier2_crk_extension.py`'s module docstring.
 
 ## AD-bridge / autograd gotchas
 
@@ -235,7 +235,7 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   tooling that needs to test more than one precision in the same run must
   isolate each precision in its own subprocess (`os.environ` mutation +
   re-import inside one process does nothing once a kernel has already
-  compiled). This is why `scripts/operation_matrix.py` imports
+  compiled). This is why `scripts/diagnostics/operation_matrix.py` imports
   `warpSPHCore` lazily inside a `_configure()` called after arg parsing, and
   why `tests/operations/test_gradcheck_scripts.py` runs each gradcheck
   script via `subprocess.run` rather than importing its module directly.
@@ -316,7 +316,7 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   type-promotion bug only broke under `float64`; the periodicity-stride bug
   only broke in `dim=1`; the `LaplacianScheme.Dot` out-of-bounds read only
   triggered for `dim>1`. Each of these was invisible at the *other* setting
-  they didn't specifically test. `scripts/operation_matrix.py --precision`
+  they didn't specifically test. `scripts/diagnostics/operation_matrix.py --precision`
   / `--dim` and the CI matrix built on top of it exist specifically to make
   this cheap to check.
 
@@ -397,7 +397,7 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   has read its neighbor count from Covariance's own per-particle kernel
   output (`covarianceReturnNumNeighbors=True`), not `adjacency.numNeighbors`,
   since the very first restructure commit, so the capability was live but
-  untested; `scripts/gradcheck_renorm_native.py` now covers it (forward
+  untested; `scripts/gradcheck/gradcheck_renorm_native.py` now covers it (forward
   parity + gradcheck across all three traversal inputs). Finding that gap
   also surfaced two independent bugs, now fixed: `pinv/wp_pinv1x1.py`
   referenced `wp.mat11f`/`wp.vec1f` (don't exist on the `warp` module —
@@ -438,7 +438,7 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   input covariance matrix, which is wrong. Ported to the same
   `warpWrapper`/`launch_kernel` pattern `pinv1x1` uses (kernel parameter
   order changed to inputs-first/outputs-last to match `launch_kernel`'s
-  assembly convention); `scripts/gradcheck_pinv_native.py` now gradchecks
+  assembly convention); `scripts/gradcheck/gradcheck_pinv_native.py` now gradchecks
   both `pinv1x1` and `pinv2x2_warpBackend` directly, and a full
   `computeRenormalizationMatrices` call was verified end-to-end to produce
   finite gradients through a genuine 2D case. **Lesson generalized:** a raw
@@ -537,9 +537,9 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   through `vectorNormalize_warp`/`norm_hess_warp`. Verified: the
   raw-`wp.Tape`, r>0 case is unchanged to ~1e-11; the coincident-position
   self-pair gradcheck (previously a ~97%-relative-error mismatch) now
-  matches finite differences; `scripts/gradcheck_tier2_jvp_interpolate.py`'s
+  matches finite differences; `scripts/gradcheck/gradcheck_tier2_jvp_interpolate.py`'s
   previously-known-failing distinct-role case now passes;
-  `scripts/kernel_sanity_native.py` all-pass; `scripts/operation_matrix.py
+  `scripts/gradcheck/kernel_sanity_native.py` all-pass; `scripts/diagnostics/operation_matrix.py
   --ci` unchanged (`OK=258, HIGH=0, ERR=0, NAN=0`); full `pytest tests/`
   unchanged (292 passed, 1 skipped).
 

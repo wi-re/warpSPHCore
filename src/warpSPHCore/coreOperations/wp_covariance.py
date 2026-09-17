@@ -227,10 +227,18 @@ def _computeSPHCovariance_stateBackend(
     renormalizationState: Optional[RenormalizationState] = None,
     returnNumNeighbors: bool = False,
 ) -> torch.Tensor:
-    """Computes the SPH covariance matrix C_i = sum_j V_j (x_i - x_j) (x) gradW_ij for
+    """Computes the SPH covariance matrix C_i = sum_j V_j (x_j - x_i) (x) gradW_ij for
     every query particle. This is the raw covariance tensor only -- turning it into a
     gradient-renormalization matrix (low-neighbor-count fallback + pseudo-inverse) is
     wp_renormalization.py's job, not this function's.
+
+    Sign verified against the kernel itself (`fij = -computeDistanceVec(x_i, x_j) =
+    x_j - x_i`, `computeDistanceVec(x, y) = x - y`) and against De Courcy et al. 2024
+    Eq. (34) (`literature/decourcy2024_*.pdf`), which spells out the same matrix as
+    `L_i = [-sum_j (x_i-x_j) (x) grad_i W_ij V_j]^-1 = [sum_j (x_j-x_i) (x) grad_i
+    W_ij V_j]^-1` -- i.e. this docstring previously had the opposite sign of what the
+    code actually computes (DELTASPH_VALIDATION_PLAN.md Part 8.13). The code was
+    already correct; only this comment was stale.
     """
     with record_function("warpSPH[Covariance]"):
         with record_function("warpSPH[Covariance] - Kernel Execution"):

@@ -59,7 +59,7 @@ def sphGradientDkDh_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kerne
         dK1/dh = -C_d/h^(dim+2) * (q*d2kdq2(q) + (dim+1)*dkdq(q))
     which collapses to sphKernelDkDh_'s own -C_d/h^(dim+2)*(dim*h*k + r*dkdq)
     under the analogous derivation one order down -- same technique, one
-    derivative higher. Verified against wp.Tape (scripts/kernel_sanity_native.py
+    derivative higher. Verified against wp.Tape (scripts/gradcheck/kernel_sanity_native.py
     Section J) rather than trusted from the derivation alone.
     """
     dim = wp.int32(x.length)

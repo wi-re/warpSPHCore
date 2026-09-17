@@ -1,6 +1,6 @@
 """Geometry-tangent JVP of the raw covariance matrix `wp_covariance.py` computes
 (`warpier_tier2_correction_jvp_plan.md` phase (d), Step 1;
-`scripts/spike_forward_mode_tier2_renorm.py`'s already-validated math):
+`scripts/spikes/spike_forward_mode_tier2_renorm.py`'s already-validated math):
 
     C_i  = Sum_j Vj * outer(y_ij, G_ij)
     dC_i = Sum_j [ dVj * outer(y_ij, G_ij) + Vj * outer(dy_ij, G_ij) + Vj * outer(y_ij, dG_ij) ]

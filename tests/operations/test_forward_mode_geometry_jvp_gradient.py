@@ -321,7 +321,7 @@ def test_gradientGeometryJVP_accepts_crkState_and_renormalizationState_simultane
     # the primal kernels and every JVP formula here already compose them in
     # the same fixed CRK-then-renorm order regardless, so no new derivation
     # was needed, only removing this now-stale scope check. See
-    # `scripts/spike_forward_mode_tier2_crk_renorm_simultaneous.py` for the
+    # `scripts/spikes/spike_forward_mode_tier2_crk_renorm_simultaneous.py` for the
     # full validation (all six CRK+renorm-supporting operator/scheme
     # combinations, JVP-vs-jacobian identity through production
     # `warpOperationJVP`).

@@ -290,7 +290,7 @@ def warpOperationJVP(
     * **Value JVP** (value tangents): an operator is exactly linear and
       homogeneous in `queryValues`/`referenceValues`, so its JVP w.r.t. them
       is the same operator relaunched on the tangent arrays in place of the
-      value arrays -- verified by `scripts/spike_forward_mode_tier1.py` and
+      value arrays -- verified by `scripts/spikes/spike_forward_mode_tier1.py` and
       gated by `tests/operations/test_forward_mode_value_jvp.py`.
     * **Geometry JVP** (position/support/mass/density tangents): the kernel
       is genuinely nonlinear in these, so each operator needs a hand-derived
@@ -348,7 +348,7 @@ def warpOperationJVP(
       compose them in the same fixed order (CRK first, then renormalization,
       applied to the single resulting `kernelGradient`/`(G, dG)` pair) --
       validated via `torch.autograd.gradcheck` against production for all
-      four operators (`scripts/spike_forward_mode_tier2_crk_renorm_simultaneous.py`),
+      four operators (`scripts/spikes/spike_forward_mode_tier2_crk_renorm_simultaneous.py`),
       no interaction-specific derivation was needed beyond the two corrections'
       own already-proven pieces.
       `gradHState` remains unsupported for every geometry-JVP operator (no

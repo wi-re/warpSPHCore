@@ -141,8 +141,8 @@ operator page under **JVP / HVP** and summarized in
 
 ## What the notebooks show
 
-The repo root ships Jupyter notebooks that exercise each operator on a
-lattice: `warp_density.ipynb`, `warp_gradient.ipynb`,
+The `notebooks/` directory ships Jupyter notebooks that exercise each
+operator on a lattice: `warp_density.ipynb`, `warp_gradient.ipynb`,
 `warp_divergence.ipynb`, `warp_curl.ipynb`, `warp_laplacian.ipynb`,
 `warp_interpolate.ipynb`, `warp_renorm.ipynb`, `warp_profile.ipynb`.
 They use the same `warpOperation` / `warpOperationJVP` entry points as

@@ -193,6 +193,68 @@ def test_laplacianBrookshawGeometryJVP_matches_jacobian_reference_2d(mode, schem
     _check_jacobian_reference(positions, supports, masses, domain, adjacency, mode, scheme)
 
 
+def _check_jacobian_reference_vector_field(positions, supports, masses, domain, adjacency, mode, scheme, dim):
+    # 2026-08-25 regression coverage: `computeSPHLaplacianBrookshawGeometryJVP`
+    # was originally scalar-field-only (fixed `scalar_t` kernel arguments) --
+    # generalized to generic `Any`-typed fields after a real `warpSPH`
+    # consumer (a Brookshaw-scheme velocity-diffusion term on a vector field)
+    # crashed the exact-JVP path with a kernel dtype mismatch. `queryValues`/
+    # `referenceValues` here are `(n, dim)` vector fields, same shape a
+    # velocity field would have.
+    n = positions.shape[0]
+    kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
+    densities = _densities_for(positions, supports, masses, kinds, domain, adjacency)
+    torch.manual_seed(hash(("vector", mode, scheme)) % (2 ** 31))
+    queryValues = torch.randn(n, dim, dtype=DTYPE, device=DEVICE)
+    referenceValues = torch.randn(n, dim, dtype=DTYPE, device=DEVICE)
+
+    props = OperationProperties(kernel=KERNEL, operation=WarpOperation.Laplacian,
+                                supportMode=mode, operationMode=OperationDirection.AllToAll,
+                                gradientMode=scheme, laplacianMode=LaplacianScheme.Brookshaw)
+
+    def f(pos, sup, mass, density):
+        p = ParticleState(positions=pos, supports=sup, masses=mass, densities=density, kinds=kinds)
+        return warpOperation(p, props, domain, adjacency=adjacency, queryValues=queryValues, referenceValues=referenceValues)
+
+    pos0 = positions.clone().requires_grad_(True)
+    sup0 = supports.clone().requires_grad_(True)
+    mass0 = masses.clone().requires_grad_(True)
+    density0 = densities.clone().requires_grad_(True)
+
+    dpos = torch.randn_like(positions)
+    dsup = torch.randn_like(supports) * 0.1
+    dmass = torch.randn_like(masses)
+    ddensity = torch.randn_like(densities) * 0.1
+
+    J = torch.autograd.functional.jacobian(f, (pos0, sup0, mass0, density0), vectorize=False)
+    out = f(pos0, sup0, mass0, density0).detach()
+    acc = torch.zeros(out.numel(), dtype=DTYPE, device=DEVICE)
+    for Jk, vk in zip(J, (dpos, dsup, dmass, ddensity)):
+        acc = acc + Jk.reshape(out.numel(), -1) @ vk.reshape(-1)
+    reference = acc.reshape(out.shape)
+
+    p0 = ParticleState(positions=positions, supports=supports, masses=masses, densities=densities, kinds=kinds)
+    assembled = warpOperationJVP(
+        p0, props, domain, adjacency=adjacency,
+        queryTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=None, densities=ddensity),
+        referenceTangentState=ParticleTangentState(positions=dpos, supports=dsup, masses=dmass, densities=ddensity),
+        queryValues=queryValues, referenceValues=referenceValues,
+    )
+    torch.testing.assert_close(assembled, reference, rtol=1e-3, atol=1e-5)
+
+
+@pytest.mark.parametrize("scheme", list(GradientScheme))
+@pytest.mark.parametrize("mode", [SupportScheme.Gather, SupportScheme.MeanSymmetric])
+def test_laplacianBrookshawGeometryJVP_matches_jacobian_reference_vectorField_2d(mode, scheme):
+    positions, supports, masses = _grid_case_2d()
+    domain = _make_domain(dim=2)
+    n = positions.shape[0]
+    kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
+    p0_forAdjacency = ParticleState(positions=positions, supports=supports, masses=masses, densities=None, kinds=kinds)
+    adjacency = radiusSearchCompactHashMap(p0_forAdjacency, domain, mode=SupportScheme.Gather)
+    _check_jacobian_reference_vector_field(positions, supports, masses, domain, adjacency, mode, scheme, dim=2)
+
+
 def _minimal_case():
     positions, supports, masses = _line_case()
     domain = _make_domain(dim=1)

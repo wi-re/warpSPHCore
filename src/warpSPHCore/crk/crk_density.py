@@ -109,7 +109,7 @@ def computeCRKDensity_Func_Adjacency(
     # accumulates into locals via += and then feeds them into a nonlinear post-loop op
     # (division), all inside the same @wp.func, produces NaN gradients here -- same
     # issue as computeCRKVolume_Func_Adjacency, see its docstring comment and
-    # scripts/debug_crk_backward.py for the minimal repro. The ratio is applied one
+    # scripts/diagnostics/debug_crk_backward.py for the minimal repro. The ratio is applied one
     # level up, in computeCRKDensity_Kernel, outside the function that contains the loop.
     iPtcl = getParticleData(queryState, i)
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):

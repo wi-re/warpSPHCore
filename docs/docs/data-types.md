@@ -83,7 +83,7 @@ to share across calls:
 | `supportMode: SupportScheme` | `Gather` | the [pairwise support scheme](kernels#pairwise-evaluation-and-the-support-schemes) |
 | `operationMode: OperationDirection` | `AllToAll` | which `kinds` participate (see [OperationDirection](#operationdirection)) |
 | `divergenceDotMode: bool` | `False` | the [Divergence](operations/divergence) dot-mode contraction |
-| `n_h: Optional[float]` | `None` | nominal support-to-spacing ratio, for the [lattice calibration](renorm#lattice-normalization-calibration) |
+| `n_h: Optional[float]` | `None` | nominal support-to-spacing ratio, for the [lattice calibration](lattice-calibration) |
 | `calibrateNormalization: bool` | `False` | enable the $1/L$ kernel scaling |
 
 `__post_init__` raises unless `n_h` is positive whenever
@@ -241,7 +241,7 @@ not a fourth variant.
 | `Scatter` | 12 | $h_j$ |
 | `MeanSymmetric` | 13 | $(h_i + h_j)/2$ |
 | `KernelMeanSymmetric` | 14 | $\tfrac12(k(q, h_i) + k(q, h_j))$ |
-| `SuperSymmetric` | 15 | $\tfrac12(k(q, h_i) - k(q, h_j))$ — the CRK-SPH formulation |
+| `SuperSymmetric` | 15 | $\tfrac12(k(q, h_i) + k(q, h_j))$ — identical value to `KernelMeanSymmetric`, the CRK-SPH formulation ([gradient differs](kernels#pairwise-evaluation-and-the-support-schemes)) |
 | `PartialSymmetric` | 16 | $f_i$-weighted $h_i$ + $f_j$-weighted $h_j$ — the PESPH formulation |
 
 ### `KernelFunctions`

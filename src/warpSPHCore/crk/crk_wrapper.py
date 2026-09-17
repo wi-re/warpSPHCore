@@ -102,7 +102,7 @@ def computeCRKFactorsJVP(
     `torch.autograd.functional.jvp` directly -- valid here (unlike every
     other Warp-kernel-backed piece of this pipeline) because
     `computeCRKTermsWarp` has no Warp call anywhere in it, so double-backward
-    through it is exact (see `scripts/spike_forward_mode_tier2_crk.py`'s
+    through it is exact (see `scripts/spikes/spike_forward_mode_tier2_crk.py`'s
     module docstring for the full justification, and its `crk_terms_jvp` for
     the pattern this mirrors). `create_graph=True` is required here (unlike
     the spike, which never differentiates the assembled JVP a second time):

@@ -15,7 +15,7 @@ Operator-agnostic (produces moment tangents regardless of which operator
 eventually consumes A/B/gradA/gradB), so built once here for reuse by phase
 (e)'s Divergence/Curl/Laplacian extension, same as `crk_volume_jvp.py`.
 
-Ported from `scripts/spike_forward_mode_tier2_crk.py`'s
+Ported from `scripts/spikes/spike_forward_mode_tier2_crk.py`'s
 `assembled_crk_moments_jvp` (validated there to float64 round-off against
 `_computeCRKMoments_stateBackend`'s own reverse-mode Jacobian). Mirrors
 `computeCRKMoments_Func_i`/`_Func_Adjacency`/`_Kernel`'s dual-path

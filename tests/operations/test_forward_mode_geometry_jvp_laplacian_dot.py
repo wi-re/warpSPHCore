@@ -23,7 +23,7 @@ have since been fixed by moving that reduction into its own `@wp.func`
 overload / `coreOperations/wp_laplacianJVP.py`'s `_laplacianDotProjJVP`) that
 *returns* the accumulated value instead of leaving it as a local used in a
 non-linear op later in the same function body -- confirmed fixed via
-`torch.autograd.gradcheck` (`scripts/gradcheck_tier2_jvp_laplacian.py`) and
+`torch.autograd.gradcheck` (`scripts/gradcheck/gradcheck_tier2_jvp_laplacian.py`) and
 via finite differences agreeing with the (now-correct) jacobian reference
 used below.
 """

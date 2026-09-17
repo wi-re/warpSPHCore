@@ -37,7 +37,7 @@ Select with `KernelFunctions.<Name>` in `OperationProperties`.
 
 The Wendland family is the default in the notebooks and tests
 (`KernelFunctions.Wendland2`); it is the family the
-[lattice-normalization calibration](renorm#lattice-normalization-calibration)
+[lattice-normalization calibration](lattice-calibration)
 has a closed-form analysis for (positive definite $\Rightarrow$
 $L(n_h) > 1$ strictly, no root in $h$).
 
@@ -97,7 +97,7 @@ scope for the JVPs, per `warpier_adjoint.md` Tier 2.1).
 
 Every function above is multiplied by the lattice-normalization factor
 `resolveNormalization(kernelState)` — `1.0` unless the
-[calibration](renorm#lattice-normalization-calibration) is enabled, in
+[calibration](lattice-calibration) is enabled, in
 which case $1/L$. The scaling is applied at the public boundary of each
 function (not at the 13 internal `eval_C_d` sites) because everything
 is linear in $C_d$, so one scale cannot be forgotten for a derivative.
@@ -162,15 +162,15 @@ the lattice factor to both primal and tangent.
 
 - `tests/operations/test_operations_core.py` — kernel-driven operator
   smoke tests.
-- `scripts/kernel_sanity_native.py` (gated by
+- `scripts/gradcheck/kernel_sanity_native.py` (gated by
   `tests/operations/test_gradcheck_scripts.py`) — the derivative
   ladder, the custom adjoint at $r=0$/$r>0$, and the Laplacian
   derivatives against `wp.Tape`.
-- `scripts/gradcheck_*.py` — operator-level gradcheck at float64,
+- `scripts/gradcheck/gradcheck_*.py` — operator-level gradcheck at float64,
   which exercises every kernel × scheme combination.
 
 ## See also
 
 [Support schemes in the operator pages](operations/gradient) ·
 [CRK corrected kernel](crk/crk-overview#the-corrected-kernel-and-gradient) ·
-[Renormalization & lattice calibration](renorm)
+[Renormalization](renorm) · [Lattice calibration](lattice-calibration)

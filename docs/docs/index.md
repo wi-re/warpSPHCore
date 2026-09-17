@@ -34,7 +34,7 @@ The defining properties, all of which this wiki documents per operator:
   objects; a kernel is "corrected" exactly when a state is supplied.
   The lattice-normalization calibration (the current branch's work) is
   the newest member of this family — see
-  [Renormalization & lattice calibration](/docs/renorm).
+  [Lattice normalization calibration](/docs/lattice-calibration).
 
 ## The operators
 
@@ -57,7 +57,8 @@ The defining properties, all of which this wiki documents per operator:
 | [CRK moments](/docs/crk/crk-moments) | $m_0, m_1, m_2$ and their $\gamma$-derivatives |
 | [CRK density](/docs/crk/crk-density) | The corrected consistency density (diagnostic) |
 | [Kernels](/docs/kernels) | The 12 compact-form kernels, the derivative ladder, support schemes, kernel JVPs |
-| [Renormalization](/docs/renorm) | Covariance $\to$ pseudo-inverse renormalization matrix, its JVP, and the lattice-normalization calibration ($L(n_h)$) |
+| [Renormalization](/docs/renorm) | Covariance $\to$ pseudo-inverse renormalization matrix, its JVP |
+| [Lattice calibration](/docs/lattice-calibration) | The $1/L$ kernel scaling that corrects a uniform lattice's quadrature offset |
 
 ## Infrastructure
 
@@ -85,15 +86,20 @@ follows a fixed structure:
 5. **Tests** — the files under `tests/operations/` that pin each claim,
    so a reader can verify a statement by running it.
 
-Design decisions, derivations, and the history of each piece live in the
-repo-root records — [`warpier_core.md`](https://github.com/wi-re/warpSPHCore/blob/main/warpier_core.md)
+Design decisions, derivations, and the history of each piece — all done and
+closed, kept for the "why is this shaped this way" record — live in
+`docs/historic_plans/`:
+[`warpier_core.md`](https://github.com/wi-re/warpSPHCore/blob/main/docs/historic_plans/warpier_core.md)
 (structured-kernel ABI and call graph),
-[`warpier_adjoint.md`](https://github.com/wi-re/warpSPHCore/blob/main/warpier_adjoint.md)
-(JVP derivations, tier by tier),
-[`warpier_fields.md`](https://github.com/wi-re/warpSPHCore/blob/main/warpier_fields.md)
-(state objects, caching, the declared ABI), and
+[`warpier_adjoint.md`](https://github.com/wi-re/warpSPHCore/blob/main/docs/historic_plans/warpier_adjoint.md)
+(JVP derivations, tier by tier), and
+[`warpier_fields.md`](https://github.com/wi-re/warpSPHCore/blob/main/docs/historic_plans/warpier_fields.md)
+(state objects, caching, the declared ABI). The still-open punch list is
+[`warpier_residual_open_problems_plan.md`](https://github.com/wi-re/warpSPHCore/blob/main/warpier_residual_open_problems_plan.md)
+(repo root), and the higher-order-convergence study plan — new, separate,
+nothing implemented yet — is
 [`higher_order.md`](https://github.com/wi-re/warpSPHCore/blob/main/higher_order.md)
-(higher-order convergence study plan). Warp-kernel authoring gotchas that
+(repo root). Warp-kernel authoring gotchas that
 bit the implementations are logged in
 [`docs/lessons_learned.md`](https://github.com/wi-re/warpSPHCore/blob/main/docs/lessons_learned.md);
 performance measurement records are under `docs/regression/`.

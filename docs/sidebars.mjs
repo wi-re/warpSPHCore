@@ -29,6 +29,7 @@ const sidebars = {
     'kernels',
     'neighbor-search',
     'renorm',
+    'lattice-calibration',
     'autograd',
     'data-types',
     'api',

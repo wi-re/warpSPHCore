@@ -96,7 +96,7 @@ the comparison baseline this exists to validate against
 second tangent through a `wp.launch`-backed function in this codebase:
 `computeSPHDensityGeometryJVP` is not wrapped in a `torch.autograd.Function`
 at all (unlike `warpOperation`'s `StateAwareWarpFunction`, which has no
-`jvp()` registered either -- see `scripts/spike_forward_mode_tier1.py`'s own
+`jvp()` registered either -- see `scripts/spikes/spike_forward_mode_tier1.py`'s own
 finding for the *first*-order case: `torch.autograd.forward_ad` silently
 returns `tangent=None` there already). Empirically, `torch.func.jvp` errors
 immediately (`RuntimeError: Cannot access data pointer of Tensor that

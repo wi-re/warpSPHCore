@@ -25,7 +25,7 @@ where
 - $k$ and $C_d$ are the compact-form kernel and its normalizing constant
   (see [Kernels](../kernels)),
 - and the optional lattice-normalization factor multiplies $W$
-  (see [Renormalization](../renorm#lattice-normalization-calibration)).
+  (see [Lattice calibration](../lattice-calibration)).
 
 Density is the **only operator with no field values and no correction
 inputs** — it reads `queryParticles.masses` directly and applies no CRK,

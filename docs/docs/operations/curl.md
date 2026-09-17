@@ -69,7 +69,7 @@ d(\nabla\times\mathbf{f})_i = \sum_j
 + dG_x\, \mathrm{coeff}_y - dG_y\, \mathrm{coeff}_x
 \Big]
 + \underbrace{\sum_j
-  \left(G_x\, v\mathrm{coeff}_y - G_y\, v\mathrm{coeff}_x\right)}_{\text{value-tangent term, fused}},
+  \left(G_x\, (df_i A_{ij} + df_j B_{ij})_y - G_y\, (df_i A_{ij} + df_j B_{ij})_x\right)}_{\text{value-tangent term, fused}},
 $$
 
 with the same $A/B$ weights and $G/dG$ chain as

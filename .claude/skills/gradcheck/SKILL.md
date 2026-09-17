@@ -12,25 +12,25 @@ or kernel-adjoint bug, not a flaky check. Every one of these bugs found so
 far (reentrancy in `wp_autograd.py`, a silently-zeroed adjoint from a
 ternary array read in Interpolate, a `float`-literal type-promotion compile
 failure and an out-of-bounds `Dot`-scheme read in Laplacian) was invisible
-to `scripts/operation_matrix.py`'s forward-only checks -- see
+to `scripts/diagnostics/operation_matrix.py`'s forward-only checks -- see
 `warpier_core.md`'s "Backward-Mode (Reverse AD) Findings" and "Gradcheck
 Script Rollout Plan" for the full history.
 
 ```
-scripts/gradcheck_density.py             # legacy manual-Jacobian version, kept for extra coverage
-scripts/gradcheck_density_native.py
-scripts/gradcheck_interpolate_native.py
-scripts/gradcheck_gradient_native.py
-scripts/gradcheck_divergence_native.py
-scripts/gradcheck_curl_native.py
-scripts/gradcheck_laplacian_native.py
+scripts/gradcheck/gradcheck_density.py             # legacy manual-Jacobian version, kept for extra coverage
+scripts/gradcheck/gradcheck_density_native.py
+scripts/gradcheck/gradcheck_interpolate_native.py
+scripts/gradcheck/gradcheck_gradient_native.py
+scripts/gradcheck/gradcheck_divergence_native.py
+scripts/gradcheck/gradcheck_curl_native.py
+scripts/gradcheck/gradcheck_laplacian_native.py
 ```
 
 All of them hardcode `warpSPHCore_PRECISION=float64` (set via
 `os.environ.setdefault` before importing `warpSPHCore` -- required, since
 Warp bakes precision into every compiled kernel at first import and it
 can't change mid-process) and run on `DEVICE = torch.device("cpu")`
-(`scripts/_gradcheck_common.py`) -- there's no `--device`/`--precision` flag
+(`scripts/gradcheck/_gradcheck_common.py`) -- there's no `--device`/`--precision` flag
 to pass, unlike `operation_matrix.py`.
 
 ## Run all of them (all ops, ~30-45s)
@@ -53,7 +53,7 @@ for Density; a `--plot` option on `gradcheck_density.py`) instead of a
 pass/fail assertion:
 
 ```bash
-python scripts/gradcheck_gradient_native.py
+python scripts/gradcheck/gradcheck_gradient_native.py
 ```
 
 Swap in `curl`/`divergence`/`interpolate`/`laplacian`/`density` for the
@@ -67,7 +67,7 @@ covers).
 
 Follow the existing pattern rather than writing one from scratch:
 
-1. Import shared fixtures from `scripts/_gradcheck_common.py`
+1. Import shared fixtures from `scripts/gradcheck/_gradcheck_common.py`
    (`make_domain`, `single_particle_case`, `line_case`, `grid_case_2d`,
    `build_adjacency`) instead of duplicating setup.
 2. Call `torch.autograd.gradcheck(f, (positions, supports, masses, ...))`
@@ -89,7 +89,7 @@ branch like this into a ternary, check that first.
 
 ## `repro_warp_grad_reentrancy.py` is not part of this
 
-`scripts/repro_warp_grad_reentrancy.py` always exits `0` and prints an
+`scripts/repro/repro_warp_grad_reentrancy.py` always exits `0` and prints an
 illustrative 4-row PASS/FAIL matrix where three of the four rows are
 *expected* to fail (only the "both fixes" row should be all-PASS) -- it's a
 standing demonstration of the reentrancy bug and its fix, not a gate. Not

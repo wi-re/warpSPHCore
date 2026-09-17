@@ -141,7 +141,7 @@ the CRK correction frozen while the geometry moves).
   the reciprocal/ratio *one level up*, outside the function containing
   the dynamic neighbor loop — Warp's automatic adjoint for
   loop-accumulate-then-divide in one `@wp.func` produces NaN gradients
-  (see `crk_volume.py`'s comment and `scripts/debug_crk_backward.py`).
+  (see `crk_volume.py`'s comment and `scripts/diagnostics/debug_crk_backward.py`).
 
 ## Tests
 
@@ -151,7 +151,7 @@ the CRK correction frozen while the geometry moves).
   (and the divergence/curl/laplacian siblings) — the operators with
   `crkTangentState`, gradchecked end to end.
 - The stage-3 `torch.func.jvp` pattern is validated by
-  `scripts/spike_forward_mode_tier2_crk.py` (gated by
+  `scripts/spikes/spike_forward_mode_tier2_crk.py` (gated by
   `tests/operations/test_gradcheck_scripts.py`).
 
 ## See also

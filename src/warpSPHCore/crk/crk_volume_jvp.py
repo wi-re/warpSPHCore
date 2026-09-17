@@ -9,7 +9,7 @@ value-having operator eventually consumes it via `correctionData.useVolume`),
 so it is built once here for reuse by phase (e)'s Divergence/Curl/Laplacian
 extension, exactly like `crk_moments_jvp.py`.
 
-Ported from `scripts/spike_forward_mode_tier2_crk.py`'s
+Ported from `scripts/spikes/spike_forward_mode_tier2_crk.py`'s
 `assembled_apparent_volume_jvp` (validated there to float64 round-off against
 `_computeCRKVolume_stateBackend`'s own reverse-mode Jacobian).
 

@@ -63,10 +63,12 @@ adjacency/grid, corrections) from a parallel list of `wp.array`s:
 | 3 | `rSup` | 15–18 | `qcrk_A/B/gradA/gradB` | 27 | `grid_qMin` |
 | 4 | `qMas` | 19–22 | `rcrk_A/B/gradA/gradB` | 28 | `grid_qMax` |
 | 5 | `rMas` | 23 | `adj_neighborList` | 29 | `grid_numCells` |
-| 6 | `qDen` | 30 | `grid_hashTable` | 33 | `domainMin` |
-| 7 | `rDen` | 31 | `grid_cellTable` | 34 | `domainMax` |
-| 8 | `qK` (kinds) | 32 | `grid_cellOffsets` | 35 | `periodicity` |
-| 9 | `rK` | 10 | `renormMat` | 11 | `qOmega` |
+| 6 | `qDen` | | | 30 | `grid_hashTable` |
+| 7 | `rDen` | | | 31 | `grid_cellTable` |
+| 8 | `qK` (kinds) | | | 32 | `grid_cellOffsets` |
+| 9 | `rK` | | | 33 | `domainMin` |
+| 10 | `renormMat` | | | 34 | `domainMax` |
+| 11 | `qOmega` | | | 35 | `periodicity` |
 
 The list is **heterogeneous**: real inputs are `torch.Tensor`s, but
 disabled correction slots (no CRK, no grad-h, no volumes, no
@@ -80,7 +82,7 @@ same object) — which is exactly the aliased-role case
 [backward](#backward) has to deduplicate.
 
 The [lattice-normalization
-calibration](renorm#lattice-normalization-calibration) is resolved here
+calibration](lattice-calibration) is resolved here
 too: when `calibrateNormalization` is set,
 `latticeDensityFactor(kernel, n_h, dim)` becomes
 `normalizationCoefficient` in the config dict (raising if not finite
@@ -338,14 +340,14 @@ the one sync in the whole machinery is `jvp()`'s batched liveness mask,
 and only when forward-mode AD is actually in use. This is a standing
 invariant with a census, not a hope:
 `tests/operations/test_no_host_sync.py` counts readbacks on specific
-modules, `scripts/count_host_syncs.py` does the whole-repo census, and
+modules, `scripts/benchmarks/count_host_syncs.py` does the whole-repo census, and
 the motivating before/after records are in `docs/regression/` (the
 [renormalization](renorm) fallback is the canonical example).
 
 ## Tests
 
 - `tests/operations/test_gradcheck_scripts.py` — gates the
-  `scripts/gradcheck_*.py` float64 `torch.autograd.gradcheck` suites
+  `scripts/gradcheck/gradcheck_*.py` float64 `torch.autograd.gradcheck` suites
   (reverse mode through the full bridge, every operator × correction
   combination).
 - `tests/operations/test_forward_mode_value_jvp.py`,
@@ -363,7 +365,7 @@ the motivating before/after records are in `docs/regression/` (the
 ## See also
 
 [Operator pages — the JVP formulas the bridge dispatches to](operations/density)
-· [Renormalization & lattice calibration](renorm) (resolved in
+· [Lattice calibration](lattice-calibration) (resolved in
 `extractStateInfo`) · `warpier_adjoint.md` (the JVP derivations) ·
 `warpier_fields.md` (the state-object design record the caching layers
 implement)
