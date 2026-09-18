@@ -6,7 +6,9 @@ and the kernels of Table 1 scaled to the same common scale h = 2sigma.
 Negative values are plotted with broken curves."
 
 As in the paper, |W̄| is plotted on a log axis (1e-6 to 1) over
-|k|h ∈ [0, 3π]; broken (dashed) segments mark where W̄ < 0.
+|k|σ ∈ [0, 3π] (σ = h/2; equivalently κ̂ = |k|h ∈ [0, 6π] — the
+cubic spline's first zero sits just over π on the paper's axis);
+broken (dashed) segments mark where W̄ < 0.
 
 With kappa-hat = |k| h (h = 2sigma = 1), the 3D FT (eq. 14) depends only
 on kappa = H|k| = kappa-hat * (H/h):
@@ -58,10 +60,13 @@ from fig01_kernel_shapes import COLORS, LABELS, ORDER
 _HERE = Path(__file__).resolve().parent
 FIGDIR = _HERE.parent / "figures"
 
-KMAX_PLOT = 3.0 * math.pi  # the paper's axis range; the quartic's first
-                           # zero (11.13) lies off-panel
-NK_PLOT = 12001    # d(kappa-hat) ~ 8.7e-4
-YFLOOR = 1e-6      # the paper's log-axis floor
+# The paper's Fig. 2 x-axis is |k|sigma, sigma = h/2: in kappa-hat =
+# |k|h units the data range is [0, 2 * KMAX_PLOT] = [0, 6 pi], which
+# contains the first zero of EVERY B-spline (3.44, 4.29, 5.56 in
+# |k|sigma units).
+KMAX_PLOT = 3.0 * math.pi  # plot x-range, in |k|sigma units
+NK_PLOT = 12001            # d(|k|sigma) ~ 1.6e-3
+YFLOOR = 1e-6              # the paper's log-axis floor
 N_SIMPSON = 20001  # Simpson points in r (error ~1e-14 at these k)
 BSPLINES = ["cubic_b4", "quartic_b5", "quintic_b6"]
 NONNEG = ["wendland_C2", "wendland_C4", "wendland_C6", "hoct4", "gaussian"]
@@ -159,7 +164,7 @@ def checks(ks: dict, num: dict, x: np.ndarray) -> dict:
     # -- non-negativity (Wendland, HOCT4, Gaussian) -------------------------
     for n in NONNEG:
         mn = float(num[n].min())
-        assert mn >= -1e-10, f"{n}: min wbar on [0,12] = {mn:.3e}"
+        assert mn >= -1e-10, f"{n}: min wbar on [0,6π] = {mn:.3e}"
         info[n]["min12"] = mn
 
     # -- B-splines oscillate about zero -------------------------------------
@@ -210,24 +215,29 @@ def plot(ks: dict, num: dict, info: dict) -> None:
         "legend.framealpha": 0.9,
     })
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
-    x = np.linspace(0.0, KMAX_PLOT, NK_PLOT)
+    x = 0.5 * np.linspace(0.0, 2.0 * KMAX_PLOT, NK_PLOT)  # |k|sigma
     for n in ORDER:
         plot_signed(ax, x, num[n], COLORS[n], YFLOOR)
 
-    # first zeros of the B-splines (set the pairing criterion); the
-    # quartic's first zero (11.13) lies beyond the paper's 3-pi range
-    for n in BSPLINES:
-        z1 = info[n]["zeros30"][0]
+    # first zeros of the B-splines (set the pairing criterion); stored
+    # in kappa-hat = |k|h units, plotted halved in |k|sigma units.
+    # Staggered label heights avoid overlap (3.44, 4.29, 5.56).
+    for iy, n in enumerate(BSPLINES):
+        z1 = 0.5 * info[n]["zeros30"][0]
         if z1 > KMAX_PLOT:
             continue
         ax.axvline(z1, color=COLORS[n], ls=":", lw=0.9, alpha=0.6)
-        ax.text(z1, 0.35, f"z$_1$ = {z1:.3f}", ha="center", fontsize=8,
-                color=COLORS[n])
+        ax.text(z1, [0.55, 0.30, 0.10][iy], f"z$_1$ = {z1:.3f}",
+                ha="center", fontsize=8, color=COLORS[n],
+                bbox=dict(facecolor="white", alpha=0.7,
+                          edgecolor="none", pad=0.8))
 
     ax.set_yscale("log")
     ax.set_xlim(0.0, KMAX_PLOT)
     ax.set_ylim(YFLOOR, 1.0)
-    ax.set_xlabel(r"$|k|\,h$   ($h = 2\sigma$)")
+    ax.set_xticks([0.0, math.pi, 2.0 * math.pi, 3.0 * math.pi])
+    ax.set_xticklabels(["0", r"$\pi$", r"$2\pi$", r"$3\pi$"])
+    ax.set_xlabel(r"$|k|\,\sigma$   ($\sigma = h/2$)")
     ax.set_ylabel(r"$\bar W(k)$")
     ax.set_title("D&A (2012) Fig. 2 — Fourier transforms at common "
                  "h = 2σ (ν = 3)")
@@ -246,19 +256,19 @@ def main() -> None:
     ref = load_reference()
     ks = kernel_shapes(ref)
 
-    x = np.linspace(0.0, KMAX_PLOT, NK_PLOT)  # kappa-hat = |k|h
+    xh = np.linspace(0.0, 2.0 * KMAX_PLOT, NK_PLOT)  # kappa-hat = |k|h
     num: dict = {}
     for n in ORDER:
         d = ks[n]
-        w = ft3d_numeric(d["shape"], d["C3"], x[1:] * d["scale3"],
+        w = ft3d_numeric(d["shape"], d["C3"], xh[1:] * d["scale3"],
                          n=N_SIMPSON)
         num[n] = np.concatenate([[1.0], w])
 
-    info = checks(ks, num, x)
+    info = checks(ks, num, xh)
 
     print("kappa-hat = |k|h, h = 2σ = 1;  primary = numerical FT (eq. 14)")
     print(f"{'kernel':<14}{'w̄(0)':>10}{'a2 (fit)':>12}{'a4 (fit)':>12}"
-          f"{'min [0,12]':>12}{'#zeros[0,30]':>13}")
+          f"{'min [0,6π]':>12}{'#zeros[0,30]':>13}")
     for n in ORDER:
         i = info[n]
         mn = f"{i['min12']:+.4f}" if "min12" in i else "   (osc.)"
@@ -266,12 +276,13 @@ def main() -> None:
         print(f"{n:<14}{i['w0']:>10.7f}{i['a2']:>12.7f}{i['a4']:>12.6e}"
               f"{mn:>12}{nz:>13}")
 
-    print("\nB-spline zeros in [0,30] (kappa-hat; z1 also in H units):")
+    print("\nB-spline zeros in [0,30] (kappa-hat = |k|h units; "
+          "the figure's axis is |k|sigma = kappa-hat/2):")
     for n in BSPLINES:
         zs = info[n]["zeros30"]
         zstr = "  ".join(f"{z:.4f}" for z in zs)
         print(f"  {n:<14} {zstr}")
-        print(f"  {'':<14} z1 = {zs[0]:.6f}   "
+        print(f"  {'':<14} z1 = {zs[0]/2:.6f} |k|σ   "
               f"(kappa = H|k|: {zs[0] * ks[n]['scale3']:.4f})")
 
     print("\nclosed-form vs numerical max|dwbar| on the plot grid:")
