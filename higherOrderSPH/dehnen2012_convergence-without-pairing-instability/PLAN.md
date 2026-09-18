@@ -204,19 +204,41 @@ now has zero KNOWN rows.
       11/245). The audit `known_issues` entry was removed; the audit
       now has zero KNOWN rows. Both keep the inherited 1.1425 packing
       factor (no paper reference; documented, overridable).
-- [ ] `fig01_kernel_shapes.py` — Fig. 1 (ν = 3, common h = 2σ scaling,
+- [x] `fig01_kernel_shapes.py` — Fig. 1 (ν = 3, common h = 2σ scaling,
       linear + log panels, support arrows) for all Table 1 kernels +
-      Gaussian + HOCT4.
-- [ ] `fig02_fourier_transforms.py` — Fig. 2: numerical 3D FT (eq. 14);
-      closed-form B-spline FT (eq. 15, de-garbled from the PDF or derived
-      from the 1D definition) as cross-check; assertions `w̄(0) = 1`,
+      Gaussian + HOCT4. **DONE 2026-09-18**: 8 kernels at h = 1
+      (H = scale₃), checks non-negativity / support / normalisation
+      (exact piecewise + Simpson); HOCT4 orange per the paper's colour
+      coding; figures/fig01_kernel_shapes.{png,pdf} (gitignored).
+- [x] `fig02_fourier_transforms.py` — Fig. 2: numerical 3D FT (eq. 14);
+      closed-form FT as cross-check — **the closed form is derived from
+      the piecewise-polynomial definitions** (eq. 15's PDF transcription
+      is garbled beyond repair, see findings log); assertions `w̄(0) = 1`,
       Taylor `w̄(k) = 1 − ½σ²k²` (eq. 17) to O(k⁴), non-negativity for
       Wendland + HOCT4 + Gaussian, sign changes for all B-splines (record
       first zeros — they set the pairing criterion κ₀ > κ_Nyquist).
+      **DONE 2026-09-18**: primary = Simpson FT (n = 20001) on
+      κ̂ = |k|h ∈ [0, 12]; closed form (exact, piecewise) cross-checks to
+      ≤ 1e-11; w̄(0) = 1 to ≤ 5e-12 (HOCT4: paper's 10-dp rounded C₃);
+      eq.-17 slope a₂ = −1/8 ± 1e-4 for all 8 (all overlap at small k);
+      min w̄ ≥ −1e-10 on [0, 12] for C2/C4/C6/HOCT4/Gaussian; B-spline
+      first zeros κ̂ = 6.8829 (κ = 12.5663 ≈ 4π), 11.1282 (κ = 22.4670),
+      8.5762 (κ = 18.8314, flat crossing |w̄| ~ 1e-13, ±0.01); zero
+      counting validated against the high-res numerical FT (tangential
+      near-zeros of b5 at κ̂ ~ 7.78/15.56/23.34 correctly rejected).
 
 Acceptance: all Table 1 rows verified (or discrepancy logged); Figs 1–2
 match the paper (Fourier curves: max |Δw̄| < 1e-3 on a common k-grid,
 control points re-digitised from the PDF if needed).
+**MET 2026-09-18 (with one documented limitation)**: all Table 1 rows
+verified via Figs 1–2 + the Phase-1 audit; the closed-form/numerical
+cross-check is ≤ 1e-11 (far below the 1e-3 bar); qualitative paper
+claims reproduced (all curves overlap at small κ̂ per eq. 17; B-splines
+oscillate about zero, Wendland/HOCT4/Gaussian stay non-negative; first
+zeros recorded). Limitation: the model has no image input, so a
+pixel-level comparison against the paper's rendered Figs 1–2 (incl.
+PDF re-digitisation) could not be performed — the PNGs are generated for
+user visual check.
 
 ## Phase 3 — add Gaussian + HOCT4 to `warpSPHCore`
 
@@ -226,7 +248,9 @@ as new kernels.
 - [ ] `gaussian.py`: the "true Gaussian", **truncated at 16σ** (the paper's
       own convention for the stability work; note in the spec that any
       truncation invalidates FT non-negativity — paper footnote 10).
-      `kernelScale = H/h = 8.0`; `C_d = (32/π)^{ν/2}`;
+      Paper's Gaussian = N(0, σ²) with h = 2σ, so σ = H/16,
+      shape `f(q) = exp(−0.5(16q)²)`, `kernelScale = H/h = 8.0`;
+      `C_d = (128/π)^{ν/2}` (corrected 2026-09-18 — see findings log);
       `packingRatio = 1.337` (Table 2, N_h = 10 row — consistent:
       (N_H/V_ν)^{1/3}/kernelScale with N_H = 5120).
 - [ ] `hoct4.py`: from the synced `read2010` definition (verified, see
@@ -400,6 +424,9 @@ Acceptance:
 | 2026-09-18 | **`sphKernelN_H` could not compile under a float64 build** (the kernel audit's precision): bare `np.pi` / `4 * np.pi / 3` constant BinOps trace as int32×float32, and `packingRatio**dim` is `pow(float64, int32)` (no overload; only the float32 build ever compiled this function). Fixed in `src/warpSPHCore/kernels/properties.py` (module-level constant leaves + `wp.pow(x, scalar_t(dim))`); semantically identical in float32. Found by the audit — evidence the float64 path was untested. | resolved 2026-09-18 |
 | 2026-09-17, resolved 2026-09-18 | **Code B7 identity: it is the D&A family's b₈ (order 8, degree 7), not the classical b₇.** The paper's eq. 11 (Schoenberg B-splines, closed form b_n(q) = Σᵢ(−1)ⁱC(n,i)((n−2i)/n−q)₊^{n−1}) was derived from Table 1 and verified to machine precision against the shipped b4/b5/b6; the code B7 shape (knots ¼/½/¾, 4 terms, degree 7) matches family n = 8 to 8.3e-17 in all dims — the code name "B7" is by degree, D&A index by order. The 1D pattern σ²/H² = 1/(3n) (stated in the paper: b_n → N(0, H²/3n)) holds exactly for all n incl. n = 8 (1/24) and n = 7 (1/21), so it is NOT a red herring — it is the code shape's own 1D moment. The classical b₇ (4 terms, degree 6, (1−q)⁶ − 7(5/7−q)₊⁶ + 21(3/7−q)₊⁶ − 35(1/7−q)₊⁶) differs from the code shape by 5.3e-2 max; its moments: C = 823543/92160, 5764801/113149π, 5764801/61440π (8.936013/16.217493/29.866425), σ²/H² = 1/21, 7691281/166329030, 11/245, H/h = 2.291288/2.325170/2.359700, 3D FT min −3.17e-6 (barely pairing-unstable, first zero κ̂ ≈ 21.96). Code B7 (= b₈): C = 4096/315, 589824/7435π, 16384/105π (all correct for the shape), σ²/H² = 1/24, 531453/13085600, 19/480, H/h(shape) = 2.449490/2.481044/2.513123, 3D FT non-negative (pairing-stable). `B7_kernelScale` copied the quintic (b6) row (2.121321/2.158131/2.195775) — off by ~13–15 %. **RESOLUTION (2026-09-18, user-directed):** shape-derived scales adopted; the former B7 was renamed **B8** (enum 33, the old value — stored configs keep resolving to the same shape) with the corrected scale, and the genuine classical b₇ was added as the new **B7** (enum 34). Audit now has zero KNOWN rows; the audit's `known_issues` entry was removed. | resolved 2026-09-18 — scale adopted, rename + new kernel shipped |
 | 2026-09-18 | **Warp tracer evaluates Python-float BinOps inside traced `@wp.func` in float32** — `scalar_t(5.0/7.0)` becomes the float32 constant 0.7142857313156128 in a float64 build, silently corrupting any non-exactly-representable constant (~1.2e-7 shape error for b₇'s 5/7 knot). Found when the new classical b₇ shape failed its audit form check at 1.25e-7 (machine precision elsewhere). Safe forms (verified by probe): full-precision float literals, module-level Python-float constants referenced by name; inexact literals like `scalar_t(0.6)` are unaffected. Same class as the `properties.py` constant-BinOp finding. Fixed in `kernelFunctions/B7.py` (module-level knot constants); **`src/warpSPHCore/util/support.py:86` has the same pattern** (`scalar_t(np.pi * 3.0 /4.0)`, `scalar_t(1.0/3.0)`) — unfixed, out of scope, candidate `src/` fix (Phase 8 decisions). | resolved for B7; support.py instance open — Phase 8 |
+| 2026-09-18 | **Gaussian convention in the reference YAML was wrong** (shape and C rows): it had f(q) = e^{−0.5(8q)²}, C_d = (32/π)^{ν/2}, i.e. σ = H/8 — contradicting the paper (Gaussian = N(0,σ²) with h = 2σ, truncated at 16σ → σ = H/16) and the YAML's own σ²/H² = 1/256 row. With the old convention the Gaussian's own h would be √2, not 1, and its eq.-17 slope would be −κ̂²/4 instead of the universal −κ̂²/8 (it would NOT overlap the other kernels at small k, contrary to the paper's Fig. 2 statement). Corrected: f(q) = e^{−0.5(16q)²}, C_d = (128/π)^{ν/2} (C₃ = 260.0699, W(0) = 0.50795 at h = 1; truncation f(1) = e^{−128} ≈ 3e-56). kernelScale = 8.0, packingRatio 1.337 unchanged. Found by the Phase-2 eq.-17 Taylor check (fit gave a₂ = −0.4994 instead of −1/8). | resolved 2026-09-18 — YAML, ft_kernels, fig01, Phase-3 spec updated |
+| 2026-09-18 | **Eq. 15 (B-spline closed-form 3D FT) is garbled beyond repair** in the PDF text layer, and the printed form (as either transcription) is mathematically wrong: it has poles at sin(nκ) = 0 where the true FT is smooth and diverges at κ → 0 while w̄(0) = 1. Superseded by a derived closed form: every kernel except the Gaussian is a piecewise polynomial, so ∫_a^b r^m sin(κr) dr per piece by exact antiderivatives (Taylor series in κ for κ < 5 to avoid cancellation, antiderivative for κ ≥ 5); piecewise transcription validated against the shipped shapes at < 1e-12. Cross-check closed vs numerical: ≤ 1e-11 on the Fig.-2 grid (cubic's closed form also matches the hand-derived 384(−2κsin(κ/2) + κsinκ − 16cos(κ/2) + 4cosκ + 12)/κ⁶). | resolved 2026-09-18 — `ft_kernels.py` |
+| 2026-09-18 | **B-spline 3D FT zero structure (common h = 2σ, κ̂ = |k|h)**: b₄ — 7 sign-change zeros in [0,30] at 6.8829/9.8446/13.7657/16.9252/20.6487/23.8897/27.5318 (4nπ/H factor zeros + tan(κ/4) = κ/4 factor zeros); b₅ — 3 sign-change zeros at 11.1282/19.1320/27.0047 PLUS 3 tangential near-zeros (w̄ touches ~0 from one side only, |w̄| ~ 1e-11, at κ̂ ~ 7.78/15.56/23.34 — the closed form's ~1e-16 rounding flips the sign across them; the high-res numerical FT confirms no crossing); b₆ — 4 sign-change zeros at 8.5762/12.2783/21.1094/29.7957. First zeros (pairing criterion κ₀): κ = 12.5663 (≈ 4π) / 22.4670 / 18.8314 — b₅ agrees with the Phase-1 audit (22.46). b₆'s first crossing is flat (|w̄| ~ 1e-13, slope ~ 2e-11/κ̂) and is only resolvable to ±0.01 in κ̂ (closed form and high-res Simpson agree within that). | resolved 2026-09-18 — recorded for Phase 4 (stability) |
 | 2026-09-17 | Code `packingRatio` deviations from Table 2: CubicSpline × 1.0175 (Price 2012 alignment), QuinticSpline, B7 & B8 × 1.1425 (CRKSPH alignment). Deliberate per in-code comments; replicate both variants. | open — Phase 4 |
 | 2026-09-17 | Code `h` (kernel functions) = paper's support radius H, not paper's h = 2σ. Notation map in `paper_notes.md`. | informational — all phases |
 | 2026-09-17 | `warpSPH` `CullenDehnen2010.py` carries an unresolved sign note ("the signs here should have been wrong, double check!") plus dead alternate formulations. | open — Phase 6 |

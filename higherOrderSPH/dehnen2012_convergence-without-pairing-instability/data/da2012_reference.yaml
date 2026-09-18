@@ -100,8 +100,8 @@ table1:
       verified kernel under the eq.-8 convention (0.228343408 H) --
       consistent, no discrepancy.
   gaussian:
-    shape: "f(q) = exp(-0.5 (8 q)^2), 16-sigma truncation (q<=1, sigma = H/16)"
-    C: [sqrt(32/pi), 32/pi, (32/pi)**1.5]
+    shape: "f(q) = exp(-0.5 (16 q)^2), 16-sigma truncation (q<=1, sigma = H/16)"
+    C: [sqrt(128/pi), 128/pi, (128/pi)**1.5]
     sigma2_over_H2: [1/256, 1/256, 1/256]
     H_over_h: [8.0, 8.0, 8.0]
     code_kernel: Gaussian (added in Phase 3; kernelScale = 8.0)
@@ -324,15 +324,19 @@ rnh2012_sphs:
 # ---------------------------------------------------------------------------
 gaussian_convention:
   # Agreed convention for the core library (Phase 3). Code h = support H;
-  # the Gaussian is truncated at 16 sigma, i.e. H = 16 sigma, so in units of
-  # the paper's resolution scale h_paper = 2 sigma the support is
-  # H/h_paper = 8  ->  kernelScale = 8.0. Shape in q = r/H units:
-  #   f(q) = exp(-0.5 (8 q)^2),   f(1) = exp(-32) ~ 1.3e-14 (negligible).
-  # Normalisation C_d = (32/pi)^(nu/2) so that int f d^nu x / H^nu = 1.
+  # the paper's Gaussian is W(r) = N(0, sigma^2) with h_paper = 2 sigma
+  # (eqs. 8-9), truncated at 16 sigma (Figs. 4-5 caption), i.e.
+  # H = 16 sigma -> H/h_paper = 8 -> kernelScale = 8.0, sigma = H/16.
+  # Shape in q = r/H units:
+  #   f(q) = exp(-0.5 (16 q)^2),   f(1) = exp(-128) ~ 3.4e-56 (negligible).
+  # Normalisation C_d = (128/pi)^(nu/2) so that int W d^nu x = 1.
+  # (2026-09-18: corrected from exp(-0.5 (8 q)^2) / (32/pi)^(nu/2), which
+  #  implied sigma = H/8, i.e. h_paper = sigma, contradicting both the
+  #  paper and this block's own sigma2_over_H2 = 1/256.)
   truncation: "16 sigma (H = 16 sigma)"
   kernelScale: 8.0
-  shape: "f(q) = exp(-0.5 (8 q)^2), q = r/H, zero for q > 1"
-  C_d: "(32/pi)^(nu/2)"
+  shape: "f(q) = exp(-0.5 (16 q)^2), q = r/H, zero for q > 1"
+  C_d: "(128/pi)^(nu/2)"
   packingRatio: 1.337
   N_H_at_Nh_10_3d: 5120          # N_H = N_h * kernelScale^3 = 10 * 512
 
