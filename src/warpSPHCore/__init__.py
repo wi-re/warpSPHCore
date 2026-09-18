@@ -6,6 +6,7 @@ Public API (flat imports):
     from warpSPHCore.util       import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins
     from warpSPHCore.autograd   import warpWrapper, WarpFunctionWrapper
     from warpSPHCore.math       import computeDistance, minimumImageDistance, ...
+    from warpSPHCore.sampling   import sampleDensestLattice, LatticeSample
     from warpSPHCore.radius     import radiusSearchCompactHashMap, radiusNaive, ...
     from warpSPHCore.dataTypes  import AdjacencyList, ParticleState, DomainDescription, ...
     from warpSPHCore.operations import sphOperation_warp, warpOperation, warpOperationJVP
@@ -40,6 +41,8 @@ from .util import *
 submodules.append(util)
 from .math import *
 submodules.append(math)
+from .sampling import *
+submodules.append(sampling)
 
 # Autograd submodules
 from .autograd import *
