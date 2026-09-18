@@ -32,9 +32,11 @@
 #
 # `shape` is either one `expr` (applies to all spec'd dims) or
 # `shape_by_dim`. `expr` is a Python expression in `q` (a numpy array)
-# evaluated with a restricted namespace: `pos(x) = max(x, 0)`, `pi`,
-# `exp`, `sqrt`. The expression is valid on 0 <= q <= 1; outside the
-# support the spec value is 0 (checked against the code).
+# evaluated with a restricted namespace: `pos(x) = max(x, 0)`,
+# `step(x) = 1(x >= 0)`, `pi`, `exp`, `sqrt`. The expression is valid on
+# 0 <= q <= 1; outside the support the spec value is 0 (checked against
+# the code). (HOCT4 needs `step` for its hard switch at alpha; `pos`
+# alone is a ramp and cannot express it.)
 #
 # `known_issues`: check failures that are documented, accepted deviations.
 # The audit reports them as KNOWN (green) instead of FAIL; a NEW failure
@@ -232,4 +234,45 @@ kernels:
       reference_N_H: 5120
       code_factor: 1.0
       note: "N_H = N_h * kernelScale^3 = 10 * 512 (16-sigma truncation)"
+    known_issues: []
+
+  # ------------------------------------------------------------------
+  # HOCT4: Read et al. (2010) eqs. 46-51 (nk = 4, beta = 0.5, gamma
+  # = 0.75) -- the paper's Fig. 1 / Table 1 comparison kernel.
+  # Verified definition: da2012_reference.yaml hoct4_definition
+  # (cross-checked against the CT kernel of the same paper,
+  # normalisation ratio 1.000000). The same shape f in all dims with
+  # the per-dim normalisation N_d; C^2 at alpha/beta/gamma; the
+  # central cusp f'(0) = P != 0 is by design ("constant central core
+  # to the kernel gradient").
+  # ------------------------------------------------------------------
+  hoct4:
+    code_name: HOCT4
+    source: >
+      Read et al. 2010 eqs. 46-51 (D&A 2012 Table 1 / Fig. 1
+      comparison kernel). Verified definition in
+      higherOrderSPH/dehnen2012_convergence-without-pairing-instability/
+      data/da2012_reference.yaml (hoct4_definition). 3D C = N_3d =
+      6.5150499306 (paper Table 1: 6.52); sigma2/H2 and H/h from the
+      verified moments (3D: 0.0521407118, 2.189684410 -- exactly
+      reproduces D&A's quoted sigma ~ 0.228343 H and the Table 2 row
+      N_H = 442, packing 2.158). alpha is the smaller root of
+      14.6 a^2 - 12 a + 1.9 = 0.
+    shape:
+      # switch form: quartic part + step(alpha - q) * (linear - quartic);
+      # equals P q + Q for q <= alpha, the quartic part for q > alpha
+      # (a hard switch -- `pos` is a ramp and cannot express it)
+      expr: >-
+        pos(1.0-q)**4 + 16.0/5.0*pos(0.75-q)**4 - 94.0/5.0*pos(0.5-q)**4
+        + step(0.214108111463-q)*((-2.154228492776*q + 0.981018558675)
+        - pos(1.0-q)**4 - 16.0/5.0*pos(0.75-q)**4 + 94.0/5.0*pos(0.5-q)**4)
+    C: {1: "2.0684349363", 2: "3.7158334191", 3: "6.5150499306"}
+    sigma2: {1: "0.0505294124", 2: "0.0520086521", 3: "0.0521407118"}
+    dims: [1, 2, 3]
+    ft_expected: nonnegative
+    packing:
+      value: 2.158
+      reference_N_H: 442
+      code_factor: 1.0
+      note: "D&A Table 2 (3D)"
     known_issues: []

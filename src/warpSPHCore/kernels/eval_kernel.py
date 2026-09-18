@@ -25,6 +25,8 @@ def eval_k(q: scalar_t, dim: wp.int32, kernel: wp.int32):
         return B7_k(q, dim)
     elif kernel == wp.static(KernelFunctions.B8.value):
         return B8_k(q, dim)
+    elif kernel == wp.static(KernelFunctions.HOCT4.value):
+        return HOCT4_k(q, dim)
     elif kernel == wp.static(KernelFunctions.Gaussian.value):
         return Gaussian_k(q, dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
@@ -57,6 +59,8 @@ def eval_dkdq(q: scalar_t, dim: wp.int32, kernel: wp.int32):
         return B7_dkdq(q, dim)
     elif kernel == wp.static(KernelFunctions.B8.value):
         return B8_dkdq(q, dim)
+    elif kernel == wp.static(KernelFunctions.HOCT4.value):
+        return HOCT4_dkdq(q, dim)
     elif kernel == wp.static(KernelFunctions.Gaussian.value):
         return Gaussian_dkdq(q, dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
@@ -89,6 +93,8 @@ def eval_d2kdq2(q: scalar_t, dim: wp.int32, kernel: wp.int32):
         return B7_d2kdq2(q, dim)
     elif kernel == wp.static(KernelFunctions.B8.value):
         return B8_d2kdq2(q, dim)
+    elif kernel == wp.static(KernelFunctions.HOCT4.value):
+        return HOCT4_d2kdq2(q, dim)
     elif kernel == wp.static(KernelFunctions.Gaussian.value):
         return Gaussian_d2kdq2(q, dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
@@ -121,6 +127,8 @@ def eval_d3kdq3(q: scalar_t, dim: wp.int32, kernel: wp.int32):
         return B7_d3kdq3(q, dim)
     elif kernel == wp.static(KernelFunctions.B8.value):
         return B8_d3kdq3(q, dim)
+    elif kernel == wp.static(KernelFunctions.HOCT4.value):
+        return HOCT4_d3kdq3(q, dim)
     elif kernel == wp.static(KernelFunctions.Gaussian.value):
         return Gaussian_d3kdq3(q, dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
@@ -153,6 +161,8 @@ def eval_C_d(dim: wp.int32, kernel: wp.int32):
         return B7_C_d(dim)
     elif kernel == wp.static(KernelFunctions.B8.value):
         return B8_C_d(dim)
+    elif kernel == wp.static(KernelFunctions.HOCT4.value):
+        return HOCT4_C_d(dim)
     elif kernel == wp.static(KernelFunctions.Gaussian.value):
         return Gaussian_C_d(dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
@@ -185,6 +195,8 @@ def eval_kernelScale(kernel: wp.int32, dim: wp.int32):
         return B7_kernelScale(dim)
     elif kernel == wp.static(KernelFunctions.B8.value):
         return B8_kernelScale(dim)
+    elif kernel == wp.static(KernelFunctions.HOCT4.value):
+        return HOCT4_kernelScale(dim)
     elif kernel == wp.static(KernelFunctions.Gaussian.value):
         return Gaussian_kernelScale(dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
@@ -217,6 +229,8 @@ def eval_packing(kernel: wp.int32):
         return B7_packingRatio()
     elif kernel == wp.static(KernelFunctions.B8.value):
         return B8_packingRatio()
+    elif kernel == wp.static(KernelFunctions.HOCT4.value):
+        return HOCT4_packingRatio()
     elif kernel == wp.static(KernelFunctions.Gaussian.value):
         return Gaussian_packingRatio()
     elif kernel == wp.static(KernelFunctions.Poly6.value):

@@ -77,8 +77,8 @@ _INITIALIZED = False
 
 # q-grid points that are kinks of some spec'd kernel (piece boundaries /
 # positive-part nodes); the AD grid must stay clear of them.
-_KINKS = (1.0 / 7.0, 3.0 / 7.0, 0.25, 1.0 / 3.0, 0.5, 5.0 / 7.0,
-          0.6, 2.0 / 3.0, 0.75)
+_KINKS = (1.0 / 7.0, 3.0 / 7.0, 0.214108111463, 0.25, 1.0 / 3.0, 0.5,
+          5.0 / 7.0, 0.6, 2.0 / 3.0, 0.75)
 
 
 def init() -> None:
@@ -200,6 +200,7 @@ def spec_shape(spec: dict, dim: int, q) -> np.ndarray:
     """The spec's f(q): the expr on [0, 1], 0 outside the support."""
     q_np = np.atleast_1d(np.asarray(q, dtype=float))
     ns = {"q": q_np, "pos": lambda x: np.maximum(x, 0.0),
+          "step": lambda x: np.where(x >= 0.0, 1.0, 0.0),
           "pi": np.pi, "exp": np.exp, "sqrt": np.sqrt}
     f = np.array(eval(_expr_for_dim(spec, dim), {"__builtins__": {}}, ns), dtype=float)
     return np.where(q_np <= 1.0, f, 0.0)

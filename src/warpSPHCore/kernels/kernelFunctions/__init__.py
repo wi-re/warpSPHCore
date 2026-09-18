@@ -19,6 +19,9 @@ __all__.extend(["cubicSpline" + suffix for suffix in suffixes])
 from .gaussian import *
 __all__.extend(["Gaussian" + suffix for suffix in suffixes])
 
+from .hoct4 import *
+__all__.extend(["HOCT4" + suffix for suffix in suffixes])
+
 from .poly6 import *
 __all__.extend(["poly6" + suffix for suffix in suffixes])
 
