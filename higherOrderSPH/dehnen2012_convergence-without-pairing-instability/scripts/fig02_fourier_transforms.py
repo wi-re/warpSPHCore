@@ -5,6 +5,9 @@ Replicates Fig. 2: "Fourier transforms W(k)b for the Gaussian, the HOCT4
 and the kernels of Table 1 scaled to the same common scale h = 2sigma.
 Negative values are plotted with broken curves."
 
+As in the paper, |W̄| is plotted on a log axis (1e-6 to 1) over
+|k|h ∈ [0, 3π]; broken (dashed) segments mark where W̄ < 0.
+
 With kappa-hat = |k| h (h = 2sigma = 1), the 3D FT (eq. 14) depends only
 on kappa = H|k| = kappa-hat * (H/h):
 
@@ -55,8 +58,10 @@ from fig01_kernel_shapes import COLORS, LABELS, ORDER
 _HERE = Path(__file__).resolve().parent
 FIGDIR = _HERE.parent / "figures"
 
-KMAX_PLOT = 12.0   # covers the first zero of every B-spline
-NK_PLOT = 12001    # d(kappa-hat) = 1e-3
+KMAX_PLOT = 3.0 * math.pi  # the paper's axis range; the quartic's first
+                           # zero (11.13) lies off-panel
+NK_PLOT = 12001    # d(kappa-hat) ~ 8.7e-4
+YFLOOR = 1e-6      # the paper's log-axis floor
 N_SIMPSON = 20001  # Simpson points in r (error ~1e-14 at these k)
 BSPLINES = ["cubic_b4", "quartic_b5", "quintic_b6"]
 NONNEG = ["wendland_C2", "wendland_C4", "wendland_C6", "hoct4", "gaussian"]
@@ -168,22 +173,25 @@ def checks(ks: dict, num: dict, x: np.ndarray) -> dict:
     return info
 
 
-def plot_signed(ax, x: np.ndarray, y: np.ndarray, color: str, lw: float = 1.6):
-    """Solid where y >= 0, broken where y < 0 (the paper's convention)."""
-    xs, ys = list(x), list(y)
+def plot_signed(ax, x: np.ndarray, y: np.ndarray, color: str,
+                floor: float, lw: float = 1.6):
+    """Plot |y| (for a log axis): solid where y >= 0, broken where y < 0
+    (the paper's convention for negative values), clipped at `floor`."""
+    ys = np.abs(y)
     s = np.sign(y)
+    xs, ysv, ss = list(x), list(ys), list(s)
     for i in np.where((s[1:] != s[:-1]) & (s[1:] != 0) & (s[:-1] != 0))[0]:
         xc = x[i] - y[i] * (x[i + 1] - x[i]) / (y[i + 1] - y[i])
         xs.insert(int(i) + 1, float(xc))
-        ys.insert(int(i) + 1, 0.0)
-    xs, ys = np.asarray(xs), np.asarray(ys)
-    s2 = np.sign(ys)
+        ysv.insert(int(i) + 1, floor)
+        ss.insert(int(i) + 1, s[i + 1])  # crossing joins the new sign
+    xs, ysv, ss = np.asarray(xs), np.asarray(ysv), np.asarray(ss)
     start = 0
     for i in range(1, len(xs)):
-        if s2[i] != s2[i - 1]:
-            _seg(ax, xs[start:i + 1], ys[start:i + 1], color, lw, s2[start])
+        if ss[i] != ss[i - 1]:
+            _seg(ax, xs[start:i + 1], ysv[start:i + 1], color, lw, ss[start])
             start = i
-    _seg(ax, xs[start:], ys[start:], color, lw, s2[start])
+    _seg(ax, xs[start:], ysv[start:], color, lw, ss[start])
 
 
 def _seg(ax, x, y, color, lw, sign):
@@ -204,19 +212,21 @@ def plot(ks: dict, num: dict, info: dict) -> None:
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
     x = np.linspace(0.0, KMAX_PLOT, NK_PLOT)
     for n in ORDER:
-        plot_signed(ax, x, num[n], COLORS[n])
+        plot_signed(ax, x, num[n], COLORS[n], YFLOOR)
 
-    # first zeros of the B-splines (set the pairing criterion)
-    ytop = 1.09
+    # first zeros of the B-splines (set the pairing criterion); the
+    # quartic's first zero (11.13) lies beyond the paper's 3-pi range
     for n in BSPLINES:
         z1 = info[n]["zeros30"][0]
+        if z1 > KMAX_PLOT:
+            continue
         ax.axvline(z1, color=COLORS[n], ls=":", lw=0.9, alpha=0.6)
-        ax.text(z1, ytop, f"z$_1$ = {z1:.3f}", ha="center", fontsize=8,
+        ax.text(z1, 0.35, f"z$_1$ = {z1:.3f}", ha="center", fontsize=8,
                 color=COLORS[n])
 
-    ax.axhline(0.0, color="0.8", lw=0.7)
+    ax.set_yscale("log")
     ax.set_xlim(0.0, KMAX_PLOT)
-    ax.set_ylim(-0.2, ytop)
+    ax.set_ylim(YFLOOR, 1.0)
     ax.set_xlabel(r"$|k|\,h$   ($h = 2\sigma$)")
     ax.set_ylabel(r"$\bar W(k)$")
     ax.set_title("D&A (2012) Fig. 2 — Fourier transforms at common "

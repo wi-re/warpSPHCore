@@ -72,7 +72,7 @@ COLORS = {
     "gaussian": "#7f7f7f",
 }
 
-CLIP = 1e-13  # log-panel floor
+CLIP = 1e-6  # log-panel floor (the paper's Fig. 1 bottom axis)
 
 
 def W(d: dict, r: np.ndarray) -> np.ndarray:
@@ -144,40 +144,40 @@ def plot(ks: dict) -> None:
     for n in ORDER:
         ax1.plot(r_top, Ws[n], color=COLORS[n], lw=1.6, label=LABELS[n])
 
-    # support arrows, staggered below the axis (caption: "arrows
-    # indicating |x| = H"); the Gaussian has no arrow (truncated, not
-    # compact) -- its truncation is marked in the log panel.
+    # support arrows: vertical, pointing down at r = H (the kernel's
+    # zero), caption: "arrows indicating |x| = H"; the Gaussian has no
+    # arrow (truncated, not compact) -- its truncation is marked in the
+    # log panel.
     compact = [n for n in ORDER if n != "gaussian"]
-    for i, n in enumerate(compact):
+    for n in compact:
         H = ks[n]["scale3"]
-        y = -(0.025 + 0.016 * i) * Wmax
         ax1.annotate(
-            "", xy=(H, y), xytext=(0.0, y),
-            arrowprops=dict(arrowstyle="<->", color=COLORS[n],
+            "", xy=(H, 0.0), xytext=(H, 1.06 * Wmax),
+            arrowprops=dict(arrowstyle="-|>", color=COLORS[n],
                             lw=1.0, alpha=0.85),
         )
 
-    ax1.set_ylim(-0.14 * Wmax, 1.06 * Wmax)
+    ax1.set_ylim(0.0, 1.06 * Wmax)
     ax1.set_ylabel("W(r)")
     ax1.set_title("D&A (2012) Fig. 1 — kernels at common h = 2σ (ν = 3)")
     ax1.legend(loc="upper right")
 
     # --- bottom: logarithmic ----------------------------------------------
     # r range ends just past where the (truncated) Gaussian crosses the
-    # clip floor (r ~ 4); its 16-sigma truncation (r = H = 8,
-    # W ~ 1.7e-56) is far below any visible floor and is noted in text.
+    # 1e-6 floor (r ~ 2.6); its 16-sigma truncation (r = H = 8,
+    # W ~ 1.7e-56) is far below the visible floor and is noted in text.
     r_bot = np.linspace(0.0, 4.2, 2101)
     for n in ORDER:
         w = W(ks[n], r_bot)
         m = w > CLIP
         ax2.plot(r_bot[m], np.log10(np.maximum(w[m], CLIP)),
                  color=COLORS[n], lw=1.6)
-    ax2.text(4.15, math.log10(CLIP) - 0.25,
+    ax2.text(4.15, math.log10(CLIP) + 0.3,
              "Gaussian truncated at 16σ (r = 8, off panel)",
              ha="right", fontsize=8, color=COLORS["gaussian"])
 
     ax2.set_xlim(0.0, 4.2)
-    ax2.set_ylim(math.log10(CLIP) - 0.4, math.log10(Wmax) + 0.2)
+    ax2.set_ylim(math.log10(CLIP), math.log10(Wmax) + 0.2)
     ax2.set_xlabel("|x| / h   (h = 2σ)")
     ax2.set_ylabel("log₁₀ W(r)")
 
