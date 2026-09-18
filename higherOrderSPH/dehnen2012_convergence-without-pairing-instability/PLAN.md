@@ -310,29 +310,60 @@ rule and the new `step` function in the spec expr namespace.
 ## Phase 4 — density estimation & N_H bookkeeping
 (Fig. 3, eqs. 7, 18, 19, Table 2)
 
-- [ ] `particle_configs.py`: densest-sphere packing (FCC, integer cell
-      counts), glass proxy (seeded Poisson random), paired configuration
-      (each FCC point → two points, mean density unchanged).
-- [ ] `fig03_density_estimation.py`:
-      - `ρ̂/ρ` vs N_H (sweep H at fixed particle set) for every shipped
-        kernel (incl. new Gaussian + HOCT4), in FCC and glass;
-        expected: cubic under-estimates, Wendland over-estimates at low
-        N_H, HOCT4 worst;
-      - paired-configuration curve (the paper's "crosses"): verify the
-        `ρ̂(N_H/f) < ρ̂(N_H)` pairing criterion of §5.1.1;
-      - fit ε(N_H) = ε₁₀₀(N_H/100)^{−α} (eq. 19) to the Wendland C²/C⁴/C⁶
-        3D over-estimation; compare with the paper's
-        (0.0294, 0.977), (0.01342, 1.579), (0.0116, 2.236);
-      - corrected estimate (eq. 18) with the paper's ε: within a few % of
-        1 over the N_H range.
-- [ ] N_H bookkeeping cross-check (Table 2) with both the paper's
-      packingRatios and the code's (the deliberate × 1.0175 / × 1.1425
-      deviations noted in the findings log).
+- [x] `particle_configs.py`: densest-sphere packing (FCC via the new
+      `warpSPHCore.sampling.sampleDensestLattice` — 4000 particles, p = 10
+      FCC cells, box 1³, exact), glass proxy (16³ lattice + 0.1 dx
+      Gaussian jitter relaxed with the warpSPH delta-shift components,
+      Wendland C² at N_H = 50, 1000 iters, cached to a .npz; NOT the
+      seeded Poisson draft and NOT `sampleOptimal` as shipped — see
+      findings log), paired configuration (the §5.1.1 fully-paired
+      distribution: each FCC point → two coincident particles, spacing ×
+      2^{1/3}, mean density unchanged).
+- [x] `fig03_density_estimation.py` — **DONE 2026-09-18** (30-point
+      log-N_H grid 20–500, all ten kernels, FCC + glass + paired):
+      - `ρ̂/ρ` vs N_H (sweep H at fixed particle set), the shipped
+        kernels evaluated host-side via `common.py`; bias ordering
+        matches the paper: cubic under-estimates in the paper's
+        accessible range (N_H ≲ 55; it crosses 1 at ~75 — see findings
+        log), Wendland/HOCT4/Gaussian over-estimate, HOCT4 worst at low
+        N_H (1.54× at N_H = 20), the 16σ-Gaussian 54× at N_H = 20 (off
+        the plot axis for all N_H — the paper does not show it);
+      - paired-configuration curve (the paper's "crosses"): the §5.1.1
+        criterion verified as the paper's exact wording — the B-spline
+        ρ̂(N_H) curves all have an interior minimum below 1 and rise
+        after it (cubic 0.993428 @ 43.5, quartic 0.998935 @ 38.9,
+        quintic 0.999824 @ 147.5, b7 0.999960 @ 118.1, b8 0.999994 @
+        320.7), while the Wendland/HOCT4/Gaussian curves are monotone
+        decreasing and stay above 1 (min at N_H = 500:
+        1.000190/1.000036/1.000018/1.006472/2.212536); plus the derived
+        identity paired(H) ≡ FCC(H/2^{1/3}) checked to 4.3e-14 for all
+        ten kernels;
+      - eq. 19 fit to the FCC over-estimation over 40 ≤ N_H ≤ 400:
+        C² (0.02952, 0.995) vs paper (0.0294, 0.977), C⁴ (0.01360,
+        1.635) vs (0.01342, 1.579), C⁶ (0.01131, 2.216) vs (0.0116,
+        2.236) — every constant within ×1.04 of the paper;
+      - corrected estimate (eq. 18) with the paper's ε within
+        0.11–2.44 % of 1 over 40 ≤ N_H ≤ 400 (FCC and glass, all three
+        Wendland kernels).
+- [x] N_H bookkeeping cross-check (Table 2) with both the paper's
+      packingRatios and the code's — printed and saved to
+      `results/table2_nH_bookkeeping.txt`: quartic/W2/W4/W6/HOCT4
+      reproduce the paper's N_H exactly (×1.0000 ± 0.0002); cubic
+      ×1.0175 → 57.9 (the Price 2012 row), quintic ×1.1425 → 268.4
+      (CRKSPH), B7/B8 ×1.1425 → 333.1/402.3 (no paper rows); the
+      Gaussian's two paper rows (N_h = 10/20) vs the code's 5126 at the
+      N_h = 10 packing. YAML self-consistency (paper's h(ρ/m)^{1/3} →
+      N_H): 3.9e-4 (3-decimal rounding).
 
 Acceptance: Fig. 3 reproduced (kernel ordering of biases matches; ε fits
 within a factor ≲ 1.5 of the paper's constants — the paper's glass
 configurations are not fully specified; the proxy is documented in the
-figure caption).
+figure caption). **MET 2026-09-18** — bias ordering matches; ε fits
+within ×1.04 (bar: ×1.5); eq. 18 correction within 2.4 % (bar: a few
+%); the §5.1.1 criterion holds exactly as the paper states it; Table 2
+reproduced incl. the deliberate packing deviations (findings log).
+Limitation as before: no image input — the PNG/PDF are for the user's
+visual check against the paper's Fig. 3.
 
 ## Phase 5 — linear stability analysis (Figs 4–6, Appendix A)
 
@@ -475,7 +506,11 @@ Acceptance:
 | 2026-09-18 | **`bpow_warp` derivative rule bit HOCT4's shipped derivatives on first audit**: `d/dq bpow_warp(q−t, p) = p · bpow_warp(q−t, p−1)` — *no* leading minus, because `bpow_warp(x, p) = (min(x, 0))_+^p = (t−q)_+^p` carries the sign in its negative argument. Writing the intuitive `−p·bpow_warp(·, p−1)` in `HOCT4_dkdq`/`_d3kdq3` gave AD-check errors of 4.3 / 133.8 (the 2× the true values, piecewise). Also: HOCT4's spec expr needed a new `step(x) = 1(x ≥ 0)` in the audit's expr namespace — the hard switch at α cannot be expressed with `pos` (a ramp); a first draft that blended the pieces with `pos(α−q)` was wrong by 0.113 at q = 0 while the shipped shape matched the direct piecewise definition to 2.2e-16. | resolved 2026-09-18 — audit namespace, `kernel_specs.yaml` header, `kernelFunctions/hoct4.py` comment |
 | 2026-09-18 | **The non-D&A library kernels ship `kernelScale = 1.0`** (h_code = H), NOT the D&A H/h convention used by the Table-1 set. Shape-derived H/h (normalised second moment, C₃-independent): poly6 √11/2 = 1.6583, spiky 1.8708, viscosity 2.1602, adhesion 1.0741, cohesion 1.3592 (figA). Whether to re-scale the five to the D&A convention (or spec them with their own) is a Phase-8 `src/` decision, alongside the `support.py:86` float32-constant fix. Note the same audit pipeline does not yet cover these five kernels at all (no `kernel_specs.yaml` entries). | open — Phase 8 |
 | 2026-09-18 | **D&A Fig. 2's x-axis is \|k\|σ (σ = h/2), not \|k\|h** (user-verified from the PDF: the cubic spline's first zero sits just over π, i.e. κ̂/2 = 3.4414). Replicated figures use \|k\|σ ∈ [0, 3π] with the data computed on κ̂ ∈ [0, 6π]; log \|w̄\| with a 1e-6 floor, dashed where w̄ < 0. Recorded in `paper_notes.md`. | resolved 2026-09-18 — fig02 convention |
-| 2026-09-17 | Code `packingRatio` deviations from Table 2: CubicSpline × 1.0175 (Price 2012 alignment), QuinticSpline, B7 & B8 × 1.1425 (CRKSPH alignment). Deliberate per in-code comments; replicate both variants. | open — Phase 4 |
+| 2026-09-17 | Code `packingRatio` deviations from Table 2: CubicSpline × 1.0175 (Price 2012 alignment), QuinticSpline, B7 & B8 × 1.1425 (CRKSPH alignment). Deliberate per in-code comments; replicate both variants. | resolved 2026-09-18 — Phase 4 Table 2 cross-check (quartic/W2/W4/W6/HOCT4 match the paper to ×1.0000; cubic → 57.9, quintic → 268.4, b7/b8 → 333.1/402.3; `results/table2_nH_bookkeeping.txt`) |
+| 2026-09-18 | **`warpSPH`'s `sampleOptimal` is broken as shipped**: (a) it passes a `ParticleSet` to `warpOperation`/`computeDeltaShiftWarp`, which require a `ParticleState` (with `kinds`) — it crashes with `AttributeError: 'ParticleSet' object has no attribute 'kinds'`; (b) it applies the raw delta-shift term (O(1–10), pointing TOWARD neighbours) without the `−CFL·Ma·2·h²` scaling `modules/shifting/delta.py` uses — the relaxation diverges (clumping, density std 24 %); (c) it overwrites its lattice start with uniform random points. **Working glass recipe** (the Fig. 3 glass, cached at `.tmp/glass_N4096_L1.0_seed42.npz`): 16³ regular lattice + 0.1·dx Gaussian jitter (seed 42) → delta-shift iterations (Wendland C² at N_H = 50, `scale = −0.3·0.1·2·h²`, CFL 0.3, Ma 0.1 = delta.py's no-velocity fallback), converged at 1000 iters (max\|disp\| 1.8e-5); result: density std 0.30 %, nn/dx 0.86 (glassy, near the paper's q_min ~ 0.7), no clumping. | resolved — Phase 4 glass built; `sampleOptimal` fix (delta.py-style scaling + `ParticleState` + keep the lattice start) is a Phase-8 `src/` candidate |
+| 2026-09-18 | **§5.1.1 pairing identity**: for the fully-paired configuration (each FCC point → two coincident particles, spacing × 2^{1/3}, same mass, ρ unchanged) the density estimate at support H equals the FCC estimate at H/2^{1/3} **exactly**, for any spherically symmetric kernel with finite W(0) — the partner's self-term 2mW(0,H) compensates the kernel rescaling because (2^{1/3})³ = 2. Verified to 4.3e-14 for all ten kernels: the paper's "crosses" are exactly the solid curves shifted by a factor 2 in N_H, and the criterion "pairing occurs if ρ̂(N_H/f) < ρ̂(N_H) for some 1 < f ≤ 2" reduces to "the curve has a minimum" (B-splines: yes, interior, below 1) vs "never" (Wendland/HOCT4/Gaussian: monotone decreasing, above 1) — all ten verified on the grid. | resolved 2026-09-18 — Phase 4 |
+| 2026-09-18 | **Density-estimation normalisation gotchas (fig03 first-draft bugs)**: the shipped kernels are unit-support — W(r;H) = C_d·f(r/H)/H³ (f = `common.shape`, supported on [0,1]) — so a naive Σ m·f(r/H)/H³ drops the C_d factor (16/π for the cubic spline). Inverting N_H = (4π/3)H³ρ/m as H = (V₃·N_H·m)^{1/3} instead of H = (N_H·m/V₃)^{1/3} overstates H by V₃^{2/3} ≈ 2.61; the first fig03 draft had both bugs (cubic FCC = 0.185 at N_H = 500 — that is what tripped the first pairing check). Also: the paper's eq.-19 ε constants are tied to the **physical central value** W(0) = C_d·f(0)/H³ = `W0(n, 3, H)` at the support radius (parameterisation-invariant); evaluating `W0` at h = H/kernelScale instead changes the result by kernelScale³ (×7.26 for C²) and breaks the fit (probe: implied ε(100) with the W0(H) convention 0.02834/0.01335/0.01220 vs the paper's 0.0294/0.01342/0.0116). | resolved 2026-09-18 — fig03 |
+| 2026-09-18 | **Fig. 3 curve shapes (exact FCC lattice sums)**: the paper's "the cubic spline under-estimates" is right only over the range it plots for the cubic (N_H ≲ 55 — "only values N_H ≲ 55 are accessible for this kernel owing to the pairing instability"): the exact FCC curve is 0.9936–0.9966 on [31, 55], crosses 1 at ~75, peaks at 1.0040 @ 100, then oscillates about 1 with decaying amplitude (1.0002 @ 500). All five B-splines have an interior minimum below 1 and rise after it (cubic 0.993428 @ 43.5, quartic 0.998935 @ 38.9, quintic 0.999824 @ 147.5, b7 0.999960 @ 118.1, b8 0.999994 @ 320.7 — the b8 rise is 1.2e-6, resolvable in float64); the Wendland C²/C⁴/C⁶, HOCT4 and Gaussian curves are strictly monotone decreasing over [20, 500] and stay above 1 (minima at the right edge 1.000190/1.000036/1.000018/1.006472/2.212536). The 16σ-truncated Gaussian over-estimates 54× at N_H = 20 (2.2× at 500 — the self-term dominates while H/d_nn < 2), which is why the paper omits it from Fig. 3 (ours is off the plot axis for all N_H). | resolved 2026-09-18 — informational (Phase-4 figure, Phase-5 context) |
 | 2026-09-17 | Code `h` (kernel functions) = paper's support radius H, not paper's h = 2σ. Notation map in `paper_notes.md`. | informational — all phases |
 | 2026-09-17 | `warpSPH` `CullenDehnen2010.py` carries an unresolved sign note ("the signs here should have been wrong, double check!") plus dead alternate formulations. | open — Phase 6 |
 | 2026-09-17 | Existing `greshoVortex` case is 2D CRKSPH; D&A's test is 3D conservative SPH — build a 3D variant, keep the 2D case as cross-check. | open — Phase 7 |
@@ -490,8 +525,9 @@ Acceptance:
 - **D&A Sod IC** is a working assignment (R&H 2012 problem); if the first
   Phase-7 run's exact-solution overlay disagrees, re-derive the IC from
   Fig. 11's digitised discontinuity positions.
-- **Fig. 3 glass configurations** are not fully specified; Poisson proxy
-  documented as a deviation.
+- **Fig. 3 glass configurations** are not fully specified; the
+  delta-shift-relaxed glass (jittered lattice, warpSPH components) is
+  the proxy, documented in the figure caption (findings log).
 - **Timing figures (12–13)** are machine-dependent; relative scaling only.
 - **GPU availability**: 96 GB VRAM only when the local LLM is stopped —
   large Phase-7 runs must be scheduled accordingly.
