@@ -61,7 +61,8 @@ REFERENCE_YAML = _HERE.parent / "data" / "da2012_reference.yaml"
 # 2026-09-18; the replication builds Figs 1-2 entirely from the shipped
 # audited warp functions).
 #
-# The b7/b8 and "other kernels" (fig03) entries were added 2026-09-18
+# The b7/b8 and "other kernels" (figA_other_kernels) entries were
+# added 2026-09-18
 # when Figs 1-2 were extended to the full B-spline family and the
 # remaining library kernels were audited as general density candidates.
 KERNEL_BY_NAME = {

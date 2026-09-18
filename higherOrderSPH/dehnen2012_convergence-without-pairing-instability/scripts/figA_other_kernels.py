@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Second kernel figure — the library kernels OUTSIDE the D&A (2012) set.
+"""Supplementary figure A — the library kernels OUTSIDE the D&A (2012) set.
 
 Figs 1-2 replicate the paper's kernel set (Table 1 + HOCT4 + Gaussian,
 plus the b7/b8 family extension). This script runs the REMAINING kernels
@@ -36,6 +36,10 @@ The viscosity kernel is singular at the origin (f ~ 0.5/q); the FT and
 moment integrands are finite there (f(q) q -> 0.5, f(q) q^m -> 0) and
 the q = 0 endpoint is taken as that limit.
 
+The top W(r) panel caps the axis at W = 1 (WCAP): the viscosity kernel
+is singular (W ~ 1/r) and would otherwise dominate the axis (its value
+at the first grid point is ~3.5e2).
+
 Checks (assert, exit non-zero on failure):
   * moment integrals converged (N vs N/4, relative 1e-7)
   * poly6, spiky, viscosity: |normalisation - 1| < 1e-8 (their shipped
@@ -44,7 +48,7 @@ Expected FAILURES are reported, not asserted: the adhesion kernel is
 not normalised, cohesion is negative at the centre, the viscosity
 kernel is singular at the centre, spiky is not C^2 at the centre.
 
-Output: figures/fig03_other_kernels.{png,pdf} (gitignored).
+Output: figures/figA_other_kernels.{png,pdf} (gitignored).
 """
 
 from __future__ import annotations
@@ -92,6 +96,7 @@ YFLOOR = 1e-6             # log-axis floor (same as fig02)
 N_FT = 20001              # Simpson points in q for the FT
 N_MOM = 200001            # Simpson points in q for the moments
 R0 = 0.02                 # top-panel start for the singular viscosity curve
+WCAP = 1.0                # top-panel W(r) cap (viscosity is singular, W ~ 1/r)
 
 
 def _simpson_weights(n: int) -> np.ndarray:
@@ -262,11 +267,19 @@ def plot(ks: dict, info: dict) -> None:
     })
 
     # --- top: shapes ---------------------------------------------------------
+    # The viscosity kernel is singular (W ~ 1/r): plot it from R0 and
+    # cap the axis at WCAP so the singularity does not dominate the
+    # panel (every regular kernel peaks at <= 0.73, spiky).
     Hmax = max(ks[n]["scale3"] for n in ORDER)
     r_top = np.linspace(0.0, Hmax * 1.12, 3301)
-    Ws = {n: W(ks[n], r_top) for n in ORDER}
-    finite = [w[np.isfinite(w)] for w in Ws.values()]
-    Wmax = max(w.max() for w in finite)
+    curves = {}
+    for n in ORDER:
+        r, w = r_top, W(ks[n], r_top)
+        if n == "viscosity":  # singular at r = 0: start off the origin
+            m = r >= R0
+            curves[n] = (r[m], w[m])
+        else:
+            curves[n] = (r, w)
 
     fig, (ax1, ax2) = plt.subplots(
         2, 1, figsize=(8.5, 9),
@@ -274,27 +287,24 @@ def plot(ks: dict, info: dict) -> None:
     )
 
     for n in ORDER:
-        r, w = r_top, Ws[n]
-        if n == "viscosity":  # singular at r = 0: start off the origin
-            m = r >= R0
-            ax1.plot(r[m], w[m], color=COLORS[n], lw=1.6, label=LABELS[n])
-        else:
-            ax1.plot(r, w, color=COLORS[n], lw=1.6, label=LABELS[n])
+        r, w = curves[n]
+        ax1.plot(r, w, color=COLORS[n], lw=1.6, label=LABELS[n])
 
     # support arrows: vertical, pointing down at r = H (same convention
     # as fig01)
     for n in ORDER:
         H = ks[n]["scale3"]
         ax1.annotate(
-            "", xy=(H, 0.0), xytext=(H, 1.06 * Wmax),
+            "", xy=(H, 0.0), xytext=(H, 0.96 * WCAP),
             arrowprops=dict(arrowstyle="-|>", color=COLORS[n],
                             lw=1.0, alpha=0.85),
         )
-    ax1.text(0.02 * Hmax, 0.92 * Wmax, "viscosity singular at r = 0",
+    ax1.text(0.02 * Hmax, 0.92 * WCAP,
+             "viscosity singular at r = 0 (leaves the panel at W = 1)",
              fontsize=8, color=COLORS["viscosity"])
 
     ax1.set_xlim(0.0, Hmax * 1.12)
-    ax1.set_ylim(-0.08 * Wmax, 1.06 * Wmax)
+    ax1.set_ylim(-0.12 * WCAP, WCAP)
     ax1.set_ylabel("W(r)")
     ax1.set_title("Kernels outside the D&A (2012) set (ν = 3) — "
                   "shapes + FT at common h = 2σ")
@@ -318,10 +328,10 @@ def plot(ks: dict, info: dict) -> None:
                loc="center right")
 
     FIGDIR.mkdir(exist_ok=True)
-    fig.savefig(FIGDIR / "fig03_other_kernels.png", dpi=150)
-    fig.savefig(FIGDIR / "fig03_other_kernels.pdf")
+    fig.savefig(FIGDIR / "figA_other_kernels.png", dpi=150)
+    fig.savefig(FIGDIR / "figA_other_kernels.pdf")
     plt.close(fig)
-    print(f"saved {FIGDIR / 'fig03_other_kernels.png'} (+ .pdf)")
+    print(f"saved {FIGDIR / 'figA_other_kernels.png'} (+ .pdf)")
 
 
 def main() -> None:

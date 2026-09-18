@@ -237,8 +237,10 @@ now has zero KNOWN rows.
       6.6648 |k|σ is now in-panel (marker); b8's sub-1e-6 FT lobe is
       documented (findings log) and asserted against the audit's 1e-6
       floor.
-- [x] `fig03_other_kernels.py` — **NEW 2026-09-18 (user request)**: the
-      second kernel figure. Runs the library kernels OUTSIDE the D&A set
+- [x] `figA_other_kernels.py` (renamed from `fig03_other_kernels.py`
+      2026-09-18 — `fig03` is kept for the paper's Fig. 3 density
+      estimation) — **NEW 2026-09-18 (user request)**: the supplementary
+      kernel figure (fig A). Runs the library kernels OUTSIDE the D&A set
       (poly6, spiky, adhesion, cohesion, viscosity — shipped warp shapes,
       no re-transcription) through the same battery: normalisation,
       non-negativity, centre/support differentiability, 3D FT (eq. 14) at
@@ -253,7 +255,7 @@ now has zero KNOWN rows.
       surface-tension kernel); viscosity — no (singular at the centre —
       Laplacian kernel). Only poly6 is usable as a general density
       kernel; none of the five is pairing-stable AND C² at the centre.
-      figures/fig03_other_kernels.{png,pdf} (gitignored).
+      figures/figA_other_kernels.{png,pdf} (gitignored).
 
 Acceptance: all Table 1 rows verified (or discrepancy logged); Figs 1–2
 match the paper (Fourier curves: max |Δw̄| < 1e-3 on a common k-grid,
@@ -471,7 +473,7 @@ Acceptance:
 | 2026-09-18 | **b₇ FT zero structure corrected** (the B7-identity row's "first zero κ̂ ≈ 21.96" and the Phase-1 audit estimates 21.97/22.02/31.45 were stale/wrong): the true sign-change zeros are **13.3296 / 22.9168 / 32.3468 in κ̂** (first zero 6.6648 |k|σ), first-lobe min −3.1655e-6 at κ̂ ≈ 14.43, still negative at κ̂ = 40 (second lobe min ~ −2.7e-9 near 34) — "barely pairing-unstable" holds, but the zeros and lobe location move. Established by an independent high-res numerical FT (n = 200001; closed-vs-numeric 6e-15) and a window-excursion zero detector (a grid sign-flip counts only if a ±0.05-κ̂ window contains a true excursion beyond 1e-13, which also rejects b₅'s tangential near-zeros). | resolved 2026-09-18 — `kernel_specs.yaml`, fig02 |
 | 2026-09-18 | **b₈'s 3D FT has a tiny negative lobe below the audit's noise floor**: min −8.469e-7 at κ̂ ≈ 13.11, exit zero 14.303, entry zero below the ~1e-13 resolvable floor. The audit's `ft_expected: nonnegative` stays correct because its `_FT_NOISE_FLOOR = 1e-6` swallows the lobe (a deliberate practical floor, not a claim of mathematical non-negativity); fig02 asserts b8 against that same −1e-6 floor and records the lobe in `kernel_specs.yaml`. | resolved 2026-09-18 — informational for Phase 5 |
 | 2026-09-18 | **`bpow_warp` derivative rule bit HOCT4's shipped derivatives on first audit**: `d/dq bpow_warp(q−t, p) = p · bpow_warp(q−t, p−1)` — *no* leading minus, because `bpow_warp(x, p) = (min(x, 0))_+^p = (t−q)_+^p` carries the sign in its negative argument. Writing the intuitive `−p·bpow_warp(·, p−1)` in `HOCT4_dkdq`/`_d3kdq3` gave AD-check errors of 4.3 / 133.8 (the 2× the true values, piecewise). Also: HOCT4's spec expr needed a new `step(x) = 1(x ≥ 0)` in the audit's expr namespace — the hard switch at α cannot be expressed with `pos` (a ramp); a first draft that blended the pieces with `pos(α−q)` was wrong by 0.113 at q = 0 while the shipped shape matched the direct piecewise definition to 2.2e-16. | resolved 2026-09-18 — audit namespace, `kernel_specs.yaml` header, `kernelFunctions/hoct4.py` comment |
-| 2026-09-18 | **The non-D&A library kernels ship `kernelScale = 1.0`** (h_code = H), NOT the D&A H/h convention used by the Table-1 set. Shape-derived H/h (normalised second moment, C₃-independent): poly6 √11/2 = 1.6583, spiky 1.8708, viscosity 2.1602, adhesion 1.0741, cohesion 1.3592 (fig03). Whether to re-scale the five to the D&A convention (or spec them with their own) is a Phase-8 `src/` decision, alongside the `support.py:86` float32-constant fix. Note the same audit pipeline does not yet cover these five kernels at all (no `kernel_specs.yaml` entries). | open — Phase 8 |
+| 2026-09-18 | **The non-D&A library kernels ship `kernelScale = 1.0`** (h_code = H), NOT the D&A H/h convention used by the Table-1 set. Shape-derived H/h (normalised second moment, C₃-independent): poly6 √11/2 = 1.6583, spiky 1.8708, viscosity 2.1602, adhesion 1.0741, cohesion 1.3592 (figA). Whether to re-scale the five to the D&A convention (or spec them with their own) is a Phase-8 `src/` decision, alongside the `support.py:86` float32-constant fix. Note the same audit pipeline does not yet cover these five kernels at all (no `kernel_specs.yaml` entries). | open — Phase 8 |
 | 2026-09-18 | **D&A Fig. 2's x-axis is \|k\|σ (σ = h/2), not \|k\|h** (user-verified from the PDF: the cubic spline's first zero sits just over π, i.e. κ̂/2 = 3.4414). Replicated figures use \|k\|σ ∈ [0, 3π] with the data computed on κ̂ ∈ [0, 6π]; log \|w̄\| with a 1e-6 floor, dashed where w̄ < 0. Recorded in `paper_notes.md`. | resolved 2026-09-18 — fig02 convention |
 | 2026-09-17 | Code `packingRatio` deviations from Table 2: CubicSpline × 1.0175 (Price 2012 alignment), QuinticSpline, B7 & B8 × 1.1425 (CRKSPH alignment). Deliberate per in-code comments; replicate both variants. | open — Phase 4 |
 | 2026-09-17 | Code `h` (kernel functions) = paper's support radius H, not paper's h = 2σ. Notation map in `paper_notes.md`. | informational — all phases |
