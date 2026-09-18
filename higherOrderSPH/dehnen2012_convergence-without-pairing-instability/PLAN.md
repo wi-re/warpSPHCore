@@ -319,8 +319,10 @@ rule and the new `step` function in the spec expr namespace.
       findings log), paired configuration (the §5.1.1 fully-paired
       distribution: each FCC point → two coincident particles, spacing ×
       2^{1/3}, mean density unchanged).
-- [x] `fig03_density_estimation.py` — **DONE 2026-09-18** (30-point
-      log-N_H grid 20–500, all ten kernels, FCC + glass + paired):
+- [x] `fig03_density_estimation.py` — **DONE 2026-09-18; regenerated
+      2026-09-18 at the paper's axis bounds (user request)** (34-point
+      log-N_H grid 20–800, all ten kernels, FCC + glass + paired; axes
+      as in the paper: x 20–800 log, y 0.99–1.01):
       - `ρ̂/ρ` vs N_H (sweep H at fixed particle set), the shipped
         kernels evaluated host-side via `common.py`; bias ordering
         matches the paper: cubic under-estimates in the paper's
@@ -329,21 +331,22 @@ rule and the new `step` function in the spec expr namespace.
         N_H (1.54× at N_H = 20), the 16σ-Gaussian 54× at N_H = 20 (off
         the plot axis for all N_H — the paper does not show it);
       - paired-configuration curve (the paper's "crosses"): the §5.1.1
-        criterion verified as the paper's exact wording — the B-spline
-        ρ̂(N_H) curves all have an interior minimum below 1 and rise
-        after it (cubic 0.993428 @ 43.5, quartic 0.998935 @ 38.9,
-        quintic 0.999824 @ 147.5, b7 0.999960 @ 118.1, b8 0.999994 @
-        320.7), while the Wendland/HOCT4/Gaussian curves are monotone
-        decreasing and stay above 1 (min at N_H = 500:
-        1.000190/1.000036/1.000018/1.006472/2.212536); plus the derived
-        identity paired(H) ≡ FCC(H/2^{1/3}) checked to 4.3e-14 for all
-        ten kernels;
+        criterion verified as the paper's exact wording, evaluated at
+        the figure's resolution (y window 0.02) — the B-spline ρ̂(N_H)
+        curves all have an interior minimum below 1 and recover after
+        it (cubic 0.993450 @ 43.7, quartic 0.998928 @ 39.1, quintic
+        0.999825 @ 149.6, b7 0.999961 @ 119.6, b8 0.999994 @ 327.1),
+        while the Wendland/HOCT4/Gaussian curves stay above 1 with no
+        resolvable rise (mins 1.000065/1.000011/1.000004/1.003356/
+        1.488521; the W2 tail wiggle is 4.8e-6 — see findings log);
+        plus the derived identity paired(H) ≡ FCC(H/2^{1/3}) checked
+        to 4.3e-14 for all ten kernels;
       - eq. 19 fit to the FCC over-estimation over 40 ≤ N_H ≤ 400:
-        C² (0.02952, 0.995) vs paper (0.0294, 0.977), C⁴ (0.01360,
-        1.635) vs (0.01342, 1.579), C⁶ (0.01131, 2.216) vs (0.0116,
-        2.236) — every constant within ×1.04 of the paper;
+        C² (0.02949, 0.999) vs paper (0.0294, 0.977), C⁴ (0.01361,
+        1.633) vs (0.01342, 1.579), C⁶ (0.01131, 2.218) vs (0.0116,
+        2.236) — every constant within ×1.03 of the paper;
       - corrected estimate (eq. 18) with the paper's ε within
-        0.11–2.44 % of 1 over 40 ≤ N_H ≤ 400 (FCC and glass, all three
+        0.10–2.40 % of 1 over 40 ≤ N_H ≤ 400 (FCC and glass, all three
         Wendland kernels).
 - [x] N_H bookkeeping cross-check (Table 2) with both the paper's
       packingRatios and the code's — printed and saved to
@@ -511,6 +514,7 @@ Acceptance:
 | 2026-09-18 | **§5.1.1 pairing identity**: for the fully-paired configuration (each FCC point → two coincident particles, spacing × 2^{1/3}, same mass, ρ unchanged) the density estimate at support H equals the FCC estimate at H/2^{1/3} **exactly**, for any spherically symmetric kernel with finite W(0) — the partner's self-term 2mW(0,H) compensates the kernel rescaling because (2^{1/3})³ = 2. Verified to 4.3e-14 for all ten kernels: the paper's "crosses" are exactly the solid curves shifted by a factor 2 in N_H, and the criterion "pairing occurs if ρ̂(N_H/f) < ρ̂(N_H) for some 1 < f ≤ 2" reduces to "the curve has a minimum" (B-splines: yes, interior, below 1) vs "never" (Wendland/HOCT4/Gaussian: monotone decreasing, above 1) — all ten verified on the grid. | resolved 2026-09-18 — Phase 4 |
 | 2026-09-18 | **Density-estimation normalisation gotchas (fig03 first-draft bugs)**: the shipped kernels are unit-support — W(r;H) = C_d·f(r/H)/H³ (f = `common.shape`, supported on [0,1]) — so a naive Σ m·f(r/H)/H³ drops the C_d factor (16/π for the cubic spline). Inverting N_H = (4π/3)H³ρ/m as H = (V₃·N_H·m)^{1/3} instead of H = (N_H·m/V₃)^{1/3} overstates H by V₃^{2/3} ≈ 2.61; the first fig03 draft had both bugs (cubic FCC = 0.185 at N_H = 500 — that is what tripped the first pairing check). Also: the paper's eq.-19 ε constants are tied to the **physical central value** W(0) = C_d·f(0)/H³ = `W0(n, 3, H)` at the support radius (parameterisation-invariant); evaluating `W0` at h = H/kernelScale instead changes the result by kernelScale³ (×7.26 for C²) and breaks the fit (probe: implied ε(100) with the W0(H) convention 0.02834/0.01335/0.01220 vs the paper's 0.0294/0.01342/0.0116). | resolved 2026-09-18 — fig03 |
 | 2026-09-18 | **Fig. 3 curve shapes (exact FCC lattice sums)**: the paper's "the cubic spline under-estimates" is right only over the range it plots for the cubic (N_H ≲ 55 — "only values N_H ≲ 55 are accessible for this kernel owing to the pairing instability"): the exact FCC curve is 0.9936–0.9966 on [31, 55], crosses 1 at ~75, peaks at 1.0040 @ 100, then oscillates about 1 with decaying amplitude (1.0002 @ 500). All five B-splines have an interior minimum below 1 and rise after it (cubic 0.993428 @ 43.5, quartic 0.998935 @ 38.9, quintic 0.999824 @ 147.5, b7 0.999960 @ 118.1, b8 0.999994 @ 320.7 — the b8 rise is 1.2e-6, resolvable in float64); the Wendland C²/C⁴/C⁶, HOCT4 and Gaussian curves are strictly monotone decreasing over [20, 500] and stay above 1 (minima at the right edge 1.000190/1.000036/1.000018/1.006472/2.212536). The 16σ-truncated Gaussian over-estimates 54× at N_H = 20 (2.2× at 500 — the self-term dominates while H/d_nn < 2), which is why the paper omits it from Fig. 3 (ours is off the plot axis for all N_H). | resolved 2026-09-18 — informational (Phase-4 figure, Phase-5 context) |
+| 2026-09-18 | **Fig. 3 at the paper's axis bounds (user request) exposes a W2 tail wiggle**: regenerating with the paper's x range (N_H 20–800; 34-point grid, ratio 1.118) and y range (0.99–1.01), the exact FCC Wendland C² sum is NOT strictly monotone out to 800 — a 4.8e-6 adjacent rise at N_H ≈ 715 → 800 (min 1.000065 @ 715.4). It is a genuine multi-shell correction of the lattice sum (float64 floor ~2e-14, so not roundoff) but ~4000× below the paper's y window: the paper's §5.1.1 statement ("this never occurs for the Wendland or HOCT4 kernels") reads its figure, so the check is now implemented at the figure's resolution: B-splines = interior dip below 1 + recovery after it (smallest: b8, dip 6.0e-6 / recovery 1.1e-5, both ≫ noise); stable kernels = stay ≥ 1 + no rise above rise_tol = 2e-5 (1e-3 of the window). Verdict for all ten kernels unchanged. | resolved 2026-09-18 — fig03, findings log |
 | 2026-09-17 | Code `h` (kernel functions) = paper's support radius H, not paper's h = 2σ. Notation map in `paper_notes.md`. | informational — all phases |
 | 2026-09-17 | `warpSPH` `CullenDehnen2010.py` carries an unresolved sign note ("the signs here should have been wrong, double check!") plus dead alternate formulations. | open — Phase 6 |
 | 2026-09-17 | Existing `greshoVortex` case is 2D CRKSPH; D&A's test is 3D conservative SPH — build a 3D variant, keep the 2D case as cross-check. | open — Phase 7 |

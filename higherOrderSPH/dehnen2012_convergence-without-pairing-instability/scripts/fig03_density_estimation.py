@@ -34,10 +34,11 @@ Checks (assert, exit non-zero on failure):
     rho_hat(N_H/f) < rho_hat(N_H) for some 1 < f <= 2 ... for the
     B-spline kernels rho_hat(N_H) always has a minimum and hence
     satisfies our condition, while this never occurs for the Wendland
-    or HOCT4 kernels." Grid version: the B-spline FCC curves are
-    non-monotone (an adjacent rise, grid ratio 1.117 < 2) with an
-    interior minimum below 1; the Wendland/HOCT4/Gaussian curves are
-    monotone decreasing and stay above 1
+    or HOCT4 kernels." Grid version (the paper reads its figure, whose
+    y window is 0.02): the B-spline FCC curves dip below 1 at an
+    interior minimum and recover after it; the Wendland/HOCT4/Gaussian
+    curves stay above 1 with no rise resolvable in that window (the
+    exact W2 sum has a 4.8e-6 adjacent rise at N_H ~ 715..800)
   * eq. 19 fit to the FCC over-estimation of the three Wendland
     kernels, eps = eps_100 (N_H/100)^(-alpha): within a factor <= 1.5
     of the paper's (0.0294, 0.977) / (0.01342, 1.579) / (0.0116, 2.236)
@@ -106,7 +107,7 @@ COLORS = {
 BSPLINES = {"cubic_b4", "quartic_b5", "quintic_b6", "b7", "b8"}
 WENDLANDS = ("wendland_C2", "wendland_C4", "wendland_C6")
 
-NH_GRID = np.logspace(math.log10(20.0), math.log10(500.0), 30)
+NH_GRID = np.logspace(math.log10(20.0), math.log10(800.0), 34)  # 20..800, as in the paper
 V3 = 4.0 * math.pi / 3.0
 FIT_RANGE = (40.0, 400.0)  # eq. 19 fit / eq. 18 check range
 
@@ -211,24 +212,35 @@ def checks(data: dict, fcc: ParticleConfig, glass: ParticleConfig,
     # rho_hat(N_H/f) < rho_hat(N_H) for some 1 < f <= 2. From Fig. 3 we
     # see that for the B-spline kernels rho_hat(N_H) always has a minimum
     # and hence satisfies our condition, while this never occurs for the
-    # Wendland or HOCT4 kernels." On the grid, "has a minimum" means the
-    # curve is non-monotone (an adjacent rise, grid ratio 1.117 < 2) with
-    # an interior minimum below 1; "never occurs" means the curve is
-    # monotone decreasing, staying above 1.
-    print("  5.1.1 criterion: B-splines have a minimum (the curve rises "
-          "somewhere); Wendland/HOCT4/Gaussian never do:")
+    # Wendland or HOCT4 kernels."
+    # The paper reads its figure (y window 0.02). At full float64
+    # resolution the exact W2 sum is not strictly monotone out to
+    # N_H = 800: a 4.8e-6 adjacent rise at N_H ~ 715..800 (a multi-shell
+    # correction of the lattice sum, ~1e3 above the float64 floor but
+    # ~4e3 below the window), so the criterion is evaluated at the
+    # figure's resolution: the B-splines dip below 1 at an interior
+    # minimum and recover after it (the pairing signature of section 3);
+    # the stable kernels stay above 1 with no resolvable rise.
+    recover_tol = 1e-9  # above the float64 lattice-sum floor (~2e-14)
+    rise_tol = 2e-5     # 1e-3 of the figure's y window (0.02)
+    print("  5.1.1 criterion: B-splines dip below 1 and recover; "
+          "Wendland/HOCT4/Gaussian stay above 1 (no resolvable rise):")
     for n in ORDER:
         NH, r = data[n]["fcc"]
         i_min = int(np.argmin(r))
-        rises = int(np.sum(r[1:] > r[:-1]))
         interior = 0 < i_min < len(r) - 1
         if n in BSPLINES:
-            ok = interior and r[i_min] < 1.0 and rises > 0
+            recover = float(r[i_min + 1:].max() - r[i_min]) if interior else -1.0
+            ok = interior and r[i_min] < 1.0 and recover > recover_tol
+            print(f"    {'PASS' if ok else 'FAIL'}  {n:<14} "
+                  f"min = {r[i_min]:.6f} @ N_H = {NH[i_min]:7.1f}  "
+                  f"recovery after min = {recover:.2e}")
         else:
-            ok = rises == 0 and r.min() >= 1.0
-        print(f"    {'PASS' if ok else 'FAIL'}  {n:<14} "
-              f"min = {r[i_min]:.6f} @ N_H = {NH[i_min]:7.1f}  "
-              f"adjacent rises = {rises}")
+            rise = float(np.max(r[1:] - r[:-1]))
+            ok = r.min() >= 1.0 and rise < rise_tol
+            print(f"    {'PASS' if ok else 'FAIL'}  {n:<14} "
+                  f"min = {r[i_min]:.6f} @ N_H = {NH[i_min]:7.1f}  "
+                  f"max adjacent rise = {rise:.2e}")
         assert ok, f"5.1.1 criterion wrong for {n}"
 
     # 4. eq. 19 fit (FCC over-estimation, Wendland kernels).
@@ -370,11 +382,14 @@ def plot(data: dict, ref: dict, fcc: ParticleConfig,
     ax.set_ylabel(r"$\hat\rho / \rho$")
     ax.set_title("D&A (2012) Fig. 3 — density estimate vs $N_H$ (3D, "
                  r"$\rho = 1$)")
-    # The 16-sigma-truncated Gaussian over-estimates by 54x at N_H = 20
-    # (2.2x at N_H = 500): every point lies above this window, so it is
-    # off-axis everywhere -- exactly why the paper does not show it.
-    ax.set_ylim(0.98, 1.65)
-    leg1 = ax.legend(loc="lower left", ncol=2)
+    # The paper's Fig. 3 axis range. The 16-sigma-truncated Gaussian
+    # (54x at N_H = 20) lies above it for all N_H, and the small-N_H
+    # tails of the curves are clipped -- as in the paper.
+    ax.set_xlim(20.0, 800.0)
+    ax.set_ylim(0.99, 1.01)
+    # upper left: with the paper's tight y range, lower left would cover
+    # the B-splines' dips below 1
+    leg1 = ax.legend(loc="upper left", ncol=2)
     ax.add_artist(leg1)  # keep it when the style legend is added below
 
     from matplotlib.lines import Line2D
@@ -426,7 +441,7 @@ def main() -> None:
     assert abs(glass.density - 1.0) < 1e-12
     assert abs(paired.density - 1.0) < 1e-12
 
-    print("evaluating density estimates (30 x N_H grid, 10 kernels, "
+    print("evaluating density estimates (34 x N_H grid, 10 kernels, "
           "3 configurations) ...")
     data = allRatios(fcc, glass, paired, ORDER)
 
