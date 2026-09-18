@@ -43,6 +43,7 @@ class KernelFunctions(Enum):
     QuinticSpline = 32
     B7 = 34 # classical 7th-order (degree 6) B-spline, D&A 2012 family b_7
     B8 = 33 # 8th-order (degree 7) B-spline, D&A 2012 family b_8 (formerly B7)
+    Gaussian = 36 # N(0, sigma^2), h = 2 sigma, 16-sigma truncation (D&A 2012 Fig. 2 / Table 2)
     Wendland2 = 0
     Wendland4 = 1
     Wendland6 = 2

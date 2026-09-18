@@ -16,6 +16,9 @@ __all__.extend(["cohesionKernel" + suffix for suffix in suffixes])
 from .cubicSpline import *
 __all__.extend(["cubicSpline" + suffix for suffix in suffixes])
 
+from .gaussian import *
+__all__.extend(["Gaussian" + suffix for suffix in suffixes])
+
 from .poly6 import *
 __all__.extend(["poly6" + suffix for suffix in suffixes])
 

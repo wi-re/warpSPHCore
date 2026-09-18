@@ -202,3 +202,34 @@ kernels:
       code_factor: 1.1425
       note: "no independent reference; inherited convention"
     known_issues: []
+
+  # ------------------------------------------------------------------
+  # Gaussian: the paper's "true Gaussian" (D&A Fig. 2 / Table 2),
+  # truncated at 16 sigma. W(r) = N(0, sigma^2), h_paper = 2 sigma,
+  # H = 16 sigma -> kernelScale = 8.0 in all dims; sigma2/H2 = 1/256
+  # (exact in the untruncated limit; the truncation error is e^-128
+  # ~ 3e-56). D&A footnote 10: any truncation invalidates strict FT
+  # non-negativity -- the induced dip is at the e^-128 level, below
+  # the audit's 1e-6 noise floor, so ft_expected: nonnegative holds
+  # in practice.
+  # ------------------------------------------------------------------
+  gaussian:
+    code_name: Gaussian
+    source: >
+      D&A 2012 Fig. 2 / Table 2 Gaussian: W(r) = N(0, sigma^2) with
+      h = 2 sigma, truncated at 16 sigma (H = 16 sigma, Figs 4-5
+      caption). f(q) = exp(-128 q^2); C_d = (128/pi)^(nu/2);
+      sigma2/H2 = 1/256. Table 2 row: N_h = 10, packing 1.337
+      (N_H = N_h * kernelScale^3 = 5120 at the truncation).
+    shape:
+      expr: "exp(-128.0*q*q)"
+    C: {1: "(128.0/pi)**0.5", 2: "128.0/pi", 3: "(128.0/pi)**1.5"}
+    sigma2: {1: "1/256", 2: "1/256", 3: "1/256"}
+    dims: [1, 2, 3]
+    ft_expected: nonnegative
+    packing:
+      value: 1.337
+      reference_N_H: 5120
+      code_factor: 1.0
+      note: "N_H = N_h * kernelScale^3 = 10 * 512 (16-sigma truncation)"
+    known_issues: []
