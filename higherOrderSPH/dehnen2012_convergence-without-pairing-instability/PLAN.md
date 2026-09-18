@@ -273,7 +273,7 @@ user visual check.
 Onboarded through the Phase-1 pipeline; separate commit(s), clearly marked
 as new kernels.
 
-- [ ] `gaussian.py`: the "true Gaussian", **truncated at 16σ** (the paper's
+- [x] `gaussian.py`: the "true Gaussian", **truncated at 16σ** (the paper's
       own convention for the stability work; note in the spec that any
       truncation invalidates FT non-negativity — paper footnote 10).
       Paper's Gaussian = N(0, σ²) with h = 2σ, so σ = H/16,
@@ -281,16 +281,29 @@ as new kernels.
       `C_d = (128/π)^{ν/2}` (corrected 2026-09-18 — see findings log);
       `packingRatio = 1.337` (Table 2, N_h = 10 row — consistent:
       (N_H/V_ν)^{1/3}/kernelScale with N_H = 5120).
-- [ ] `hoct4.py`: from the synced `read2010` definition (verified, see
+- [x] `hoct4.py`: from the synced `read2010` definition (verified, see
       `paper_notes.md` *Verified: HOCT4*): `C_d = 6.5150499306`,
       `kernelScale = 2.189684410` (3D, from the eq.-8-convention
       σ = 0.228343 H); `packingRatio = 2.158` (Table 2, N_H = 442).
-- [ ] Spec entries, audit run, CI green; Figs 1–2 regenerated including
+- [x] Spec entries, audit run, CI green; Figs 1–2 regenerated including
       the two new kernels (they are the paper's comparison curves).
 
 Acceptance: both kernels pass the full audit; the audit catches a
 deliberate perturbation of each (spot-check); the paper's Figs 1–2 are
 reproducible entirely from the shipped kernel set.
+
+**DONE 2026-09-18.** Both kernels shipped
+(`kernelFunctions/gaussian.py`, enum 36; `kernelFunctions/hoct4.py`,
+enum 35), spec'd, and audited: 10/10 kernels pass the full battery
+incl. `--ft`; CI `tests/kernels/` 14/14. Perturbation spot-check
+passed (Gaussian −128 → −127.5 caught by the form check at 1.4e-3 with
+all-dim derivative FAILs; HOCT4 A 3.2 → 3.3 caught at 8.2e-3; both
+reverted). Figs 1–2 are now built **entirely** from the shipped audited
+warp functions — the replication's `common.py`/`ft_kernels.py` were
+switched off the numpy re-transcriptions (HOCT4's closed-form pieces
+remain as a cross-check of the shipped shape at < 1e-12). Two onboarding
+bugs fixed en route (see findings log): the `bpow_warp` derivative sign
+rule and the new `step` function in the spec expr namespace.
 
 ## Phase 4 — density estimation & N_H bookkeeping
 (Fig. 3, eqs. 7, 18, 19, Table 2)
@@ -457,6 +470,7 @@ Acceptance:
 | 2026-09-18 | **B-spline 3D FT zero structure (common h = 2σ, κ̂ = |k|h)**: b₄ — 7 sign-change zeros in [0,30] at 6.8829/9.8446/13.7657/16.9252/20.6487/23.8897/27.5318 (4nπ/H factor zeros + tan(κ/4) = κ/4 factor zeros); b₅ — 3 sign-change zeros at 11.1282/19.1320/27.0047 PLUS 3 tangential near-zeros (w̄ touches ~0 from one side only, |w̄| ~ 1e-11, at κ̂ ~ 7.78/15.56/23.34 — the closed form's ~1e-16 rounding flips the sign across them; the high-res numerical FT confirms no crossing); b₆ — 4 sign-change zeros at 8.5762/12.2783/21.1094/29.7957. First zeros (pairing criterion κ₀): κ = 12.5663 (≈ 4π) / 22.4670 / 18.8314 — b₅ agrees with the Phase-1 audit (22.46). b₆'s first crossing is flat (|w̄| ~ 1e-13, slope ~ 2e-11/κ̂) and is only resolvable to ±0.01 in κ̂ (closed form and high-res Simpson agree within that). | resolved 2026-09-18 — recorded for Phase 4 (stability) |
 | 2026-09-18 | **b₇ FT zero structure corrected** (the B7-identity row's "first zero κ̂ ≈ 21.96" and the Phase-1 audit estimates 21.97/22.02/31.45 were stale/wrong): the true sign-change zeros are **13.3296 / 22.9168 / 32.3468 in κ̂** (first zero 6.6648 |k|σ), first-lobe min −3.1655e-6 at κ̂ ≈ 14.43, still negative at κ̂ = 40 (second lobe min ~ −2.7e-9 near 34) — "barely pairing-unstable" holds, but the zeros and lobe location move. Established by an independent high-res numerical FT (n = 200001; closed-vs-numeric 6e-15) and a window-excursion zero detector (a grid sign-flip counts only if a ±0.05-κ̂ window contains a true excursion beyond 1e-13, which also rejects b₅'s tangential near-zeros). | resolved 2026-09-18 — `kernel_specs.yaml`, fig02 |
 | 2026-09-18 | **b₈'s 3D FT has a tiny negative lobe below the audit's noise floor**: min −8.469e-7 at κ̂ ≈ 13.11, exit zero 14.303, entry zero below the ~1e-13 resolvable floor. The audit's `ft_expected: nonnegative` stays correct because its `_FT_NOISE_FLOOR = 1e-6` swallows the lobe (a deliberate practical floor, not a claim of mathematical non-negativity); fig02 asserts b8 against that same −1e-6 floor and records the lobe in `kernel_specs.yaml`. | resolved 2026-09-18 — informational for Phase 5 |
+| 2026-09-18 | **`bpow_warp` derivative rule bit HOCT4's shipped derivatives on first audit**: `d/dq bpow_warp(q−t, p) = p · bpow_warp(q−t, p−1)` — *no* leading minus, because `bpow_warp(x, p) = (min(x, 0))_+^p = (t−q)_+^p` carries the sign in its negative argument. Writing the intuitive `−p·bpow_warp(·, p−1)` in `HOCT4_dkdq`/`_d3kdq3` gave AD-check errors of 4.3 / 133.8 (the 2× the true values, piecewise). Also: HOCT4's spec expr needed a new `step(x) = 1(x ≥ 0)` in the audit's expr namespace — the hard switch at α cannot be expressed with `pos` (a ramp); a first draft that blended the pieces with `pos(α−q)` was wrong by 0.113 at q = 0 while the shipped shape matched the direct piecewise definition to 2.2e-16. | resolved 2026-09-18 — audit namespace, `kernel_specs.yaml` header, `kernelFunctions/hoct4.py` comment |
 | 2026-09-18 | **The non-D&A library kernels ship `kernelScale = 1.0`** (h_code = H), NOT the D&A H/h convention used by the Table-1 set. Shape-derived H/h (normalised second moment, C₃-independent): poly6 √11/2 = 1.6583, spiky 1.8708, viscosity 2.1602, adhesion 1.0741, cohesion 1.3592 (fig03). Whether to re-scale the five to the D&A convention (or spec them with their own) is a Phase-8 `src/` decision, alongside the `support.py:86` float32-constant fix. Note the same audit pipeline does not yet cover these five kernels at all (no `kernel_specs.yaml` entries). | open — Phase 8 |
 | 2026-09-18 | **D&A Fig. 2's x-axis is \|k\|σ (σ = h/2), not \|k\|h** (user-verified from the PDF: the cubic spline's first zero sits just over π, i.e. κ̂/2 = 3.4414). Replicated figures use \|k\|σ ∈ [0, 3π] with the data computed on κ̂ ∈ [0, 6π]; log \|w̄\| with a 1e-6 floor, dashed where w̄ < 0. Recorded in `paper_notes.md`. | resolved 2026-09-18 — fig02 convention |
 | 2026-09-17 | Code `packingRatio` deviations from Table 2: CubicSpline × 1.0175 (Price 2012 alignment), QuinticSpline, B7 & B8 × 1.1425 (CRKSPH alignment). Deliberate per in-code comments; replicate both variants. | open — Phase 4 |

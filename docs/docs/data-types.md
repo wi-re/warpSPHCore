@@ -253,6 +253,7 @@ not a fourth variant.
 | `Wendland6` | 2 | | `CubicSpline` | 30 |
 | `QuarticSpline` | 31 | | `QuinticSpline` | 32 |
 | `B7` | 34 | | `B8` | 33 |
+| `HOCT4` | 35 | | `Gaussian` | 36 |
 | `ViscosityKernel` | 40 | | `CohesionKernel` | 41 |
 | `AdhesionKernel` | 42 | | | |
 

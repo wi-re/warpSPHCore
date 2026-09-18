@@ -56,10 +56,10 @@ DEVICE = "cpu"
 _HERE = Path(__file__).resolve().parent
 REFERENCE_YAML = _HERE.parent / "data" / "da2012_reference.yaml"
 
-# Name -> shipped KernelFunctions member. HOCT4 and Gaussian join this
-# map in Phase 3, once they exist in the core library; until then the
-# replication references them through the verified definitions in
-# data/da2012_reference.yaml and a local numpy shape function.
+# Name -> shipped KernelFunctions member. The whole Fig.-1/2 set is in
+# the core library (HOCT4 and Gaussian onboarded in Phase 3,
+# 2026-09-18; the replication builds Figs 1-2 entirely from the shipped
+# audited warp functions).
 #
 # The b7/b8 and "other kernels" (fig03) entries were added 2026-09-18
 # when Figs 1-2 were extended to the full B-spline family and the
@@ -73,6 +73,8 @@ KERNEL_BY_NAME = {
     "wendland_C2": KernelFunctions.Wendland2,
     "wendland_C4": KernelFunctions.Wendland4,
     "wendland_C6": KernelFunctions.Wendland6,
+    "hoct4": KernelFunctions.HOCT4,
+    "gaussian": KernelFunctions.Gaussian,
     "poly6": KernelFunctions.Poly6,
     "spiky": KernelFunctions.Spiky,
     "adhesion": KernelFunctions.AdhesionKernel,

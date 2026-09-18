@@ -275,11 +275,9 @@ def ft3d_numeric(f, C3: float, k: np.ndarray, n: int = _SIMPSON_N, chunk: int = 
 # The Fig. 2 kernel set
 # ---------------------------------------------------------------------------
 
-# name -> (shipped code name or None, shape source)
-# "shipped" kernels: f via common.shape (the audited warp functions).
-# HOCT4 / Gaussian: not in the core library yet (Phase 3) -- numpy shapes
-# from the verified definition in the reference YAML.
-
+# name -> shipped code name: f via common.shape (the audited warp
+# functions). The whole Fig. 1/2 set is shipped (HOCT4 + Gaussian
+# onboarded in Phase 3, 2026-09-18).
 SHIPPED_FIG2 = {
     "cubic_b4": "cubic_b4",
     "quartic_b5": "quartic_b5",
@@ -289,6 +287,8 @@ SHIPPED_FIG2 = {
     "wendland_C2": "wendland_C2",
     "wendland_C4": "wendland_C4",
     "wendland_C6": "wendland_C6",
+    "hoct4": "hoct4",
+    "gaussian": "gaussian",
 }
 
 # closed-form pieces for the shipped B-splines (n of the D&A family) and
@@ -306,26 +306,15 @@ WENDLAND_POLY = {
 }
 
 
-def gaussian_shape(ref: dict):
-    """f(q) = exp(-0.5 (16 q)^2), 16-sigma truncation (q <= 1).
-
-    The paper's Gaussian is N(0, sigma^2) with h = 2 sigma and
-    H = 16 sigma (sigma = H/16), so f(q) = exp(-q^2/(2 sigma_q^2)) with
-    sigma_q = 1/16.
-    """
-
-    def f(r):
-        r = np.asarray(r, float)
-        return np.where(r <= 1.0, np.exp(-128.0 * r * r), 0.0)
-
-    return f
-
-
 def kernel_shapes(ref: dict) -> dict:
     """name -> dict with C3, scale3, shape(r) (numpy), pieces (or None).
 
-    The pieces (closed-form FT input) are cross-validated against the
-    shape on a dense grid before being returned (max|diff| < 1e-14).
+    Every kernel is SHIPPED (Phase 3): f through common.shape (the
+    audited warp functions, float64 on CPU), C3/scale3 through the
+    shipped eval_C_d/eval_kernelScale. The pieces (closed-form FT input)
+    are cross-validated against the shipped shape on a dense grid before
+    being returned (max|diff| < 1e-12); the Gaussian has no pieces
+    (numerical FT only).
     """
     init()
     out = {}
@@ -338,34 +327,16 @@ def kernel_shapes(ref: dict) -> dict:
 
         if name in BSPLINE_ORDER:
             pieces = bspline_pieces(BSPLINE_ORDER[name])
-        else:
+        elif name in WENDLAND_POLY:
             ell, poly = WENDLAND_POLY[name]
             pieces = wendland_pieces(ell, poly)
-        _validate_pieces(pieces, f, name)
+        elif name == "hoct4":
+            pieces = hoct4_pieces(ref)  # closed form, cross-check only
+        else:  # gaussian: truncated exponential, numerical FT only
+            pieces = None
+        if pieces is not None:
+            _validate_pieces(pieces, f, name)
         out[name] = dict(C3=C3, scale3=scale, shape=f, pieces=pieces)
-
-    # HOCT4 (verified read2010 definition, numpy)
-    d = ref["hoct4_definition"]
-    C3 = float(d["N_3d"])
-    pieces = hoct4_pieces(ref)
-
-    def f(r):
-        return piecewise_eval(pieces, r)
-
-    out["hoct4"] = dict(
-        C3=C3,
-        scale3=float(ref["table1"]["hoct4"]["H_over_h"][2]),
-        shape=f,
-        pieces=pieces,
-    )
-
-    # Gaussian (16-sigma truncation, numpy)
-    out["gaussian"] = dict(
-        C3=(128.0 / np.pi) ** 1.5,
-        scale3=8.0,
-        shape=gaussian_shape(ref),
-        pieces=None,
-    )
     return out
 
 

@@ -68,8 +68,9 @@ the spec gets cleaned up when the code is fixed.
    it from the shape and say so in the spec's `source` note (the B7
    entry is the model).
 3. **Add the spec** to `kernel_specs.yaml` (shape expr in `q` with
-   `pos(x) = (x₊)`; `shape_by_dim` when the shape differs per dimension,
-   as for the Wendland family).
+   `pos(x) = (x₊)` (a ramp) and `step(x) = 1(x >= 0)` (a hard switch,
+   needed e.g. by HOCT4 at its alpha); `shape_by_dim` when the shape
+   differs per dimension, as for the Wendland family).
 4. **Run the audit**; every check must PASS, or the deviation must be a
    documented `known_issues` entry with a reason (never silent).
 5. **Run the CI tests** (`pytest tests/kernels/`) and the full suite.
@@ -97,11 +98,27 @@ the spec gets cleaned up when the code is fixed.
   with shape-derived C (823543/92160, 5764801/113149π,
   5764801/61440π) and scale 2.291/2.325/2.360 (σ²/H² = 1/21,
   7691281/166329030, 11/245). Both pass every check: b8's 3D FT is
-  non-negative (pairing-stable); b7's 3D FT has a barely-negative lobe
-  (min −3.2e-6, first zero κ̂ ≈ 21.96 — pairing-unstable in the paper's
-  sense, as expected for a non-C² kernel). The family formula
-  reproduces the shipped cubic/quartic/quintic exactly. Neither is in
-  D&A Table 1.
+  non-negative (pairing-stable); b7's 3D FT has small negative lobes
+  (first: min −3.17e-6 at κ̂ ≈ 14.43 between the zeros 13.330 and
+  22.917, next zero 32.347, lobe min ~ −2.7e-9 — pairing-unstable in
+  the paper's sense, as expected for a non-C² kernel). The family
+  formula reproduces the shipped cubic/quartic/quintic exactly. Neither
+  is in D&A Table 1.
+- Gaussian (enum 36) and HOCT4 (enum 35) onboarded 2026-09-18 (Phase 3
+  of the D&A replication): the paper's whole Fig. 1/2 set is now
+  shipped and audited (10/10 pass the battery, incl. `--ft`).
+  Gaussian: 16-sigma truncation, kernelScale = 8.0 and sigma2/H2 =
+  1/256 in all dims, C3 = (128/pi)^{3/2}; D&A Table 2 N_H = 5120 at
+  packing 1.337; FT non-negative up to the 1e-6 noise floor (the
+  truncation dip is at the e^{-128} level — D&A footnote 10). HOCT4:
+  Read et al. 2010 eqs. 46-51 (verified definition in the
+  replication's `da2012_reference.yaml`); same shape all dims with
+  per-dim N_d; the central cusp f'(0) = P ≠ 0 is by design; D&A Table 2
+  N_H = 442 at packing 2.158; FT non-negative. Onboarding added `step`
+  to the spec expr namespace (HOCT4's hard switch at alpha; `pos` is a
+  ramp) and surfaced the bpow derivative rule
+  (d/dq (t−q)₊ᵖ = p (t−q)₊^{p−1}, **no** leading minus) in
+  `kernelFunctions/hoct4.py`.
 - **Warp constant gotcha (found during the b7 derivation)**: a
   Python-float binop inside a traced `@wp.func` (e.g.
   `scalar_t(5.0/7.0)`) is evaluated in float32 by the tracer, silently

@@ -29,6 +29,8 @@ Select with `KernelFunctions.<Name>` in `OperationProperties`.
 | `QuinticSpline` | $(1-q)^5 - 6(\tfrac{2}{3}-q)^5 + 15(\tfrac{1}{3}-q)^5$ | $243/40$ / $15309/(478\pi)$ / $2187/(40\pi)$ | $C^4$ |
 | `B7` | $(q-1)^6 - 7(q-\tfrac57)^6 + 21(q-\tfrac37)^6 - 35(q-\tfrac17)^6$ | $823543/92160$ / $5764801/(113149\pi)$ / $5764801/(61440\pi)$ | $C^5$ |
 | `B8` | $56(q-0.25)^7 - 28(q-0.5)^7 + 8(q-0.75)^7 - (q-1)^7$ | $4096/315$ / $589824/(7435\pi)$ / $16384/(105\pi)$ | $C^6$ |
+| `HOCT4` | $Pq + Q$ for $q \le \alpha$; $(1-q)^4 + \tfrac{16}{5}(0.75-q)^4 - \tfrac{94}{5}(0.5-q)^4$ for $q > \alpha$ ($\alpha \approx 0.214108$, Read et al. 2010 eqs. 46-51) | $2.06843$ / $3.71583$ / $6.51505$ | $C^2$; designed central cusp $k'(0) = P \ne 0$ |
+| `Gaussian` | $\exp(-128q^2)$, truncated at $16\sigma$ ($\sigma = h/16$) | $(128/\pi)^{1/2}$ / $128/\pi$ / $(128/\pi)^{3/2}$ | analytic; truncation at the $e^{-128}$ level |
 | `Wendland2` | 1D: $(1-q)^3(1+3q)$; d≥2: $(1-q)^4(1+4q)$ | $5/4$ / $7/\pi$ / $21/(2\pi)$ | $C^2$, positive definite |
 | `Wendland4` | 1D: $(1-q)^5(1+5q+8q^2)$; d≥2: $(1-q)^6(1+6q+\tfrac{35}{3}q^2)$ | $3/2$ / $9/\pi$ / $495/(32\pi)$ | $C^4$, positive definite |
 | `Wendland6` | 1D: $(1-q)^7(1+7q+19q^2+21q^3)$; d≥2: $(1-q)^8(1+8q+25q^2+32q^3)$ | $55/32$ / $78/(7\pi)$ / $1365/(64\pi)$ | $C^6$, positive definite |
