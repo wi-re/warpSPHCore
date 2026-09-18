@@ -284,14 +284,21 @@ SHIPPED_FIG2 = {
     "cubic_b4": "cubic_b4",
     "quartic_b5": "quartic_b5",
     "quintic_b6": "quintic_b6",
+    "b7": "b7",
+    "b8": "b8",
     "wendland_C2": "wendland_C2",
     "wendland_C4": "wendland_C4",
     "wendland_C6": "wendland_C6",
 }
 
 # closed-form pieces for the shipped B-splines (n of the D&A family) and
-# Wendland kernels: (ell, poly coefficients ascending in r)
-BSPLINE_ORDER = {"cubic_b4": 4, "quartic_b5": 5, "quintic_b6": 6}
+# Wendland kernels: (ell, poly coefficients ascending in r). b7/b8 join
+# the figure set 2026-09-18 (the D&A Table 1 set lists b4-b6; b7/b8 are
+# the same family, shipped as enum B7/B8).
+BSPLINE_ORDER = {
+    "cubic_b4": 4, "quartic_b5": 5, "quintic_b6": 6,
+    "b7": 7, "b8": 8,
+}
 WENDLAND_POLY = {
     "wendland_C2": (4, [1.0, 4.0]),                    # (1-r)^4 (1+4r)
     "wendland_C4": (6, [1.0, 6.0, 35.0 / 3.0]),        # (1-r)^6 (1+6r+35/3 r^2)

@@ -149,11 +149,14 @@ kernels:
   # Neither is tabulated in D&A Table 1 (which lists b4-b6); both C and
   # sigma2 below are shape-derived (exact).
   #   b7 = family b_7 (order 7, degree 6): 4 terms, knots 1/7, 3/7, 5/7.
-  #       3D FT has a small negative lobe (min ~ -3.2e-6, first zeros
-  #       ~ 21.97 / 22.02 / 31.45) -> barely pairing-unstable.
+  #       3D FT has small negative lobes (first: min -3.17e-6 at
+  #       kappa-hat 14.43 between the zeros 13.330 and 22.917; next
+  #       zero 32.347, lobe min ~ -2.7e-9) -> barely pairing-unstable.
   #   b8 = family b_8 (order 8, degree 7): 4 terms, knots 1/4, 1/2, 3/4
   #       (this is what the code used to ship as "B7"). 3D FT
-  #       non-negative up to the noise floor -> pairing-stable.
+  #       non-negative up to the 1e-6 noise floor -> pairing-stable
+  #       (tiny lobe: min -8.47e-7 at kappa-hat 13.11, exit zero
+  #       14.30, entry zero below the resolvable ~1e-13 floor).
   # The 1D pattern sigma2/H2 = 1/(3n) (stated in the paper: b_n ->
   # N(0, H^2/3n)) holds exactly for all n: 1/21 (b7), 1/24 (b8).
   # ------------------------------------------------------------------

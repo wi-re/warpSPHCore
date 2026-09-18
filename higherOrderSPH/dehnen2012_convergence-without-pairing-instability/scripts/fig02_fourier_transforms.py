@@ -5,6 +5,10 @@ Replicates Fig. 2: "Fourier transforms W(k)b for the Gaussian, the HOCT4
 and the kernels of Table 1 scaled to the same common scale h = 2sigma.
 Negative values are plotted with broken curves."
 
+The figure set is extended with b7/b8 (same B-spline family as b4-b6,
+shipped as enum B7/B8; NOT part of the paper's Fig. 2 -- added
+2026-09-18 on user request).
+
 As in the paper, |W̄| is plotted on a log axis (1e-6 to 1) over
 |k|σ ∈ [0, 3π] (σ = h/2; equivalently κ̂ = |k|h ∈ [0, 6π] — the
 cubic spline's first zero sits just over π on the paper's axis);
@@ -32,11 +36,13 @@ Checks (assert, exit non-zero on failure):
   * eq. 17 at small wave numbers: wbar = 1 - kappa-hat^2/8 + O(k^4) for
     ALL kernels (they "all overlap at small wave numbers"): fit the
     numerical FT on [0.05, 0.5], |a2 + 1/8| < 1e-4
-  * non-negativity: min wbar >= -1e-10 on [0, 12] for Wendland C2/C4/C6,
-    HOCT4, Gaussian (pairing-stable per the paper)
-  * B-splines "oscillate about zero": >= 3 zeros of wbar in [0, 30]
-    (closed form, bisection-refined); first zeros recorded -- they set
-    the pairing criterion kappa_0 > kappa_Nyquist
+  * non-negativity: min wbar >= -1e-10 on the plot grid [0, 6π] for
+    Wendland C2/C4/C6, HOCT4, Gaussian (pairing-stable); b8 uses the
+    audit's 1e-6 practical floor (its FT has a tiny lobe, min -8.47e-7
+    at kappa-hat 13.11, exit zero 14.30, below that floor)
+  * B-splines (b4-b6 + b7) "oscillate about zero": >= 3 zeros of wbar
+    in [0, 40] (closed form, bisection-refined); first zeros recorded
+    -- they set the pairing criterion kappa_0 > kappa_Nyquist
 
 Output: figures/fig02_fourier_transforms.{png,pdf} (gitignored).
 """
@@ -68,8 +74,17 @@ KMAX_PLOT = 3.0 * math.pi  # plot x-range, in |k|sigma units
 NK_PLOT = 12001            # d(|k|sigma) ~ 1.6e-3
 YFLOOR = 1e-6              # the paper's log-axis floor
 N_SIMPSON = 20001  # Simpson points in r (error ~1e-14 at these k)
-BSPLINES = ["cubic_b4", "quartic_b5", "quintic_b6"]
-NONNEG = ["wendland_C2", "wendland_C4", "wendland_C6", "hoct4", "gaussian"]
+# b7/b8 join 2026-09-18 (user request): b7 oscillates (tiny negative
+# lobes -> "barely pairing-unstable"); b8 is classified non-negative
+# like the audit's ft_expected -- its FT does have a tiny lobe (min
+# -8.47e-7 at kappa-hat 13.11, exit zero 14.30, entry zero below the
+# resolvable ~1e-13 floor) but below the audit's 1e-6 practical floor.
+BSPLINES = ["cubic_b4", "quartic_b5", "quintic_b6", "b7"]
+NONNEG = ["wendland_C2", "wendland_C4", "wendland_C6", "b8", "hoct4",
+          "gaussian"]
+# non-negativity floor per kernel; b8 uses the audit's 1e-6 practical
+# noise floor (scripts/kernels/kernel_audit.py _FT_NOISE_FLOOR)
+NONNEG_FLOOR = {"b8": -1e-6}
 
 
 def wbar0(name: str, d: dict) -> float:
@@ -87,38 +102,43 @@ def find_zeros(d: dict, xg: np.ndarray, w: np.ndarray,
     bisection-refined on the closed form. Returns zeros in kappa-hat
     units.
 
-    A candidate crossing only counts if the values `side` grid points
-    (0.05 in kappa-hat) to its left and right are of opposite sign and
-    both exceed `floor` in magnitude. This rejects:
+    A grid sign-flip at i only counts if the window [i-side, i+side]
+    (0.1 in kappa-hat) contains a true excursion: a value below -floor
+    AND a value above +floor. This rejects:
     * tangential near-zeros, where wbar touches ~0 from one side only
       (e.g. b5 at kappa-hat ~ 7.78, 15.56, 23.34, |wbar| ~ 1e-11: the
       closed form's ~1e-16 rounding flips the sign across the touch);
     * sign flips inside the closed form's ~1e-15 noise floor far out,
       where the decaying FT has dropped below round-off.
-    Verified against the high-resolution numerical FT (2026-09-18).
+    The bisection bracket is [window edge, window extremum of the
+    opposite sign], so it starts from verified opposite signs even for
+    very flat crossings (b7's zero at 32.347 sits at the edge of a
+    ~1e-9 lobe). Verified against the high-resolution numerical FT
+    (2026-09-18): b4-b6 reproduce the Phase-2 zeros, and b7's zeros
+    13.330 / 22.917 / 32.347 (first-lobe min -3.17e-6 at 14.43) replace
+    the stale Phase-1 audit estimates 21.97 / 22.02 / 31.45.
     """
     H = d["scale3"]
     s = np.sign(w)
     out = []
     for i in np.where(s[1:] != s[:-1])[0]:
-        if i - side < 0 or i + side + 1 > len(w):
-            continue
-        wl, wh = w[i - side], w[i + side]
-        if wl * wh > 0.0:
-            continue  # tangential near-zero: same sign on both sides
-        if min(abs(wl), abs(wh)) < floor:
-            continue  # below the closed form's noise floor
-        # bisect on the closed form, starting from the wide verified
-        # bracket (the scan-grid bracket can straddle the ~1e-16 noise
-        # floor for very flat crossings)
-        a, fa = xg[i - side], wl
-        b = xg[i + side]
+        lo = max(i - side, 0)
+        hi = min(i + side + 1, len(w))
+        wlo, whi = float(w[lo:hi].min()), float(w[lo:hi].max())
+        if wlo > -floor or whi < floor:
+            continue  # no true excursion: tangential / noise floor
+        a, fa = xg[lo], w[lo]
+        if fa < 0.0:
+            j = lo + int(np.argmax(w[lo:hi]))
+        else:
+            j = lo + int(np.argmin(w[lo:hi]))
+        b, fb = xg[j], w[j]
         for _ in range(80):
             m = 0.5 * (a + b)
             fm = float(ft3d_closed(d["pieces"], d["C3"],
                                    np.array([m * H]))[0])
             if fa * fm <= 0.0:
-                b = m
+                b, fb = m, fm
             else:
                 a, fa = m, fm
         out.append(0.5 * (a + b))
@@ -161,20 +181,23 @@ def checks(ks: dict, num: dict, x: np.ndarray) -> dict:
             f"{n}: eq. 17 slope a2 = {a2:.8f} (expect -1/8)"
         info[n]["a2"], info[n]["a4"] = float(a2), float(a4)
 
-    # -- non-negativity (Wendland, HOCT4, Gaussian) -------------------------
+    # -- non-negativity (Wendland, b8, HOCT4, Gaussian) ---------------------
     for n in NONNEG:
         mn = float(num[n].min())
-        assert mn >= -1e-10, f"{n}: min wbar on [0,6π] = {mn:.3e}"
+        lim = NONNEG_FLOOR.get(n, -1e-10)
+        assert mn >= lim, f"{n}: min wbar on [0,6π] = {mn:.3e}"
         info[n]["min12"] = mn
 
     # -- B-splines oscillate about zero -------------------------------------
-    zg = np.linspace(0.0, 30.0, 15001)  # d = 2e-3, kappa-hat units
+    # [0, 40] in kappa-hat: b7's third zero (32.347) needs the extra
+    # range.
+    zg = np.linspace(0.0, 40.0, 20001)  # d = 2e-3, kappa-hat units
     for n in BSPLINES:
         d = ks[n]
         w = ft3d_closed(d["pieces"], d["C3"], zg[1:] * d["scale3"])
         zeros = find_zeros(d, zg[1:], w)
-        assert len(zeros) >= 3, f"{n}: only {len(zeros)} zeros in [0,30]"
-        info[n]["zeros30"] = zeros
+        assert len(zeros) >= 3, f"{n}: only {len(zeros)} zeros in [0,40]"
+        info[n]["zeros40"] = zeros
     return info
 
 
@@ -221,13 +244,14 @@ def plot(ks: dict, num: dict, info: dict) -> None:
 
     # first zeros of the B-splines (set the pairing criterion); stored
     # in kappa-hat = |k|h units, plotted halved in |k|sigma units.
-    # Staggered label heights avoid overlap (3.44, 4.29, 5.56).
+    # Staggered label heights avoid overlap (3.44, 4.29, 5.56); b7's
+    # first zero (10.98) lies beyond the 3-pi axis and is skipped.
     for iy, n in enumerate(BSPLINES):
-        z1 = 0.5 * info[n]["zeros30"][0]
+        z1 = 0.5 * info[n]["zeros40"][0]
         if z1 > KMAX_PLOT:
             continue
         ax.axvline(z1, color=COLORS[n], ls=":", lw=0.9, alpha=0.6)
-        ax.text(z1, [0.55, 0.30, 0.10][iy], f"z$_1$ = {z1:.3f}",
+        ax.text(z1, [0.55, 0.30, 0.10, 0.55][iy % 4], f"z$_1$ = {z1:.3f}",
                 ha="center", fontsize=8, color=COLORS[n],
                 bbox=dict(facecolor="white", alpha=0.7,
                           edgecolor="none", pad=0.8))
@@ -268,18 +292,18 @@ def main() -> None:
 
     print("kappa-hat = |k|h, h = 2σ = 1;  primary = numerical FT (eq. 14)")
     print(f"{'kernel':<14}{'w̄(0)':>10}{'a2 (fit)':>12}{'a4 (fit)':>12}"
-          f"{'min [0,6π]':>12}{'#zeros[0,30]':>13}")
+          f"{'min [0,6π]':>12}{'#zeros[0,40]':>13}")
     for n in ORDER:
         i = info[n]
         mn = f"{i['min12']:+.4f}" if "min12" in i else "   (osc.)"
-        nz = len(i["zeros30"]) if "zeros30" in i else "—"
+        nz = len(i["zeros40"]) if "zeros40" in i else "—"
         print(f"{n:<14}{i['w0']:>10.7f}{i['a2']:>12.7f}{i['a4']:>12.6e}"
               f"{mn:>12}{nz:>13}")
 
-    print("\nB-spline zeros in [0,30] (kappa-hat = |k|h units; "
+    print("\nB-spline zeros in [0,40] (kappa-hat = |k|h units; "
           "the figure's axis is |k|sigma = kappa-hat/2):")
     for n in BSPLINES:
-        zs = info[n]["zeros30"]
+        zs = info[n]["zeros40"]
         zstr = "  ".join(f"{z:.4f}" for z in zs)
         print(f"  {n:<14} {zstr}")
         print(f"  {'':<14} z1 = {zs[0]/2:.6f} |k|σ   "

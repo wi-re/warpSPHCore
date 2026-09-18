@@ -210,6 +210,9 @@ now has zero KNOWN rows.
       (H = scale₃), checks non-negativity / support / normalisation
       (exact piecewise + Simpson); HOCT4 orange per the paper's colour
       coding; figures/fig01_kernel_shapes.{png,pdf} (gitignored).
+      **EXTENDED 2026-09-18 (user request)**: b7/b8 added (same B-spline
+      family, not in the paper's Fig. 1); vertical support arrows and the
+      paper's 1e-6 log-panel floor (both user-checked against the PDF).
 - [x] `fig02_fourier_transforms.py` — Fig. 2: numerical 3D FT (eq. 14);
       closed-form FT as cross-check — **the closed form is derived from
       the piecewise-polynomial definitions** (eq. 15's PDF transcription
@@ -226,6 +229,31 @@ now has zero KNOWN rows.
       8.5762 (κ = 18.8314, flat crossing |w̄| ~ 1e-13, ±0.01); zero
       counting validated against the high-res numerical FT (tangential
       near-zeros of b5 at κ̂ ~ 7.78/15.56/23.34 correctly rejected).
+      **EXTENDED + AXIS CORRECTED 2026-09-18 (user-checked against the
+      PDF)**: b7/b8 added; the paper's x-axis is **|k|σ (σ = h/2), not
+      |k|h** — cubic's first zero sits just over π, so the data grid is
+      κ̂ ∈ [0, 6π] plotted as |k|σ ∈ [0, 3π]; log |w̄| with the paper's
+      1e-6 floor and dashed segments where w̄ < 0. b7's first zero
+      6.6648 |k|σ is now in-panel (marker); b8's sub-1e-6 FT lobe is
+      documented (findings log) and asserted against the audit's 1e-6
+      floor.
+- [x] `fig03_other_kernels.py` — **NEW 2026-09-18 (user request)**: the
+      second kernel figure. Runs the library kernels OUTSIDE the D&A set
+      (poly6, spiky, adhesion, cohesion, viscosity — shipped warp shapes,
+      no re-transcription) through the same battery: normalisation,
+      non-negativity, centre/support differentiability, 3D FT (eq. 14) at
+      each kernel's own h = 2σ (shape-derived H/h; the C₃-independent
+      normalised-moment form, since adhesion/cohesion are not
+      normalised). **Verdicts (general density kernel? / pairing
+      stability):** poly6 — YES, but pairing-unstable (min w̄ = −1.19e-2,
+      first zero 2.467 |k|σ); spiky — no (f'(0) = −3, not C² at the
+      centre) yet pairing-stable (min w̄ = +2.3e-4 on [0, 3π]); adhesion
+      — no (4πC₃∫fq² = 0.0158, f'(1) diverges — surface-tension kernel);
+      cohesion — no (norm 0.2351, negative at the centre —
+      surface-tension kernel); viscosity — no (singular at the centre —
+      Laplacian kernel). Only poly6 is usable as a general density
+      kernel; none of the five is pairing-stable AND C² at the centre.
+      figures/fig03_other_kernels.{png,pdf} (gitignored).
 
 Acceptance: all Table 1 rows verified (or discrepancy logged); Figs 1–2
 match the paper (Fourier curves: max |Δw̄| < 1e-3 on a common k-grid,
@@ -427,6 +455,10 @@ Acceptance:
 | 2026-09-18 | **Gaussian convention in the reference YAML was wrong** (shape and C rows): it had f(q) = e^{−0.5(8q)²}, C_d = (32/π)^{ν/2}, i.e. σ = H/8 — contradicting the paper (Gaussian = N(0,σ²) with h = 2σ, truncated at 16σ → σ = H/16) and the YAML's own σ²/H² = 1/256 row. With the old convention the Gaussian's own h would be √2, not 1, and its eq.-17 slope would be −κ̂²/4 instead of the universal −κ̂²/8 (it would NOT overlap the other kernels at small k, contrary to the paper's Fig. 2 statement). Corrected: f(q) = e^{−0.5(16q)²}, C_d = (128/π)^{ν/2} (C₃ = 260.0699, W(0) = 0.50795 at h = 1; truncation f(1) = e^{−128} ≈ 3e-56). kernelScale = 8.0, packingRatio 1.337 unchanged. Found by the Phase-2 eq.-17 Taylor check (fit gave a₂ = −0.4994 instead of −1/8). | resolved 2026-09-18 — YAML, ft_kernels, fig01, Phase-3 spec updated |
 | 2026-09-18 | **Eq. 15 (B-spline closed-form 3D FT) is garbled beyond repair** in the PDF text layer, and the printed form (as either transcription) is mathematically wrong: it has poles at sin(nκ) = 0 where the true FT is smooth and diverges at κ → 0 while w̄(0) = 1. Superseded by a derived closed form: every kernel except the Gaussian is a piecewise polynomial, so ∫_a^b r^m sin(κr) dr per piece by exact antiderivatives (Taylor series in κ for κ < 5 to avoid cancellation, antiderivative for κ ≥ 5); piecewise transcription validated against the shipped shapes at < 1e-12. Cross-check closed vs numerical: ≤ 1e-11 on the Fig.-2 grid (cubic's closed form also matches the hand-derived 384(−2κsin(κ/2) + κsinκ − 16cos(κ/2) + 4cosκ + 12)/κ⁶). | resolved 2026-09-18 — `ft_kernels.py` |
 | 2026-09-18 | **B-spline 3D FT zero structure (common h = 2σ, κ̂ = |k|h)**: b₄ — 7 sign-change zeros in [0,30] at 6.8829/9.8446/13.7657/16.9252/20.6487/23.8897/27.5318 (4nπ/H factor zeros + tan(κ/4) = κ/4 factor zeros); b₅ — 3 sign-change zeros at 11.1282/19.1320/27.0047 PLUS 3 tangential near-zeros (w̄ touches ~0 from one side only, |w̄| ~ 1e-11, at κ̂ ~ 7.78/15.56/23.34 — the closed form's ~1e-16 rounding flips the sign across them; the high-res numerical FT confirms no crossing); b₆ — 4 sign-change zeros at 8.5762/12.2783/21.1094/29.7957. First zeros (pairing criterion κ₀): κ = 12.5663 (≈ 4π) / 22.4670 / 18.8314 — b₅ agrees with the Phase-1 audit (22.46). b₆'s first crossing is flat (|w̄| ~ 1e-13, slope ~ 2e-11/κ̂) and is only resolvable to ±0.01 in κ̂ (closed form and high-res Simpson agree within that). | resolved 2026-09-18 — recorded for Phase 4 (stability) |
+| 2026-09-18 | **b₇ FT zero structure corrected** (the B7-identity row's "first zero κ̂ ≈ 21.96" and the Phase-1 audit estimates 21.97/22.02/31.45 were stale/wrong): the true sign-change zeros are **13.3296 / 22.9168 / 32.3468 in κ̂** (first zero 6.6648 |k|σ), first-lobe min −3.1655e-6 at κ̂ ≈ 14.43, still negative at κ̂ = 40 (second lobe min ~ −2.7e-9 near 34) — "barely pairing-unstable" holds, but the zeros and lobe location move. Established by an independent high-res numerical FT (n = 200001; closed-vs-numeric 6e-15) and a window-excursion zero detector (a grid sign-flip counts only if a ±0.05-κ̂ window contains a true excursion beyond 1e-13, which also rejects b₅'s tangential near-zeros). | resolved 2026-09-18 — `kernel_specs.yaml`, fig02 |
+| 2026-09-18 | **b₈'s 3D FT has a tiny negative lobe below the audit's noise floor**: min −8.469e-7 at κ̂ ≈ 13.11, exit zero 14.303, entry zero below the ~1e-13 resolvable floor. The audit's `ft_expected: nonnegative` stays correct because its `_FT_NOISE_FLOOR = 1e-6` swallows the lobe (a deliberate practical floor, not a claim of mathematical non-negativity); fig02 asserts b8 against that same −1e-6 floor and records the lobe in `kernel_specs.yaml`. | resolved 2026-09-18 — informational for Phase 5 |
+| 2026-09-18 | **The non-D&A library kernels ship `kernelScale = 1.0`** (h_code = H), NOT the D&A H/h convention used by the Table-1 set. Shape-derived H/h (normalised second moment, C₃-independent): poly6 √11/2 = 1.6583, spiky 1.8708, viscosity 2.1602, adhesion 1.0741, cohesion 1.3592 (fig03). Whether to re-scale the five to the D&A convention (or spec them with their own) is a Phase-8 `src/` decision, alongside the `support.py:86` float32-constant fix. Note the same audit pipeline does not yet cover these five kernels at all (no `kernel_specs.yaml` entries). | open — Phase 8 |
+| 2026-09-18 | **D&A Fig. 2's x-axis is \|k\|σ (σ = h/2), not \|k\|h** (user-verified from the PDF: the cubic spline's first zero sits just over π, i.e. κ̂/2 = 3.4414). Replicated figures use \|k\|σ ∈ [0, 3π] with the data computed on κ̂ ∈ [0, 6π]; log \|w̄\| with a 1e-6 floor, dashed where w̄ < 0. Recorded in `paper_notes.md`. | resolved 2026-09-18 — fig02 convention |
 | 2026-09-17 | Code `packingRatio` deviations from Table 2: CubicSpline × 1.0175 (Price 2012 alignment), QuinticSpline, B7 & B8 × 1.1425 (CRKSPH alignment). Deliberate per in-code comments; replicate both variants. | open — Phase 4 |
 | 2026-09-17 | Code `h` (kernel functions) = paper's support radius H, not paper's h = 2σ. Notation map in `paper_notes.md`. | informational — all phases |
 | 2026-09-17 | `warpSPH` `CullenDehnen2010.py` carries an unresolved sign note ("the signs here should have been wrong, double check!") plus dead alternate formulations. | open — Phase 6 |

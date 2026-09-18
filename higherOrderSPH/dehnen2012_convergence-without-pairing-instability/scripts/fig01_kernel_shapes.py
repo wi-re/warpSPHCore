@@ -42,8 +42,10 @@ from ft_kernels import kernel_shapes, moment2
 _HERE = Path(__file__).resolve().parent
 FIGDIR = _HERE.parent / "figures"
 
+# D&A Table 1 lists b4-b6; b7/b8 (shipped as enum B7/B8) are the same
+# B-spline family and join the figure set 2026-09-18 (user request).
 ORDER = [
-    "cubic_b4", "quartic_b5", "quintic_b6",
+    "cubic_b4", "quartic_b5", "quintic_b6", "b7", "b8",
     "wendland_C2", "wendland_C4", "wendland_C6",
     "hoct4", "gaussian",
 ]
@@ -52,6 +54,8 @@ LABELS = {
     "cubic_b4": "cubic spline ($b_4$)",
     "quartic_b5": "quartic spline ($b_5$)",
     "quintic_b6": "quintic spline ($b_6$)",
+    "b7": "spline $b_7$",
+    "b8": "spline $b_8$",
     "wendland_C2": "Wendland C$^2$",
     "wendland_C4": "Wendland C$^4$",
     "wendland_C6": "Wendland C$^6$",
@@ -60,11 +64,14 @@ LABELS = {
 }
 
 # HOCT4 is orange in the paper (Fig. 3 caption: "the HOCT4 kernel of Read
-# et al. (2010, orange)", colour coding shared with Figs 1-2).
+# et al. (2010, orange)", colour coding shared with Figs 1-2). b7/b8 are
+# not in the paper's figure (our extension) -- remaining tab10 colours.
 COLORS = {
     "cubic_b4": "#1f77b4",
     "quartic_b5": "#17becf",
     "quintic_b6": "#9467bd",
+    "b7": "#e377c2",
+    "b8": "#bcbd22",
     "wendland_C2": "#2ca02c",
     "wendland_C4": "#d62728",
     "wendland_C6": "#8c564b",

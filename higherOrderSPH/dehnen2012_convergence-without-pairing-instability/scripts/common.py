@@ -56,17 +56,28 @@ DEVICE = "cpu"
 _HERE = Path(__file__).resolve().parent
 REFERENCE_YAML = _HERE.parent / "data" / "da2012_reference.yaml"
 
-# Paper-table name -> shipped KernelFunctions member. HOCT4 and Gaussian join
-# this map in Phase 3, once they exist in the core library; until then the
+# Name -> shipped KernelFunctions member. HOCT4 and Gaussian join this
+# map in Phase 3, once they exist in the core library; until then the
 # replication references them through the verified definitions in
 # data/da2012_reference.yaml and a local numpy shape function.
+#
+# The b7/b8 and "other kernels" (fig03) entries were added 2026-09-18
+# when Figs 1-2 were extended to the full B-spline family and the
+# remaining library kernels were audited as general density candidates.
 KERNEL_BY_NAME = {
     "cubic_b4": KernelFunctions.CubicSpline,
     "quartic_b5": KernelFunctions.QuarticSpline,
     "quintic_b6": KernelFunctions.QuinticSpline,
+    "b7": KernelFunctions.B7,
+    "b8": KernelFunctions.B8,
     "wendland_C2": KernelFunctions.Wendland2,
     "wendland_C4": KernelFunctions.Wendland4,
     "wendland_C6": KernelFunctions.Wendland6,
+    "poly6": KernelFunctions.Poly6,
+    "spiky": KernelFunctions.Spiky,
+    "adhesion": KernelFunctions.AdhesionKernel,
+    "cohesion": KernelFunctions.CohesionKernel,
+    "viscosity": KernelFunctions.ViscosityKernel,
 }
 
 _initialized = False
