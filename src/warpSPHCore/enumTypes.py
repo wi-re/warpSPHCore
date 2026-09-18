@@ -41,7 +41,8 @@ class KernelFunctions(Enum):
     CubicSpline = 30
     QuarticSpline = 31
     QuinticSpline = 32
-    B7 = 33
+    B7 = 34 # classical 7th-order (degree 6) B-spline, D&A 2012 family b_7
+    B8 = 33 # 8th-order (degree 7) B-spline, D&A 2012 family b_8 (formerly B7)
     Wendland2 = 0
     Wendland4 = 1
     Wendland6 = 2

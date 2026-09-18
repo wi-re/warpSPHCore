@@ -252,8 +252,9 @@ not a fourth variant.
 | `Wendland4` | 1 | | `Spiky` | 21 |
 | `Wendland6` | 2 | | `CubicSpline` | 30 |
 | `QuarticSpline` | 31 | | `QuinticSpline` | 32 |
-| `B7` | 33 | | `ViscosityKernel` | 40 |
-| `CohesionKernel` | 41 | | `AdhesionKernel` | 42 |
+| `B7` | 34 | | `B8` | 33 |
+| `ViscosityKernel` | 40 | | `CohesionKernel` | 41 |
+| `AdhesionKernel` | 42 | | | |
 
 (the formulas are on the [Kernel library](kernels) page)
 

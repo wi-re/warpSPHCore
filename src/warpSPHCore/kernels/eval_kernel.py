@@ -23,6 +23,8 @@ def eval_k(q: scalar_t, dim: wp.int32, kernel: wp.int32):
         return quinticSpline_k(q, dim)
     elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_k(q, dim)
+    elif kernel == wp.static(KernelFunctions.B8.value):
+        return B8_k(q, dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_k(q, dim)
     elif kernel == wp.static(KernelFunctions.Spiky.value):
@@ -51,6 +53,8 @@ def eval_dkdq(q: scalar_t, dim: wp.int32, kernel: wp.int32):
         return quinticSpline_dkdq(q, dim)
     elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_dkdq(q, dim)
+    elif kernel == wp.static(KernelFunctions.B8.value):
+        return B8_dkdq(q, dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_dkdq(q, dim)
     elif kernel == wp.static(KernelFunctions.Spiky.value):
@@ -79,6 +83,8 @@ def eval_d2kdq2(q: scalar_t, dim: wp.int32, kernel: wp.int32):
         return quinticSpline_d2kdq2(q, dim)
     elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_d2kdq2(q, dim)
+    elif kernel == wp.static(KernelFunctions.B8.value):
+        return B8_d2kdq2(q, dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_d2kdq2(q, dim)
     elif kernel == wp.static(KernelFunctions.Spiky.value):
@@ -107,6 +113,8 @@ def eval_d3kdq3(q: scalar_t, dim: wp.int32, kernel: wp.int32):
         return quinticSpline_d3kdq3(q, dim)
     elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_d3kdq3(q, dim)
+    elif kernel == wp.static(KernelFunctions.B8.value):
+        return B8_d3kdq3(q, dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_d3kdq3(q, dim)
     elif kernel == wp.static(KernelFunctions.Spiky.value):
@@ -135,6 +143,8 @@ def eval_C_d(dim: wp.int32, kernel: wp.int32):
         return quinticSpline_C_d(dim)
     elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_C_d(dim)
+    elif kernel == wp.static(KernelFunctions.B8.value):
+        return B8_C_d(dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_C_d(dim)
     elif kernel == wp.static(KernelFunctions.Spiky.value):
@@ -163,6 +173,8 @@ def eval_kernelScale(kernel: wp.int32, dim: wp.int32):
         return quinticSpline_kernelScale(dim)
     elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_kernelScale(dim)
+    elif kernel == wp.static(KernelFunctions.B8.value):
+        return B8_kernelScale(dim)
     elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_kernelScale(dim)
     elif kernel == wp.static(KernelFunctions.Spiky.value):
@@ -191,6 +203,8 @@ def eval_packing(kernel: wp.int32):
         return quinticSpline_packingRatio()
     elif kernel == wp.static(KernelFunctions.B7.value):
         return B7_packingRatio()
+    elif kernel == wp.static(KernelFunctions.B8.value):
+        return B8_packingRatio()
     elif kernel == wp.static(KernelFunctions.Poly6.value):
         return poly6_packingRatio()
     elif kernel == wp.static(KernelFunctions.Spiky.value):

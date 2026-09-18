@@ -7,6 +7,9 @@ __all__.extend(["adhesionKernel" + suffix for suffix in suffixes])
 from .B7 import *
 __all__.extend(["B7" + suffix for suffix in suffixes])
 
+from .B8 import *
+__all__.extend(["B8" + suffix for suffix in suffixes])
+
 from .cohesionKernel import *
 __all__.extend(["cohesionKernel" + suffix for suffix in suffixes])
 

@@ -6,9 +6,9 @@ Interpolate, Gradient, ...) end to end. None of them isolate the smoothing
 kernel math underneath: eval_k/eval_dkdq/eval_d2kdq2/eval_d3kdq3 (the
 per-kernel-family dispatch in eval_kernel.py), sphKernel_/sphGradient_/
 sphKernelDerivative_ (the raw pairwise kernel + its derivatives, before any
-domain/support-scheme wrapping), and the twelve KernelFunctions families
+domain/support-scheme wrapping), and the fourteen KernelFunctions families
 themselves (Wendland2/4/6, CubicSpline, QuarticSpline, QuinticSpline, B7,
-Poly6, Spiky, ViscosityKernel, CohesionKernel, AdhesionKernel).
+B8, Poly6, Spiky, ViscosityKernel, CohesionKernel, AdhesionKernel).
 
 This is Step 0 of the forward-mode/adjoint plan in warpier_fields.md Section
 3.6: positions enter every SPH operator through a genuinely nonlinear kernel
@@ -21,9 +21,9 @@ claim to be:
    directly-called _k/_dkdq/_d2kdq2/_d3kdq3 function, for every
    KernelFunctions member. This is a pure code-path check, no math
    involved, and it is the check that catches wiring bugs (see below).
-2. **Normalization** -- every genuine SPH interpolation kernel (the eight
+2. **Normalization** -- every genuine SPH interpolation kernel (the nine
    families meant to be used as W(r,h) itself: Wendland2/4/6, CubicSpline,
-   QuarticSpline, QuinticSpline, B7, Poly6, Spiky) must integrate to 1 over
+   QuarticSpline, QuinticSpline, B7, B8, Poly6, Spiky) must integrate to 1 over
    its support, in dim 1/2/3. ViscosityKernel/CohesionKernel/AdhesionKernel
    are deliberately excluded: they are Monaghan/Akinci-style special-purpose
    kernels (viscosity dissipation, surface-tension cohesion/adhesion) that
@@ -163,6 +163,7 @@ from warpSPHCore.kernels.kernelFunctions import (
     quarticSpline_k, quarticSpline_dkdq, quarticSpline_d2kdq2, quarticSpline_d3kdq3,
     quinticSpline_k, quinticSpline_dkdq, quinticSpline_d2kdq2, quinticSpline_d3kdq3,
     B7_k, B7_dkdq, B7_d2kdq2, B7_d3kdq3,
+    B8_k, B8_dkdq, B8_d2kdq2, B8_d3kdq3,
     poly6_k, poly6_dkdq, poly6_d2kdq2, poly6_d3kdq3,
     spiky_k, spiky_dkdq, spiky_d2kdq2, spiky_d3kdq3,
     viscosityKernel_k, viscosityKernel_dkdq, viscosityKernel_d2kdq2, viscosityKernel_d3kdq3,
@@ -184,6 +185,7 @@ SPH_KERNELS = [
     KernelFunctions.QuarticSpline,
     KernelFunctions.QuinticSpline,
     KernelFunctions.B7,
+    KernelFunctions.B8,
     KernelFunctions.Poly6,
     KernelFunctions.Spiky,
 ]
@@ -238,6 +240,7 @@ _DIRECT4 = {
     KernelFunctions.QuarticSpline: _make_direct4(quarticSpline_k, quarticSpline_dkdq, quarticSpline_d2kdq2, quarticSpline_d3kdq3),
     KernelFunctions.QuinticSpline: _make_direct4(quinticSpline_k, quinticSpline_dkdq, quinticSpline_d2kdq2, quinticSpline_d3kdq3),
     KernelFunctions.B7: _make_direct4(B7_k, B7_dkdq, B7_d2kdq2, B7_d3kdq3),
+    KernelFunctions.B8: _make_direct4(B8_k, B8_dkdq, B8_d2kdq2, B8_d3kdq3),
     KernelFunctions.Poly6: _make_direct4(poly6_k, poly6_dkdq, poly6_d2kdq2, poly6_d3kdq3),
     KernelFunctions.Spiky: _make_direct4(spiky_k, spiky_dkdq, spiky_d2kdq2, spiky_d3kdq3),
     KernelFunctions.ViscosityKernel: _make_direct4(viscosityKernel_k, viscosityKernel_dkdq, viscosityKernel_d2kdq2, viscosityKernel_d3kdq3),

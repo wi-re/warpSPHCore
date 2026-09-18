@@ -1,0 +1,201 @@
+# =============================================================================
+# Machine-readable kernel specifications for the kernel audit
+# (scripts/kernels/kernel_audit.py) and the kernel-onboarding checklist
+# (scripts/kernels/README.md).
+#
+# One entry per kernel. The audit checks, per spec'd dimension:
+#   1. form         code eval_k vs the spec shape on a fine grid;
+#   2. normalisation code eval_C_d vs 1/(V_nu int f q^(nu-1) dq) vs spec C;
+#   3. moments      sigma2/H2 = C V_nu/nu int f q^(nu+1) dq vs spec sigma2,
+#                   and H/h = 1/(2 sqrt(sigma2/H2)) vs code kernelScale;
+#   4. derivatives  code _dkdq/_d2kdq2/_d3kdq3 vs wp.Tape AD of the level
+#                   below (mirrors scripts/gradcheck/kernel_sanity_native.py);
+#   5. support      zero outside q>1, f(1) = 0, f'(1) = 0;
+#   6. FT sign      (flag --ft) 3D FT eq. D&A (14): wbar(0)=1, eq. (17)
+#                   Taylor, non-negativity / first zeros;
+#   7. packing      code packingRatio == spec value; sphKernelN_H at that
+#                   packing reproduces the spec reference N_H (3-decimal
+#                   packing rounding allowed); sphKernel_xi = H*d_nn.
+#
+# Conventions (load-bearing -- see
+# higherOrderSPH/dehnen2012_convergence-without-pairing-instability/
+# data/da2012_reference.yaml, NOTATION PIN):
+#   * the code smoothing length h IS the support radius H; the shape f(q)
+#     is a function of q = r/H and is zero for q > 1;
+#   * sigma2 is the PAPER's eq.-8 convention: sigma^2 = nu^-1 int |x|^2 W
+#     d^nu x (the 1/nu factor is real; it makes H/h = 1/(2 sqrt(sigma2/H2))
+#     agree with the tabulated values);
+#   * packing is h_paper (rho/m)^(1/nu) at the kernel's reference N_H
+#     (== sphKernelN_H / V_nu / scale^nu), i.e. the last column of D&A
+#     Table 2; code packingRatio() may carry a deliberate multiplicative
+#     correction factor (recorded per kernel).
+#
+# `shape` is either one `expr` (applies to all spec'd dims) or
+# `shape_by_dim`. `expr` is a Python expression in `q` (a numpy array)
+# evaluated with a restricted namespace: `pos(x) = max(x, 0)`, `pi`,
+# `exp`, `sqrt`. The expression is valid on 0 <= q <= 1; outside the
+# support the spec value is 0 (checked against the code).
+#
+# `known_issues`: check failures that are documented, accepted deviations.
+# The audit reports them as KNOWN (green) instead of FAIL; a NEW failure
+# on the same check is still a hard failure. If a known issue starts
+# passing (the code was fixed), the audit warns to remove the entry.
+# =============================================================================
+
+kernels:
+  cubic:
+    code_name: CubicSpline
+    source: "Dehnen & Aly 2012, Table 1 (cubic spline b4); Monaghan 1992 M4 in support-1 units"
+    shape:
+      expr: "(1.0-q)**3 - 4.0*pos(0.5-q)**3"
+    C: {1: "8/3", 2: "80/(7*pi)", 3: "16/pi"}
+    sigma2: {1: "1/12", 2: "31/392", 3: "3/40"}
+    dims: [1, 2, 3]
+    ft_expected: negative_lobe
+    packing:
+      value: 1.314610            # 1.292 (Table 2, N_H=55) * 1.0175 (code)
+      reference_N_H: 55          # D&A Table 2 (3D)
+      code_factor: 1.0175        # Price 2012 alignment -> ~57.9 neighbours
+      note: "deliberate code factor (in-code comment, cubicSpline.py)"
+    known_issues: []
+
+  quartic:
+    code_name: QuarticSpline
+    source: "Dehnen & Aly 2012, Table 1 (quartic spline b5)"
+    shape:
+      expr: "(1.0-q)**4 - 5.0*pos(0.6-q)**4 + 10.0*pos(0.2-q)**4"
+    C: {1: "3125/768", 2: "46875/(2398*pi)", 3: "15625/(512*pi)"}
+    sigma2: {1: "1/15", 2: "9759/152600", 3: "23/375"}
+    dims: [1, 2, 3]
+    ft_expected: negative_lobe
+    packing:
+      value: 1.203
+      reference_N_H: 60
+      code_factor: 1.0
+    known_issues: []
+
+  quintic:
+    code_name: QuinticSpline
+    source: "Dehnen & Aly 2012, Table 1 (quintic spline b6)"
+    shape:
+      expr: "(1.0-q)**5 - 6.0*pos(2.0/3.0-q)**5 + 15.0*pos(1.0/3.0-q)**5"
+    C: {1: "243/40", 2: "15309/(478*pi)", 3: "2187/(40*pi)"}
+    sigma2: {1: "1/18", 2: "2771/51624", 3: "7/135"}
+    dims: [1, 2, 3]
+    ft_expected: negative_lobe
+    packing:
+      value: 1.8222875           # 1.595 (Table 2, N_H=180) * 1.1425 (code)
+      reference_N_H: 180
+      code_factor: 1.1425        # CRKSPH alignment (in-code comment)
+      note: "deliberate code factor (in-code comment, quinticSpline.py)"
+    known_issues: []
+
+  wendland2:
+    code_name: Wendland2
+    source: "Dehnen & Aly 2012, Table 1 (Wendland C2: psi_2,1 in 1D, psi_3,1 in 2D/3D)"
+    shape_by_dim:
+      "1": "pos(1.0-q)**3 * (1.0 + 3.0*q)"
+      "2": "pos(1.0-q)**4 * (1.0 + 4.0*q)"
+      "3": "pos(1.0-q)**4 * (1.0 + 4.0*q)"
+    C: {1: "5/4", 2: "7/pi", 3: "21/(2*pi)"}
+    sigma2: {1: "2/21", 2: "5/72", 3: "1/15"}
+    dims: [1, 2, 3]
+    ft_expected: nonnegative
+    packing:
+      value: 1.487
+      reference_N_H: 100
+      code_factor: 1.0
+    known_issues: []
+
+  wendland4:
+    code_name: Wendland4
+    source: "Dehnen & Aly 2012, Table 1 (Wendland C4: psi_3,2 in 1D, psi_4,2 in 2D/3D)"
+    shape_by_dim:
+      "1": "pos(1.0-q)**5 * (1.0 + 5.0*q + 8.0*q**2)"
+      "2": "pos(1.0-q)**6 * (1.0 + 6.0*q + 35.0/3.0*q**2)"
+      "3": "pos(1.0-q)**6 * (1.0 + 6.0*q + 35.0/3.0*q**2)"
+    C: {1: "3/2", 2: "9/pi", 3: "495/(32*pi)"}
+    sigma2: {1: "1/15", 2: "7/132", 3: "2/39"}
+    dims: [1, 2, 3]
+    ft_expected: nonnegative
+    packing:
+      value: 1.643
+      reference_N_H: 200
+      code_factor: 1.0
+    known_issues: []
+
+  wendland6:
+    code_name: Wendland6
+    source: "Dehnen & Aly 2012, Table 1 (Wendland C6: psi_4,3 in 1D, psi_5,3 in 2D/3D)"
+    shape_by_dim:
+      "1": "pos(1.0-q)**7 * (1.0 + 7.0*q + 19.0*q**2 + 21.0*q**3)"
+      "2": "pos(1.0-q)**8 * (1.0 + 8.0*q + 25.0*q**2 + 32.0*q**3)"
+      "3": "pos(1.0-q)**8 * (1.0 + 8.0*q + 25.0*q**2 + 32.0*q**3)"
+    C: {1: "55/32", 2: "78/(7*pi)", 3: "1365/(64*pi)"}
+    sigma2: {1: "2/39", 2: "3/70", 3: "1/24"}
+    dims: [1, 2, 3]
+    ft_expected: nonnegative
+    packing:
+      value: 1.866
+      reference_N_H: 400
+      code_factor: 1.0
+    known_issues: []
+
+  # ------------------------------------------------------------------
+  # b7 / b8: members of the D&A b_n family,
+  #   b_n(q) = sum_{i=0}^{floor((n-1)/2)} (-1)^i C(n,i) ((n-2i)/n - q)_+^(n-1)
+  # (Schoenberg B-spline of order n, eq. 11's closed form; verified to
+  # machine precision against the shipped b4/b5/b6, 2026-09-18).
+  # Neither is tabulated in D&A Table 1 (which lists b4-b6); both C and
+  # sigma2 below are shape-derived (exact).
+  #   b7 = family b_7 (order 7, degree 6): 4 terms, knots 1/7, 3/7, 5/7.
+  #       3D FT has a small negative lobe (min ~ -3.2e-6, first zeros
+  #       ~ 21.97 / 22.02 / 31.45) -> barely pairing-unstable.
+  #   b8 = family b_8 (order 8, degree 7): 4 terms, knots 1/4, 1/2, 3/4
+  #       (this is what the code used to ship as "B7"). 3D FT
+  #       non-negative up to the noise floor -> pairing-stable.
+  # The 1D pattern sigma2/H2 = 1/(3n) (stated in the paper: b_n ->
+  # N(0, H^2/3n)) holds exactly for all n: 1/21 (b7), 1/24 (b8).
+  # ------------------------------------------------------------------
+  b7:
+    code_name: B7
+    source: >
+      D&A 2012 eq. (11) B-spline family member b_7 (order 7, degree 6).
+      Not tabulated in D&A Table 1 (which lists b4-b6); C and sigma2
+      derived exactly from the shape (2026-09-18). The 1D moment is
+      exactly on the family pattern sigma2/H2 = 1/(3n) (n = 7 -> 1/21).
+    shape:
+      expr: "pos(1.0-q)**6 - 7.0*pos(5.0/7.0-q)**6 + 21.0*pos(3.0/7.0-q)**6 - 35.0*pos(1.0/7.0-q)**6"
+    C: {1: "823543/92160", 2: "5764801/(113149*pi)", 3: "5764801/(61440*pi)"}
+    sigma2: {1: "1/21", 2: "7691281/166329030", 3: "11/245"}
+    dims: [1, 2, 3]
+    ft_expected: negative_lobe
+    packing:
+      value: 1.8222875           # 1.595 * 1.1425, same convention as the other code B-splines
+      reference_N_H: null        # no Table-2 reference (not in the paper)
+      code_factor: 1.1425
+      note: "no independent reference; inherited convention"
+    known_issues: []
+
+  b8:
+    code_name: B8
+    source: >
+      D&A 2012 eq. (11) B-spline family member b_8 (order 8, degree 7).
+      Not tabulated in D&A Table 1 (which lists b4-b6). This is the
+      kernel the code used to ship as "B7" (named by degree, D&A index
+      by order); renamed 2026-09-18, at which point kernelScale was
+      fixed from the copied quintic row to the shape-derived values.
+      The 1D moment is exactly on the family pattern sigma2/H2 = 1/(3n)
+      (n = 8 -> 1/24).
+    shape:
+      expr: "pos(1.0-q)**7 - 8.0*pos(0.75-q)**7 + 28.0*pos(0.5-q)**7 - 56.0*pos(0.25-q)**7"
+    C: {1: "4096/315", 2: "589824/(7435*pi)", 3: "16384/(105*pi)"}
+    sigma2: {1: "1/24", 2: "531453/13085600", 3: "19/480"}
+    dims: [1, 2, 3]
+    ft_expected: nonnegative
+    packing:
+      value: 1.8222875           # 1.595 * 1.1425, same convention as the other code B-splines
+      reference_N_H: null        # no Table-2 reference (not in the paper)
+      code_factor: 1.1425
+      note: "no independent reference; inherited convention"
+    known_issues: []

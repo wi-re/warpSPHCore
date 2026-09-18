@@ -1,0 +1,346 @@
+# =============================================================================
+# Reference data for the Dehnen & Aly (2012) replication.
+#
+# Single source of truth: every script, notebook and report in this folder
+# reads the paper's numbers from here instead of re-quoting them. Values are
+# transcribed from the PDF (warpSPH/literature/dehnen2012_convergence-
+# without-pairing-instability.pdf), the read2010 kernel definition
+# (warpSPH/literature/read2010_resolving-mixing-sph.pdf) and the read2012
+# SPHS formulation (warpSPH/literature/read2012_sphs-higher-order-
+# dissipation-switch.pdf), and from the validated warpSPH Riemann solver
+# (warpSPH/src/warpSPH/caseUtils/compressible/sod/sodSolution.py).
+#
+# NOTATION PIN (load-bearing for every file in this folder):
+#   * the CODE smoothing length `h` is the PAPER'S support radius H
+#     (the warpSPHCore kernels are W(r) = C_d/h^nu f(r/h) with f(r/H)=0 for
+#      r/H > 1, so the code `h` plays the role of the paper's H);
+#   * the PAPER's resolution scale h (eq. 8, h = 2 sigma) is
+#     `h_paper = h_code / kernelScale(kernel, dim)`;
+#   * eq. 8 carries a 1/nu factor as printed:
+#     sigma^2 = nu^-1 int |x|^2 W d^nu x  (variance of ONE Cartesian
+#     component, not of |x|). Dropping it overestimates sigma^2/H^2 by
+#     exactly a factor of nu. All sigma values in this file use the
+#     paper's convention; the code's kernelScale(kernel, dim) = H/h
+#     satisfies H/h = 1/(2 sqrt(sigma^2/H^2)) and matches Table 1.
+#   * N_H = V_nu H^nu (rho/m)  -- particles inside the support radius H;
+#   * N_h = V_nu h^nu (rho/m)  = N_H / kernelScale^nu  -- the paper's
+#     "particle number in a resolution volume";
+#   * densest-sphere packing: n = sqrt(2) * d_nn^-3 (3D FCC).
+# =============================================================================
+
+paper:
+  key: dehnen2012
+  title: Improving convergence in smoothed particle hydrodynamics simulations
+    without pairing instability
+  venue: MNRAS 425(2), 1068-1088 (2012)
+  arxiv: "1204.2471v2"
+  pdf: warpSPH/literature/dehnen2012_convergence-without-pairing-instability.pdf
+  equation_numbers: "as printed in v2 (eq. 3 conservative form, eq. 8 sigma,
+    eqs. 14-17 FT/pairing, eqs. 18-19 density correction, eqs. 21-29 P-matrix,
+    eqs. 30-32 q_min, eqs. 33a/b Gresho-Chan IC, eqs. 46-51 HOCT4 via read2010)"
+
+# ---------------------------------------------------------------------------
+# Table 1 (paper p. 1075): kernel constants C (normalisation) and sigma^2/H^2
+# per dimension, plus H/h = 1/(2 sqrt(sigma^2/H^2)).
+# C is the normalisation of the DIMENSIONLESS shape f(q) in W = C f(q)/h^nu.
+# (The warpSPHCore `eval_C_d` values are the same C for every kernel we ship.)
+# ---------------------------------------------------------------------------
+table1:
+  # name: [C_1, C_2, C_3, sigma2_1, sigma2_2, sigma2_3, Hh_1, Hh_2, Hh_3]
+  cubic_b4:        # (1-r)^3+ - 4(1/2-r)^3+
+    shape: "f(q) = (1-q)^3+ - 4(1/2-q)^3+"
+    C: [8/3, 80/(7*pi), 16/pi]
+    sigma2_over_H2: [1/12, 31/392, 3/40]
+    H_over_h: [1.732051, 1.778002, 1.825742]
+    code_kernel: CubicSpline
+  quartic_b5:
+    shape: "f(q) = 1 - 2.5 q^2 + 3 q^3 - 1.25 q^4  (0<=q<=1, B-spline form)"
+    C: [3125/768, 46875/(2398*pi), 15625/(512*pi)]
+    sigma2_over_H2: [1/15, 9759/152600, 23/375]
+    H_over_h: [1.936492, 1.977173, 2.018932]
+    code_kernel: QuarticSpline
+  quintic_b6:
+    shape: "f(q) = 1 - 3.5 q^2 + 21/2 q^3 - 35/4 q^4 + 7/4 q^5 (0<=q<=1)"
+    C: [243/40, 15309/(478*pi), 2187/(40*pi)]
+    sigma2_over_H2: [1/18, 2771/51624, 7/135]
+    H_over_h: [2.121321, 2.158131, 2.195775]
+    code_kernel: QuinticSpline
+  wendland_C2:     # psi_3,1 (2D/3D) / psi_2,1 (1D)
+    shape: "f(q) = (1-q)^4+ (1 + 4 q)"
+    C: [null, 7/pi, 21/(2*pi)]
+    sigma2_over_H2: [null, 5/72, 1/15]
+    H_over_h: [null, 1.897367, 1.936492]
+    code_kernel: WendlandC2
+    note: 1D row uses psi_2,1 = (1-q)^3+ (1+3 q), C=5/4, H/h=1.620185 (paper
+      prints the 1D Wendland rows separately; not used in the 3D replication)
+  wendland_C4:     # psi_4,2 (2D/3D) / psi_3,2 (1D)
+    shape: "f(q) = (1-q)^6+ (1 + 6 q + 35/3 q^2)"
+    C: [null, 9/pi, 495/(32*pi)]
+    sigma2_over_H2: [null, 7/132, 2/39]
+    H_over_h: [null, 2.171239, 2.207940]
+    code_kernel: WendlandC4
+    note: 1D row uses psi_3,2 = (1-q)^5+ (1 + 5 q + 8 q^2), C=3/2, H/h=1.936492
+  wendland_C6:     # psi_5,3 (2D/3D) / psi_4,3 (1D)
+    shape: "f(q) = (1-q)^8+ (1 + 8 q + 25 q^2 + 32 q^3)"
+    C: [null, 78/(7*pi), 1365/(64*pi)]
+    sigma2_over_H2: [null, 3/70, 1/24]
+    H_over_h: [null, 2.415230, 2.449490]
+    code_kernel: WendlandC6
+    note: 1D row uses psi_4,3 = (1-q)^7+ (1 + 7 q + 19 q^2 + 21 q^3),
+      C=55/32, H/h=2.207940
+  hoct4:
+    see: hoct4_definition
+    C: [null, null, 6.5150499306]
+    sigma2_over_H2: [0.0505294124, 0.0520086521, 0.0521407118]
+    H_over_h: [2.224323, 2.192463, 2.189684]
+    code_kernel: HOCT4 (added in Phase 3; kernelScale = 2.189684410)
+    note: C and sigma2 from the verified read2010 definition (below); the
+      paper's own table lists 3D only (N=6.52, sigma^2/H^2 not printed).
+      D&A's quoted "sigma ~ 0.228343 H" is EXACTLY the 3D value of the
+      verified kernel under the eq.-8 convention (0.228343408 H) --
+      consistent, no discrepancy.
+  gaussian:
+    shape: "f(q) = exp(-0.5 (8 q)^2), 16-sigma truncation (q<=1, sigma = H/16)"
+    C: [sqrt(32/pi), 32/pi, (32/pi)**1.5]
+    sigma2_over_H2: [1/256, 1/256, 1/256]
+    H_over_h: [8.0, 8.0, 8.0]
+    code_kernel: Gaussian (added in Phase 3; kernelScale = 8.0)
+    note: the paper's Gaussian rows are tabulated by N_h = 10 and 20, not by
+      N_H, because the Gaussian has no finite support; with the 16-sigma
+      truncation N_H = 5120 (3D) corresponds to N_h = 10.
+
+# ---------------------------------------------------------------------------
+# Table 2 (paper p. 1076): particle numbers per kernel at equal
+# "resolution" (same h/d_nn per row group), densest-sphere packing, 3D.
+# d_nn = nearest-neighbour spacing; n = sqrt(2) d_nn^-3.
+# ---------------------------------------------------------------------------
+table2:
+  # [N_H, N_h, h_over_dnn, h_rho13]
+  cubic:    [[42, 6.90, 1.052, 1.181], [55, 9.04, 1.151, 1.292]]
+  quartic:  [[60, 7.29, 1.072, 1.203]]
+  quintic:  [[180, 17.00, 1.421, 1.595]]
+  wendland_C2:  [[100, 13.77, 1.325, 1.487]]
+  wendland_C4:  [[200, 18.58, 1.464, 1.643]]
+  wendland_C6:  [[400, 27.22, 1.662, 1.866]]
+  hoct4:    [[442, 42.10, 1.923, 2.158]]
+  gaussian:
+    - {N_h: 10, h_over_dnn: 1.191, h_rho13: 1.337}
+    - {N_h: 20, h_over_dnn: 1.500, h_rho13: 1.684}
+
+# ---------------------------------------------------------------------------
+# Eq. 18-19: density correction  rho_hat_corr = rho_hat - eps * m * W(0, H)
+# with  eps = eps_100 * (N_H / 100)^(-alpha)
+# (3D constants; only the three Wendland kernels are fitted in the paper)
+# ---------------------------------------------------------------------------
+density_correction:
+  wendland_C2:  {eps_100: 0.0294,  alpha: 0.977}
+  wendland_C4:  {eps_100: 0.01342, alpha: 1.579}
+  wendland_C6:  {eps_100: 0.0116,  alpha: 2.236}
+
+# ---------------------------------------------------------------------------
+# Pairing (clumping) test, section 4.1, Fig. 8
+# ---------------------------------------------------------------------------
+pairing_test:
+  particles: 32000
+  domain: "unit cube, periodic"
+  ic: "densest-sphere (FCC) packing + Gaussian offsets, 1D sigma = d_nn,
+    xdot = 0 (no velocity), viscous heating suppressed"
+  observable: "number of particle pairs closer than the initial d_nn;
+    reported per kernel"
+  thresholds:
+    cubic: "gradual growth, > 55 pairs (min q_min ~ 0.16)"
+    quartic: "> 67 pairs"
+    quintic: "> 190 pairs"
+    wendland: "no pairing up to 700 pairs (clean)"
+
+# ---------------------------------------------------------------------------
+# Gresho--Chan 2D vortex, section 4.2, Fig. 10
+# ---------------------------------------------------------------------------
+gresho_chan:
+  equations: "eqs. 33a/33b, P0 = 5"
+  pressure:
+    band1_R_lt_0.2:   "P = P0 + 12.5 R^2"
+    band2_0.2_le_R:   "P = P0 + 12.5 R^2 + 4 - 20 R + 4 ln(5 R)"
+    band3_ge_0.4:     "P = P0 + 2 (2 ln 2 - 1)"
+  velocity_phi:
+    band1_R_lt_0.2:   "v_phi = 5 R"
+    band2_0.2_le_R:   "v_phi = 2 - 5 R"
+    band3_ge_0.4:     "v_phi = 0"
+  continuity_check: "dP/dR = v_phi^2 / R verified in each band"
+  resolution: [51, 102, 203, 406]        # N_1D per side
+  final_time: 1.0
+  control: "P0 = 0 run (pressure-free initial state)"
+  metric: "L1 velocity error vs N_1D (Fig. 10)"
+  note: "warpSPH gets this as a compressible-scheme example in Phase 6."
+
+# ---------------------------------------------------------------------------
+# Sod shock tube, section 4.3, Fig. 11
+# ---------------------------------------------------------------------------
+sod:
+  final_time: 0.2
+  metric: "L1 error over -0.4 < x < 0.5, 3D, glass-like ICs,
+    particles with |y|,|z| < 0.005 sliced onto x"
+  kernel_combos: "the six kernel-N_H pairs of Fig. 10 (one particle number N)"
+  # INITIAL CONDITIONS -- the paper text does NOT state the Riemann states.
+  # Working assignment (verified 2026-09-17 against the validated warpSPH
+  # Riemann solver): the discontinuity positions quoted in the paper
+  # (contact ~ 0.17, shock ~ 0.378 at t = 0.2) match the R&H 2012 problem,
+  # NOT the warpSPH cases/sodND.py problem:
+  #   problem A (warpSPH sodND):  (rho,p,u) L=(1,1,0)  R=(0.25,0.1795,0)
+  #     p* = 0.42173481, rho* = 0.59569461, u* = 0.61421477,
+  #     rho_post = 0.40940209, S_shock = 1.57752517
+  #     t=0.2: head=-0.258199, foot=-0.094408, contact=0.122843, shock=0.315505
+  #   problem B (R&H 2012):       (rho,p,u) L=(1,1,0)  R=(0.125,0.1,0)
+  #     p* = 0.29394519, rho* = 0.47968906, u* = 0.84119485,
+  #     rho_post = 0.22980575, S_shock = 1.84447337
+  #     t=0.2: head=-0.258199, foot=-0.033880, contact=0.168239, shock=0.368895
+  #   paper quotes contact ~0.17, shock ~0.378 -> problem B (contact off by
+  #   1%, shock off by 2.4%, within SPH smearing of the velocity jump);
+  #   problem A is off by 38% / 19.6%. D&A's "artificial conductivity similar
+  #   to Read & Hayfield (2012)" makes adopting their exact test plausible.
+  # CONFIRM on the first Phase-7 run against the exact-solution overlay.
+  working_ic:
+    gamma: 5/3
+    left:  {rho: 1.0,   p: 1.0,  u: 0.0}
+    right: {rho: 0.125, p: 0.1,  u: 0.0}
+    riemann:
+      p_star: 0.29394519
+      rho_star: 0.47968906
+      u_star: 0.84119485
+      rho_post: 0.22980575
+      shock_speed: 1.84447337
+      t02: {head: -0.258199, foot: -0.033880, contact: 0.168239, shock: 0.368895}
+  alternative_ic_warpSPH_sodND:
+    gamma: 5/3
+    left:  {rho: 1.0,  p: 1.0,    u: 0.0}
+    right: {rho: 0.25, p: 0.1795, u: 0.0}
+    riemann:
+      p_star: 0.42173481
+      rho_star: 0.59569461
+      u_star: 0.61421477
+      rho_post: 0.40940209
+      shock_speed: 1.57752517
+      t02: {head: -0.258199, foot: -0.094408, contact: 0.122843, shock: 0.315505}
+
+# ---------------------------------------------------------------------------
+# HOCT4 kernel -- VERIFIED definition (read2010 eqs. 46-51; cross-checked
+# against the CT kernel of the same paper, which normalises to the printed
+# N formula with ratio 1.000000). W(r) = N/H^3 f(x), x = r/H, nk = 4,
+# beta = 0.5, gamma = 0.75.  A and B are exact rationals:
+# ---------------------------------------------------------------------------
+hoct4_definition:
+  nk: 4
+  beta: 0.5
+  gamma: 0.75
+  A: 3.2            # (1 - beta^2) / (gamma^(nk-3) (gamma^2 - beta^2)), exact
+  B: -18.8          # -(1 + A gamma^(nk-1)) / beta^(nk-1), exact
+  alpha: 0.214108111463   # root of (1-a)^(nk-2) + A (gamma-a)^(nk-2) + B (beta-a)^(nk-2) = 0
+                         # (nk=4: 14.6 a^2 - 12 a + 1.9 = 0, smaller root)
+  P: -2.154228492776      # eq. 49
+  Q: 0.981018558675       # eq. 50
+  pieces:
+    "0 <= x <= alpha":      "f(x) = P x + Q"
+    "alpha < x <= beta":    "f(x) = (1-x)^4 + A (gamma-x)^4 + B (beta-x)^4"
+    "beta < x <= gamma":    "f(x) = (1-x)^4 + A (gamma-x)^4"
+    "gamma < x <= 1":       "f(x) = (1-x)^4"
+    "x > 1":                "f(x) = 0"
+  N_3d: 6.5150499306      # 4 pi int_0^1 f x^2 dx = 1/N; paper Table 1: 6.52
+  N_2d: 3.7158334191
+  N_1d: 2.0684349363
+  # sigma^2/H^2, paper eq. 8 convention (1/nu factor included):
+  sigma2_over_H2: {1d: 0.0505294124, 2d: 0.0520086521, 3d: 0.0521407118}
+  # the full second moment int |x|^2 W d^nu x (nu * the paper's sigma^2):
+  sigma2_x2_over_H2: {1d: 0.0505294124, 2d: 0.1040173042, 3d: 0.1564221355}
+  H_over_h: {1d: 2.224323, 2d: 2.192463, 3d: 2.189684}   # 1/(2 sqrt(sigma2/H2))
+  values:
+    f_at_alpha: 0.5197807644
+    f_at_beta: 0.075
+    f_at_gamma: 0.00390625
+    W0_H3: 6.3913848926   # N * f(0)
+  properties:
+    - "C^2-continuous at alpha, beta, gamma"
+    - "monotonically decreasing"
+    - "central cusp: f'(0) = P != 0 ('constant central core to the kernel
+      gradient' / triangular central spike -- by design, not a bug)"
+  consistency_with_DA: "D&A 2012 quotes sigma ~ 0.228343 H for HOCT4, which
+    is EXACTLY the verified kernel's 3D sigma under the eq.-8 convention
+    (0.228343408 H; the initial impression of a discrepancy came from
+    missing the 1/nu factor in eq. 8). D&A's Table 2 HOCT4 row is fully
+    reproduced by the verified kernel: N_h = 442/2.189684^3 = 42.0996
+    (paper 42.10), h/d_nn = 1.92261 (paper 1.923), h(rho/m)^(1/3) =
+    2.15806 (paper 2.158). The kernel as printed is exactly what D&A used."
+
+# ---------------------------------------------------------------------------
+# R&H 2012 SPHS formulation (read2012, MNRAS 422(4):3037; all eqs below are
+# the paper's numbering) -- the "artificial conductivity similar to R&H 2012"
+# that D&A use at the Sod contact. Built into the compressible scheme in
+# Phase 6.
+# ---------------------------------------------------------------------------
+rnh2012_sphs:
+  switch_eq21: "alpha_loc,i = h_i^2 |grad(div v_i)| / (h_i^2 |grad(div v_i)|
+    + h_i |div v_i| + ns c_s^max)  if div v_i < 0, else 0"
+  parameters:
+    ns: 0.05          # "noise" parameter
+    alpha_max: 1.0    # per-variable, default 1
+    alpha_min: 0.2
+    balsara_const: 1.0e-4   # eq. 32
+  relaxation:
+    eq22: "alpha_i = alpha_loc,i  if alpha_i < alpha_loc,i (instantaneous up)"
+    eq23: "alpha_dot_i = (alpha_loc,i - alpha_i)/tau_i  if alpha_min < alpha_loc,i < alpha_i;
+      = (alpha_min - alpha_i)/tau_i  if alpha_min > alpha_loc,i"
+    eq24: "tau_i = h_i / v_max,i"
+    eq25: "v_max,i = max_j v_sig,ij ;  v_sig,ij = c_i + c_j - 3 w_ij ;
+      w_ij = (v_ij . r_ij)/|r_ij|"
+  gradient_estimator: "second-order (Maron & Howes 2003 style) polynomial fit,
+    10x10 moment matrix in 3D (10 coefficients); gradients at x=0 from
+    a1..a3, second derivatives from a4..a9; grad(div v) and curl v come from
+    the same fit"
+  viscosity:
+    eq29: "v_dot_diss,i = - sum_j m_j pi_ij grad_i W_ij"
+    eq30: "pi_ij = -alpha_ij v_sig,ij w_ij / rho_ij  if v_ij . r_ij < 0, else 0"
+    eq31: "alpha_ij = (alpha_i + alpha_j)/2 ;
+      A_dot_diss,i = -(1/(2 rho_i^(gamma-1))) sum_j m_j alpha_ij pi_ij (v_ij . grad_i W_ij)"
+  balsara_eq32: "f_Balsara,i = |div v_i| / (|div v_i| + |curl v_i| +
+    0.0001 c_i / h_i), multiplies alpha_i"
+  entropy_dissipation:
+    eq33: "A_dot_diss,i = sum_j (m_j/rho_ij) alpha_ij v_sig,ij^p L_ij
+      (A_i - A_j) (rho_j/rho_i)^(gamma-1) K_ij"
+    eq34: "v_sig,ij^p = c_i + c_j - 3 w_ij  if 3 w_ij < c_i + c_j, else 0"
+    eq35: "L_ij = |P_i - P_j|/(P_i + P_j) ;  K_ij = r_hat_ij . grad_i W_ij
+      (symmetric)"
+    entropy_function: "A with P = rho^gamma A"
+  mass_dissipation:
+    eq36: "m_dot_diss,i = sum_j (m_ij/rho_ij) alpha_ij v_sig,ij^p L_ij
+      (m_i - m_j) K_ij  (multimass runs only)"
+    eq39: "v_dot_diss,i = -(m_dot_diss,i/m_i) v_i"
+    eq40: "A_dot_diss,i = (gamma-1) m_dot_diss,i/(2 rho_i^(gamma-1) m_i)
+      [v_i . v_i] - (m_dot_diss,i/m_i) A_i ;  m_ij = (m_i + m_j)/2"
+  sod_setup_phase6: "domain [-0.5, 0.5], (rho, P, v) L=(1.0,1.0,0) R=(0.125,0.1,0),
+    gamma=5/3, 3D, 32x32x400 + 16x16x200 lattice, N_1D=600, t=0.2, initial
+    alpha=1 on -0.05 < x < 0.05, 'pressure blip at x ~ 0.2'"
+
+# ---------------------------------------------------------------------------
+# Gaussian convention for the core library (Phase 3)
+# ---------------------------------------------------------------------------
+gaussian_convention:
+  # Agreed convention for the core library (Phase 3). Code h = support H;
+  # the Gaussian is truncated at 16 sigma, i.e. H = 16 sigma, so in units of
+  # the paper's resolution scale h_paper = 2 sigma the support is
+  # H/h_paper = 8  ->  kernelScale = 8.0. Shape in q = r/H units:
+  #   f(q) = exp(-0.5 (8 q)^2),   f(1) = exp(-32) ~ 1.3e-14 (negligible).
+  # Normalisation C_d = (32/pi)^(nu/2) so that int f d^nu x / H^nu = 1.
+  truncation: "16 sigma (H = 16 sigma)"
+  kernelScale: 8.0
+  shape: "f(q) = exp(-0.5 (8 q)^2), q = r/H, zero for q > 1"
+  C_d: "(32/pi)^(nu/2)"
+  packingRatio: 1.337
+  N_H_at_Nh_10_3d: 5120          # N_H = N_h * kernelScale^3 = 10 * 512
+
+# ---------------------------------------------------------------------------
+# Scheme / solver context (D&A section 4 preamble)
+# ---------------------------------------------------------------------------
+scheme:
+  form: "conservative SPH, eq. 3; 3D periodic"
+  eos: "P = K rho^(5/3) (gamma = 5/3)"
+  viscosity: "C&D 2010 (XSPH-style switch; 'invokes dissipation only for
+    compressive flows') + artificial conductivity similar to R&H 2012"

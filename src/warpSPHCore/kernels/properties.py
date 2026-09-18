@@ -17,11 +17,21 @@ def sphKernelScale(kernel: wp.int32, dim: wp.int32):
 def sphKernelC_d(kernel: wp.int32, dim: wp.int32):
     return eval_C_d(dim, kernel)
 
+# Unit-ball volumes per dimension. Kept as module-level Python floats and
+# wrapped as single scalar_t leaves: warp traces Python constant BinOps as
+# int32/float32 mixes that fail to compile under a float64 build.
+_NU1_VOLUME = 2.0
+_NU2_VOLUME = float(np.pi)
+_NU3_VOLUME = float(4 * np.pi / 3.0)
+
 @wp.func
 def sphKernelN_H(kernel: wp.int32, dim: wp.int32):
     packingRatio = eval_packing(kernel)
-    fac = scalar_t(2.0) if dim == 1 else (np.pi if dim == 2 else 4 * np.pi / 3)
-    N = fac * packingRatio**dim * eval_kernelScale(kernel, dim)**dim
+    fac = scalar_t(_NU1_VOLUME) if dim == 1 else (scalar_t(_NU2_VOLUME) if dim == 2 else scalar_t(_NU3_VOLUME))
+    # wp.pow with scalar_t exponents: a runtime `**dim` (int32) has no
+    # float64 overload (only the float32 build ever compiled this function
+    # before the kernel audit, which runs float64).
+    N = fac * wp.pow(packingRatio, scalar_t(dim)) * wp.pow(eval_kernelScale(kernel, dim), scalar_t(dim))
     return N
 
 @wp.func
