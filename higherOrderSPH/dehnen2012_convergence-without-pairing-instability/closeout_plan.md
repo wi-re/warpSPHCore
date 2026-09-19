@@ -1,0 +1,134 @@
+# Closeout plan — D&A 2012 replication (post-Phase 6)
+
+> **Resume protocol:** Phases 0–6 are complete. Read `PLAN.md` (Phase 5
+> STATUS, Phase 6 status, Phase 8), then this file. Check `git status` /
+> `git log -n 5` in BOTH repos (`warpSPHCore` and sibling `warpSPH`) to see
+> what has landed; continue at the first unchecked item. Append dated
+> progress notes to the **Progress log** at the bottom as items complete.
+>
+> **Environment:** conda env `warp` (`/home/lu26029/miniconda3/envs/warp/
+> bin/python`); cap BLAS threads (`OMP_NUM_THREADS=2`) for all numerics —
+> shared box; everything here runs on CPU. Do NOT push. Scratch files go in
+> the repo's `.tmp/` (gitignored). Commit per completed item; check `git log`
+> in each repo for message style.
+
+## Decisions (user, 2026-09-19)
+
+- The five non-D&A kernels (poly6/spiky/adhesion/cohesion/viscosity) are
+  CG-specialty force/Laplacian kernels, **not** general-purpose density
+  kernels → **excluded** from the audit pipeline and from any D&A-convention
+  re-scaling. No code change; document the exclusion in `REPORT.md`.
+- Fix `sampleOptimal` (warpSPH) — explicitly wanted.
+- Fix the `support.py` float32-BinOp constant (warpSPHCore).
+- The eq.-18 ε `renorm` feature is **scoped only** (design note), not built.
+- The high-res 10-kernel stability sweep comes **before** `REPORT.md`.
+
+## Items
+
+### 1. PLAN.md bookkeeping — [x] DONE 2026-09-19
+- Retired the "LIVE WORK LOG (Phase 5)" header banner → now points to the
+  closed logs (here + warpSPH) and this file.
+- Findings log: C&D sign-note row `open — Phase 6` → resolved 2026-09-19.
+- Findings log: Phase-5 force-law/P-matrix row `open — Phase 5` → resolved
+  2026-09-19 (entries d–k).
+- Phase-5 section: STATUS `entries a–h` → `a–l`; the checkbox P-matrix
+  formula was the pre-entry-(i)/(k) form (doubled K, wrong sign,
+  absolute-coordinate phase) → corrected to the validated form
+  `P = 2mB̄ Σ(1−cos k·d0_j)∇∇W(d0_j) + mB̄(γ−2)/ρ̄ Re[Σ ∇W(d0_j)⊗B_j]`.
+
+### 2. Fix the float32-BinOp constants in `src/warpSPHCore/util/support.py` — [ ]
+- `volumeToSupport_warp`, dim == 3 branch: `scalar_t(np.pi * 3.0 /4.0)` and
+  `scalar_t(1.0/3.0)` are evaluated as **float32** constants by the warp
+  tracer even in float64 builds (same bug class as the B7 knot; findings log
+  2026-09-18). Corrupts the (4π/3) volume factor at ~1e-8 relative.
+- Fix: module-level Python-float constants referenced by name (the pattern
+  `kernelFunctions/B7.py` uses for its knots).
+- Verify: a `.tmp/` probe comparing `volumeToSupport_warp` (float64 build)
+  against the exact `(4π/3)·N_H·v` before/after; run any tests covering
+  support computation (grep `tests/` for `volumeToSupport` / `support`).
+- Commit in `warpSPHCore`.
+
+### 3. Fix `sampleOptimal` (`warpSPH/src/warpSPH/sample/optimal.py`) — [ ]
+Three bugs (findings log 2026-09-18):
+1. passes a `ParticleSet` where `warpOperation` / `computeDeltaShiftWarp`
+   need a `ParticleState` → `AttributeError: ... 'kinds'`;
+2. applies the raw delta-shift term (O(1–10), pointing TOWARD neighbours)
+   without the `−CFL·Ma·2·h²` scaling `modules/shifting/delta.py` uses →
+   relaxation diverges (density std 24 %, clumping);
+3. overwrites its lattice start with uniform random points.
+Fix: build/accept a `ParticleState`, use the delta.py-style scaling
+(`scale = −CFL·Ma·2·h²`, CFL 0.3, Ma 0.1 = the no-velocity fallback), keep
+the jittered-lattice start.
+Verify: reproduce the working glass recipe (findings log): 16³ regular
+lattice + 0.1·dx Gaussian jitter (seed 42), Wendland C² at N_H = 50,
+1000 iters → density std ≈ 0.30 %, nn/dx ≈ 0.86, no clumping; compare
+against the cached reference `.tmp/glass_N4096_L1.0_seed42.npz`
+(rebuild it in warpSPH's own `.tmp/` if not present).
+Commit in `warpSPH`.
+
+### 4. Scope the `renorm` ε feature (warpSPHCore) — [ ] (scope ONLY)
+Paper eq. 18/19 (`data/da2012_reference.yaml` → `density_correction`):
+`rho_corr = rho_hat − ε·m·W(0, H)` with `ε = ε₁₀₀·(N_H/100)^(−α)`; 3D
+constants W2 (0.0294, 0.977), W4 (0.01342, 1.579), W6 (0.0116, 2.236); our
+Phase-4 refits agree within ×1.04. Deliverable = a short design note
+(REPORT.md appendix or its own file) answering:
+- **Hook point:** where in the density path the correction applies
+  (warpSPHCore density function vs warpSPH scheme); it is per-particle.
+- **N_H at density time:** N_H must be recovered per particle from support +
+  density, `N_H = V_3·H³·ρ̂/m` — check what is available at the hook point.
+- **W(0,H) convention:** must be the physical central value
+  `W(0) = C_d·f(0)/H³` at the support radius (parameterisation-invariant);
+  evaluating at h = H/kernelScale is wrong by kernelScale³ (findings log
+  2026-09-18, fig03 gotcha).
+- **Constants:** only the three Wendland kernels have paper constants —
+  per-kernel table vs refit; W2 is the default-kernel candidate.
+- **`calibrateNormalization` interaction:** that is a *different* correction
+  (lattice renormalisation) — do not conflate; decide coexistence.
+- **Tests (for when it is built):** unit check reproducing the fig03 result
+  (corrected FCC within 0.10–2.40 % of 1 over 40 ≤ N_H ≤ 400, all three
+  Wendland kernels).
+Not implemented in the closeout; `REPORT.md` carries the scope +
+recommendation.
+
+### 5. 10-kernel stability sweep, high-res fig04/05/06 — [ ]
+Current `fig04_fig05_stability_contours.py` grid is **14 h/d_nn × 26
+|k|d_nn** per direction — too coarse for the paper's contours ("fig 4 needs
+much higher nx/ny resolution"). Steps:
+- Add a CLI resolution flag (e.g. `--grid NH×KDN`) to the fig04/05 script
+  (keep the current grid as default). Target ≈ 60 N_H (log) × 200 |k|d_nn
+  (log); tune after the timing probe.
+- **Timing probe first:** time one kernel (cubic_b4) at the target grid,
+  extrapolate to 10 kernels × 2 directions. The Gaussian (N_H up to 5120)
+  is the most expensive point — if its cost is unreasonable, document a
+  reduced N_H range for it.
+- **Cache:** save each kernel's (lon, tr; 111, 110) fields to
+  `results/stability_<kernel>.npz` (gitignored) and load-if-present, so an
+  interrupted sweep resumes and figures regenerate without recompute.
+- Run all ten `STABILITY_ORDER` kernels (`--kernel` enables split runs).
+- Verify the Phase-5 acceptance boundaries from the fields: cubic ≲ 55,
+  quartic ≈ 67, quintic ≈ 190 (+ small-N_H island near 100), Wendland C²
+  island near 40, HOCT4 island near 150, clean otherwise; the cubic long-λ
+  dip (|k|d_nn ≈ 0.3–0.6, all N_H 40–100) must be clearly resolved — it is
+  the documented Phase-5 discrepancy.
+- Regenerate fig04/05 (per-kernel, as now) and fig06 (all kernels; raise its
+  kdn grid from 30 points to match) at the new resolution.
+
+### 6. `REPORT.md` — [ ] (after 5)
+Per PLAN Phase 8:
+- Per-figure comparison, paper vs replication: Figs 1–6 + figA, Tables 1–2
+  (note the Phase-4 glass-proxy caveat and the no-image-input limitation:
+  PNGs are for the user's visual check).
+- The discrepancy table from the findings log, including the Phase-5 cubic
+  long-λ instability (the one open `[ ]` in Phase 5) with its hypotheses
+  (`phase5_stability_log.md` entry f).
+- Implications for `warpSPHCore` kernel defaults: Wendland2 + its N_H; the
+  B7→B8 rename + classical-B7 outcome; the `renorm` ε scope (item 4); the
+  Phase-3 kernel additions; the Phase-6 frontend work (C&D sign resolution
+  B11, R&H SPHS module, 1D/2D/3D Sod validation numbers from the warpSPH
+  phase-6 log).
+- Closeout `src/` decisions: the support.py BinOp fix (item 2), the
+  `sampleOptimal` fix (item 3), and the exclusion of the five specialty
+  kernels (decisions above).
+
+## Progress log
+- 2026-09-19: closeout plan created; item 1 (PLAN.md bookkeeping) done.
