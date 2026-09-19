@@ -1,5 +1,11 @@
 # Replication plan — Dehnen & Aly 2012
 
+> **LIVE WORK LOG (Phase 5):** the in-flight linear-stability derivation is
+> tracked step-by-step in **`phase5_stability_log.md`** (next to this file) —
+> pinned facts, the derived P-matrix equations verbatim, every numerical
+> result, and the exact next step. Read it first before resuming Phase 5;
+> it is written so the work survives a session crash mid-prompt.
+
 Goal: replicate the results and evaluations of
 *Improving convergence in SPH simulations without pairing instability*
 (Dehnen & Aly 2012, MNRAS 425, 1068; arXiv:1204.2471) to establish that the
@@ -372,20 +378,58 @@ visual check against the paper's Fig. 3.
 
 Pure numerics on a static FCC equilibrium — no time integration.
 
-- [ ] `stability_p_matrix.py`: P-matrix from eq. (23) with `t(k)` (24a),
-      `T(k)` (24b) on an FCC lattice (converged shell sums); fixed-h and
-      adaptive-h branches (Appendix A; for the constant-density FCC
-      equilibrium ℋ̄ ≈ Π̄ ≈ 1, Ξ̄ ≈ 0, but compute them). EOS P = Kρ^{5/3}.
-- [ ] Analytic cross-checks before plotting: k → 0 (eqs. 25–26, A19),
-      continuum limit (eq. 28), resolved waves (eq. 29), untruncated
-      Gaussian stable.
-- [ ] `fig04_fig05_stability_contours.py`: ω²_∥/c²k² (top),
-      ω²_⊥2/c²k² (bottom) over (|k|·d_nn, h/d_nn), N_H (N_h for the
-      Gaussian) on the right axis; wave directions k ∝ (1,1,1),
-      k ∝ (1,1,0); Fig. 4 = Gaussian + cubic, Fig. 5 = quartic + quintic
-      + HOCT4 (left), Wendland C²–C⁶ (right).
-- [ ] `fig06_sound_speed.py`: c_SPH/c vs |k| for the ten Table-2
-      kernel-N_H combinations, three wave directions, λ = 8h marker.
+**STATUS 2026-09-19 (deliverables COMPLETE — one documented open
+discrepancy; see `phase5_stability_log.md`, entries a–h):** the P matrix
+is now the EXACT linearisation of the actual force (real lattice sums, no
+complex rho^gamma — the complex-step oracle is WRONG for the non-integer
+gamma = 5/3, entry d) and is VALIDATED against the ground-truth real-FD
+Jacobian of the actual force (max|P_fd − P_ex| = the FD truncation error,
+entries e/g). All three figure scripts + the P-matrix script are built,
+with `--kernel`.
+
+- [x] **Probe / oracle built** (`scripts/stability.py` — `StabilityOracle`):
+      complex-safe kernel shape evaluation (f, f′, f″ at complex q), FCC
+      N = 4000 equilibrium (m = 1/4000, d_nn = 0.070711, ρ̄ = 1),
+      minimum-image neighbour lists (list1 < H, list2 < 2H).
+- [x] **Force law pinned** (the eq.-3 PDF text layer is garbled on both
+      the leading sign and the leading mass): ẍ_i = −Σ_j **m_j**[P̂_i/ρ̂_i²
+      ∇W(x_ij,h_i) + P̂_j/ρ̂_j² ∇W(x_ij,h_j)] — the leading MINUS and the
+      explicit m_j are BOTH required, pinned by ẍ → −∇P/ρ.
+- [x] **Complex-step oracle is WRONG for γ = 5/3 (RESOLVED, entry d):**
+      the force contains rho^gamma (non-integer gamma), which is not
+      holomorphic, so the complex step returns the real part of the wrong
+      analytic continuation (the FD↔CS "agreement" of the old probe was
+      only on the real part; a real central difference disagrees by ~227).
+      The old "three-way discrepancy" (oracle 39 / eq.-23 0.44 / derived
+      −0.16) was a SYMPTOM of this bug, not a real disagreement.
+- [x] **The EXACT P matrix (entries a–e, g):** real lattice sums at the real
+      equilibrium, no complex rho^gamma:
+      P = 2mKB̄ Σ_j (1−cos k·x_j) ∇∇W(d0_j) − mKB̄(γ−2)/ρ̄ Σ_j ∇W(d0_j)⊗B_j,
+      with the EXACT density response B_j = −m Σ_k ∇W(x_j−x_k) e^{ik·x_k}
+      (the A9 term the paper's eq.-23 drops). P = −Re[M] (M the
+      travelling-wave matrix). Validated against the ground truth
+      (`scripts/ground_truth.py`, `F0_brute`/`fd_jacobian`): max|P_fd − P_ex|
+      = the central-FD truncation error (a few × 1e0 at h = 1e-6); P symmetric
+      to ~1e-15. The paper's own eq.-23 P agrees to O(FD error) (entry f), so
+      the discrepancy below is NOT the density-response approximation.
+- [x] `stability_p_matrix.py`: the exact P matrix + built-in checks
+      (P symmetric; equilibrium force-free + rho_0 = lattice sum; optional
+      `--fd-check` = the ground-truth real-FD Jacobian), `--kernel`.
+- [x] `fig04_fig05_stability_contours.py`: ω²_∥/c²k² (top),
+      ω²_⊥2/c²k² (bottom) over (|k|·d_nn, N_H); k ∝ (1,1,1) / (1,1,0);
+      red ω² ≤ 0, cyan ω²/c²k² = 1, green 0.95..1.05; `--kernel`.
+- [x] `fig06_sound_speed.py`: c_SPH/c = (ω_k/|k|)/c vs |k|·d_nn (horizontal
+      cuts of the top panels, N_H = 50/100/200/400, k ∝ (1,1,1)), λ = 8h
+      verticals; `--kernel`.
+- [ ] **OPEN — cubic long-λ instability (documented, entry f):** the exact P
+      (and the paper's own eq.-23 P, and the ground-truth force) show the
+      cubic ALREADY unstable (longitudinal ω²_∥ < 0 at |k|d_nn ≈ 0.3–0.6, a
+      LONG wavelength) for ALL N_H 40–100, but the paper's text (Fig 3 / §2.5)
+      says the cubic is "accessible for N_H ≲ 55" (the pairing instability is
+      attributed to Ŵ < 0 at LARGE H|k|). The figures plot the full (|k|, N_H)
+      range so the long-λ dip is visible (the paper's Fig 4 x-axis likely
+      starts at |k|d_nn ≈ 0.5–1, hiding it). To be resolved/documented in the
+      Phase-8 report (hypotheses in entry f).
 
 Acceptance: stability boundaries — cubic ≲ 55, quartic ≈ 67, quintic
 ≈ 190 (+ small-N_H island near 100), Wendland C² island near 40, clean
@@ -518,6 +562,8 @@ Acceptance:
 | 2026-09-17 | Code `h` (kernel functions) = paper's support radius H, not paper's h = 2σ. Notation map in `paper_notes.md`. | informational — all phases |
 | 2026-09-17 | `warpSPH` `CullenDehnen2010.py` carries an unresolved sign note ("the signs here should have been wrong, double check!") plus dead alternate formulations. | open — Phase 6 |
 | 2026-09-17 | Existing `greshoVortex` case is 2D CRKSPH; D&A's test is 3D conservative SPH — build a 3D variant, keep the 2D case as cross-check. | open — Phase 7 |
+| 2026-09-18 | **Phase 5 force law + P-matrix discrepancy.** The eq.-3 PDF text layer is garbled on BOTH the leading sign and the leading mass; the correct conservative-SPH acceleration is ẍ_i = −Σ_j **m_j**[P̂_i/ρ̂_i² ∇W(x_ij,h_i) + P̂_j/ρ̂_j² ∇W(x_ij,h_j)] (MINUS + m_j both required), pinned by ẍ → −∇P/ρ: the SPH density response then gives δρ_0 = iρ̄Ŵ(k)(k·a), matching the continuity equation (the prior "−i" note was a sign slip). The complex-step force oracle (`.tmp/stability_probe.py`) is self-consistent (FD ↔ CS 3.6e-7, P symmetric 8.5e-14, equilibrium |ẍ₀|~1e-14, ρ̂₀=1.004). **But three objects disagree** at N_H=100 (cubic, k∝(1,1,0)): the oracle's small-k longitudinal limit is ω²_∥/k² → ≈39 (not c̄²=1), the paper's closed-form eq.-23/A11 P gives →0.44, and an independent pressure-term derivation gives →−0.16; re-deriving eq. 23 in the continuum yields (8/5)c̄², not c̄², so the transcribed eq.-23 form is missing a term (or u/U is mis-defined). Note the k→0=c̄² result is a *continuum* (N_H→∞) limit — at finite N_H the SPH sound speed legitimately differs, but the three objects must still agree with each other. Gate for all Phase-5 figures. | open — Phase 5 (next: derive P from the force, match term-by-term vs eq. 23 and the oracle) |
+| 2026-09-18 | **User requirement: `--kernel` on every figure script.** All D&A figure scripts (fig01/fig02/fig03, the new Phase-5 fig04/fig05/fig06, and figA where feasible) must take a `--kernel` flag (shipped name(s), repeatable/comma-separated, default the full ORDER set) so a single new kernel can be plotted/checked in isolation as a distillate of the replication; single-kernel mode runs only the applicable checks. | open — retrofit fig01–fig03 now; built-in for fig04–fig06 |
 
 ## Risks & open questions
 
