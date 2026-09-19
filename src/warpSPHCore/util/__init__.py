@@ -22,6 +22,9 @@ from .latticeDensity import (
     kernelFourierTransform, epsteinZeta, shellCounts, jacobiR2,
     WENDLAND_TAIL_COEFFICIENTS,
 )
+from .densityCorrection import (
+    applyDensityCorrection, selfTermW0, densityCorrectionConstants,
+)
 
 
 __all__ = [
@@ -55,6 +58,9 @@ __all__ = [
     "shellCounts",
     "jacobiR2",
     "WENDLAND_TAIL_COEFFICIENTS",
+    "applyDensityCorrection",
+    "selfTermW0",
+    "densityCorrectionConstants",
 
     # "StateAwareWarpFunction"
 ]
