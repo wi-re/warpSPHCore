@@ -25,14 +25,27 @@ def F0_brute(o, k, a):
     """Actual SPH acceleration on particle 0 for a REAL standing-wave
     displacement delta x_n = a cos(k.x_n).  ``o`` is a StabilityOracle (provides
     H, C3, m, L, gamma, K, kev, lat.x); ``a`` a real (3,) amplitude.
-    All pair distances use the minimum-image convention."""
+    All pair distances use the minimum-image convention.
+
+    The driving phase k.x_n must be evaluated at each particle's TRUE
+    position relative to particle 0 (x_0 + minimum-image(x_n - x_0)), not at
+    its raw box-wrapped array coordinate: since H (and 2H) are only a small
+    fraction of the box L, every particle that matters here is within a
+    couple of H of particle 0, so unwrapping directly against particle 0 is
+    the correct, single, unambiguous periodic image -- using the raw
+    coordinate instead silently swaps in a DIFFERENT periodic image for any
+    particle whose nearest copy to x_0 required wrapping, corrupting the
+    phase by a spurious exp(ik.(n.L)). See phase5_stability_log.md entry (i)
+    (this bug previously made F0_brute agree with a matching bug in
+    ``StabilityOracle.exact_p_matrix`` instead of catching it)."""
     H, C3, m, L = o.H, o.C3, o.m, o.L
     X = o.lat.x
 
     def mi(d):
         return d - L * np.round(d / L)
 
-    cosph = np.cos(k @ X.T)
+    Xtrue = X[0] + mi(X - X[0])
+    cosph = np.cos(k @ Xtrue.T)
     Xd = X + a * cosph[:, None]
     x0 = Xd[0]
     dv0 = mi(x0[None, :] - Xd)                # (N,3): x0 - Xd_j, minimum image

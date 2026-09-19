@@ -47,6 +47,8 @@ from warpSPHCore.enumTypes import KernelFunctions
 from warpSPHCore.type_config import scalar_t
 from warpSPHCore.kernels.eval_kernel import (
     eval_k,
+    eval_dkdq,
+    eval_d2kdq2,
     eval_C_d,
     eval_kernelScale,
     eval_packing,
@@ -137,6 +139,48 @@ _K_KERNEL = {1: _k_1, 2: _k_2, 3: _k_3}
 
 
 @wp.kernel
+def _dkdq_1(q: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
+    i = wp.tid()
+    out[i] = eval_dkdq(q[i], wp.int32(1), kernel_id)
+
+
+@wp.kernel
+def _dkdq_2(q: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
+    i = wp.tid()
+    out[i] = eval_dkdq(q[i], wp.int32(2), kernel_id)
+
+
+@wp.kernel
+def _dkdq_3(q: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
+    i = wp.tid()
+    out[i] = eval_dkdq(q[i], wp.int32(3), kernel_id)
+
+
+_DKDQ_KERNEL = {1: _dkdq_1, 2: _dkdq_2, 3: _dkdq_3}
+
+
+@wp.kernel
+def _d2kdq2_1(q: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
+    i = wp.tid()
+    out[i] = eval_d2kdq2(q[i], wp.int32(1), kernel_id)
+
+
+@wp.kernel
+def _d2kdq2_2(q: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
+    i = wp.tid()
+    out[i] = eval_d2kdq2(q[i], wp.int32(2), kernel_id)
+
+
+@wp.kernel
+def _d2kdq2_3(q: wp.array(dtype=scalar_t), kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
+    i = wp.tid()
+    out[i] = eval_d2kdq2(q[i], wp.int32(3), kernel_id)
+
+
+_D2KDQ2_KERNEL = {1: _d2kdq2_1, 2: _d2kdq2_2, 3: _d2kdq2_3}
+
+
+@wp.kernel
 def _Cd_1(kernel_id: wp.int32, out: wp.array(dtype=scalar_t)):
     out[0] = eval_C_d(wp.int32(1), kernel_id)
 
@@ -195,6 +239,20 @@ def shape(q, dim: int, name: str) -> np.ndarray:
     init()
     q_np = np.atleast_1d(np.asarray(q, dtype=float))
     return _launch_array(_K_KERNEL[dim], q_np, [kernel_id(name)])
+
+
+def shape_deriv(q, dim: int, name: str) -> np.ndarray:
+    """f'(q) of the shipped kernel shape (df/dq, the shipped _dkdq)."""
+    init()
+    q_np = np.atleast_1d(np.asarray(q, dtype=float))
+    return _launch_array(_DKDQ_KERNEL[dim], q_np, [kernel_id(name)])
+
+
+def shape_deriv2(q, dim: int, name: str) -> np.ndarray:
+    """f''(q) of the shipped kernel shape (the shipped _d2kdq2)."""
+    init()
+    q_np = np.atleast_1d(np.asarray(q, dtype=float))
+    return _launch_array(_D2KDQ2_KERNEL[dim], q_np, [kernel_id(name)])
 
 
 def C_d(dim: int, name: str) -> float:

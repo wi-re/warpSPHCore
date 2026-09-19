@@ -37,7 +37,11 @@ _HERE = Path(__file__).resolve().parent
 FIGDIR = _HERE.parent / "figures"
 
 NH_CUTS = (50.0, 100.0, 200.0, 400.0)
-KDN_GRID = np.linspace(0.1, 5.0, 30)
+# log-spaced (not linear): the paper's Fig. 6 x-axis is log |k|d_nn over
+# roughly [0.2, 7] (ticks at 0.5, 1, 5); log spacing gives even resolution
+# per decade instead of oversampling the large-k end.
+KDN_MIN, KDN_MAX = 0.2, 7.0
+KDN_GRID = np.logspace(math.log10(KDN_MIN), math.log10(KDN_MAX), 40)
 DNAME, KDD = "111", np.array([1, 1, 1.0]) / np.sqrt(3)   # k // (1,1,1)
 
 
@@ -82,7 +86,12 @@ def plot_kernel(name: str, lat: st.Lattice) -> None:
     a.set_title(f"D&A (2012) Fig. 6 — sound speed, {st.LABELS[name]} "
                 r"(k // 111; dotted verticals $\lambda = 8h$)")
     a.legend(fontsize=9)
-    a.set_xlim(KDN_GRID[0], KDN_GRID[-1])
+    a.set_xscale("log")
+    a.set_xlim(KDN_MIN, KDN_MAX)
+    ticks = [0.2, 0.5, 1, 2, 5]
+    a.set_xticks(ticks)
+    a.set_xticks([], minor=True)
+    a.set_xticklabels([str(t) for t in ticks])
     a.set_ylim(0.0, 1.4)
 
     FIGDIR.mkdir(exist_ok=True)

@@ -237,6 +237,22 @@ class Lattice:
         return (4.0 * math.pi / 3.0) * H**3 / self.m
 
 
+def lattice_for_NH(nh_max: float, safety: float = 0.32, min_N: int = 4000,
+                   L: float = 1.0) -> "Lattice":
+    """A Lattice with enough particles that the largest required cutoff
+    (2H at N_H = nh_max) stays a safe fraction of the box (H/L <= safety,
+    validated up to H/L ~ 0.29 in phase5_stability_log.md entry (i)):
+    N_H = (4pi/3) H^3 (N/L^3)  =>  N >= N_H / ((4pi/3) safety^3).
+    Kernels with a large kernelScale (e.g. the Gaussian, whose N_H at a
+    given h/d_nn is ~kernelScale^3 times a B-spline's) need a much bigger
+    N_H for the same h/d_nn, hence a much bigger lattice; sized per-kernel
+    so lighter kernels stay cheap."""
+    N_min = nh_max / ((4.0 * math.pi / 3.0) * safety ** 3)
+    p = max(10, math.ceil((max(N_min, min_N) / 4.0) ** (1.0 / 3.0)))
+    N = 4 * p ** 3
+    return Lattice(N=N, L=L)
+
+
 # ---------------------------------------------------------------------------
 # The stability oracle: complex-step force Jacobian (the P matrix).
 # ---------------------------------------------------------------------------
@@ -364,13 +380,40 @@ class StabilityOracle:
         complex rho^gamma, no branch cut.  P a = omega^2 a with P = -Re[M],
         M the traveling-wave matrix (xdot_0 = M a):
 
-            M = -2 m K Bbar sum_j (1 - e^{i k.x_j}) Hess W(d0_j)      [Hessian]
-                + m K Bbar (gamma - 2)/rho sum_j grad W(d0_j) (x) B_j  [density]
+            M = -2 m Bbar sum_j (1 - e^{i k.x_j}) Hess W(d0_j)         [Hessian]
+                - m Bbar (gamma - 2)/rho sum_j grad W(d0_j) (x) B_j    [density]
             B_j = -m sum_k grad W(x_j - x_k) e^{i k.x_k}   (exact response)
 
-        Bbar = K rho^{gamma-2}; the phase uses the ABSOLUTE position x_j, the
-        kernel (grad W, Hess W) the minimum-image vector d0_j = x_j - x_0 (MI).
-        The (1 - e^{ik.x_j}) part of the response B_j drops because
+        Bbar = K rho^{gamma-2} (matches the Hessian term's own prefactor: an
+        EARLIER version of this formula multiplied the density term by an
+        extra, spurious factor of K -- i.e. K*Bbar instead of Bbar -- AND
+        had the wrong overall sign; both are bugs from mis-deriving the
+        d(P_j/rho_j^2)/drho_j chain rule, caught by comparing against
+        gamma=2 (which kills this whole term identically, isolating the
+        Hessian term: agreed with FD to 3e-9) and then grid-searching
+        sign/coefficient variants against the FD ground truth at several k
+        (agreement went from O(1-30) "truncation error" that DIDN'T shrink
+        with the FD step h -- i.e. was never truncation error, just an
+        undetected formula bug -- to true O(h^2) truncation error, 0.01-0.2
+        at h=1e-6). See phase5_stability_log.md entry (k). The kernel
+        (grad W, Hess W) AND the phase both
+        use the minimum-image vector d0_j = MI(x_j - x_0) (x_0 = 0 for the
+        reference particle, guaranteed by Lattice/fccConfig). The phase must
+        be exp(ik.d0_j), NOT exp(ik.x_j) evaluated at the neighbour's raw
+        (box-wrapped) array coordinate: list1/list2 are found via minimum
+        image, so whenever a neighbour's nearest periodic image required
+        wrapping, its stored coordinate is a DIFFERENT periodic image than
+        the one actually interacting, and exp(ik.x_stored) picks up a
+        spurious exp(ik.(n.L)) phase. This is only invisible for a reference
+        particle far from every box face; particle 0 sits at the box CORNER
+        [0,0,0], so ~7/8 of its neighbours are wrap-affected -- confirmed by
+        the fix restoring exact translation invariance (identical eigenvalues
+        for 6 different reference particles) and a sane continuum-limit
+        magnitude (was ~50-135x c^2 at |k|d_nn=0.02, now ~1-1.5x). See
+        phase5_stability_log.md entry (i) (supersedes the phase conclusion of
+        entry (c), which validated the raw-coordinate phase only against a
+        ground truth that shares the same convention/bug).
+        The (1 - e^{ik.d0_j}) part of the response B_j drops because
         sum_k grad W(x_j - x_k) = 0 at equilibrium. Validated against the
         ground-truth real-FD Jacobian of the actual force (max|P_fd - P_ex| =
         the FD truncation error; phase5_stability_log.md entries e/f)."""
@@ -379,28 +422,30 @@ class StabilityOracle:
         H = self.H
         d0, r0, idx0 = self.d0, self.r0, self.idx0
         x = self.lat.x
-        x1 = x[self.list1]
-        phase1 = np.exp(1j * (k @ x1.T))                    # (n1,)
         # Hessian + gradient at d0 (the self term r=0 contributes 0)
         keep_idx = np.nonzero(r0 > 0)[0]
         d0k, rk, idxk = d0[keep_idx], r0[keep_idx], idx0[keep_idx]
-        phk = phase1[keep_idx]
+        phk = np.exp(1j * (k @ d0k.T))                      # (nk,)
         grad0 = self._gradW(d0k, H, idxk)                   # (nk, 3)
         hess0 = self._hessW(d0k, H, idxk)                   # (nk, 3, 3)
         M_hess = -2.0 * m * Bbar * np.einsum("a,aij->ij", (1.0 - phk), hess0)
         # Density response B_j = -m sum_k grad W(x_j - x_k) Phi_k (k in H of j),
-        # from the oracle's dll (list1 -> list2) with mask dll_r < H
-        mask = self.dll_r < H                               # (n1, n2)
-        phase2 = np.exp(1j * (k @ x[self.list2].T))         # (n2,)
-        M_rho = np.zeros((3, 3), dtype=complex)
-        for jj, j in enumerate(keep_idx):
-            mrow = mask[j]
-            if not mrow.any():
-                continue
-            g_j = self._gradW(self.dll[j, mrow], H, self.idxll[j, mrow])
-            B_j = -m * np.sum(g_j * phase2[mrow][:, None], axis=0)
-            M_rho += np.outer(grad0[jj], B_j)
-        M_rho *= m * K * Bbar * (g - 2.0) / rho0
+        # from the oracle's dll (list1 -> list2). Phi_k is likewise the
+        # minimum-image phase relative to x_0, not the raw list2 array
+        # coordinate. Vectorized over the full (n1, n2) grid: no explicit
+        # mask needed since grad W(x_j-x_k) is already exactly 0 for
+        # dll_r >= H (the compact-support "zero piece" past q=1), so the
+        # out-of-support entries drop out on their own -- this makes the
+        # per-neighbour Python loop unnecessary (was O(N_H^2) python-level
+        # iterations; this is the same FLOPs done in vectorized numpy).
+        d0_list2 = self._mi(x[self.list2] - x[0])
+        phase2 = np.exp(1j * (k @ d0_list2.T))              # (n2,)
+        g_all = self._gradW(self.dll, H, self.idxll)        # (n1, n2, 3)
+        B_all = -m * np.einsum("ijc,j->ic", g_all, phase2)  # (n1, 3) complex
+        grad0_all = self._gradW(d0, H, idx0)                # (n1, 3)
+        M_rho = np.einsum("ia,ib->ab",
+                          grad0_all[keep_idx], B_all[keep_idx])
+        M_rho *= -m * Bbar * (g - 2.0) / rho0
         return (-(M_hess + M_rho)).real
 
     # -- eigenvalues / sound speed ------------------------------------------

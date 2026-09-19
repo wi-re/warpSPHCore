@@ -351,4 +351,242 @@ text (entry f) — document in the Phase-8 report; the figures plot the full
 (|k|, N_H) range so it is visible.  LATER: `--kernel` retrofit of fig01/02/03
 (pending task), Phase 6/7/8.
 
+### 2026-09-19 (i) — FIX: `exact_p_matrix`'s phase broke translational
+invariance; entries (c)/(f)'s "long-λ instability" and the fig06 discrepancy
+were both this bug, not real physics
+
+**Trigger:** fig06 (cubic_b4) looked nothing like the paper's Fig. 6 —
+disconnected sawtooth segments, values swinging from 0 to >1.4 instead of a
+smooth curve near 1. Rendered the paper's actual Fig. 4 at 500dpi
+(`pdftoppm -r 500`) and confirmed: the cubic panel shows **no** red
+(ω²≤0) region at low |k|d_nn for ANY N_H in 30–1000 — directly contradicting
+entry (f)'s "UNRESOLVED" long-λ instability at N_H=40–100, which was
+therefore never real physics.
+
+**Root cause:** `exact_p_matrix` (both the Hessian term's `phase1` and the
+density term's `phase2`) evaluated the plane-wave phase at each neighbour's
+RAW, box-wrapped array coordinate (`exp(ik·x[list1/2])`), instead of at the
+neighbour's true minimum-image-unwrapped position relative to particle 0
+(`exp(ik·d0)`). For an infinite/periodic lattice the dispersion relation
+ω²(k) is exactly translation-invariant — it must not depend on which
+particle is treated as "particle 0". It did: relabelling the reference
+particle (identical physical configuration, just renaming which array index
+is "0") changed ω² by 2-3× at fixed k, and the effect was WORST for particle
+0 itself, which `fccConfig` places exactly at the box corner `[0,0,0]` — so
+~7/8 of its H-radius neighbours are only "close" via periodic wraparound,
+and for those the raw stored coordinate is a *different* periodic image than
+the one the minimum-image kernel term actually uses. Since k is O(1–70) in
+these units and the box period L=1, the resulting spurious
+`exp(ik·(n·L))` phase error winds through many cycles as k scans
+continuously — exactly the sawtooth in fig06, and the spurious "long-λ
+instability" of entries (c)/(f) (both `p_matrix`-legacy and paper-eq.-23
+comparisons in entry (f) inherited the same convention, which is why they
+appeared to agree with each other while both being wrong).
+
+Entry (c)'s validation of the raw-coordinate phase against a brute-force FD
+ground truth (`ground_truth.py`/`.tmp/brute_force.py`) didn't catch this
+because that ground truth applies the SAME raw-coordinate cosine field to
+every particle — it's internally self-consistent with the bug, not an
+independent check.
+
+**Fix** (`stability.py::exact_p_matrix`): phase now built from the same
+minimum-image relative vector already used for the kernel gradient/Hessian
+(`d0` for the Hessian term; `d0_list2 = MI(x[list2]-x[0])` for the density
+term), instead of the raw stored coordinate. Companion fix in
+`ground_truth.py::F0_brute`: the driving field is now evaluated at
+`x[0] + MI(x - x[0])` for every particle (their true position relative to
+particle 0), not their raw coordinate — it had the identical bug, which is
+why it agreed with the old (buggy) `exact_p_matrix`.
+
+**Validation:**
+- Translation invariance restored exactly: eigenvalues bit-identical across
+  6 different reference particles (corner, edge, and interior), from
+  N_H=40 up to N_H=400 (2H/L up to 0.58).
+- Continuum sanity: ω²/(c²k²) at |k|d_nn=0.02 (deep resolved-wave regime)
+  went from an unphysical ~50–135× c² down to ~1.4× c² (cubic, N_H=40).
+- Re-validated against the FIXED ground truth: max|P_fd−P_ex| = 1.8–15 (FD
+  truncation error only, same order as entries e/g), vs. 200+ against the
+  old (buggy) ground truth.
+- `fig06_sound_speed.py` (cubic_b4): now a smooth curve, no NaN gaps, no
+  sawtoothing; c_SPH/c ≈ 1.1–1.2 at small |k|d_nn falling smoothly toward 0
+  at large |k|d_nn (expected — short waves unresolved at these N_H, eq. 28).
+- `fig04_fig05_stability_contours.py` (cubic_b4): the low-k band across all
+  N_H is now uniformly POSITIVE (0.86–1.4× c²k², checked numerically) with
+  no ω²=0 contour line there — matching the paper. It still LOOKS reddish
+  in the rendered PNG because `RdBu_r` maps HIGH values to red (not low —
+  the `_r` reverses the base `RdBu`), and values ~1–1.4 sit on the warm side
+  of the script's `vmin=-1,vmax=2` scale; this is a colour-scale choice in
+  our diagnostic script, not the paper's contour-line convention, and is a
+  separate (cosmetic) follow-up, not a physics bug. The genuine red ω²=0
+  contour lines that remain (isolated islands at |k|d_nn≈2-4 for N_H≳200)
+  look like real short-wavelength/Nyquist-adjacent pairing regions,
+  qualitatively consistent with the paper's description for other kernels.
+
+**STILL OPEN (structural, separate from the bug above):** `fig06_sound_speed.py`
+plots ONE kernel at several arbitrary N_H (50/100/200/400) in one panel; the
+paper's actual Fig. 6 plots ONE panel per k-direction with SEVERAL KERNELS
+each at its own single characteristic N_H (cubic@42/55, quartic@60,
+quintic@180 top; Wendland C²/C⁴/C⁸@100/200/400 middle; Gaussian@10/20,
+HOCT4@442 bottom) — reproducing the paper's actual figure layout needs a
+rewrite of `fig06_sound_speed.py`'s panel/kernel structure, not just the
+oracle fix. Not done in this pass.
+
+[next] apply the analogous relative-phase review to any other lattice-sum
+code in `higherOrderSPH` that mixes raw absolute positions with
+minimum-image geometry; decide whether to restructure `fig06_sound_speed.py`
+to match the paper's per-kernel-N_H panel layout; update PLAN.md Phase 5
+STATUS; commit.
+
+### 2026-09-19 (j) — axis units/scale fixes (figs 4-6) + paper's Table-2
+config as an additional Fig. 6 + a vectorization that made it feasible
+
+Follow-up to entry (i): the axes didn't match the paper's, on top of the
+phase bug already fixed there.
+
+**`fig06_sound_speed.py`:** x-axis was linear; the paper's is log |k|d_nn.
+Switched `KDN_GRID` to log-spaced over [0.2, 7] (paper's approximate range,
+ticks at 0.5/1/5) and set `ax.set_xscale("log")`.
+
+**`fig04_fig05_stability_contours.py`:** two unit bugs, not one:
+  1. x-axis was linear -> now log, KDN_GRID log-spaced over [0.1, 6].
+  2. y-axis was raw `N_H` (kernel-dependent range with no fixed meaning
+     across kernels) -> the paper's actual y-axis is `h/d_nn` (h =
+     H/kernelScale), LINEAR, bounds [0.9, 3], UNIVERSAL across kernels; a
+     secondary axis on the right shows the corresponding N_H (kernel-
+     dependent, via `ax.secondary_yaxis` with `Lattice.H_of_NH`/`NH_of_H`
+     composed with the kernel's own `kernelScale`). The per-kernel N_H grid
+     needed to hit h/d_nn in [0.9,3] is now derived (`hdn_grid_to_NH`), not
+     hardcoded — for a kernel like the Gaussian (kernelScale=8) this
+     requires much larger N_H than for a B-spline at the same h/d_nn, which
+     in turn requires a bigger lattice (see below).
+  Also recentred the `RdBu_r` colour scale on 1 (`vmin=0, vmax=2`, was
+  `vmin=-1, vmax=2`): the old off-centre scale made the merely-above-1
+  region at low k render as solid dark red, indistinguishable by eye from
+  genuine instability — entry (i)'s claim that this was "just a colour-scale
+  artifact, not a bug" is now also visually obvious, not just numerically
+  checked.
+  Re-rendering the paper's actual Fig. 4 cubic panel at 500dpi and comparing
+  by eye: the green good-value loop and the red instability island (now
+  correctly a small, isolated closed contour around |k|d_nn~1.5-3,
+  h/d_nn~2-2.5, not a broad low-k region) both qualitatively match.
+
+**New `fig06_paper_config.py`:** the structural gap flagged at the end of
+entry (i) — the paper's Fig. 6 is 3 panels by k-direction
+((1,0,0),(1,1,0),(1,1,1)), each overlaying ALL 10 Table-2 (kernel, N_H)
+rows, legend split 4+3+3 across panels (confirmed by rendering the paper's
+Fig. 6 at 500dpi: every curve appears in every panel). Implemented as a
+companion to (not a replacement for) `fig06_sound_speed.py`. Result:
+qualitatively matches the paper closely — curves flat-ish just above 1 for
+|k|d_nn<1, a broad dip to a minimum around |k|d_nn~4, a slight rebound, and
+convergence near |k|d_nn~6-7, with the same kernel ordering (cubic N_H=42
+highest, HOCT4 lowest) as the real figure.
+
+**Gaussian N_h=10/20 (N_H=5120/10240) omitted, and why (found the hard
+way):** tried to include them and the machine hit ~54GB RSS + swapped
+before being killed. Root cause: `_build_neighbors` builds DENSE (n1, n2, 3)
+arrays (n1~N_H, n2~8N_H) once per (kernel,N_H) regardless of how many are
+actually within cutoff; at N_H=10240 that's ~5e8 elements (~40GB as
+complex128) — infeasible on this machine, and this is independent of
+anything fixed in entry (i) (it was already true of the pre-fix code). Left
+out of `fig06_paper_config.py` by default (`--include-gaussian` forces it,
+with a warning); would need the oracle's O(N_H^2) density-response term
+rewritten to be sparse/chunked to fix properly. Not attempted here.
+
+**Vectorized `exact_p_matrix`'s density-response term** (`stability.py`):
+replaced the explicit Python loop over `keep_idx` (one iteration per list1
+neighbour, each doing a masked numpy reduction) with two `np.einsum` calls
+over the already-dense `(n1, n2, 3)` arrays built in `_build_neighbors`
+(the mask was redundant: grad W is exactly 0 past the compact-support
+radius via the kernel's own "zero piece", so summing over the full dense
+array gives the identical result). This does NOT change the memory
+footprint (that array was already being built densely) — it only removes
+per-iteration Python-interpreter overhead. Validated bit-identical output
+to the pre-vectorization loop version, and re-checked against the FD ground
+truth for wendland_C6/hoct4/quintic_b6 (P symmetric to ~1e-13, FD agreement
+within truncation error, same order as entries e/g). ~15x faster in
+practice (N_H=100: 2.6ms/call, was similar order before but this made the
+8-series x 3-direction x 40-point `fig06_paper_config.py` run in ~27s
+instead of being impractically slow).
+
+[next] `fig06_sound_speed.py`'s per-kernel-multi-N_H layout is still a
+different (complementary) diagnostic from the paper's own Fig. 6, kept as
+is by design. If the Gaussian Table-2 rows are ever needed, rewrite the
+density-response term to avoid the dense (n1,n2,3) array (chunk over list1,
+or use a spatial cutoff/tree instead of the current "all of list2" dense
+broadcast) before attempting N_H>~2000.
+
+### 2026-09-19 (k) — SECOND, independent bug in `exact_p_matrix`: the
+density-response term had a spurious extra factor of K and the wrong sign
+
+Trigger: entry (j)'s `fig06_paper_config.py` looked structurally right but
+every curve started at c_SPH/c ~ 1.1-1.2 at the smallest plotted k, where
+the paper's own curves start "exceptionally close to 1" (paper_notes.md:
+"cubic N_H=42/55: errors of a few percent"; the rendered Fig. 6 tick labels
+read 0.982-1.025 at the curves' left edge). A 10-20% small-k offset is an
+order of magnitude too big to be discreteness noise.
+
+**Root cause, found by isolating terms:** entry (i) validated `exact_p_matrix`
+against `ground_truth.fd_jacobian` and saw `max|P_fd-P_ex|` of order 1-30,
+called it "FD truncation error" and moved on -- WITHOUT checking that it
+shrinks as the FD step h shrinks. It doesn't: re-run at h = 1e-3 .. 1e-7,
+`max|P_fd-P_ex|` is IDENTICAL to 5 significant figures at every step size.
+That means it was never truncation error -- entry (i)'s validation had a
+false negative, and this bug survived that check.
+
+Isolated by setting `gamma=2` (which makes the density-response term's own
+`(gamma-2)` prefactor exactly 0, i.e. Hessian-term-only): `exact_p_matrix`
+and the FD Jacobian then agree to 3e-9 -- so `M_hess` is exactly right, and
+100% of the discrepancy is in `M_rho`. Grid-searching sign x
+{with,without the extra K} against FD at several k confirmed the fix
+uniquely: `M_rho *= -1 * m * Bbar * (g-2)/rho0` (was
+`+1 * m * K * Bbar * (g-2)/rho0`) reproduces FD to true O(h^2) truncation
+error (0.01-0.2, scaling with k, down from the flat 1-30 that never
+shrank) -- neither the sign flip nor the K removal alone fixed it, both
+were needed simultaneously.
+
+Both bugs trace to the same mis-copied chain-rule step:
+d(P_j/rho_j^2)/drho_j = K(gamma-2)rho_j^(gamma-3) = Bbar(gamma-2)/rho0 (at
+rho0=1) -- ONE power of K, matching the Hessian term's own bare `Bbar`
+prefactor (which is itself `K rho0^(gamma-2)`, so already has its one K).
+The old code effectively multiplied by `K * Bbar` = `K^2 rho0^(gamma-2)`,
+double-counting K, and had the wrong sign on top.
+
+**Validated broadly** (re-run `stability_p_matrix.py --fd-check` and a
+direct sweep): cubic_b4/wendland_C6/hoct4/quintic_b6, both k-directions,
+|k|d_nn 0.3-2.0, N_H 40-442 -- `max|Pfd-Pex|` now 0.0001-0.2 (shrinks with
+FD step, genuine truncation error), P symmetric to ~1e-13. This was
+UNRELATED to entry (i)'s phase-reference fix (that one's translation-
+invariance argument and its own numeric evidence both still hold and are
+unaffected); it's a second, independent bug in the same function, caught
+because this session actually looked at the SMALL-k behaviour instead of
+only the moderate/large-k regime entry (i) happened to check.
+
+**Consequence for every figure already produced (i)/(j):** the eigen
+DIRECTIONS were mostly right (`M_rho` is small compared to `M_hess` except
+near k -> 0 for the transverse-degenerate-with-longitudinal cases, which is
+why the transverse mode matched FD all along and only the longitudinal
+mode was ever visibly wrong), but every LONGITUDINAL number is corrected by
+this fix. Re-ran and re-saved: `fig06_sound_speed.py` (cubic_b4, curves now
+start at ~0.94-1.07 at |k|d_nn=0.2, matching "a few percent" from the
+paper), `fig06_paper_config.py` (all 8 series now start within ~1-7% of 1,
+matching the paper's tick labels), `fig04_fig05_stability_contours.py`
+(cubic_b4 -- re-checked the apparent pale-orange band at h/d_nn~1.0-1.3 by
+hand: it is NOT a red ω^2<=0 contour, just background colour for values
+~1.0-1.2 with tightly-packed green/cyan contour lines nearby; a direct
+numeric sweep of the exact plotted grid confirms every point at
+h/d_nn<1.7 is positive -- the only genuine instability island is the
+already-identified one at h/d_nn~2-2.9, |k|d_nn~2-5, matching the real
+paper's Fig. 4 cubic panel).
+
+[next] the phase-5 deliverables (`stability.py`, `stability_p_matrix.py`,
+`fig04_fig05_stability_contours.py`, `fig06_sound_speed.py`,
+`fig06_paper_config.py`) should now be considered validated against the
+paper at the level of "curves start within a few percent of 1 and decay
+with the right shape/ordering"; a natural next check (not done here) would
+be reproducing the paper's quoted N_H pairing thresholds (cubic gradual
+beyond ~55, quartic ~67, quintic ~190, Wendland stable to 700) directly
+from `fig04_fig05`'s red contour rather than eyeballing it.
+
+
+
 
