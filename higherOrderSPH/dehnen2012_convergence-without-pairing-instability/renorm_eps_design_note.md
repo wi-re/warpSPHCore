@@ -1,9 +1,11 @@
 # Design note — D&A 2012 eq. 18/19 density self-term correction ("renorm ε")
 
-> **Closeout item 4 — SCOPE only, NOT built.** This note answers the six
-> questions in `closeout_plan.md` item 4 so the feature can be built later
-> without re-deriving anything. `REPORT.md` (item 6) carries a summary +
-> recommendation; this file is the detail.
+> **BUILT — closeout item 7 (2026-09-19); item 4 scoped it.** Originally
+> written to answer the six questions in `closeout_plan.md` item 4; the
+> build then followed this note (warpSPHCore `bf14e56` + warpSPH
+> `3de37e7`). Where the build deviated from the scope, the section says
+> so. `REPORT.md` (item 6) carries a summary + recommendation; this file
+> is the detail.
 >
 > Paper: Dehnen & Aly (2012) eqs. 18/19; constants in
 > `data/da2012_reference.yaml` → `density_correction`.
@@ -24,9 +26,11 @@
   and the conservation properties are unaffected. This is the
   justification for the "correct after the fact, evolve the raw estimate"
   implementation (§3).
-- **Our Phase-4 refit** (exact FCC lattice sums, `W0(H)` convention):
-  ε₁₀₀ = 0.02834 / 0.01335 / 0.01220 vs the paper's 0.0294 / 0.01342 /
-  0.0116 — agreement within ×1.04 (findings log 2026-09-18).
+- **Our refit** (exact FCC lattice sums, `W0(H)` convention): ε₁₀₀ =
+  0.02949 / 0.01361 / 0.01131, α = 0.999 / 1.633 / 2.218 (the fig03
+  check-#4 values; the item-7 multi-dim refit reproduces them at x1.005
+  — it is the identical computation) vs the paper's 0.0294/0.977,
+  0.01342/1.579, 0.0116/2.236 — within ×1.04.
 
 ## 2. Naming
 
@@ -82,9 +86,16 @@ used it; crkSPH has no kernel-sum density path. The ε hook is therefore a
     own JVP is elementwise).
   - Cost: three elementwise tensor ops on N vectors per density step —
     negligible next to the density operator.
-- **Config:** a `DensityCorrection` module-configuration (pattern:
-  `shiftProperties` / `viscositySwitchParams`): `enabled` (default **off**),
-  per-kernel constants table lookup, optional `(eps100, alpha)` override.
+- **Config (as built):** a `DensityCorrection` dataclass
+  (`enabled` default **off**, optional `eps100`/`alpha` overrides) as a
+  SIBLING FIELD of `SimulationConfig.calibrateNormalization` (user
+  decision 2026-09-19: "making it a sibling next to
+  calibrateNormalization is probably the easiest option") — not the
+  scheme-side module-configuration pattern. `buildConfig` accepts the
+  bool shorthand or the dataclass; the runner exposes
+  `--densityCorrection/--no-densityCorrection` via a plain CaseSpec
+  bool; the nested-dataclass encode/decode branches are fields-driven
+  and generic (any future nested config type round-trips unchanged).
 
 Out of scope unless a module reads the scheme's density: internal
 re-computations inside modules (e.g. the C&D switch's own E.1 density
@@ -104,8 +115,20 @@ N_H,i = V_ν · h_i^ν · ρ̂_i / m_i        (V_1, V_2, V_3 = 2, π, 4π/3)
   already 1–3 % correction — second order, negligible; **no iteration**.
 - Adaptive h (monaghan's `evaluateOptimalSupport`) is handled naturally —
   the formula is per-particle and per-step.
-- The paper fits **3D only**; 1D/2D would need their own refits
-  (out of scope).
+- **Runtime-convention note (load-bearing, added by the build):** the ε
+  that runs at runtime is evaluated at this N_H,est from the RAW
+  estimate — on a defect-free lattice that is the exact N_H × ρ̂, NOT
+  the exact N_H. Mid-window the difference is negligible (bias ~1e-3);
+  at the window edges the bias reaches ~5 % (W6 3D at N_H ≈ 40), which
+  shifts ε by O(α·bias) and the residual by α·bias² — that term
+  dominates the measured edge band. The refit's bands are therefore
+  measured with the runtime convention (dense sweep over the CLOSED
+  window; the 34-point fit grid does not even contain N_H = 40.0).
+- The paper fits **3D only**. The build extended to 2D (refit on the
+  densest 2D lattice — shipped); 1D was refit too and NOT shipped: the
+  raw 1D estimate is already within 1e-6 of exact over 40 ≤ N_H ≤ 400
+  (the 1D continuum limit is immediate) and the implied ε is not a power
+  law — it crosses zero, so no fit exists.
 
 ## 5. W(0, H) convention — load-bearing gotcha
 
@@ -125,24 +148,47 @@ unit-support, `W(r) = C_d f(r/H)/H^ν`, f supported on [0,1]).
   without constants). The library version keys on the `KernelFunctions`
   enum instead of names and owns its own constants table.
 
-## 6. Constants — table, paper values, W2 as the default candidate
+## 6. Constants — the shipped table (as built)
 
-- Ship **only the three Wendland 3D pairs** (the paper's fits). Rationale:
-  the correction *subtracts* a fraction of the self-term, so it only helps
-  kernels that **over-estimate**. Our Phase-4 exact lattice sums:
-  Wendland/HOCT4/Gaussian stay ≥ 1 (over-estimate); the B-splines dip
-  **below** 1 (under-estimate) — a positive ε would make them *worse*.
-  Do not add B-spline constants.
-- HOCT4/Gaussian: no paper constants. The Gaussian's small-N_H
-  over-estimation (×2.2 at N_H = 500, ×54 at N_H = 20 — self-term
-  dominated while H/d_nn < 2) is probably outside a power-law ε's reach,
-  which is why the paper leaves it out of Fig. 3. Leave both out; a future
-  refit via the fig03 machinery is the route if ever wanted.
-- Config override `(eps100, alpha)` per run (for refits, e.g. on top of
-  `calibrateNormalization` — §7). No constants → `KeyError` (mirrors the
-  replication script).
-- **Wendland2 is the default-kernel candidate** for the feature (the
-  replication's working kernel and warpSPH's common choice).
+The build refit all eight kernels × 3 dims (`scripts/eps_constants_
+multidim.py`; all 24 fits in `results/eps_constants_multidim.json`,
+window 40–400, bands measured with the §4 runtime convention) and
+shipped **six entries**, validity window 40 ≤ N_H ≤ 400 on every
+entry:
+
+| (dim, kernel) | ε₁₀₀ | α |
+|---|---|---|
+| 2D Wendland2 | 3.0233e-3 | 1.5016 |
+| 2D Wendland4 | 3.5065e-4 | 2.4815 |
+| 2D Wendland6 | 8.0060e-5 | 3.4709 |
+| 3D Wendland2 | 2.9488e-2 | 0.9990 |
+| 3D Wendland4 | 1.3612e-2 | 1.6333 |
+| 3D Wendland6 | 1.1308e-2 | 2.2185 |
+
+- The 3D row is the paper's fit on the same lattice: within ×1.04 (§1)
+  and TIGHTER — corrected band over the closed window (dense sweep,
+  runtime convention) 0.27–1.0 % (3D) / 3e-5–2.2e-4 (2D), vs ~5 % for
+  the paper's constants in 3D; mid-window ~1e-4 (3D) / 1e-5 (2D).
+- **NOT shipped, with the measured reason:**
+  - 1D (all kernels): the raw estimate is already within 1e-6 of exact
+    over 40–400 (the 1D continuum limit is immediate) and the implied
+    ε is not a power law — it crosses zero, so no fit exists.
+  - B-splines (2D + 3D): they under-estimate and their lattice bias
+    OSCILLATES with N_H (the spline offset changes sign, cf.
+    `latticeDensity`), so a single (ε₁₀₀, α) mis-corrects: the fitted
+    power law's log residuals are 0.78–1.29 decades and the "corrected"
+    band is WORSE than the raw one for 8 of the 10 entries (e.g. 3D b8:
+    raw 5.4e-2 → "corrected" 1.2e-1); quartic-3D even fits a NEGATIVE
+    α (−0.121).
+  - HOCT4/Gaussian: no paper fit; the Gaussian's small-N_H
+    over-estimation (×2.2 at N_H = 500, ×54 at N_H = 20 — self-term
+    dominated while H/d_nn < 2) is outside a power-law ε's reach, which
+    is why the paper leaves it out of Fig. 3.
+- No constants → `KeyError` with the shipped list (mirrors the
+  replication script); the `eps100`/`alpha` overrides exist for refits
+  (e.g. on top of `calibrateNormalization` — §7).
+- **Wendland2 remains the default-kernel candidate** (the replication's
+  working kernel and warpSPH's common choice).
 
 ## 7. Coexistence with `calibrateNormalization` — different axes, refit rule
 
@@ -162,28 +208,53 @@ enable both in one run unless ε is refit on the 1/L-corrected lattice sum
 (the fig03 machinery does the refit). The D&A replication uses the ε
 correction alone (standard kernel normalisation).
 
-## 8. Tests (for when it is built)
+## 8. Tests (as built)
 
-1. **Unit (warpSPHCore, pure torch):** on FCC lattices (reuse the fig03
-   exact-sum machinery), the corrected estimate is within **0.10–2.40 % of
-   1 over 40 ≤ N_H ≤ 400** for W2/W4/W6 (the fig03 corrected-curve result);
-   the uncorrected output reproduces the fig03 solid curves (W2 minimum
-   etc.); the W0-convention check (support-radius value vs the
-   `h/kernelScale` gotcha, §5).
-2. **Cross-repo consistency:** the library function reproduces
-   `scripts/fig03_density_estimation.py`'s corrected curves (the script
-   could then delegate to it).
-3. **Integration (warpSPH, Monaghan scheme):** lattice/glass IC with the
-   correction on — the initial ρ̂,corr reads ≈ 1 within the band (vs the
-   raw over-estimate); conservation smoke (total mass exact to round-off;
-   EOS pressures shift as the corrected density implies).
+1. **Unit (warpSPHCore, `tests/operations/test_densityCorrection.py`,
+   46/46 pass, CPU):** the W0 code-support convention (incl. the
+   `h/kernelScale` gotcha — the ratio must equal kernelScale^−dim, §5);
+   the table transcription (rel 1e-12); paper agreement x1.04; the
+   KeyError paths (Gaussian/HOCT4/splines/B7/B8 in 2D+3D; all Wendland
+   in 1D); the corrected densest lattice within the refit band at
+   N_H = 40/100/200/400 (2D+3D × W2/W4/W6, the refit's own lattice and
+   the test's own per-point reference sum) with the RAW estimate ≥ 2×
+   the band at the window edge; the manual formula term-by-term
+   (incl. the eps100 override) and the zero-ε identity; bad dim raises.
+2. **Frontend (warpSPH, `tests/test_densityCorrection.py`, 45/45 pass,
+   CPU float32):** every OFF spelling (absent / `False` /
+   `DensityCorrection()`) bit-exact with the raw operator; ON bit-exact
+   with `applyDensityCorrection` on the raw estimate (and not a no-op);
+   the eps100 override reaches the hook; the bool form equals the bare
+   dataclass; a non-shipped kernel raises; the corrected densest lattice
+   through the REAL operator + Verlet list on a lattice-box periodic
+   domain within the refit band at N_H = 40/100/400, raw clearly
+   outside at 40; the config serialization round-trip (incl. a
+   pre-field dict).
+3. **Cross-repo consistency:** the refit script self-tests 3D against
+   fig03 check #4 at x1.005 (identical computation — a transcription
+   guard, not a new measurement) and the paper at x1.5.
+4. **Deferred (GPU):** a scheme-level Monaghan smoke (corrected initial
+   ρ̂,corr ≈ 1 within the band, mass conservation) — the runner
+   auto-selects cuda:0 and the GPU is held by the local LLM; the CPU
+   frontend test exercises the same operator path.
 
-## 9. Build estimate (when it is actually built)
+## 9. Build record (built 2026-09-19, closeout item 7)
 
-- `warpSPHCore/util/densityCorrection.py`: the elementwise function +
-  `selfTermW0(kernel, dim, supports)` + the 3-entry constants table
-  (~80 lines, pure torch).
-- warpSPH: `DensityCorrection` module-configuration (~15 lines) + the
-  single call-site wiring inside `computeDensities` (post-port, §3;
-  ~5 lines) + config plumbing.
-- Tests per §8, reusing the fig03 FCC machinery.
+- `warpSPHCore/util/densityCorrection.py` (~180 lines incl. the module
+  docstring: the feature, the shipped table with the shipping rationale,
+  the W0 convention, the distinction from calibrateNormalization):
+  `densityCorrectionConstants` / `selfTermW0` (one-time host-call
+  `C_d f(0)` cache) / `applyDensityCorrection` (pure torch — three
+  elementwise ops; the warp kernel is untouched). Exported via
+  `util/__init__.py`.
+- warpSPH frontend (~90 lines over 4 files): the `DensityCorrection`
+  dataclass + SimulationConfig sibling field + buildConfig bool
+  shorthand + the generic nested-dataclass encode/decode branches
+  (simulationConfig.py); the CaseSpec bool + help line; the runner
+  kwarg; the `computeDensities` hook (~15 lines, §3).
+- Refit: `scripts/eps_constants_multidim.py` (+ results JSON/TXT,
+  gitignored) — 8 kernels × 3 dims × 3 fit windows, dense band sweeps
+  with the §4 runtime convention.
+- Tests: 46 (warpSPHCore) + 45 (warpSPH), all pass on CPU; §8.
+- Commits: warpSPHCore `bf14e56` (refit + util + unit tests); warpSPH
+  `3de37e7` (frontend wiring + frontend tests).

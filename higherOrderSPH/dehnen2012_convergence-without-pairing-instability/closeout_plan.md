@@ -20,7 +20,8 @@
   re-scaling. No code change; document the exclusion in `REPORT.md`.
 - Fix `sampleOptimal` (warpSPH) — explicitly wanted.
 - Fix the `support.py` float32-BinOp constant (warpSPHCore).
-- The eq.-18 ε `renorm` feature is **scoped only** (design note), not built.
+- The eq.-18 ε `renorm` feature is **scoped only** (design note), not
+  built. *(Superseded 2026-09-19: the user then asked to build it — item 7.)*
 - The high-res 10-kernel stability sweep comes **before** `REPORT.md`.
 
 ## Items
@@ -179,6 +180,51 @@ Per PLAN Phase 8:
   `sampleOptimal` fix (item 3), and the exclusion of the five specialty
   kernels (decisions above).
 
+### 7. Build the ε correction (warpSPHCore + warpSPH) — [x] DONE 2026-09-19
+(User decision 2026-09-19, supersedes the item-4 scope-only decision:
+"Go build the whole thing". Built 2026-09-19, before item 5.)
+- **Refit** (`scripts/eps_constants_multidim.py`): 8 kernels (Wendland +
+  B-splines) × 3 dims on the densest lattice (1D uniform / 2D hexagonal /
+  3D FCC — the same source as fig03), fig03's N_H grid, fit windows
+  40-400/40-800/20-800, dense band sweeps measured with the LIBRARY's
+  runtime convention (ε at N_H,est = V_d·h^d·ρ̂/m, since the exact N_H
+  is unknown at runtime; at the window edges the two conventions differ
+  by O(α·bias), residual by α·bias²). Self-test: 3D reproduces fig03
+  check #4 at x1.005 (identical computation) and the paper at x1.5.
+  All 24 fits: `results/eps_constants_multidim.json` (gitignored).
+- **Shipped constants** (`warpSPHCore/util/densityCorrection.py`, 6
+  entries, window 40-400): the three Wendland in 2D AND 3D. NOT shipped:
+  1D (raw estimate already ≤1e-6 of exact over 40-400; implied ε not a
+  power law — crosses zero) and the B-splines 2D/3D (lattice bias
+  oscillates with N_H; the fitted power law's "corrected" band is WORSE
+  than the raw one for 8 of the 10 entries; quartic-3D fits a negative
+  α). 3D agrees with the paper within x1.04; corrected band over the
+  closed window 0.27-1.0 % (3D) / 3e-5-2.2e-4 (2D), mid-window ~1e-4 /
+  1e-5.
+- **Util** (warpSPHCore `bf14e56`): `densityCorrectionConstants` /
+  `selfTermW0` (one-time host-call `C_d·f(0)` cache) /
+  `applyDensityCorrection` (pure torch; W0 at the code support via the
+  shipped host-callable eval fns) + `util/__init__.py` exports.
+- **warpSPH frontend** (`3de37e7`): `DensityCorrection` dataclass
+  (enabled/eps100/alpha) as a SimulationConfig SIBLING of
+  `calibrateNormalization` (user: "making it a sibling next to
+  calibrateNormalization is probably the easiest option"); buildConfig
+  bool shorthand + the generic nested-dataclass encode/decode branches;
+  CaseSpec bool (`--densityCorrection`); runner pass-through; the
+  `computeDensities` hook (pure-torch post-process — the warp kernel is
+  unchanged; off = the operator's tensor untouched, bit-exact).
+- **Verified:** warpSPHCore 46/46 (unit, CPU f32); warpSPH 45/45
+  (frontend, CPU f32, real operator + Verlet list on the refit's own
+  lattice-box periodic domain); regression
+  test_caseSpec/test_runner/test_latticeDensity: 170 passed / 1 failed —
+  the failure is PRE-EXISTING and unrelated (test_runner.py::
+  test_everyCaseDeclaresItsParamsAsScalarsOrLists: dambreak.
+  surfacePressureProbes is a tuple, introduced in 252d857). Design note
+  updated (status; §1 stale-quote fix 0.02834/0.01335/0.01220 →
+  0.02949/0.01361/0.01131; §3 as-built config; §4 runtime-convention
+  note + 2D extension; §6 shipped table + measured non-ship reasons;
+  §8/§9 actuals).
+
 ## Progress log
 - 2026-09-19: closeout plan created; item 1 (PLAN.md bookkeeping) done.
 - 2026-09-19: item 2 (support.py float32-BinOp constants) DONE + committed.
@@ -211,3 +257,16 @@ Per PLAN Phase 8:
   float64 + float32. The ε hook is now a single call site inside
   `computeDensities` (design note §3 updated). Scheme-level GPU tests
   (runner auto-selects CUDA) deferred — GPU held by the local LLM.
+- 2026-09-19: item 7 (build the ε correction) DONE + committed in both
+  repos (warpSPHCore bf14e56, warpSPH 3de37e7). Multi-dim refit (8
+  kernels × 3 dims, densest lattice, fig03 grid + dense runtime-convention
+  bands; 3D self-test vs fig03 check #4 x1.005 / paper x1.5); 6 Wendland
+  2D/3D entries shipped, 1D + B-splines excluded with measured reasons
+  (see item 7). warpSPHCore util (pure torch, warp kernel untouched) +
+  46/46 unit tests; warpSPH sibling config (DensityCorrection dataclass
+  next to calibrateNormalization, bool shorthand, --densityCorrection
+  CLI flag) + computeDensities hook + 45/45 frontend tests — all green
+  on CPU f32. Regression test_caseSpec/test_runner/test_latticeDensity:
+  170 passed / 1 failed, the failure PRE-EXISTING and unrelated
+  (dambreak.surfacePressureProbes tuple params, 252d857). Design note
+  updated (status BUILT; §1 stale quote fixed; §3/§4/§6/§8/§9 as-built).
