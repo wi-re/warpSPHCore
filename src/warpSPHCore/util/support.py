@@ -76,14 +76,28 @@ def nH_to_n_h(nH: float, dim: int) -> float:
 
 
 
+# Module-level Python floats: a `scalar_t(np.pi * 3.0 / 4.0)` (or
+# `scalar_t(1.0/3.0)`) binop inside a traced func is evaluated in float32 by
+# the warp tracer, silently corrupting the sphere-volume factor and the
+# cube-root exponent at ~1e-8 relative in float64 builds (same gotcha as the
+# B7 knots / the properties.py constant-BinOp finding, PLAN log 2026-09-18).
+# Plain module constants referenced by name survive float64 exactly
+# (probe-verified, .tmp/support_const_probe.py).
+_VOL_3D_FACTOR = np.pi * 3.0 / 4.0   # (4/3)pi h^3 = N_H v  ->  h^3 = N_H v / (3pi/4)
+_CUBE_ROOT_EXP = 1.0 / 3.0
+
+
 @wp.func
 def volumeToSupport_warp(volume : scalar_t, targetNeighbors : wp.int32, dim : wp.int32):
+    # the tracer has no int32 x float64 mul overload; cast first (exact for
+    # the integer neighbor counts involved)
+    n = scalar_t(targetNeighbors)
     if dim == 1:
-        return targetNeighbors * volume / scalar_t(2.0)
+        return n * volume / scalar_t(2.0)
     elif dim == 2:
-        return safe_sqrt(targetNeighbors * volume / scalar_t(np.pi))
+        return safe_sqrt(n * volume / scalar_t(np.pi))
     else:
-        return wp.pow(targetNeighbors * volume / scalar_t(np.pi * 3.0 /4.0), scalar_t(1.0/3.0))
+        return wp.pow(n * volume / scalar_t(_VOL_3D_FACTOR), scalar_t(_CUBE_ROOT_EXP))
 
 
 

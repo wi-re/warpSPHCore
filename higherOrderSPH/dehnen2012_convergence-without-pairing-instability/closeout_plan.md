@@ -36,17 +36,27 @@
   absolute-coordinate phase) → corrected to the validated form
   `P = 2mB̄ Σ(1−cos k·d0_j)∇∇W(d0_j) + mB̄(γ−2)/ρ̄ Re[Σ ∇W(d0_j)⊗B_j]`.
 
-### 2. Fix the float32-BinOp constants in `src/warpSPHCore/util/support.py` — [ ]
+### 2. Fix the float32-BinOp constants in `src/warpSPHCore/util/support.py` — [x] DONE 2026-09-19
 - `volumeToSupport_warp`, dim == 3 branch: `scalar_t(np.pi * 3.0 /4.0)` and
   `scalar_t(1.0/3.0)` are evaluated as **float32** constants by the warp
   tracer even in float64 builds (same bug class as the B7 knot; findings log
   2026-09-18). Corrupts the (4π/3) volume factor at ~1e-8 relative.
-- Fix: module-level Python-float constants referenced by name (the pattern
-  `kernelFunctions/B7.py` uses for its knots).
-- Verify: a `.tmp/` probe comparing `volumeToSupport_warp` (float64 build)
-  against the exact `(4π/3)·N_H·v` before/after; run any tests covering
-  support computation (grep `tests/` for `volumeToSupport` / `support`).
-- Commit in `warpSPHCore`.
+  **Found while fixing:** the function did not compile in *any* build — the
+  tracer has no `int32 × float64` mul overload (`targetNeighbors * volume`
+  raised "Input types must be the same"), so the float32-constant bug was
+  latent behind a compile error (which is why it had zero callers).
+- Fix (committed): module-level Python-float constants `_VOL_3D_FACTOR` /
+  `_CUBE_ROOT_EXP` referenced by name (the `kernelFunctions/B7.py` knot
+  pattern) + `n = scalar_t(targetNeighbors)` cast before the muls.
+- Verified: `.tmp/support_const_probe.py` (float64 build) — all three dims
+  now **exact** (max |rel| = 0.000e+00) vs the double reference; float32
+  build gives ~7.5e-8 (= f32 round-off, the pre-fix expectation).
+  `.tmp/support_const_probe2.py` isolates the pre-fix corruption: the two
+  BinOp constants came out as float32-rounded values (2.5e-9 / 2.98e-8 rel)
+  in a float64 build, while the `scalar_t(np.pi)` Name form was exact.
+  Full suite: 451 passed, 1 skipped (one unrelated pre-existing failure in
+  `test_field_abstraction.py::test_tangent_slot_inert_when_unset`, present
+  on the unmodified file too).
 
 ### 3. Fix `sampleOptimal` (`warpSPH/src/warpSPH/sample/optimal.py`) — [ ]
 Three bugs (findings log 2026-09-18):
@@ -132,3 +142,9 @@ Per PLAN Phase 8:
 
 ## Progress log
 - 2026-09-19: closeout plan created; item 1 (PLAN.md bookkeeping) done.
+- 2026-09-19: item 2 (support.py float32-BinOp constants) DONE + committed.
+  Module-level constants + int-cast fix; float64 probe now exact (0.0 rel),
+  float32 ~7.5e-8 (f32 round-off); full suite 451 passed / 1 skipped / 1
+  unrelated pre-existing failure. Also surfaced that the function previously
+  did not compile in any build (no int32×float64 mul overload) — the
+  float32-constant bug was latent behind that.
