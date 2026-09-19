@@ -58,7 +58,7 @@
   `test_field_abstraction.py::test_tangent_slot_inert_when_unset`, present
   on the unmodified file too).
 
-### 3. Fix `sampleOptimal` (`warpSPH/src/warpSPH/sample/optimal.py`) — [ ]
+### 3. Fix `sampleOptimal` (`warpSPH/src/warpSPH/sample/optimal.py`) — [x] DONE 2026-09-19
 Three bugs (findings log 2026-09-18):
 1. passes a `ParticleSet` where `warpOperation` / `computeDeltaShiftWarp`
    need a `ParticleState` → `AttributeError: ... 'kinds'`;
@@ -69,12 +69,25 @@ Three bugs (findings log 2026-09-18):
 Fix: build/accept a `ParticleState`, use the delta.py-style scaling
 (`scale = −CFL·Ma·2·h²`, CFL 0.3, Ma 0.1 = the no-velocity fallback), keep
 the jittered-lattice start.
-Verify: reproduce the working glass recipe (findings log): 16³ regular
-lattice + 0.1·dx Gaussian jitter (seed 42), Wendland C² at N_H = 50,
-1000 iters → density std ≈ 0.30 %, nn/dx ≈ 0.86, no clumping; compare
-against the cached reference `.tmp/glass_N4096_L1.0_seed42.npz`
-(rebuild it in warpSPH's own `.tmp/` if not present).
-Commit in `warpSPH`.
+**Fixed (committed in warpSPH):** all three bugs; also (a) a fourth latent
+bug — `ParticleSet` was used unimported at the end of the function (would
+`NameError` after the other fixes), now `from ..geometry import ParticleSet`;
+(b) the `kernel` arg was ignored (Wendland2 hardcoded) — now used for both
+the density op and the shift + `sphKernelScale`; (c) a `seed` kwarg (default
+`None`) makes the Gaussian jitter reproducible (the recipe uses seed 42);
+positions are wrapped into `[min, max)` on periodic axes each iter.
+**Verified** (`.tmp/verify_sampleOptimal.py` + `.tmp/ref_glass_cpu.py`,
+warpSPH `.tmp/`, CPU/float64): the fixed function reproduces the recipe
+algorithm **exactly** — per-particle positions match an unmodified
+CPU run of the original `glass_recipe_probe.py` logic to max |Δpos| =
+4.4e-15 (float64 round-off). Recipe acceptance on CPU: density std/mean =
+0.283 % (recipe ~0.30 %), nn/dx = 0.8863 (recipe ~0.86), no clumping.
+The cached CUDA npz differs from BOTH the CPU recipe run and the fixed
+function by the same 3.4e-2 max (a device-level ulp/jitter-generator fork
+of the relaxation into a neighbouring glass basin — both are valid glasses
+meeting the recipe criteria; not an implementation deviation). Float32
+build also runs (50-iter smoke). Regression: `test_densestSampling.py` +
+`test_latticeDensity.py` 151 passed.
 
 ### 4. Scope the `renorm` ε feature (warpSPHCore) — [ ] (scope ONLY)
 Paper eq. 18/19 (`data/da2012_reference.yaml` → `density_correction`):
@@ -148,3 +161,11 @@ Per PLAN Phase 8:
   unrelated pre-existing failure. Also surfaced that the function previously
   did not compile in any build (no int32×float64 mul overload) — the
   float32-constant bug was latent behind that.
+- 2026-09-19: item 3 (warpSPH `sampleOptimal`) DONE + committed in warpSPH.
+  Fixed the three findings-log bugs (ParticleState, −CFL·Ma·2h² scaling,
+  keep the jittered lattice) plus two more latent ones (unimported
+  ParticleSet, ignored `kernel` arg); added a `seed` kwarg. Verified:
+  per-particle match to 4.4e-15 vs an unmodified CPU run of the original
+  glass-recipe probe; recipe acceptance met on CPU (std 0.283 %, nn/dx
+  0.8863); the 3.4e-2 gap to the cached CUDA npz is device-level fork
+  (same for the unmodified CPU recipe) — not an implementation deviation.
