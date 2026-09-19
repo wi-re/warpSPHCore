@@ -89,7 +89,28 @@ meeting the recipe criteria; not an implementation deviation). Float32
 build also runs (50-iter smoke). Regression: `test_densestSampling.py` +
 `test_latticeDensity.py` 151 passed.
 
-### 4. Scope the `renorm` ε feature (warpSPHCore) — [ ] (scope ONLY)
+### 4. Scope the `renorm` ε feature (warpSPHCore) — [x] DONE 2026-09-19 (scope ONLY)
+**Deliverable: `renorm_eps_design_note.md` (this folder)** — answers all six
+questions. Key scoping outcomes: (a) naming — do NOT call it `renorm`
+(`warpSPHCore/renorm.py` is gradient renormalization); use
+`densityCorrection`/`selfTermCorrection`; (b) hook — post-process OUTSIDE
+the density operator (pure-torch elementwise remap at the two scheme sites,
+immediately after the raw density, before the EOS — the Monaghan scheme
+calls `warpOperation(Density)` directly, NOT via `computeDensities`),
+keeping the continuity update standard (justified by the paper's
+constant-in-h Lagrangian argument); (c) N_H from the raw estimate
+`N_H = V_ν h^ν ρ̂/m` (no iteration — second order); (d) W0 =
+C_d·f(0)/h^ν at the code support = paper H via `eval_k(0)`/`eval_C_d`
+(kernelScale³ gotcha); (e) constants — ship only the 3 Wendland 3D pairs
+(the correction only helps over-estimating kernels; B-splines
+under-estimate), W2 the default candidate, config override + KeyError;
+(f) `calibrateNormalization` — different axis (constant 1/L lattice
+quadrature vs per-particle N_H^−α self-term fraction), partial overlap at
+small n_h → both default off, refit ε before combining; (g) tests spec:
+fig03 corrected-curve unit check (0.10–2.40 % over 40≤N_H≤400), cross-repo
+consistency, Monaghan integration smoke. NOT built (per user decision).
+
+*Original scope (for reference):*
 Paper eq. 18/19 (`data/da2012_reference.yaml` → `density_correction`):
 `rho_corr = rho_hat − ε·m·W(0, H)` with `ε = ε₁₀₀·(N_H/100)^(−α)`; 3D
 constants W2 (0.0294, 0.977), W4 (0.01342, 1.579), W6 (0.0116, 2.236); our
@@ -169,3 +190,9 @@ Per PLAN Phase 8:
   glass-recipe probe; recipe acceptance met on CPU (std 0.283 %, nn/dx
   0.8863); the 3.4e-2 gap to the cached CUDA npz is device-level fork
   (same for the unmodified CPU recipe) — not an implementation deviation.
+- 2026-09-19: item 4 (renorm ε scope) DONE — `renorm_eps_design_note.md`
+  written (all six questions: naming collision with the existing gradient
+  `renorm`, outside-operator hook at the two scheme density sites, N_H from
+  the raw estimate, W0 convention + kernelScale³ gotcha, 3-Wendland-only
+  constants table, calibrateNormalization coexistence rule, test spec).
+  Not built, per the user decision.
