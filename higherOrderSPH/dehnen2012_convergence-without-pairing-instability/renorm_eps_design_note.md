@@ -44,22 +44,31 @@ The correction needs the *finished* raw density (ε depends on N_H, which
 depends on ρ̂), so it is a per-particle remap
 `(ρ̂, m, h, kernel) → ρ̂,corr`, not a term inside the neighbour sum.
 
-**Density paths in warpSPH (the actual call sites):**
-- `schemes/monaghan.py` (the D&A scheme) calls
-  `warpOperation(Density)` **directly** (line ~60) — it does NOT go
-  through `modules/density/density.py::computeDensities`.
-- All other schemes (deltaSPH, divergenceFree, omniIncompressible,
-  dfsphReference, band2018pb) go through `computeDensities`.
+**Density paths in warpSPH (after the 2026-09-19 port — option B):** ALL
+schemes that compute a kernel-sum density now go through
+`modules/density/density.py::computeDensities` — `monaghan.py` and
+`compSPH.py` were ported from direct `warpOperation(Density)` calls onto
+it (warpSPH, user decision 2026-09-19). `computeDensities` gained an
+optional `supportMode` parameter, **default Gather** (the C&D switch E.1
+rationale in its docstring); monaghan passes `config.supportMode`
+(default **SuperSymmetric**) so its behavior is **unchanged**, and compSPH
+uses the Gather default (it had hardcoded Gather). Verified **bit-exact**
+against the old direct calls on a non-uniform-support state, both modes
+(warpSPH `.tmp/probe_density_port_equiv.py`; mode spread 1.3e-1 rel
+confirms the supports exercise the mode). The other schemes (deltaSPH,
+divergenceFree, omniIncompressible, dfsphReference, band2018pb) already
+used it; crkSPH has no kernel-sum density path. The ε hook is therefore a
+**single call site** inside `computeDensities`.
 
-**Options:**
+**Options (A/B as originally scoped; B landed in the ported form):**
 - **A. Inside the operator** (flag on `OperationProperties`, applied in
   `coreOperations/wp_density.py` after the sum). Single call site, but the
   correction must be replicated in the forward-mode JVP/HVP density kernels
   (`wp_densityJVP.py`, `wp_densityHVP.py`) and the CRK density path —
   three implementations of the same math.
-- **B. Post-processing outside (recommended).** A small pure-torch
-  elementwise function in warpSPHCore, applied at the two scheme-level
-  sites above, immediately after the raw density and **before the EOS**
+- **B. Post-processing outside (recommended, LANDED).** A small pure-torch
+  elementwise function in warpSPHCore, applied inside `computeDensities`
+  immediately after the raw `warpOperation` result and **before the EOS**
   (`idealGasEOS` in monaghan.py reads `currentState.densities`), so the
   EOS, the force terms, `divergence = −drhodt/ρ` and any switch reading the
   scheme's density all see ρ̂,corr — matching the paper's "replace ρ̂ by
@@ -174,7 +183,7 @@ correction alone (standard kernel normalisation).
 - `warpSPHCore/util/densityCorrection.py`: the elementwise function +
   `selfTermW0(kernel, dim, supports)` + the 3-entry constants table
   (~80 lines, pure torch).
-- warpSPH: `DensityCorrection` module-configuration (~15 lines) + the two
-  call-site wirings (monaghan.py after the raw density;
-  `computeDensities`) (~10 lines) + config plumbing.
+- warpSPH: `DensityCorrection` module-configuration (~15 lines) + the
+  single call-site wiring inside `computeDensities` (post-port, §3;
+  ~5 lines) + config plumbing.
 - Tests per §8, reusing the fig03 FCC machinery.

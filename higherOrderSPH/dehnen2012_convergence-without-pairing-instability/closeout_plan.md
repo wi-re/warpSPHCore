@@ -94,11 +94,16 @@ build also runs (50-iter smoke). Regression: `test_densestSampling.py` +
 questions. Key scoping outcomes: (a) naming — do NOT call it `renorm`
 (`warpSPHCore/renorm.py` is gradient renormalization); use
 `densityCorrection`/`selfTermCorrection`; (b) hook — post-process OUTSIDE
-the density operator (pure-torch elementwise remap at the two scheme sites,
-immediately after the raw density, before the EOS — the Monaghan scheme
-calls `warpOperation(Density)` directly, NOT via `computeDensities`),
-keeping the continuity update standard (justified by the paper's
-constant-in-h Lagrangian argument); (c) N_H from the raw estimate
+the density operator (pure-torch elementwise remap, immediately after the
+raw density, before the EOS), keeping the continuity update standard
+(justified by the paper's constant-in-h Lagrangian argument);
+**post-scoping addendum (2026-09-19, user option B):** the originally
+"two scheme sites" are now ONE — monaghan/compSPH density calls ported
+onto `computeDensities` (optional `supportMode` param added, default
+Gather; monaghan passes `config.supportMode` = SuperSymmetric → zero
+behavior change, bit-exact vs the old direct calls on non-uniform-support
+states, probe warpSPH `.tmp/probe_density_port_equiv.py`), so the hook is
+a single call site inside `computeDensities`; (c) N_H from the raw estimate
 `N_H = V_ν h^ν ρ̂/m` (no iteration — second order); (d) W0 =
 C_d·f(0)/h^ν at the code support = paper H via `eval_k(0)`/`eval_C_d`
 (kernelScale³ gotcha); (e) constants — ship only the 3 Wendland 3D pairs
@@ -196,3 +201,13 @@ Per PLAN Phase 8:
   the raw estimate, W0 convention + kernelScale³ gotcha, 3-Wendland-only
   constants table, calibrateNormalization coexistence rule, test spec).
   Not built, per the user decision.
+- 2026-09-19: item-4 follow-up (user option B) — monaghan/compSPH density
+  calls ported onto `computeDensities` (optional `supportMode` param,
+  default Gather; monaghan passes `config.supportMode`, default
+  SuperSymmetric → zero behavior change; warpSPH 27b9934). Verified
+  bit-exact against the old direct `warpOperation(Density)` calls on a
+  non-uniform-support state in both modes (mode spread 1.3e-1 rel —
+  non-vacuous), imports clean in
+  float64 + float32. The ε hook is now a single call site inside
+  `computeDensities` (design note §3 updated). Scheme-level GPU tests
+  (runner auto-selects CUDA) deferred — GPU held by the local LLM.
