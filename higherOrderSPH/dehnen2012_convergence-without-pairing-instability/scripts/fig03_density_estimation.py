@@ -56,6 +56,7 @@ Output: figures/fig03_density_estimation.{png,pdf} (gitignored).
 
 from __future__ import annotations
 
+import argparse
 import math
 from pathlib import Path
 
@@ -68,6 +69,7 @@ import matplotlib.pyplot as plt
 from common import (C_d, W0, check, kernel_scale, load_reference, packing_ratio,
                     shape as common_shape)
 from particle_configs import ParticleConfig, fccConfig, glassConfig, pairedConfig
+from stability import parse_kernel_arg
 
 _HERE = Path(__file__).resolve().parent
 FIGDIR = _HERE.parent / "figures"
@@ -185,7 +187,10 @@ def allRatios(fcc: ParticleConfig, glass: ParticleConfig,
 
 
 def checks(data: dict, fcc: ParticleConfig, glass: ParticleConfig,
-           paired: ParticleConfig, ref: dict) -> None:
+           paired: ParticleConfig, ref: dict,
+           kernels: list | None = None) -> None:
+    kernels = kernels or ORDER
+    wendl = [n for n in kernels if n in WENDLANDS]
     print("checks:")
 
     # 1. FCC translational invariance (particle 0 vs every particle).
@@ -201,7 +206,7 @@ def checks(data: dict, fcc: ParticleConfig, glass: ParticleConfig,
 
     # 2. section-5.1.1 identity: paired(H) == FCC(H / 2^(1/3)).
     worst = 0.0
-    for n in ORDER:
+    for n in kernels:
         worst = max(worst, float(np.max(np.abs(
             data[n]["paired"][1] - data[n]["fcc_half"][1]))))
     check("5.1.1 identity: paired(H) == FCC(H/2^(1/3)) all kernels",
@@ -225,7 +230,7 @@ def checks(data: dict, fcc: ParticleConfig, glass: ParticleConfig,
     rise_tol = 2e-5     # 1e-3 of the figure's y window (0.02)
     print("  5.1.1 criterion: B-splines dip below 1 and recover; "
           "Wendland/HOCT4/Gaussian stay above 1 (no resolvable rise):")
-    for n in ORDER:
+    for n in kernels:
         NH, r = data[n]["fcc"]
         i_min = int(np.argmin(r))
         interior = 0 < i_min < len(r) - 1
@@ -244,9 +249,10 @@ def checks(data: dict, fcc: ParticleConfig, glass: ParticleConfig,
         assert ok, f"5.1.1 criterion wrong for {n}"
 
     # 4. eq. 19 fit (FCC over-estimation, Wendland kernels).
-    print("  eq. 19 fit  eps = eps_100 (N_H/100)^(-alpha)  "
-          f"(range {FIT_RANGE[0]:.0f}..{FIT_RANGE[1]:.0f}):")
-    for n in WENDLANDS:
+    if wendl:
+        print("  eq. 19 fit  eps = eps_100 (N_H/100)^(-alpha)  "
+              f"(range {FIT_RANGE[0]:.0f}..{FIT_RANGE[1]:.0f}):")
+    for n in wendl:
         NH, r = data[n]["fcc"]
         H = np.array([H_of_NH(x, fcc.mass) for x in NH])
         # W(0, H) is the physical kernel central value, independent of
@@ -270,9 +276,10 @@ def checks(data: dict, fcc: ParticleConfig, glass: ParticleConfig,
         assert ok, f"eq. 19 fit off by more than x1.5 for {n}"
 
     # 5. eq. 18 correction with the paper's constants.
-    print("  eq. 18 correction (paper eps) within 5% of 1 "
-          f"over {FIT_RANGE[0]:.0f} <= N_H <= {FIT_RANGE[1]:.0f}:")
-    for n in WENDLANDS:
+    if wendl:
+        print("  eq. 18 correction (paper eps) within 5% of 1 "
+              f"over {FIT_RANGE[0]:.0f} <= N_H <= {FIT_RANGE[1]:.0f}:")
+    for n in wendl:
         c = ref["density_correction"][n]
         for cfg, key in ((fcc, "fcc"), (glass, "glass")):
             NH, r = data[n][key]
@@ -344,7 +351,8 @@ def table2(ref: dict) -> str:
 
 
 def plot(data: dict, ref: dict, fcc: ParticleConfig,
-         glass: ParticleConfig) -> None:
+         glass: ParticleConfig, kernels: list | None = None) -> None:
+    kernels = kernels or ORDER
     plt.rcParams.update({
         "font.size": 10,
         "axes.titlesize": 11,
@@ -354,7 +362,7 @@ def plot(data: dict, ref: dict, fcc: ParticleConfig,
     })
     fig, ax = plt.subplots(figsize=(8.5, 6))
 
-    for n in ORDER:
+    for n in kernels:
         NHf, rf = data[n]["fcc"]
         NHg, rg = data[n]["glass"]
         NHp, rp = data[n]["paired"]
@@ -427,6 +435,14 @@ def plot(data: dict, ref: dict, fcc: ParticleConfig,
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--kernel", action="append", default=None,
+                    help="kernel(s) to plot, repeatable and/or comma-separated; "
+                         f"known: {ORDER} (default: all ten)")
+    args = ap.parse_args()
+    kernels = parse_kernel_arg(args.kernel, default=ORDER)
+
     ref = load_reference()
 
     print("building particle configurations ...")
@@ -441,11 +457,11 @@ def main() -> None:
     assert abs(glass.density - 1.0) < 1e-12
     assert abs(paired.density - 1.0) < 1e-12
 
-    print("evaluating density estimates (34 x N_H grid, 10 kernels, "
-          "3 configurations) ...")
-    data = allRatios(fcc, glass, paired, ORDER)
+    print(f"evaluating density estimates ({len(NH_GRID)} x N_H grid, "
+          f"{len(kernels)} kernel(s), 3 configurations) ...")
+    data = allRatios(fcc, glass, paired, kernels)
 
-    checks(data, fcc, glass, paired, ref)
+    checks(data, fcc, glass, paired, ref, kernels)
 
     print()
     tbl = table2(ref)
@@ -454,7 +470,7 @@ def main() -> None:
     (RESDIR / "table2_nH_bookkeeping.txt").write_text(tbl + "\n")
     print(f"saved {RESDIR / 'table2_nH_bookkeeping.txt'}")
 
-    plot(data, ref, fcc, glass)
+    plot(data, ref, fcc, glass, kernels)
 
 
 if __name__ == "__main__":

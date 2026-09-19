@@ -84,10 +84,15 @@ COLORS = {
 }
 
 
-def parse_kernel_arg(values, default=STABILITY_ORDER):
+def parse_kernel_arg(values, default=None, valid=None):
     """Parse the --kernel flag: repeatable and/or comma-separated shipped
-    names; default is the full STABILITY_ORDER. Returns the selected list
-    (in STABILITY_ORDER order)."""
+    names. `valid` is the set of accepted names (default STABILITY_ORDER);
+    `default` is the selection when the flag is absent (default: the full
+    `valid` set). Returns the selected list (in `valid` order)."""
+    if valid is None:
+        valid = STABILITY_ORDER
+    if default is None:
+        default = valid
     if not values:
         return list(default)
     names = []
@@ -98,13 +103,12 @@ def parse_kernel_arg(values, default=STABILITY_ORDER):
                 names.append(part)
     seen, out = set(), []
     for n in names:
-        if n in STABILITY_ORDER and n not in seen:
+        if n in valid and n not in seen:
             seen.add(n)
             out.append(n)
-    bad = [n for n in names if n not in STABILITY_ORDER]
+    bad = [n for n in names if n not in valid]
     if bad:
-        raise SystemExit(f"unknown kernel(s) {bad}; "
-                         f"known: {STABILITY_ORDER}")
+        raise SystemExit(f"unknown kernel(s) {bad}; known: {list(valid)}")
     return out
 
 

@@ -49,6 +49,7 @@ Output: figures/fig02_fourier_transforms.{png,pdf} (gitignored).
 
 from __future__ import annotations
 
+import argparse
 import math
 from pathlib import Path
 
@@ -62,6 +63,7 @@ from common import load_reference
 from ft_kernels import (ft3d_closed, ft3d_numeric, kernel_shapes,
                         moment2)
 from fig01_kernel_shapes import COLORS, LABELS, ORDER
+from stability import parse_kernel_arg
 
 _HERE = Path(__file__).resolve().parent
 FIGDIR = _HERE.parent / "figures"
@@ -152,17 +154,21 @@ def find_zeros(d: dict, xg: np.ndarray, w: np.ndarray,
     return merged
 
 
-def checks(ks: dict, num: dict, x: np.ndarray) -> dict:
+def checks(ks: dict, num: dict, x: np.ndarray,
+           kernels: list | None = None) -> dict:
+    kernels = kernels or ORDER
+    nonneg = [n for n in kernels if n in NONNEG]
+    bspl = [n for n in kernels if n in BSPLINES]
     info: dict = {}
 
     # -- wbar(0) = 1 -------------------------------------------------------
-    for n in ORDER:
+    for n in kernels:
         w0 = wbar0(n, ks[n])
         assert abs(w0 - 1.0) < 1e-10, f"{n}: wbar(0) = {w0:.12f}"
         info.setdefault(n, {})["w0"] = w0
 
     # -- closed form vs numerical on the plot grid -------------------------
-    for n in ORDER:
+    for n in kernels:
         d = ks[n]
         if d["pieces"] is None:
             continue
@@ -173,7 +179,7 @@ def checks(ks: dict, num: dict, x: np.ndarray) -> dict:
 
     # -- eq. 17: wbar = 1 - kappa^2/8 + O(kappa^4) at small kappa ----------
     kt = np.linspace(0.05, 0.5, 46)
-    for n in ORDER:
+    for n in kernels:
         d = ks[n]
         wt = ft3d_numeric(d["shape"], d["C3"], kt * d["scale3"], n=N_SIMPSON)
         a4, a2, a0 = np.polyfit(kt ** 2, wt - 1.0, 2)
@@ -182,7 +188,7 @@ def checks(ks: dict, num: dict, x: np.ndarray) -> dict:
         info[n]["a2"], info[n]["a4"] = float(a2), float(a4)
 
     # -- non-negativity (Wendland, b8, HOCT4, Gaussian) ---------------------
-    for n in NONNEG:
+    for n in nonneg:
         mn = float(num[n].min())
         lim = NONNEG_FLOOR.get(n, -1e-10)
         assert mn >= lim, f"{n}: min wbar on [0,6π] = {mn:.3e}"
@@ -192,7 +198,7 @@ def checks(ks: dict, num: dict, x: np.ndarray) -> dict:
     # [0, 40] in kappa-hat: b7's third zero (32.347) needs the extra
     # range.
     zg = np.linspace(0.0, 40.0, 20001)  # d = 2e-3, kappa-hat units
-    for n in BSPLINES:
+    for n in bspl:
         d = ks[n]
         w = ft3d_closed(d["pieces"], d["C3"], zg[1:] * d["scale3"])
         zeros = find_zeros(d, zg[1:], w)
@@ -229,7 +235,9 @@ def _seg(ax, x, y, color, lw, sign):
             ls=(0, (4, 2)) if sign < 0 else "-")
 
 
-def plot(ks: dict, num: dict, info: dict) -> None:
+def plot(ks: dict, num: dict, info: dict, kernels: list | None = None) -> None:
+    kernels = kernels or ORDER
+    bspl = [n for n in kernels if n in BSPLINES]
     plt.rcParams.update({
         "font.size": 10,
         "axes.titlesize": 11,
@@ -239,14 +247,14 @@ def plot(ks: dict, num: dict, info: dict) -> None:
     })
     fig, ax = plt.subplots(figsize=(8.5, 5.5))
     x = 0.5 * np.linspace(0.0, 2.0 * KMAX_PLOT, NK_PLOT)  # |k|sigma
-    for n in ORDER:
+    for n in kernels:
         plot_signed(ax, x, num[n], COLORS[n], YFLOOR)
 
     # first zeros of the B-splines (set the pairing criterion); stored
     # in kappa-hat = |k|h units, plotted halved in |k|sigma units.
     # Staggered label heights avoid overlap (3.44, 4.29, 5.56); b7's
     # first zero (10.98) lies beyond the 3-pi axis and is skipped.
-    for iy, n in enumerate(BSPLINES):
+    for iy, n in enumerate(bspl):
         z1 = 0.5 * info[n]["zeros40"][0]
         if z1 > KMAX_PLOT:
             continue
@@ -266,7 +274,7 @@ def plot(ks: dict, num: dict, info: dict) -> None:
     ax.set_title("D&A (2012) Fig. 2 — Fourier transforms at common "
                  "h = 2σ (ν = 3)")
     ax.legend(handles=[plt.Line2D([], [], color=COLORS[n], lw=1.6,
-                                  label=LABELS[n]) for n in ORDER],
+                                  label=LABELS[n]) for n in kernels],
               loc="upper right")
 
     FIGDIR.mkdir(exist_ok=True)
@@ -277,44 +285,54 @@ def plot(ks: dict, num: dict, info: dict) -> None:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--kernel", action="append", default=None,
+                    help="kernel(s) to plot, repeatable and/or comma-separated; "
+                         f"known: {ORDER} (default: all ten)")
+    args = ap.parse_args()
+    kernels = parse_kernel_arg(args.kernel, default=ORDER)
+    bspl = [n for n in kernels if n in BSPLINES]
+
     ref = load_reference()
     ks = kernel_shapes(ref)
 
     xh = np.linspace(0.0, 2.0 * KMAX_PLOT, NK_PLOT)  # kappa-hat = |k|h
     num: dict = {}
-    for n in ORDER:
+    for n in kernels:
         d = ks[n]
         w = ft3d_numeric(d["shape"], d["C3"], xh[1:] * d["scale3"],
                          n=N_SIMPSON)
         num[n] = np.concatenate([[1.0], w])
 
-    info = checks(ks, num, xh)
+    info = checks(ks, num, xh, kernels)
 
     print("kappa-hat = |k|h, h = 2σ = 1;  primary = numerical FT (eq. 14)")
     print(f"{'kernel':<14}{'w̄(0)':>10}{'a2 (fit)':>12}{'a4 (fit)':>12}"
           f"{'min [0,6π]':>12}{'#zeros[0,40]':>13}")
-    for n in ORDER:
+    for n in kernels:
         i = info[n]
         mn = f"{i['min12']:+.4f}" if "min12" in i else "   (osc.)"
         nz = len(i["zeros40"]) if "zeros40" in i else "—"
         print(f"{n:<14}{i['w0']:>10.7f}{i['a2']:>12.7f}{i['a4']:>12.6e}"
               f"{mn:>12}{nz:>13}")
 
-    print("\nB-spline zeros in [0,40] (kappa-hat = |k|h units; "
-          "the figure's axis is |k|sigma = kappa-hat/2):")
-    for n in BSPLINES:
-        zs = info[n]["zeros40"]
-        zstr = "  ".join(f"{z:.4f}" for z in zs)
-        print(f"  {n:<14} {zstr}")
-        print(f"  {'':<14} z1 = {zs[0]/2:.6f} |k|σ   "
-              f"(kappa = H|k|: {zs[0] * ks[n]['scale3']:.4f})")
+    if bspl:
+        print("\nB-spline zeros in [0,40] (kappa-hat = |k|h units; "
+              "the figure's axis is |k|sigma = kappa-hat/2):")
+        for n in bspl:
+            zs = info[n]["zeros40"]
+            zstr = "  ".join(f"{z:.4f}" for z in zs)
+            print(f"  {n:<14} {zstr}")
+            print(f"  {'':<14} z1 = {zs[0]/2:.6f} |k|σ   "
+                  f"(kappa = H|k|: {zs[0] * ks[n]['scale3']:.4f})")
 
     print("\nclosed-form vs numerical max|dwbar| on the plot grid:")
-    for n in ORDER:
+    for n in kernels:
         if "clnum" in info[n]:
             print(f"  {n:<14} {info[n]['clnum']:.3e}")
 
-    plot(ks, num, info)
+    plot(ks, num, info, kernels)
 
 
 if __name__ == "__main__":

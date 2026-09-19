@@ -587,6 +587,43 @@ be reproducing the paper's quoted N_H pairing thresholds (cubic gradual
 beyond ~55, quartic ~67, quintic ~190, Wendland stable to 700) directly
 from `fig04_fig05`'s red contour rather than eyeballing it.
 
+### 2026-09-19 (l) — `--kernel` retrofit complete for all figure scripts (fig01/02/03/figA)
+
+Carried-over user requirement: every figure script must support a `--kernel`
+flag (shipped names, repeatable and/or comma-separated, default the full set;
+single-kernel mode runs only the applicable checks). fig04/05/06 already had
+it; this finishes fig01/02/03 (refactored in the prior session, uncommitted
+here) and figA.
+
+- **`stability.py::parse_kernel_arg` generalized** to
+  `parse_kernel_arg(values, default=None, valid=None)` — `valid` is the set of
+  accepted names (default `STABILITY_ORDER`), `default` is the no-flag
+  selection (default the full `valid` set). Backward compatible: fig01/02/03
+  call it as before (`default=ORDER`, where their `ORDER == STABILITY_ORDER`).
+  The `valid` parameter is what lets figA validate against ITS OWN five
+  kernels, which are not in `STABILITY_ORDER`.
+- **figA_other_kernels.py** (its own set poly6/spiky/adhesion/cohesion/
+  viscosity): `main()` builds `ks` only for the selected kernels;
+  `checks(ks, kernels)` and `plot(ks, info, kernels)` take `kernels`; the
+  "viscosity singular at r = 0" panel annotation is now guarded by
+  `"viscosity" in kernels`; `main()` calls
+  `parse_kernel_arg(args.kernel, default=ORDER, valid=ORDER)`.
+- fig01/02/03: `check`/`checks`/`plot` take `kernels`, `main()` parses
+  `--kernel` and passes the selection through; category loops (BSPLINES /
+  NONNEG / wendl) are filtered against the selection.
+
+**Tested (this session):**
+- `fig01 --kernel cubic_b4,gaussian` → only those two in table/check/plot, all
+  checks pass.
+- `figA --kernel poly6` → poly6 only (norm 1.000000, pairing-unstable
+  min w̄ −1.192e-02, z1 2.467). `figA --kernel poly6,spiky` → both rows.
+  `figA` (no flag) → all five, output identical to the pre-retrofit baseline
+  (adhesion not-normalised 0.0158, cohesion negative, viscosity singular
+  f(0)=∞). `figA --kernel cubic_b4` → correctly rejected: "unknown kernel(s)
+  ['cubic_b4']; known: ['poly6','spiky','adhesion','cohesion','viscosity']".
+
+All four figure scripts (fig01/02/03/figA) now accept `--kernel`.
+
 
 
 

@@ -27,6 +27,7 @@ Output: figures/fig01_kernel_shapes.{png,pdf} (gitignored).
 
 from __future__ import annotations
 
+import argparse
 import math
 from pathlib import Path
 
@@ -38,6 +39,7 @@ import matplotlib.pyplot as plt
 
 from common import load_reference
 from ft_kernels import kernel_shapes, moment2
+from stability import parse_kernel_arg
 
 _HERE = Path(__file__).resolve().parent
 FIGDIR = _HERE.parent / "figures"
@@ -93,9 +95,10 @@ def W(d: dict, r: np.ndarray) -> np.ndarray:
     return out
 
 
-def check(ks: dict) -> None:
+def check(ks: dict, kernels: list | None = None) -> None:
+    kernels = kernels or ORDER
     r = np.linspace(0.0, 8.4, 4201)
-    for name in ORDER:
+    for name in kernels:
         d = ks[name]
         w = W(d, r)
         H = d["scale3"]
@@ -129,7 +132,8 @@ def check(ks: dict) -> None:
     print("checks: non-negativity, support, normalisation -- all pass")
 
 
-def plot(ks: dict) -> None:
+def plot(ks: dict, kernels: list | None = None) -> None:
+    kernels = kernels or ORDER
     plt.rcParams.update({
         "font.size": 10,
         "axes.titlesize": 11,
@@ -140,7 +144,7 @@ def plot(ks: dict) -> None:
 
     # --- top: linear -------------------------------------------------------
     r_top = np.linspace(0.0, 2.7, 2701)
-    Ws = {n: W(ks[n], r_top) for n in ORDER}
+    Ws = {n: W(ks[n], r_top) for n in kernels}
     Wmax = max(w.max() for w in Ws.values())
 
     fig, (ax1, ax2) = plt.subplots(
@@ -148,14 +152,14 @@ def plot(ks: dict) -> None:
         gridspec_kw={"height_ratios": [1.15, 1.0], "hspace": 0.12},
     )
 
-    for n in ORDER:
+    for n in kernels:
         ax1.plot(r_top, Ws[n], color=COLORS[n], lw=1.6, label=LABELS[n])
 
     # support arrows: vertical, pointing down at r = H (the kernel's
     # zero), caption: "arrows indicating |x| = H"; the Gaussian has no
     # arrow (truncated, not compact) -- its truncation is marked in the
     # log panel.
-    compact = [n for n in ORDER if n != "gaussian"]
+    compact = [n for n in kernels if n != "gaussian"]
     for n in compact:
         H = ks[n]["scale3"]
         ax1.annotate(
@@ -174,7 +178,7 @@ def plot(ks: dict) -> None:
     # 1e-6 floor (r ~ 2.6); its 16-sigma truncation (r = H = 8,
     # W ~ 1.7e-56) is far below the visible floor and is noted in text.
     r_bot = np.linspace(0.0, 4.2, 2101)
-    for n in ORDER:
+    for n in kernels:
         w = W(ks[n], r_bot)
         m = w > CLIP
         ax2.plot(r_bot[m], np.log10(np.maximum(w[m], CLIP)),
@@ -196,20 +200,28 @@ def plot(ks: dict) -> None:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--kernel", action="append", default=None,
+                    help="kernel(s) to plot, repeatable and/or comma-separated; "
+                         f"known: {ORDER} (default: all ten)")
+    args = ap.parse_args()
+    kernels = parse_kernel_arg(args.kernel, default=ORDER)
+
     ref = load_reference()
     ks = kernel_shapes(ref)
 
     print(f"common scale: h = 2σ = 1 (paper units); support H = scale₃:")
     print(f"{'kernel':<14}{'C₃':>12}{'H/h':>12}{'W(0)':>12}")
-    for n in ORDER:
+    for n in kernels:
         d = ks[n]
         W0 = d["C3"] / d["scale3"] ** 3 * float(
             np.atleast_1d(d["shape"](np.array([0.0])))[0])
         supp = f"{d['scale3']:.6f}" if n != "gaussian" else "8 (trunc.)"
         print(f"{n:<14}{d['C3']:>12.6f}{supp:>12}{W0:>12.6f}")
 
-    check(ks)
-    plot(ks)
+    check(ks, kernels)
+    plot(ks, kernels)
 
 
 if __name__ == "__main__":

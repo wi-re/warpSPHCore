@@ -53,6 +53,7 @@ Output: figures/figA_other_kernels.{png,pdf} (gitignored).
 
 from __future__ import annotations
 
+import argparse
 import math
 from pathlib import Path
 
@@ -64,6 +65,7 @@ import matplotlib.pyplot as plt
 
 from common import C_d, init, shape, simpson
 from fig02_fourier_transforms import plot_signed
+from stability import parse_kernel_arg
 
 _HERE = Path(__file__).resolve().parent
 FIGDIR = _HERE.parent / "figures"
@@ -172,9 +174,10 @@ def ft3d(f, C3: float, k: np.ndarray, n: int = N_FT) -> np.ndarray:
     return out
 
 
-def checks(ks: dict) -> dict:
+def checks(ks: dict, kernels: list | None = None) -> dict:
+    kernels = kernels or ORDER
     info: dict = {}
-    for name in ORDER:
+    for name in kernels:
         d = ks[name]
         f = d["shape"]
         i = info[name] = {}
@@ -257,7 +260,8 @@ def pairing_note(i: dict) -> str:
     return f"pairing-stable (min w̄ = {i['minw']:+.2e})"
 
 
-def plot(ks: dict, info: dict) -> None:
+def plot(ks: dict, info: dict, kernels: list | None = None) -> None:
+    kernels = kernels or ORDER
     plt.rcParams.update({
         "font.size": 10,
         "axes.titlesize": 11,
@@ -270,10 +274,10 @@ def plot(ks: dict, info: dict) -> None:
     # The viscosity kernel is singular (W ~ 1/r): plot it from R0 and
     # cap the axis at WCAP so the singularity does not dominate the
     # panel (every regular kernel peaks at <= 0.73, spiky).
-    Hmax = max(ks[n]["scale3"] for n in ORDER)
+    Hmax = max(ks[n]["scale3"] for n in kernels)
     r_top = np.linspace(0.0, Hmax * 1.12, 3301)
     curves = {}
-    for n in ORDER:
+    for n in kernels:
         r, w = r_top, W(ks[n], r_top)
         if n == "viscosity":  # singular at r = 0: start off the origin
             m = r >= R0
@@ -286,22 +290,23 @@ def plot(ks: dict, info: dict) -> None:
         gridspec_kw={"height_ratios": [1.15, 1.0], "hspace": 0.12},
     )
 
-    for n in ORDER:
+    for n in kernels:
         r, w = curves[n]
         ax1.plot(r, w, color=COLORS[n], lw=1.6, label=LABELS[n])
 
     # support arrows: vertical, pointing down at r = H (same convention
     # as fig01)
-    for n in ORDER:
+    for n in kernels:
         H = ks[n]["scale3"]
         ax1.annotate(
             "", xy=(H, 0.0), xytext=(H, 0.96 * WCAP),
             arrowprops=dict(arrowstyle="-|>", color=COLORS[n],
                             lw=1.0, alpha=0.85),
         )
-    ax1.text(0.02 * Hmax, 0.92 * WCAP,
-             "viscosity singular at r = 0 (leaves the panel at W = 1)",
-             fontsize=8, color=COLORS["viscosity"])
+    if "viscosity" in kernels:
+        ax1.text(0.02 * Hmax, 0.92 * WCAP,
+                 "viscosity singular at r = 0 (leaves the panel at W = 1)",
+                 fontsize=8, color=COLORS["viscosity"])
 
     ax1.set_xlim(0.0, Hmax * 1.12)
     ax1.set_ylim(-0.12 * WCAP, WCAP)
@@ -312,10 +317,10 @@ def plot(ks: dict, info: dict) -> None:
 
     # --- bottom: FT, log |wbar| over |k|sigma in [0, 3 pi] ------------------
     x = 0.5 * np.linspace(0.0, 2.0 * KMAX_SIG, NK)  # |k|sigma
-    for n in ORDER:
+    for n in kernels:
         plot_signed(ax2, x, info[n]["wbar"], COLORS[n], YFLOOR)
 
-    ytop = max(1.0, max(info[n]["wbar"][0] for n in ORDER)) * 1.1
+    ytop = max(1.0, max(info[n]["wbar"][0] for n in kernels)) * 1.1
     ax2.set_yscale("log")
     ax2.set_xlim(0.0, KMAX_SIG)
     ax2.set_ylim(YFLOOR, ytop)
@@ -324,7 +329,7 @@ def plot(ks: dict, info: dict) -> None:
     ax2.set_xlabel(r"$|k|\,\sigma$   ($\sigma = h/2$)")
     ax2.set_ylabel(r"$|\bar W(k)|$")
     ax2.legend(handles=[plt.Line2D([], [], color=COLORS[n], lw=1.6,
-                                   label=LABELS[n]) for n in ORDER],
+                                   label=LABELS[n]) for n in kernels],
                loc="center right")
 
     FIGDIR.mkdir(exist_ok=True)
@@ -335,15 +340,23 @@ def plot(ks: dict, info: dict) -> None:
 
 
 def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--kernel", action="append", default=None,
+                    help="kernel(s) to plot, repeatable and/or comma-separated; "
+                         f"known: {ORDER} (default: all five)")
+    args = ap.parse_args()
+    kernels = parse_kernel_arg(args.kernel, default=ORDER, valid=ORDER)
+
     init()
-    ks = {n: kernel_data(n) for n in ORDER}
-    info = checks(ks)
+    ks = {n: kernel_data(n) for n in kernels}
+    info = checks(ks, kernels)
 
     print("kernels outside the D&A set, scaled to their own h = 2sigma "
           "(3D, shipped warp functions):")
     print(f"{'kernel':<12}{'C₃':>11}{'H/h':>10}{'norm':>11}{'min f':>11}"
           f"{'f(0)':>10}{'f\'(1)':>10}{'min w̄':>11}{'z1 |k|σ':>10}")
-    for n in ORDER:
+    for n in kernels:
         i = info[n]
         f0 = "∞" if not math.isfinite(i["f0"]) else f"{i['f0']:.4f}"
         fp1 = f"{i['fp1']:.2e}"
@@ -353,13 +366,13 @@ def main() -> None:
               f"{i['minw']:>11.3e}{z:>10}")
 
     print("\nverdict (general density kernel? / pairing stability):")
-    for n in ORDER:
+    for n in kernels:
         i = info[n]
         ok, why = verdict(n, i)
         print(f"  {n:<12} {'YES' if ok else 'no':<4} "
               f"{(why + '; ' if why else '') + pairing_note(i)}")
 
-    plot(ks, info)
+    plot(ks, info, kernels)
 
 
 if __name__ == "__main__":
