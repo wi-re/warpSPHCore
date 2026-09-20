@@ -436,16 +436,18 @@ class StabilityOracle:
         # Density response B_j = -m sum_k grad W(x_j - x_k) Phi_k (k in H of j),
         # from the oracle's dll (list1 -> list2). Phi_k is likewise the
         # minimum-image phase relative to x_0, not the raw list2 array
-        # coordinate. Vectorized over the full (n1, n2) grid: no explicit
-        # mask needed since grad W(x_j-x_k) is already exactly 0 for
-        # dll_r >= H (the compact-support "zero piece" past q=1), so the
-        # out-of-support entries drop out on their own -- this makes the
-        # per-neighbour Python loop unnecessary (was O(N_H^2) python-level
-        # iterations; this is the same FLOPs done in vectorized numpy).
+        # coordinate. Only the pairs with dll_r < H contribute (all ten
+        # kernels have compact support at H, incl. the 16-sigma-truncated
+        # Gaussian), so the sum is masked to those ~n1^2 entries instead of
+        # the full (n1, n2) grid (~8x more, and ~30 GB of temporaries per
+        # point at the gaussian top row of the high-res sweep): identical
+        # result, the dropped terms are exactly zero.
         d0_list2 = self._mi(x[self.list2] - x[0])
         phase2 = np.exp(1j * (k @ d0_list2.T))              # (n2,)
-        g_all = self._gradW(self.dll, H, self.idxll)        # (n1, n2, 3)
-        B_all = -m * np.einsum("ijc,j->ic", g_all, phase2)  # (n1, 3) complex
+        ij = np.nonzero(self.dll_r < H)                     # (2, nc)
+        g_c = self._gradW(self.dll[ij], H, self.idxll[ij])  # (nc, 3) complex
+        B_all = np.zeros((len(self.list1), 3), dtype=complex)
+        np.add.at(B_all, ij[0], -m * g_c * phase2[ij[1]][:, None])
         grad0_all = self._gradW(d0, H, idx0)                # (n1, 3)
         M_rho = np.einsum("ia,ib->ab",
                           grad0_all[keep_idx], B_all[keep_idx])

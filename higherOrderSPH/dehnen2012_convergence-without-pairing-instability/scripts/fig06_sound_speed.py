@@ -39,20 +39,21 @@ FIGDIR = _HERE.parent / "figures"
 NH_CUTS = (50.0, 100.0, 200.0, 400.0)
 # log-spaced (not linear): the paper's Fig. 6 x-axis is log |k|d_nn over
 # roughly [0.2, 7] (ticks at 0.5, 1, 5); log spacing gives even resolution
-# per decade instead of oversampling the large-k end.
+# per decade instead of oversampling the large-k end. The 200-column grid
+# matches the closeout item-5 high-res sweep (was 40).
 KDN_MIN, KDN_MAX = 0.2, 7.0
-KDN_GRID = np.logspace(math.log10(KDN_MIN), math.log10(KDN_MAX), 40)
+N_KDN = 200
 DNAME, KDD = "111", np.array([1, 1, 1.0]) / np.sqrt(3)   # k // (1,1,1)
 
 
-def sound_speed_curve(name: str, lat: st.Lattice, NH: float):
+def sound_speed_curve(name: str, lat: st.Lattice, NH: float, kdn_grid):
     """c_SPH / c vs |k| d_nn (the longitudinal mode) for one (kernel, N_H).
     Returns (kdn, csph_over_c, kdn_at_8h)."""
     o = st.StabilityOracle(name, lat, float(NH))
     dnn = lat.dnn
-    kdn = np.empty(len(KDN_GRID))
-    csph = np.full(len(KDN_GRID), np.nan)
-    for j, kd in enumerate(KDN_GRID):
+    kdn = np.empty(len(kdn_grid))
+    csph = np.full(len(kdn_grid), np.nan)
+    for j, kd in enumerate(kdn_grid):
         k = kd * KDD / dnn
         P = o.exact_p_matrix(k)
         w, v = np.linalg.eigh(P)
@@ -69,16 +70,16 @@ def sound_speed_curve(name: str, lat: st.Lattice, NH: float):
     return kdn, csph, kdn_8h
 
 
-def plot_kernel(name: str, lat: st.Lattice) -> None:
+def plot_kernel(name: str, lat: st.Lattice, kdn_grid: np.ndarray) -> None:
     c = st.COLORS[name]
     plt.rcParams.update({"font.size": 11, "axes.titlesize": 12,
                          "axes.labelsize": 12})
     fig, a = plt.subplots(figsize=(8.5, 6))
     for NH in NH_CUTS:
-        kdn, csph, kdn_8h = sound_speed_curve(name, lat, NH)
+        kdn, csph, kdn_8h = sound_speed_curve(name, lat, NH, kdn_grid)
         a.plot(kdn, csph, color=c, lw=1.6,
                label=f"$N_H = {NH:g}$")
-        if KDN_GRID[0] < kdn_8h < KDN_GRID[-1]:
+        if kdn_grid[0] < kdn_8h < kdn_grid[-1]:
             a.axvline(kdn_8h, color=c, ls=":", lw=1.0, alpha=0.7)
     a.axhline(1.0, color="k", lw=0.8, alpha=0.6)
     a.set_xlabel(r"wave number $|k|\, d_{nn}$")
@@ -108,16 +109,19 @@ def main():
     ap.add_argument("--kernel", action="append", default=None,
                     help="kernel(s), repeatable and/or comma-separated; "
                          f"known: {st.STABILITY_ORDER} "
-                         "(default: cubic_b4 + gaussian)")
+                         "(default: all ten)")
+    ap.add_argument("--n-kdn", type=int, default=N_KDN,
+                    help=f"number of log-|k|d_nn columns (default {N_KDN}, "
+                         "matching the closeout item-5 sweep)")
     args = ap.parse_args()
-    kernels = st.parse_kernel_arg(args.kernel,
-                                  default=["cubic_b4", "gaussian"])
+    kernels = st.parse_kernel_arg(args.kernel)   # default: the full set
 
     common.init()
+    kdn = np.logspace(math.log10(KDN_MIN), math.log10(KDN_MAX), args.n_kdn)
     lat = st.Lattice(N=4000, L=1.0)
     for name in kernels:
         print(f"\n=== {st.LABELS[name]}  (k // 111, N_H cuts {NH_CUTS}) ===")
-        plot_kernel(name, lat)
+        plot_kernel(name, lat, kdn)
 
 
 if __name__ == "__main__":

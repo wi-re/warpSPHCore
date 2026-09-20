@@ -23,6 +23,16 @@
 - The eq.-18 ε `renorm` feature is **scoped only** (design note), not
   built. *(Superseded 2026-09-19: the user then asked to build it — item 7.)*
 - The high-res 10-kernel stability sweep comes **before** `REPORT.md`.
+- **The high-res sweep SKIPS the Gaussian** (item 5, 2026-09-19): it is by
+  far the largest (N_H to ~82 000 over h/d_nn 0.9–3.0; the oracle build
+  OOMs on this box above N_H≈7 000 — measured peak RSS 23.8 GB at N_H=7000)
+  and is not practical in an actual simulation. Run the other nine
+  `STABILITY_ORDER` kernels at full h/d_nn 0.9–3.0. Document the exclusion
+  in `REPORT.md`.
+- **Run the sweep STAGED, a few kernels at a time** (item 5, 2026-09-19):
+  monitor box memory between stages (the box is shared and a memory spike
+  has been breaking tmux sessions). Per-kernel `results/*.npz` caching
+  makes an interrupted stage resumable.
 
 ## Items
 
@@ -140,7 +150,7 @@ Phase-4 refits agree within ×1.04. Deliverable = a short design note
 Not implemented in the closeout; `REPORT.md` carries the scope +
 recommendation.
 
-### 5. 10-kernel stability sweep, high-res fig04/05/06 — [ ]
+### 5. 10-kernel stability sweep, high-res fig04/05/06 — [x] DONE 2026-09-20
 Current `fig04_fig05_stability_contours.py` grid is **14 h/d_nn × 26
 |k|d_nn** per direction — too coarse for the paper's contours ("fig 4 needs
 much higher nx/ny resolution"). Steps:
@@ -162,6 +172,28 @@ much higher nx/ny resolution"). Steps:
   the documented Phase-5 discrepancy.
 - Regenerate fig04/05 (per-kernel, as now) and fig06 (all kernels; raise its
   kdn grid from 30 points to match) at the new resolution.
+
+**As-built (2026-09-20):** the nine non-Gaussian kernels (Gaussian skipped
+per the decision above) at 60 N_H (log, per-kernel h/d_nn 0.9–3.0) ×
+200 |k|d_nn (log), both k-directions, per-kernel `results/*.npz` cache
+(~370 KB each, two-mode: lon + smallest transverse per direction); the
+masked B_j (phase-5 log entry (m)) made the large-N_H rows tractable;
+staged in two sets of 4/5, ~7 h wall-clock, 0 errors.
+`check_stability_boundaries.py` verifies the boundaries from the cached
+fields (two-mode separation: longitudinal = the "accessible N_H" metric,
+transverse = the generic no-shear-stiffness pathology, reported
+separately). Longitudinal onsets: cubic 62 (≲55 ✓), quartic 66 (≈67 ✓✓),
+quintic 225 (≈190 ~), W2 clean (3-pt edge artifact near 40 ✓), b7 193,
+b8 549, W4/W6 fully clean (0.00 %), HOCT4 island N_H 114–185 (centre
+≈145 — the "island near 150", ✓, at |k|d_nn 5.6–6.0). The b7/b8 onsets
+sit at h/d_nn ≥ 1.35/1.80: the Ŵ(H|k|)<0 pairing region pushed to large
+N_H by the higher order (both clean in the practical h/d_nn ≲ 1.2
+regime) — consistent with the paper's mechanism; the plan's "clean
+otherwise" was stricter than the paper's own contours. The cubic long-λ
+dip box (|k|d_nn 0.3–0.6, N_H 40–100) is EMPTY (0 longitudinal unstable
+points) → the Phase-5 discrepancy was the phase-reference bug (entry i),
+not physics. fig04/05 (per-kernel) + fig06 (all nine, 200 kdn points)
+regenerated at the new resolution.
 
 ### 6. `REPORT.md` — [ ] (after 5)
 Per PLAN Phase 8:
@@ -270,3 +302,41 @@ Per PLAN Phase 8:
   170 passed / 1 failed, the failure PRE-EXISTING and unrelated
   (dambreak.surfacePressureProbes tuple params, 252d857). Design note
   updated (status BUILT; §1 stale quote fixed; §3/§4/§6/§8/§9 as-built).
+- 2026-09-20: item 5 (high-res sweep) STARTED. (a) Masked B_j in
+  `stability.py::exact_p_matrix` (per-point O(n1·n2) → O(nc)~O(N_H²); the
+  dropped terms are exactly zero — compact support at H): re-validated
+  vs the ground-truth real-FD Jacobian (P sym ~1e-14, max|Pfd-Pex|
+  0.000–0.19 = FD truncation). (b) fig04/05 gained `--grid ROWSXKDN`
+  (default 14x26), LOG-spaced N_H rows, per-kernel `results/*.npz` caching
+  (load-if-present, resume on interrupt), full-set default; fig06 kdn
+  40→200. (c) Timing probe: cubic ~9 min, W2 ~13 min, b8 ~66 min at 60x200;
+  the Gaussian's dense oracle BUILD OOMs above N_H≈7000 (measured peak RSS
+  3.1→23.8 GB over N_H 2211→7000) — per user decision the sweep SKIPS the
+  Gaussian (largest by far, not practical in a real sim) and runs STAGED
+  (few kernels at a time, box is shared). (d) Stage 1 (cubic, quartic,
+  quintic, W2) DONE at 60x200. (e) `check_stability_boundaries.py` written
+  to verify the acceptance boundaries from the cached fields. KEY FINDING:
+  the first check run conflated two modes — the TRANSVERSE (shear) mode is
+  broadly ω²<0 (62–82 % of the field, EVERY kernel) as a generic SPH
+  pathology (no shear stiffness), which is NOT the pairing instability; the
+  longitudinal (pairing) mode is the small 5–8 % region and is the correct
+  "accessible N_H" metric. After separating the two, the longitudinal
+  onsets match the Phase-5 expectations: cubic ~62 (≲55 ✓), quartic 66
+  (≈67 ✓✓), quintic 225 (≈190, ~), W2 essentially clean (3-pt edge artifact
+  near N_H 40, ✓). The cubic long-λ dip box is EMPTY (0 longitudinal
+  unstable points) → confirms entry (i) it was the phase-reference bug, not
+  physics. (f) Stage 2 (b7, b8, W4, W6, HOCT4) launched. Two-mode cache
+  format (lon + smallest transverse) confirmed sufficient by the user for
+  threshold reprocessing — no all-three-eigenvalue storage.
+- 2026-09-20: item 5 DONE + committed. Stage 2 cached b7 (09:32), b8
+  (10:42), W4 (11:12), W6 (12:22), HOCT4 (12:48) — nine of nine kernels
+  at 60x200, 0 errors, ~7 h wall-clock over the two stages. Stage-2
+  boundary check: HOCT4 "island near 150" CONFIRMED (N_H 114–185, centre
+  ≈145, |k|d_nn 5.6–6.0, 0.23 % of the field); W4/W6 fully clean (0.00 %
+  longitudinal); b7 onset 193 (h/d_nn 1.35) and b8 onset 549 (h/d_nn
+  1.80) are high-h/high-|k| Ŵ<0 pairing islands only — both clean below
+  h/d_nn 1.2 (the plan's "clean otherwise" was stricter than the
+  paper's own contours; see item-5 as-built note). All Phase-5
+  acceptance boundaries now verified; the cubic long-λ dip box is EMPTY.
+  fig04/05 (nine kernels) + fig06 (nine kernels, 200 kdn points)
+  regenerated. Phase-5 log entry (n).

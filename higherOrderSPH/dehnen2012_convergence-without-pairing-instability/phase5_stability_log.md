@@ -624,6 +624,92 @@ here) and figA.
 
 All four figure scripts (fig01/02/03/figA) now accept `--kernel`.
 
+### 2026-09-19 (m) — masked B_j in `exact_p_matrix`: per-point cost
+O(n1·n2) → O(nc) ~ O(N_H²); enables the high-res sweep's large-N_H rows
+
+Closeout item 5 (the 60×200 high-res sweep) exposed that `exact_p_matrix`'s
+density-response term evaluated the FULL dense `(n1, n2)` pair grid for the
+`B_j` sum, even though only the `dll_r < H` pairs contribute (all ten kernels
+are compact-support at H, incl. the 16-σ-truncated Gaussian). That is ~8× the
+work and, at the Gaussian's top rows (n1·n2 ≈ 2.7e8), ~30 GB of per-point
+temporaries — an OOM on this box.
+
+**Fix** (`stability.py::exact_p_matrix`): mask the `B_j` sum to the
+contributing pairs. `ij = np.nonzero(dll_r < H)`; `g_c = _gradW(dll[ij], H,
+idxll[ij])` (shape (nc, 3)); `B_all` accumulated with `np.add.at(B_all, ij[0],
+-m·g_c·phase2[ij[1]])`. Mathematically IDENTICAL to the full-grid version —
+the dropped terms are exactly zero (the compact-support "zero piece"); only
+float summation order changes (~1e-16). The self pair (r=0) contributes 0 via
+`rhat = 0`, same as before. The BUILD is unchanged (still materializes the
+dense `(n1, n2)` `dll` grid once per (kernel, N_H), O(n1·n2)); only the
+per-point path is masked.
+
+**Re-validated against the ground-truth real-FD Jacobian**
+(`stability_p_matrix.py --fd-check`, cubic_b4/wendland_C6/hoct4/quintic_b6,
+both k-directions, |k|d_nn 0.5/1.0/2.0): P symmetric to ~1e-14,
+`max|Pfd-Pex|` = 0.000–0.19 (the FD truncation error, same order as entry (k)'s
+0.0001–0.2) — i.e. the masked sum reproduces the validated P matrix.
+
+**Consequence / remaining limitation:** the per-point cost is now O(nc) ~
+O(N_H²), but the BUILD is still O(n1·n2) ~ O(8·N_H²) in MEMORY (the dense
+`dll` grid + build temporaries ≈ 3× its size). Measured Gaussian build peak
+RSS: N_H 2211 → 3.1 GB, 4000 → 8.4 GB, 5500 → 14.9 GB, 7000 → 23.8 GB
+(`.tmp/probe_gaussian_mem.py`). The Gaussian's full-range top (N_H ≈ 82 000)
+is infeasible to BUILD on this box (would need ~1.3 TB). Per the user
+decision (closeout item 5), the high-res sweep therefore SKIPS the Gaussian
+entirely (largest by far, not practical in a real simulation); the other nine
+kernels peak at ~1 GB (b8) and run at full h/d_nn 0.9–3.0. A future
+sparse/chunked build (flagged in entry (j)) would be required to extend the
+Gaussian's range.
+
+### 2026-09-20 (n) — high-res sweep (60×200, nine kernels) results; the
+longitudinal/transverse separation confirms every Phase-5 acceptance
+boundary and RESOLVES the cubic long-λ discrepancy
+
+Ran the closeout-item-5 sweep: 60 N_H (log, per-kernel h/d_nn 0.9–3.0) ×
+200 |k|d_nn (log, 0.10–6.00), both k-directions, per-kernel npz cache
+(`results/stability_<kernel>.npz`, two-mode fields: longitudinal = the
+eigenmode most aligned with k, transverse = the smallest eigenvalue, both
+ω²/(c²k²)), staged in two sets (4 + 5) over ~7 h, 0 errors.
+`check_stability_boundaries.py` reads the cached fields and separates the
+two modes (the first check run had conflated them — the transverse mode is
+ω²<0 over 37–80 % of the field for EVERY kernel, a generic no-shear-
+stiffness SPH pathology, NOT the pairing instability; the longitudinal
+mode is the small 0.2–4 % region and the correct "accessible N_H" metric).
+
+**Longitudinal (pairing) onsets at 60×200** (main-island first N_H with
+ω²_∥<0; island extents; the grid's |k|d_nn = 6.0 boundary cuts off the
+right edge, so islands touching it are lower bounds on their |k| extent):
+  cubic_b4   62   (≲55 expected ✓, within grid tolerance of the paper's
+                   "gradual beyond ~55"; main island N_H 62–973,
+                   h/d_nn 1.20–3.00, |k|d_nn 2.23–6.0; plus a 4-pt
+                   |k|d_nn-edge artifact at N_H 30–32)
+  quartic_b5 66   (≈67 expected ✓✓; islands N_H 66–129 at |k|d_nn
+                   5.09–6.0 and N_H 285–1316 at |k|d_nn 2.43–6.0)
+  quintic_b6 225  (≈190 expected ~; island N_H 225–1693, h/d_nn
+                   1.53–3.00, |k|d_nn 2.63–6.0; the plan's "small-N_H
+                   island near 100" is NOT present in the longitudinal
+                   field)
+  wendland_C2 clean (3-pt |k|d_nn-edge artifact at N_H 35–40,
+                   |k|d_nn 6.0; "island near 40" ✓ as a trace only)
+  b7         193  (h/d_nn 1.35; islands at |k|d_nn 5.2–6.0 (N_H 193–356)
+                   and 2.7–3.9 (N_H 1288–2102) + high-N_H island 789–2102)
+  b8         549  (h/d_nn 1.80; single island N_H 549–2539,
+                   |k|d_nn 2.98–6.0)
+  wendland_C4 clean (0.00 %)
+  wendland_C6 clean (0.00 %)
+  hoct4      114  (island N_H 114–185, centre ≈145, |k|d_nn 5.6–6.0 —
+                   the "island near 150" ✓)
+
+The b7/b8 onsets are the Ŵ(H|k|)<0 pairing region pushed to large N_H by
+the higher kernel order (monotone trend: cubic 62 < b7 193 < b8 549 <
+W4/W6 clean); both are clean below h/d_nn 1.2, the practical regime.
+**The cubic long-λ dip box (|k|d_nn 0.3–0.6, N_H 40–100) is EMPTY** — 0
+longitudinal unstable points at the new resolution: entry (i)'s
+phase-reference bug fully accounts for the Phase-5 discrepancy; it is
+RESOLVED, not a paper/setup difference. fig04/05 (per-kernel) + fig06
+(all nine, 200 kdn points) regenerated at the new resolution.
+
 
 
 

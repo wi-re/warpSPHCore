@@ -26,10 +26,24 @@ count; kernel-dependent, since h/d_nn = (H/d_nn)/kernelScale but N_H is a
 function of H alone). The x-axis is |k|d_nn on a LOG scale, matching the
 paper. The Gaussian (16-sigma truncation) is shown at N_H = N_h * 8^3.
 
+Resolution (closeout item 5): the grid is `--grid ROWSXKDN` (default
+14x26, the original figure resolution; the high-res sweep is 60x200).
+The ROWS rows are LOG-spaced in N_H over the kernel's N_H range
+corresponding to h/d_nn in [hdn-min, hdn-max] (N_H ~ hdn^3, so log-N_H
+spacing resolves the small-N_H instability islands; the original 14
+linear-hdn rows were approximately this), and the KDN columns are
+log-spaced over [0.1, 6.0] |k|d_nn.
+
+Each kernel's fields are cached to results/stability_<kernel>.npz
+(gitignored) and loaded if present, so an interrupted sweep resumes and
+the figures regenerate without recompute; --recompute forces a
+recompute.
+
 Usage:
-  python fig04_fig05_stability_contours.py                 # default kernels
+  python fig04_fig05_stability_contours.py                 # all ten kernels
   python fig04_fig05_stability_contours.py --kernel cubic_b4
   python fig04_fig05_stability_contours.py --kernel cubic_b4,gaussian
+  python fig04_fig05_stability_contours.py --grid 60x200   # the high-res sweep
 """
 
 from __future__ import annotations
@@ -49,12 +63,13 @@ import stability as st
 
 _HERE = Path(__file__).resolve().parent
 FIGDIR = _HERE.parent / "figures"
+RESDIR = _HERE.parent / "results"
 
-# the |k|d_nn grid (log-spaced, matching the paper's log x-axis) and the
-# h/d_nn bounds (matching the paper's y-axis; converted to a kernel-specific
-# N_H grid in main(), since h = H/kernelScale is kernel-dependent).
+# the |k|d_nn range (log-spaced, matching the paper's log x-axis) and the
+# h/d_nn bounds (matching the paper's y-axis; the rows are converted to a
+# kernel-specific N_H grid in main(), since h = H/kernelScale is
+# kernel-dependent).
 KDN_MIN, KDN_MAX = 0.1, 6.0
-KDN_GRID = np.logspace(math.log10(KDN_MIN), math.log10(KDN_MAX), 26)
 HDN_MIN, HDN_MAX = 0.9, 3.0
 DIRS = {
     "111": np.array([1, 1, 1.0]) / np.sqrt(3),
@@ -62,10 +77,55 @@ DIRS = {
 }
 
 
-def hdn_grid_to_NH(lat: st.Lattice, kernel_scale: float, hdn_grid) -> np.ndarray:
-    """h/d_nn values -> N_H, for one kernel (h = H/kernel_scale)."""
-    H = np.asarray(hdn_grid) * kernel_scale * lat.dnn
-    return np.array([lat.NH_of_H(float(h)) for h in H])
+def kdn_grid(n_kdn: int) -> np.ndarray:
+    return np.logspace(math.log10(KDN_MIN), math.log10(KDN_MAX), n_kdn)
+
+
+def NH_grid(log_nh_min: float, log_nh_max: float, n_rows: int) -> np.ndarray:
+    """LOG-spaced N_H rows (the plan's 'N_H (log)' resolution axis)."""
+    return np.logspace(log_nh_min, log_nh_max, n_rows)
+
+
+def NH_to_hdn(lat: st.Lattice, kernel_scale: float, nh_grid) -> np.ndarray:
+    """N_H -> h/d_nn = H/(kernelScale d_nn), for one kernel."""
+    return np.array([lat.H_of_NH(float(nh)) / (kernel_scale * lat.dnn)
+                     for nh in nh_grid])
+
+
+def cache_path(name: str) -> Path:
+    return RESDIR / f"stability_{name}.npz"
+
+
+def load_cache(name: str, n_rows: int, n_kdn: int, hdn_min: float,
+               hdn_max: float):
+    """The cached (kernel, grid) fields, or None if absent / stale (a
+    different grid) so an interrupted sweep resumes but a grid change
+    recomputes."""
+    p = cache_path(name)
+    if not p.exists():
+        return None
+    d = np.load(p)
+    if (int(d["n_rows"]) != n_rows or int(d["n_kdn"]) != n_kdn
+            or abs(float(d["kdn_min"]) - KDN_MIN) > 1e-12
+            or abs(float(d["kdn_max"]) - KDN_MAX) > 1e-12
+            or abs(float(d["hdn_min"]) - hdn_min) > 1e-12
+            or abs(float(d["hdn_max"]) - hdn_max) > 1e-12):
+        return None
+    return d
+
+
+def save_cache(name: str, n_rows: int, n_kdn: int, lat: st.Lattice,
+               kernel_scale: float, hdn_min: float, hdn_max: float,
+               nh_grid, hdn_grid, kdn, lon111, tr111, lon110, tr110) -> None:
+    RESDIR.mkdir(exist_ok=True)
+    np.savez_compressed(
+        cache_path(name),
+        name=name, N=lat.N, dnn=lat.dnn, kernel_scale=kernel_scale,
+        hdn_min=hdn_min, hdn_max=hdn_max, kdn_min=KDN_MIN, kdn_max=KDN_MAX,
+        n_rows=n_rows, n_kdn=n_kdn,
+        nh_grid=nh_grid, hdn_grid=hdn_grid, kdn_grid=kdn,
+        lon111=lon111, tr111=tr111, lon110=lon110, tr110=tr110)
+    print(f"cached {cache_path(name)}")
 
 
 def omega2_fields(name: str, lat: st.Lattice, kdd: np.ndarray,
@@ -93,7 +153,8 @@ def omega2_fields(name: str, lat: st.Lattice, kdd: np.ndarray,
 
 
 def plot_kernel(name: str, lat: st.Lattice, hdn_grid: np.ndarray,
-                nh_grid: np.ndarray, lon111, tr111, lon110, tr110) -> None:
+                nh_grid: np.ndarray, kdn_grid: np.ndarray,
+                lon111, tr111, lon110, tr110) -> None:
     kernel_scale = common.kernel_scale(3, name)
     dnn = lat.dnn
 
@@ -112,17 +173,17 @@ def plot_kernel(name: str, lat: st.Lattice, hdn_grid: np.ndarray,
     fig, ax = plt.subplots(2, 2, figsize=(11, 8.5), sharex=True, sharey=True)
 
     def panel(a, lon, tr, which, dname, kdd, right_axis):
-        field = (lon if which == "lon" else tr).T          # (len(hdn), len(KDN))
+        field = (lon if which == "lon" else tr).T          # (len(hdn), len(kdn))
         # centred on 1 (RdBu_r: low->blue, high->red) so the background is
         # pale near the continuum value and only genuinely large deviations
         # (incl. all omega^2<=0, which is <= vmin) read as strongly coloured
-        a.pcolormesh(KDN_GRID, hdn_grid, field, shading="auto",
+        a.pcolormesh(kdn_grid, hdn_grid, field, shading="auto",
                      cmap="RdBu_r", vmin=0.0, vmax=2.0)
-        a.contour(KDN_GRID, hdn_grid, field, levels=[0.0], colors="red",
+        a.contour(kdn_grid, hdn_grid, field, levels=[0.0], colors="red",
                   linewidths=1.6)
-        a.contour(KDN_GRID, hdn_grid, field, levels=[1.0], colors="cyan",
+        a.contour(kdn_grid, hdn_grid, field, levels=[1.0], colors="cyan",
                   linewidths=1.0)
-        a.contour(KDN_GRID, hdn_grid, field,
+        a.contour(kdn_grid, hdn_grid, field,
                   levels=[0.95, 0.99, 1.01, 1.05], colors="green",
                   linewidths=0.7, alpha=0.7)
         a.set_xscale("log")
@@ -168,37 +229,60 @@ def main():
     ap.add_argument("--kernel", action="append", default=None,
                     help="kernel(s), repeatable and/or comma-separated; "
                          f"known: {st.STABILITY_ORDER} "
-                         "(default: cubic_b4 + gaussian, the paper's Figs 4-5)")
+                         "(default: all ten)")
+    ap.add_argument("--grid", type=str, default="14x26",
+                    help="ROWSxKDN resolution: log-N_H rows x log-|k|d_nn "
+                         "columns (default 14x26, the original figures; "
+                         "the closeout item-5 sweep is 60x200)")
     ap.add_argument("--hdn-min", type=float, default=HDN_MIN,
                     help="min h/d_nn for the grid (default 0.9, paper's bound)")
     ap.add_argument("--hdn-max", type=float, default=HDN_MAX,
                     help="max h/d_nn for the grid (default 3.0, paper's bound)")
-    ap.add_argument("--n-hdn", type=int, default=14,
-                    help="number of h/d_nn rows (default 14)")
+    ap.add_argument("--recompute", action="store_true",
+                    help="recompute instead of loading the results/ cache")
     args = ap.parse_args()
-    kernels = st.parse_kernel_arg(args.kernel,
-                                  default=["cubic_b4", "gaussian"])
+    n_rows, n_kdn = (int(v) for v in args.grid.lower().split("x"))
+    kernels = st.parse_kernel_arg(args.kernel)   # default: the full set
 
     common.init()
-    hdn_grid = np.linspace(args.hdn_min, args.hdn_max, args.n_hdn)
+    kdn = kdn_grid(n_kdn)
     # N_H(H) only depends on H via rho/m = N/L^3 = const (rho=1 fixed), so a
-    # small reference lattice is enough to convert the h/d_nn bound to N_H
-    # regardless of which N the real (per-kernel) lattice ends up using.
+    # small reference lattice is enough to convert the h/d_nn bounds to the
+    # N_H range regardless of which N the real (per-kernel) lattice ends up
+    # using.
     lat_ref = st.Lattice(N=4000, L=1.0)
 
     for name in kernels:
         kernel_scale = common.kernel_scale(3, name)
+        nh_min = lat_ref.NH_of_H(args.hdn_min * kernel_scale * lat_ref.dnn)
         nh_max = lat_ref.NH_of_H(args.hdn_max * kernel_scale * lat_ref.dnn)
-        lat = st.lattice_for_NH(nh_max)
-        nh_grid = hdn_grid_to_NH(lat, kernel_scale, hdn_grid)
-        print(f"\n=== {st.LABELS[name]}  (N={lat.N}, h/d_nn {hdn_grid[0]:.2f}.."
-              f"{hdn_grid[-1]:.2f} -> N_H {nh_grid[0]:.1f}..{nh_grid[-1]:.1f}, "
-              f"|k|d_nn {KDN_GRID[0]:.2f}..{KDN_GRID[-1]:.2f}) ===")
-        print("  k // 111:")
-        lon111, tr111 = omega2_fields(name, lat, DIRS["111"], nh_grid, KDN_GRID)
-        print("  k // 110:")
-        lon110, tr110 = omega2_fields(name, lat, DIRS["110"], nh_grid, KDN_GRID)
-        plot_kernel(name, lat, hdn_grid, nh_grid, lon111, tr111, lon110, tr110)
+        cached = (None if args.recompute
+                  else load_cache(name, n_rows, n_kdn,
+                                  args.hdn_min, args.hdn_max))
+        if cached is not None:
+            nh_grid = cached["nh_grid"]
+            hdn_grid = cached["hdn_grid"]
+            lon111, tr111 = cached["lon111"], cached["tr111"]
+            lon110, tr110 = cached["lon110"], cached["tr110"]
+            lat = st.Lattice(N=int(cached["N"]), L=1.0)
+            print(f"\n=== {st.LABELS[name]}  (loaded cache {cache_path(name)}) ===")
+        else:
+            lat = st.lattice_for_NH(nh_max)
+            nh_grid = NH_grid(math.log10(nh_min), math.log10(nh_max), n_rows)
+            hdn_grid = NH_to_hdn(lat, kernel_scale, nh_grid)
+            print(f"\n=== {st.LABELS[name]}  (N={lat.N}, "
+                  f"N_H {nh_grid[0]:.1f}..{nh_grid[-1]:.1f} log-spaced "
+                  f"({n_rows} rows), |k|d_nn {kdn[0]:.2f}..{kdn[-1]:.2f} "
+                  f"({n_kdn} columns)) ===")
+            print("  k // 111:")
+            lon111, tr111 = omega2_fields(name, lat, DIRS["111"], nh_grid, kdn)
+            print("  k // 110:")
+            lon110, tr110 = omega2_fields(name, lat, DIRS["110"], nh_grid, kdn)
+            save_cache(name, n_rows, n_kdn, lat, kernel_scale,
+                       args.hdn_min, args.hdn_max, nh_grid, hdn_grid, kdn,
+                       lon111, tr111, lon110, tr110)
+        plot_kernel(name, lat, hdn_grid, nh_grid, kdn,
+                    lon111, tr111, lon110, tr110)
 
 
 if __name__ == "__main__":
