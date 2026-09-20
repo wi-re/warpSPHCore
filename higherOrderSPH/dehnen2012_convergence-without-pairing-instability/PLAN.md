@@ -563,7 +563,16 @@ Acceptance:
 
 ## Phase 8 — reporting
 
-- [ ] `REPORT.md`: per-figure comparison (paper vs replication), the
+**STATUS 2026-09-20: COMPLETE.** `REPORT.md` written (per-figure
+comparison Figs 1–6 + figA + Tables 1–2; the consolidated discrepancy
+log with root causes/resolutions — incl. the RESOLVED cubic long-λ
+instability and the longitudinal/transverse mode separation; kernel-
+default implications incl. the BUILT eq.-18 ε correction; the Phase-3
+kernel additions; the Phase-6 frontend validation numbers; the
+closeout src/ decisions). The src/ fixes landed as the explicit
+closeout steps (items 2, 3, 7 + the specialty-kernel exclusion).
+
+- [x] `REPORT.md`: per-figure comparison (paper vs replication), the
       discrepancy table from the findings log, and implications for
       `warpSPHCore` kernel defaults (Wendland2 + its N_H, the B7→B8
       rename + new classical B7 outcome (resolved 2026-09-18), the
@@ -571,7 +580,7 @@ Acceptance:
       `calibrateNormalization` lattice correction is a *different*
       correction; do not conflate) plus a summary of the Phase 3 kernel
       additions and the Phase 6 frontend work.
-- [ ] Decisions on any `src/` fixes as separate, explicit steps.
+- [x] Decisions on any `src/` fixes as separate, explicit steps.
 
 ## Findings log
 

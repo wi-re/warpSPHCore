@@ -195,7 +195,7 @@ points) → the Phase-5 discrepancy was the phase-reference bug (entry i),
 not physics. fig04/05 (per-kernel) + fig06 (all nine, 200 kdn points)
 regenerated at the new resolution.
 
-### 6. `REPORT.md` — [ ] (after 5)
+### 6. `REPORT.md` — [x] DONE 2026-09-20
 Per PLAN Phase 8:
 - Per-figure comparison, paper vs replication: Figs 1–6 + figA, Tables 1–2
   (note the Phase-4 glass-proxy caveat and the no-image-input limitation:
@@ -340,3 +340,26 @@ Per PLAN Phase 8:
   acceptance boundaries now verified; the cubic long-λ dip box is EMPTY.
   fig04/05 (nine kernels) + fig06 (nine kernels, 200 kdn points)
   regenerated. Phase-5 log entry (n).
+- 2026-09-20: item 6 (REPORT.md) DONE + committed. `REPORT.md`
+  written: §1 verdict + success-criteria scorecard (5/6 MET, Phase 7
+  pending); §2 per-figure comparison (Figs 1–6 + figA + Tables 1–2,
+  the no-image-input and glass-proxy caveats, the two-mode stability
+  finding, the 60×200 onset table vs the paper's accessible-N_H
+  statements, the Gaussian exclusion + measured OOM rationale); §3
+  the consolidated 15-row discrepancy log (complex-step oracle,
+  phase-reference bug, extra-K/sign, float32-BinOp class, B7
+  identity, garbled eq.-15, Sod IC = R&H 2012 problem, Fig.-2 axis,
+  C&D signs, sampleOptimal, glass proxy, machine-dependent timings,
+  the unreproduced quintic-100/W2-40 small-N_H islands, the Gaussian
+  infeasibility) — every row with root cause + status; §4 what the
+  replication establishes (order/smoothness → stability trend,
+  accessible N_H = longitudinal onsets, ε correction works, h = 2σ
+  convention); §5 kernel-default implications (W2 + N_H, B7→B8 +
+  classical B7, the BUILT ε correction, Phase-3 additions); §6
+  Phase-6 frontend (C&D sign + Gresho control, R&H SPHS, Sod
+  1D/2D/3D contact-spike numbers); §7 closeout src/ decisions
+  (items 2, 3, 7 + the five specialty-kernel exclusion); §8 Phase-7
+  remaining work + hardware note; §9 reproducibility. PLAN.md Phase 8
+  marked COMPLETE. With this, closeout items 1–7 are all DONE — the
+  D&A closeout is complete; Phase 7 (dynamic tests) is the only
+  remaining D&A work (separate effort).
