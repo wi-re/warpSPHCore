@@ -17,7 +17,8 @@ Each replication lives in its own subfolder named after the PDF file name
 
 | Subfolder | Paper | Status |
 |---|---|---|
-| `dehnen2012_convergence-without-pairing-instability/` | Dehnen & Aly 2012, MNRAS 425, 1068 (arXiv:1204.2471) — Wendland kernels, pairing instability, kernel-NH evaluation | planned (`PLAN.md`, `paper_notes.md`); no scripts yet |
+| `dehnen2012_convergence-without-pairing-instability/` | Dehnen & Aly 2012, MNRAS 425, 1068 (arXiv:1204.2471) — Wendland kernels, pairing instability, kernel-NH evaluation | Phases 0–6 + 8 done (closeout 2026-09-20, `REPORT.md`); Phase 7 (dynamic tests) open |
+| `harness/` | — (shared infrastructure, not a paper) | Phase 0 (static) convergence harness + Phase 1/2 baselines for `../higher_order.md`; first pass implemented 2026-09-22 (`PLAN.md`, `REPORT.md` + `FINDINGS.md` = frozen before column) |
 
 The dehnen2012 replication also carries scope beyond the paper itself:
 a repo-level **kernel onboarding/audit pipeline** (`scripts/kernels/` +

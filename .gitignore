@@ -96,6 +96,9 @@ partiBench/**/*.gif
 # D&A 2012 replication outputs (regenerable from scripts/)
 higherOrderSPH/dehnen2012_convergence-without-pairing-instability/figures/
 higherOrderSPH/dehnen2012_convergence-without-pairing-instability/results/
+# Convergence harness outputs (regenerable from the drivers)
+higherOrderSPH/harness/figures/
+higherOrderSPH/harness/results/
 
 # scratch space (probes, extracted paper text, throwaway scripts)
 .tmp/
