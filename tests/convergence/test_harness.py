@@ -213,6 +213,27 @@ def test_condition_numbers_and_fallback():
 
 
 # ---------------------------------------------------------------------------
+# value renormalization (Randles--Libersky) helper
+# ---------------------------------------------------------------------------
+
+def test_renorm_value_scalar_and_vector_broadcast():
+    # Local import: operators pulls in warpSPHCore (kept out of the pure-CPU
+    # section above) and uses a bare sibling import, so the harness dir itself
+    # must be importable too. _renormValue is plain torch either way.
+    sys.path.insert(0, str(HARNESS_DIR))
+    from harness.operators import _renormValue
+    raw = torch.tensor([[2.0, 4.0], [6.0, 8.0]])  # (N, D) vector field
+    S = torch.tensor([2.0, 4.0])                   # (N,) 0th moment
+    out = _renormValue(raw, S)
+    assert out.shape == (2, 2)
+    assert torch.allclose(out, torch.tensor([[1.0, 2.0], [1.5, 2.0]]))
+    # scalar field: (N,) / (N,)
+    assert torch.allclose(_renormValue(torch.tensor([3.0, 5.0]),
+                                       torch.tensor([1.0, 2.0])),
+                          torch.tensor([3.0, 2.5]))
+
+
+# ---------------------------------------------------------------------------
 # smoke (subprocess, float64)
 # ---------------------------------------------------------------------------
 

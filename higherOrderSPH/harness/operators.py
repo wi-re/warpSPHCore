@@ -3,21 +3,29 @@
 
 A thin adapter over the shipped `warpOperation` dispatch so every later
 phase of the higher-order plan can probe its operators through one common
-interface (the parent plan's Phase 0 deliverable). Three correction modes
+interface (the parent plan's Phase 0 deliverable). Four correction modes
 are exposed:
 
 * **standard** -- no correction state (uncorrected SPH operators);
 * **crk** -- CRKSPH: `computeCRKFactors` state, with the CRK apparent
   volume passed as query/reference volumes (the validated usage in the
   `warpSPH` frontend's `schemes/crkSPH.py`);
-* **renorm** -- covariance-matrix renormalization:
-  `computeRenormalizationMatrices` (its eigenvalues are the condition-number
-  source; see `conditioning.py`).
+* **renorm** -- covariance-matrix renormalization (Bonet--Lok-style
+  corrected *gradient*): `computeRenormalizationMatrices` (its eigenvalues
+  are the condition-number source; see `conditioning.py`). The value is
+  left uncorrected (= standard) -- the parent plan's Phase 3 leaves the
+  value-correction decision open.
+* **renormVal** -- the full Phase 3 operator: the `renorm` corrected
+  *gradient* plus a Randles--Libersky *value* renormalization,
+  `fhat/S` where `S = Interpolate(ones)` is the (field-independent) 0th
+  kernel moment. This makes constant reproduction exact (0th-order value)
+  without a new `src/` operator -- it composes the shipped `Interpolate`
+  twice. The Laplacian is left uncorrected (no Bonet--Lok Laplacian).
 
 Probe operations: Interpolate, Gradient (Difference scheme -- the one the
 CRK frontend uses), Laplacian (Brookshaw scheme, scalar fields only).
-Correction states are computed once per case and cached (they do not depend
-on the probed field).
+Correction states (and the kernel sum) are computed once per case and
+cached (they do not depend on the probed field).
 """
 
 from __future__ import annotations
@@ -41,7 +49,7 @@ from particle_sets import Case
 
 __all__ = ["MODES", "PROBES", "CorrectionCache", "run_probe"]
 
-MODES = ("standard", "crk", "renorm")
+MODES = ("standard", "crk", "renorm", "renormVal")
 PROBES = ("interpolate", "gradient", "laplacian")
 
 _OP_BY_PROBE = {
@@ -60,6 +68,32 @@ class CorrectionCache:
     renorm_C: torch.Tensor | None = field(default=None, repr=False)
     renorm_eigvals: torch.Tensor | None = field(default=None, repr=False)
     renorm_state: object | None = field(default=None, repr=False)
+    kernel_sum: torch.Tensor | None = field(default=None, repr=False)
+
+    def kernelSum(self) -> torch.Tensor:
+        """The 0th kernel moment S_i = sum_j V_j W_ij (field-independent).
+
+        Computed as a standard (uncorrected) Interpolate of the constant
+        field 1 -- the same operator the `renormVal` value renormalization
+        divides by, so the two are consistent by construction.
+        """
+        if self.kernel_sum is None:
+            pos = self.case.particles.positions
+            ones = torch.ones(pos.shape[0], device=pos.device, dtype=pos.dtype)
+            self.kernel_sum = warpOperation(
+                self.case.particles,
+                OperationProperties(
+                    kernel=self.case.kernel,
+                    operation=WarpOperation.Interpolate,
+                    supportMode=SupportScheme.Gather,
+                    operationMode=OperationDirection.AllToAll,
+                ),
+                self.case.domain,
+                adjacency=self.case.adjacency,
+                queryValues=ones,
+                referenceValues=ones,
+            )
+        return self.kernel_sum
 
     def crk(self):
         if self.crk_state is None:
@@ -95,6 +129,15 @@ class CorrectionCache:
         return self.renorm_C, self.renorm_eigvals, self.renorm_state
 
 
+def _renormValue(raw: torch.Tensor, S: torch.Tensor) -> torch.Tensor:
+    """Randles--Libersky value renormalization ``raw / S``, broadcasting the
+    per-particle scalar 0th moment ``S`` over any trailing field-component
+    axes (scalar field ``(N,)`` or vector field ``(N, D)``)."""
+    if raw.dim() > 1:
+        S = S.reshape(-1, *([1] * (raw.dim() - 1)))
+    return raw / S
+
+
 def run_probe(case: Case, cache: CorrectionCache,
               values: torch.Tensor, probe: str, mode: str) -> torch.Tensor:
     """Run one operator probe on `values` (the field at the particles) and
@@ -112,13 +155,28 @@ def run_probe(case: Case, cache: CorrectionCache,
         gradientMode=GradientScheme.Difference,
         laplacianMode=LaplacianScheme.Brookshaw,
     )
+    # renormVal's value probe is a derived quantity (uncorrected interpolant
+    # divided by the 0th kernel moment), so it returns before the common
+    # dispatch. Its gradient probe uses the corrected L matrix below; its
+    # laplacian falls through uncorrected (there is no Bonet--Lok Laplacian).
+    if mode == "renormVal" and probe == "interpolate":
+        raw = warpOperation(
+            case.particles,
+            properties,
+            case.domain,
+            adjacency=case.adjacency,
+            queryValues=values,
+            referenceValues=values,
+        )
+        return _renormValue(raw, cache.kernelSum())
+
     kwargs: dict = {}
     if mode == "crk":
         apparent_volume, crk_state = cache.crk()
         kwargs["crkState"] = crk_state
         kwargs["queryVolumes"] = apparent_volume
         kwargs["referenceVolumes"] = apparent_volume
-    elif mode == "renorm":
+    elif mode in ("renorm", "renormVal"):
         _C, _eigvals, state = cache.renorm()
         kwargs["renormalizationState"] = state
 

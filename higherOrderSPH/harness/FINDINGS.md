@@ -1,4 +1,4 @@
-# Baseline findings (first pass, 2026-09-22)
+# Baseline findings (first pass 2026-09-22; Phase 3 `renormVal` 2026-09-23)
 
 Curated interpretation of [`REPORT.md`](REPORT.md) — the frozen "before"
 column for the higher-order phases (parent plan `../../higher_order.md`).
@@ -7,20 +7,37 @@ Wendland2, float64, jitter 0.3, default target neighbors 40
 tables; update this file when the baseline changes (a harness change is a
 versioning event).
 
+**Versioning event (2026-09-23):** added the `renormVal` mode — the full
+Phase 3 operator (Bonet–Lok corrected *gradient* + Randles–Libersky *value*
+renormalization `f̂/S`). This is purely **additive**: the three pre-existing
+modes (`standard`/`crk`/`renorm`) are byte-identical to the 2026-09-22
+baseline (verified by diffing the CSV). The new column and its findings
+below are the only change.
+
 ## 1. Reproduction (monomial patch tests, open domain)
 
 **Interior** (max error, N = 1152):
 
-| capability | standard | crk | renorm |
-|---|---|---|---|
-| interpolate constant | 5.5e-2 | **7e-16 (exact)** | 5.5e-2 |
-| interpolate linear | 4-6e-2 | **7e-16 (exact)** | 4-6e-2 |
-| interpolate degree ≥ 2 | 2-3e-2 | 5e-5 – 4e-3 (not exact) | = standard |
-| gradient linear (scalar) | 1.0e-1 | 7e-4 – 1.5e-3 (flat) | **7e-16 (exact)** |
-| gradient linear (vector Mx) | 1.6e-1 | 1.5e-3 (flat) | **2e-15 (exact)** |
-| gradient degree ≥ 2 | 9e-2 – 2.7e-1 | 3e-3 – 3.6e-2 | 3e-3 – 2.7e-2 |
-| laplacian (quadratic) | 5 – 12 | 0.5 – 1.4 | = standard |
+| capability | standard | crk | renorm | renormVal |
+|---|---|---|---|---|
+| interpolate constant | 5.5e-2 | **7e-16 (exact)** | 5.5e-2 | **0 (exact)** |
+| interpolate linear | 4-6e-2 | **7e-16 (exact)** | 4-6e-2 | 2-2.5e-3 |
+| interpolate degree ≥ 2 | 2-3e-2 | 5e-5 – 4e-3 (not exact) | = standard | 2-8e-3 |
+| gradient linear (scalar) | 1.0e-1 | 7e-4 – 1.5e-3 (flat) | **7e-16 (exact)** | **7e-16 (exact)** |
+| gradient linear (vector Mx) | 1.6e-1 | 1.5e-3 (flat) | **2e-15 (exact)** | **2e-15 (exact)** |
+| gradient degree ≥ 2 | 9e-2 – 2.7e-1 | 3e-3 – 3.6e-2 | 3e-3 – 2.7e-2 | = renorm |
+| laplacian (quadratic) | 5 – 12 | 0.5 – 1.4 | = standard | = standard |
 
+- **renormVal** (the full Phase 3 operator: Bonet–Lok *gradient* +
+  Randles–Libersky *value* renormalization `f̂/S`, `S` = the 0th kernel
+  moment) is the new column. Its *gradient* and *laplacian* are identical
+  to `renorm` (only the value is additionally corrected). Its *value* is
+  the result: dividing the uncorrected interpolant by `S` makes constant
+  reproduction exact (0) and cuts the value error ~10-18× vs standard at
+  every degree (linear 2-2.5e-3, quartic 3.5-8.2e-3). It does **not** make
+  linear value reproduction exact — only the 0th moment is corrected, not
+  the 1st. That is the precise difference from CRK, which enforces both
+  moments and is machine-exact to degree 1.
 - **CRK** enforces 0th/1st moments of the corrected kernel: value
   reproduction of constants and linears is machine-exact, and this is the
   only mode that does so. It does *not* reproduce degree ≥ 2 (as expected
@@ -42,8 +59,14 @@ versioning event).
 - **CRK value reproduction stays machine-exact at the boundary** (const
   and linear interpolation ~7e-16, vs 2.3e-1 for standard) — the
   apparent-volume correction absorbs the truncated kernel support.
-- **renorm linear gradients stay machine-exact in the band** (6.7e-15)
-  where standard degrades to 0.6-1.2.
+- **renormVal also makes boundary constant interpolation exact** (0, vs
+  2.3e-1 standard) and cuts boundary linear value error to 1.4-1.6e-2
+  (~14×) — the per-particle `f̂/S` renormalization absorbs the truncated
+  support just like CRK's apparent volume does, but it only fixes the 0th
+  moment, so its boundary *linear* value error (1.4-1.6e-2) is ~2 orders
+  above CRK's (7e-16).
+- **renorm / renormVal linear gradients stay machine-exact in the band**
+  (6.7e-15) where standard degrades to 0.6-1.2.
 - Standard interpolation error is ~4× the interior value at the band;
   gradient errors 5-15×.
 - **Laplacian at the boundary is bad for every mode** (40-270) and CRK is
@@ -63,15 +86,24 @@ meaningful order signal.
 
 Interior, smooth fields (error vs dx):
 
-| probe | standard | crk | renorm |
-|---|---|---|---|
-| gradient | ~0.95 (O(h)) | 1.6 - 1.7 | **1.7 - 1.86** |
-| interpolate | ~0.95, floors at ΣW−1 bias | **1.84 - 1.95 (true O(h²))** | ~0.95, same floor |
+| probe | standard | crk | renorm | renormVal |
+|---|---|---|---|---|
+| gradient | ~0.95 (O(h)) | 1.6 - 1.7 | **1.7 - 1.86** | = renorm |
+| interpolate | ~0.95, floors at ΣW−1 bias | **1.84 - 1.95 (true O(h²))** | ~0.95, same floor | **1.84 - 1.91 (O(h²))** |
 
 - CRK's moment correction buys a full order on smooth interpolation
   (removes the ΣW−1 floor); renorm leaves it in place.
-- On smooth *gradients* renorm is marginally best (1.7-1.86 vs CRK
-  1.6-1.7); standard is O(h).
+- **renormVal's value renormalization buys the same full order as CRK** on
+  smooth interpolation (1.84-1.91, matching CRK's 1.84-1.95): dividing by
+  the 0th moment `S` removes the ΣW−1 floor exactly as CRK's `A` factor
+  does. So on *smooth* values, renormVal and CRK are both O(h²); they
+  differ on *polynomial* values — CRK also fixes the 1st moment, so it is
+  machine-exact for linears, whereas renormVal's linear value error
+  saturates (flat ~2e-3 in the decoupled sweep, per the §3 reading rule:
+  the residual 1st-moment error is O(1) in dx at fixed h/Δx). renormVal's
+  *gradient* is unchanged from renorm (Bonet–Lok).
+- On smooth *gradients* renorm/renormVal are marginally best (1.7-1.86 vs
+  CRK 1.6-1.7); standard is O(h).
 - **The Brookshaw laplacian does not converge**: for monomial fields the
   observed slopes are negative in all three modes (interior ~
   −1.2…−1.7, boundary ~ −1.0…−1.1) — the error *grows* as dx → 0 at
@@ -130,3 +162,10 @@ discretization noise but increases truncation bias.
   The hex/FCC lattice without jitter would be exactly isotropic to
   second order and would hide the O(1) lattice-sum bias that CRK
   corrects — the jittered case is the honest one.
+- **`renormVal` is a derived column, not a new `src/` operator.** The
+  core's `Interpolate` only supports CRK value correction, so the
+  Randles–Libersky value renormalization is composed from two standard
+  `Interpolate` calls in `operators.py`: the raw interpolant `f̂` and the
+  0th kernel moment `S = Interpolate(ones)` (cached per case), returning
+  `f̂/S`. The gradient probe reuses the `renorm` `L` matrix; the laplacian
+  is uncorrected (there is no Bonet–Lok Laplacian in the core).

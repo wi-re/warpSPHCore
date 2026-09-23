@@ -373,6 +373,8 @@ def run_smoke(device: str, kernel: KernelFunctions) -> dict:
     c4 = linf(f_lin, "gradient", "standard", "interior")
     c5 = linf(f_const, "interpolate", "standard", "interior")
     c6 = linf(f_const, "interpolate", "standard", "boundary")
+    c7 = linf(f_const, "interpolate", "renormVal", "interior")
+    c8 = linf(f_lin, "gradient", "renormVal", "interior")
     _C, eigvals, _ = cache.renorm()
     cond_mean = float(condition_numbers(eigvals)[case.interior_mask].mean())
 
@@ -383,6 +385,8 @@ def run_smoke(device: str, kernel: KernelFunctions) -> dict:
         "standard_grad_linear_interior_linf": c4,      # ~1e-1 (NOT exact)
         "standard_interp_const_interior_linf": c5,     # ~1e-2
         "standard_interp_const_boundary_linf": c6,     # > interior
+        "renormVal_interp_const_interior_linf": c7,    # ~1e-15 (value corrected)
+        "renormVal_grad_linear_interior_linf": c8,     # ~1e-15 (Bonet-Lok grad)
         "renorm_cond_interior_mean": cond_mean,        # O(1)
     }
     thresholds = {
@@ -392,6 +396,8 @@ def run_smoke(device: str, kernel: KernelFunctions) -> dict:
         "standard_grad_linear_interior_linf_min": 1e-3,
         "standard_interp_const_interior_linf_min": 1e-4,
         "standard_interp_const_boundary_gt_interior": True,
+        "renormVal_interp_const_interior_linf_max": 1e-10,
+        "renormVal_grad_linear_interior_linf_max": 1e-10,
         "renorm_cond_interior_mean_max": 10.0,
         "synthetic_order": 2.0,
     }
@@ -399,6 +405,7 @@ def run_smoke(device: str, kernel: KernelFunctions) -> dict:
     verdict["thresholds"] = thresholds
     ok &= c1 < 1e-10 and c2 < 1e-10 and c3 < 1e-10
     ok &= c4 > 1e-3 and c5 > 1e-4 and c6 > c5
+    ok &= c7 < 1e-10 and c8 < 1e-10
     ok &= np.isfinite(cond_mean) and cond_mean < 10.0
     verdict["ok"] = bool(ok)
 
