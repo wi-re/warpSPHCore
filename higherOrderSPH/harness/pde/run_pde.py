@@ -29,7 +29,6 @@ import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import torch
 
 HERE = Path(__file__).resolve().parent
@@ -45,7 +44,8 @@ from conservation import (ConservedQuantities, conserved,
                           drift)                     # noqa: E402
 from field_error import grid_l2_error                # noqa: E402
 from pde_cases import CASES, load_case_entry        # noqa: E402
-from metrics import error_norms, observed_order     # noqa: E402
+from metrics import error_norms                      # noqa: E402
+from report_pde import observed_orders, render_report  # noqa: E402
 
 RESULTS = HERE / "results"
 REPORT = HERE / "REPORT_pde.md"
@@ -153,60 +153,6 @@ def apply_reference_metric(rows: list[dict], states: dict, entry, case) -> None:
         )
         by_nx[nx]["error_l2"] = err
         by_nx[nx]["error_linf"] = err
-
-
-def observed_orders(rows: list[dict], xattr: str = "dx") -> dict:
-    """Group rows by case and fit the observed order of error vs resolution."""
-    orders = {}
-    by_case = {}
-    for r in rows:
-        # the reference-metric case's finest row is the reference itself
-        # (error 0 by self-comparison) -- exclude it from the fit.
-        if r.get("is_reference"):
-            continue
-        by_case.setdefault(r["case"], []).append(r)
-    for case, rs in by_case.items():
-        rs = sorted(rs, key=lambda r: r["N"])
-        x = np.array([r[xattr] for r in rs])
-        y = np.array([r.get("error_l2", float("nan")) for r in rs])
-        if len(rs) < 2 or np.any(np.isnan(y)):
-            continue
-        res = observed_order(x, y)
-        orders[case] = {
-            "slope": res.slope, "r_squared": res.r_squared,
-            "saturated": res.saturated, "exact": res.exact,
-            "pairwise": res.pairwise_slopes,
-        }
-    return orders
-
-
-def render_report(rows: list[dict], orders: dict) -> str:
-    lines = ["# PDE benchmark report (Pass 2)", "",
-             "Multi-resolution convergence + conservation. float64, full t* "
-             "overnight run.",
-             "", "## Per-resolution rows", "",
-             "| case | nx | N | dx | t | err L2 | mass drift | KE drift | "
-             "TotE drift | |p|f| |L|f| | wall |",
-             "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-    for r in rows:
-        tag = " (ref)" if r.get("is_reference") else ""
-        lines.append(
-            f"| {r['case']} | {r['nx']}{tag} | {r['N']} | {r['dx']:.4g} | "
-            f"{r['t_final']:.3g} | {r.get('error_l2', float('nan')):.3e} | "
-            f"{r['mass_drift']:+.2e} | {r['ke_drift']:+.2e} | "
-            f"{r['total_energy_drift']:+.2e} | "
-            f"{r['momentum_norm_final']:.3e} | {r['angmom_norm_final']:.3e} | "
-            f"{r['diverged']} | {r['wall_s']:.1f} |")
-    lines += ["", "## Observed orders (error L2 vs dx)", "",
-              "| case | slope | r^2 | saturated | exact |",
-              "|---|---|---|---|---|"]
-    for case, o in orders.items():
-        slope = "exact" if o["exact"] else ("n/a" if o["saturated"]
-                                            else f"{o['slope']:.2f}")
-        r2 = "n/a" if o["saturated"] or o["exact"] else f"{o['r_squared']:.3f}"
-        lines.append(f"| {case} | {slope} | {r2} | {o['saturated']} | "
-                     f"{o['exact']} |")
-    return "\n".join(lines) + "\n"
 
 
 def main(argv=None):
