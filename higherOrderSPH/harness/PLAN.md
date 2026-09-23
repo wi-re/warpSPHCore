@@ -11,6 +11,15 @@ existing reference operators — **standard SPH** (Phase 1) and
 **CRKSPH** (Phase 2) — to produce the "before" column every later
 phase (Bonet–Lok, MLS, LABFM, TENO, WENO) is compared against.
 
+## Pass 2 (PDE benchmark) — implemented 2026-09-23
+
+The pass-2 scope below is now built in the `pde/` subfolder (see its
+section in `README.md`): a multi-resolution driver over the real
+`warpSPH` frontend cases, measuring the L2 field error (vs analytic for
+TGV/linearWave, vs the finest-ladder run projected onto a common grid for
+Gresho/KH/Sod/Sedov) plus the conservation drift. The 1D cases are the
+fast dev/test path (minutes); the full 6-case run is an overnight job.
+
 ## Scope decision (2026-09-22)
 
 - **In:** static consistency only — patch tests, convergence rates,
@@ -21,7 +30,8 @@ phase (Bonet–Lok, MLS, LABFM, TENO, WENO) is compared against.
   `warpSPH/caseUtils/compressible/{greshoVortex,linearWave,sod,sedov,
   kelvinHelmholtz}`, runner `RunResult.trajectory` carries per-step
   diagnostics) — the pass-2 work is the multi-resolution driver +
-  drift measurement, not the cases themselves.
+  drift measurement, not the cases themselves. *(Now implemented — see
+  "Pass 2" above and the `pde/` subfolder.)*
 - **Out (later phases):** all new operators (parent-plan Phases 3–7).
 
 ## Key finding — the operator stack for this pass already exists

@@ -31,6 +31,33 @@ python run_baseline.py             # full baseline -> REPORT.md
 python run_baseline.py --suites patch,resolve-open --kernels Wendland2 CubicSpline
 ```
 
+## Pass 2: PDE benchmark (`pde/`)
+
+Multi-resolution convergence + conservation for the real `warpSPH` frontend
+cases (imported, never re-implemented). Each case runs a 4-point resolution
+ladder at its full simulated time; the metric is the L2 field error — vs the
+analytic solution for the smooth closed-form cases (TGV, linearWave), or vs
+the finest-ladder run (projected onto a common grid) for the rest (Gresho,
+Kelvin–Helmholtz, Sod, Sedov) — plus the conservation drift (mass / KE /
+momentum / angular momentum).
+
+| File | Role |
+|---|---|
+| `pde/pde_cases.py` | case registry: `PDECase` (module, dim, metric, 4-point `nx_ladder`, `t_star`, analytic field, measured state field) + the TGV / linearWave analytic fields |
+| `pde/conservation.py` | driver-side conserved quantities + drift (pure torch; mass exact, KE relative, momentum/angmom as absolute final norms for the ~0-symmetric ICs) |
+| `pde/field_error.py` | the reference metric: cloud-in-cell (CIC) projection of both particle sets onto a common grid, RMS L2 over the shared cells (pure torch; density = mass/cell volume) |
+| `pde/run_pde.py` | the driver: float64, per-(case, nx) rows, observed order per case, `REPORT_pde.md` + `results/pde_rows.csv`; `--smoke` is the CI gate |
+
+```
+python pde/run_pde.py --cases sod sedov   # fast 1D cases (minutes) -> dev loop
+python pde/run_pde.py                     # all 6 cases, full t* (~3-4 h overnight)
+python pde/run_pde.py --cases tgv --smoke # CI gate
+```
+
+The 2D incompressible cases (TGV/Gresho/KH) cost ~nx³ under adaptive dt and
+dominate the runtime; the 1D cases finish in minutes and are the fast
+dev/test path.
+
 ## Conventions
 
 - float64 (`warpSPHCore_PRECISION=float64`, set by the driver before

@@ -1,0 +1,142 @@
+#!/usr/bin/env python3
+"""Conservation diagnostics for the PDE benchmark suite (Pass 2).
+
+Computed driver-side from a particle state (masses, velocities, positions) --
+no `src/` or frontend change, consistent with the harness convention of never
+re-implementing an operator. Pure torch, so it is unit-testable on CPU without
+warp or the float64 env dance.
+
+The conserved quantities and the drift convention:
+
+* **mass** -- ``sum(m)``. SPH never changes a particle's mass, so the relative
+  drift ``(m_f - m_i)/m_i`` is the clean conservation check (expect ~0 to
+  machine precision).
+* **momentum** -- ``sum(m v)``. Reported as a vector and its norm. Cases with
+  a symmetric initial condition (TGV, Gresho) start at net momentum ~0, so a
+  *relative* drift is division by ~0 and meaningless there; the meaningful
+  signal is the **absolute** norm ``|p|`` (a good scheme keeps the spurious
+  net momentum small). ``conserved`` returns the vector; the caller decides
+  relative-vs-absolute per case.
+* **kineticEnergy** -- ``0.5 sum(m |v|^2)``. For compressible cases the total
+  energy (KE + internal) is the conserved quantity; for the first pass we track
+  KE (incompressible cases like TGV have KE decay viscously, so its drift is
+  the dissipation signal, not a conservation violation).
+* **angularMom** -- the out-of-plane component ``sum(m (x v_y - y v_x))`` in 2D
+  (the full vector in 3D). Same ~0-initial-value caveat as momentum.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import torch
+
+__all__ = ["ConservedQuantities", "conserved", "drift"]
+
+
+@dataclass
+class ConservedQuantities:
+    mass: float
+    momentum: torch.Tensor          # (dim,) vector
+    momentum_norm: float            # |momentum|
+    kinetic_energy: float
+    angular_momentum: torch.Tensor  # (dim,) in 3D, (1,) in 2D (z-component)
+    angular_momentum_norm: float
+    internal_energy: float = 0.0    # 0 for incompressible states (no IE)
+
+    @property
+    def total_energy(self) -> float:
+        """KE + IE -- the conserved quantity for compressible cases. For
+        incompressible states (IE = 0) this equals the kinetic energy, which
+        decays viscously (a dissipation signal, not a conservation check)."""
+        return self.kinetic_energy + self.internal_energy
+
+    def as_dict(self) -> dict:
+        return {
+            "mass": self.mass,
+            "momentum_norm": self.momentum_norm,
+            "kinetic_energy": self.kinetic_energy,
+            "total_energy": self.total_energy,
+            "angular_momentum_norm": self.angular_momentum_norm,
+        }
+
+
+def conserved(masses: torch.Tensor,
+              velocities: torch.Tensor,
+              positions: torch.Tensor,
+              internal_energies: torch.Tensor | None = None
+              ) -> ConservedQuantities:
+    """Conserved quantities of a particle state.
+
+    `masses` (N,), `velocities` (N, dim), `positions` (N, dim); optional
+    `internal_energies` (N,) *specific* internal energy (compressible cases).
+    All on the same device/dtype. Returns a `ConservedQuantities` with scalars
+    on the host (the tensors are detached and moved to CPU).
+    """
+    m = masses.detach()
+    v = velocities.detach()
+    x = positions.detach()
+    dim = v.shape[1]
+
+    mass = float(m.sum())
+    momentum = (m[:, None] * v).sum(dim=0)
+    momentum_norm = float(momentum.norm())
+    ke = float(0.5 * (m * (v ** 2).sum(dim=-1)).sum())
+    ie = (float((m * internal_energies.detach()).sum())
+          if internal_energies is not None else 0.0)
+
+    if dim >= 2:
+        # Full r x v in 3D; the single out-of-plane (z) component in 2D.
+        rxv = torch.stack([
+            x[:, 1] * v[:, 2] - x[:, 2] * v[:, 1],
+            x[:, 2] * v[:, 0] - x[:, 0] * v[:, 2],
+            x[:, 0] * v[:, 1] - x[:, 1] * v[:, 0],
+        ], dim=-1) if dim == 3 else torch.stack([
+            x[:, 0] * v[:, 1] - x[:, 1] * v[:, 0],
+        ], dim=-1)
+        angular_momentum = (m[:, None] * rxv).sum(dim=0)
+    else:
+        # 1D: no out-of-plane angular momentum is defined; report zero.
+        angular_momentum = torch.zeros(1, dtype=m.dtype, device=m.device)
+    angular_momentum_norm = float(angular_momentum.norm())
+
+    return ConservedQuantities(
+        mass=mass,
+        momentum=momentum.cpu(),
+        momentum_norm=momentum_norm,
+        kinetic_energy=ke,
+        angular_momentum=angular_momentum.cpu(),
+        angular_momentum_norm=angular_momentum_norm,
+        internal_energy=ie,
+    )
+
+
+def drift(initial: ConservedQuantities,
+          final: ConservedQuantities,
+          eps: float = 1e-30) -> dict:
+    """Relative drift ``(final - initial)/initial`` for the O(1) quantities
+    (mass, kinetic energy, total energy), plus the **absolute** final norms
+    for the ~0-initial-value quantities (momentum, angular momentum) -- a
+    relative drift there would divide by ~0 and be meaningless.
+
+    `ke_drift` is the dissipation signal for incompressible cases (KE decays
+    viscously); `total_energy_drift` is the conservation check for
+    compressible cases (KE + IE is the invariant; for incompressible states it
+    equals `ke_drift`).
+
+    Returns a flat dict ready to land in a report row.
+    """
+    def rel(a: float, b: float) -> float:
+        return (b - a) / a if abs(a) > eps else float("nan")
+
+    return {
+        "mass_drift": rel(initial.mass, final.mass),
+        "ke_drift": rel(initial.kinetic_energy, final.kinetic_energy),
+        "total_energy_drift": rel(initial.total_energy, final.total_energy),
+        # absolute norms: a symmetric IC starts at ~0, so these are the
+        # spurious-momentum / spurious-angular-momentum signal.
+        "momentum_norm_init": initial.momentum_norm,
+        "momentum_norm_final": final.momentum_norm,
+        "angmom_norm_init": initial.angular_momentum_norm,
+        "angmom_norm_final": final.angular_momentum_norm,
+    }
