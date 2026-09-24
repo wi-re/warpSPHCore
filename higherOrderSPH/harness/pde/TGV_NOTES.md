@@ -207,3 +207,97 @@ config.dim))`, matching the established `float(...)` convention. After it,
 run scatter, so the fix is numerically inert. With the blocker gone, `tgv-wc`
 satisfies the harness's float64 contract and can be registered as a
 first-class `CASES` entry.
+
+## 5. Integrator study: does a higher-order time integrator lift the delta+ floor? (2026-09-24)
+
+The original rationale for the delta+ leg was that delta+-SPH is an *explicit*
+scheme designed to compose with higher-order time integrators (an alternative
+to the DFSPH pressure pass, whose derivation is tied to semi-implicit Euler,
+§2). The natural question: does running delta+ with **RK4** instead of RK2
+lift the ~8.5e-3 floor at fine resolution?
+
+**Plumbing (confirmed, float64):** `integrationScheme` is a `CaseSpec` field
+(`rungeKutta2`/`rungeKutta4` are registered `warpSPHIntegrators` schemes);
+`deltaSPH_step` takes a `stageIndex`, so multi-stage RK is a first-class path,
+not a special case. A short smoke (both integrators, both `targetDt` and
+`machTarget` routes) ran cleanly. RK4 is a valid, stable configuration for
+tgv-wc.
+
+### Part 1 — integrator comparison at fixed `nx=128` (legacy back-solve)
+
+The legacy back-solve ties `dt` and `c0` together (`c0 = 0.3 h/(ks·dt)`), so a
+`dt` sweep also moves the Mach number. That is the point: it exposes the real
+`targetDt`↔`c0` tradeoff.
+
+| integrator | dt | c0 | Ma | steps | err_l2 |
+|---|---|---|---|---|---|
+| RK2 | 1e-3 | 27.1 | 0.037 | 2001 | 9.08e-3 |
+| RK4 | 1e-3 | 27.1 | 0.037 | 2001 | **8.25e-3** |
+| RK2 | 5e-4 | 54.3 | 0.018 | 4001 | 1.05e-2 |
+| RK4 | 2e-3 | 13.6 | 0.074 | 1000 | 9.03e-3 |
+
+- **RK4 vs RK2 at identical dt/c0/step count** (first two rows): 8.25e-3 vs
+  9.08e-3 — RK4 is ~9 % better. That is the genuine O(dt⁴)-vs-O(dt²)
+  time-integration effect, but it is *small*: the time error at dt=1e-3 is at
+  most ~1e-3, a fraction of the ~8e-3 floor. The floor is present in both.
+- **Halving dt (RK2 dt=5e-4, 2001→4001 steps) *raises* the error** to
+  1.05e-2, even though Ma drops (0.037→0.018) and the time error shrinks. The
+  only quantity that increased is the **step count**.
+- **Doubling dt with RK4 (dt=2e-3, 1000 steps) leaves the error flat**
+  (9.03e-3) despite 4× higher Ma (0.074) — again not time-integration-driven.
+
+### Part 2 — fixed Ma = 0.02 (c0 = 50, `dt = cfl·h/(c0·ks) ∝ dx`), ladder 64→160
+
+The `machTarget` route (Sun 2017 Eq. 2) holds the Mach number fixed and
+back-solves `dt` from the acoustic CFL, so `dt` shrinks with `nx`. RK2 vs RK4
+at every resolution (identical step counts within a row):
+
+| nx | RK2 (steps) | RK4 (steps) |
+|---|---|---|
+| 64 | 2.09e-2 (1844) | 2.27e-2 (1844) |
+| 96 | 1.36e-2 (2794) | 1.41e-2 (2794) |
+| 128 | 1.04e-2 (3687) | 1.00e-2 (3687) |
+| 160 | 8.24e-3 (4608) | 8.49e-3 (4608) |
+
+RK4 and RK2 agree within the unseeded-start jitter (±5 %) at *every*
+resolution and *every* step count — no systematic RK4 advantage. The observed
+order is ~1.0 for both, vs the legacy fixed-dt ladder's ~1.5–1.6 (§3).
+
+### Why the order degrades under dt∝dx — and what the floor actually is
+
+The fixed-Ma route makes `dt` shrink with `nx`, so the **step count grows up
+the ladder** (1844→4608). The legacy back-solve, by contrast, holds `dt` (and
+hence the step count, ~2000) *constant* across the ladder. Comparing the two
+at `nx=128`: the legacy run has the *higher* Ma (0.037 vs 0.02) yet the
+*lower* error (8.24e-3 vs 1.04e-2) — the only difference is the step count
+(2000 vs 3687). That isolates the driver: **per-step accumulation**, which
+grows with step count and cancels part of the spatial convergence when the
+step count is allowed to grow with resolution.
+
+Fitting the Part-1 `dt`-pair (same `nx`, dt=1e-3 vs 5e-4) with
+`err² = S² + (a·n^0.4)² + (t·dt²)²` gives a per-step coefficient
+**a ≈ 2.9e-4** — the same n^0.4 effect and magnitude as DFSPH's §1 term-3
+(2.8e-4). At ~2000 steps that is A ≈ 6.8e-3, the bulk of the ~8e-3 floor; the
+remainder is the (small) spatial term + Ma² + a little time error.
+
+### Conclusion
+
+- **RK4 does not lift the delta+ TGV floor.** It works (plumbing, stability,
+  and order are all fine) and removes the small O(dt²) time error (~1e-3 at
+  dt=1e-3), but the dominant ~8e-3 floor is per-step accumulation — a function
+  of *step count*, not integrator order.
+- The delta+ floor is the **same per-step (n^0.4) effect as DFSPH's §1
+  term-3, with the same coefficient** — i.e. part of the standing **vd+ps**
+  problem (the coupling of incompressibility, particle shifting and
+  divergence freedom), not a delta+-specific time-integration limitation.
+- **Refining dt (more steps) makes the error worse** (the dt=5e-4 run), so
+  "converge in time" is the wrong lever here; the legacy fixed-`dt` ladder is
+  actually the *cleaner* convergence diagnostic for delta+ because it holds
+  the step count constant.
+- The remaining lever for delta+ error reduction is the **per-step shifting
+  error itself** (the vd+ps problem) or a smaller step count (larger `dt`,
+  bounded by stability) — not the integrator order.
+- The higher-order-integrator rationale for delta+ is therefore **not
+  validated on this benchmark**: its value would show up on problems where the
+  *time* error is the dominant error (stiff / high-frequency dynamics), not on
+  the smooth TGV vortex, where per-step accumulation dominates.
