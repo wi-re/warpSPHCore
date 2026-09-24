@@ -95,21 +95,25 @@ well-relaxed start has near-uniform summation density, so the spurious
 initial pressure c0²(ρ−ρ0) is small and the initial pressure build-up stays
 weak.
 
-### Results (float32, dt = 1e-3, 2001 steps)
+### Results (float64, dt = 1e-3, 2001 steps)
 
 | nx | 32 | 48 | 64 | 96 | 128 | 160 |
 |---|---|---|---|---|---|---|
-| delta+ err_l2 | 7.68e-2 | 3.83e-2 | 2.42e-2 | 1.26e-2 | 8.37e-3 | 8.60e-3 |
+| delta+ err_l2 | 7.57e-2 | 3.86e-2 | 2.23e-2 | 1.23e-2 | 8.24e-3 | 8.67e-3 |
 | DFSPH err_l2 (benchmark) | 2.55e-2 | 1.79e-2 | 1.46e-2 | 1.19e-2 | 1.08e-2 | 1.17e-2 |
-| delta+ pairwise order | 1.72 | 1.60 | 1.61 | 1.42 | ≈0 | |
+| delta+ pairwise order | 1.66 | 1.90 | 1.47 | 1.40 | ≈0 | |
 
-- **Delta+ converges cleanly at ~1.5–1.6 order** from nx=32 to 128 — in
+(The first delta+ pass ran in float32 because of the §4 float64 blocker —
+now fixed; the float32 leg agrees at every point within the unseeded-start
+run scatter: 7.68/3.83/2.42/1.26/8.37/8.60 e-2...e-3.)
+
+- **Delta+ converges cleanly at ~1.5–1.9 order** from nx=32 to 128 — in
   contrast to DFSPH's 0.69, which is its non-converging compressibility bias
   of §2.
-- **Overtake confirmed (nx=128/160 runs):** at nx=96 DFSPH is still 6%
-  better (1.19e-2 vs 1.26e-2); by nx=128 delta+ is 22% better
-  (8.37e-3 vs 1.08e-2) and by nx=160 27% better (8.60e-3 vs 1.17e-2).
-  Crossover between nx=96 and 128, as the 1.6-order extrapolation predicted.
+- **Overtake confirmed (nx=128/160 runs):** at nx=96 DFSPH is still 5%
+  better (1.19e-2 vs 1.23e-2); by nx=128 delta+ is 24% better
+  (8.24e-3 vs 1.08e-2) and by nx=160 26% better (8.67e-3 vs 1.17e-2).
+  Crossover between nx=96 and 128, as the extrapolation predicted.
 - **Both schemes are now on their respective floors.** DFSPH sits on its
   ~1.1e-2 plateau (the §2 compressibility bias + per-step accumulation).
   Delta+ flattens at ~8.5e-3 and even rises slightly 128→160 — a constant
@@ -176,22 +180,30 @@ much coarser 1·h jitter. So "start from the optimal sampling" is not a
 turn-key knob today; exercising it needs either a frontend hook or a
 probe-level stand-in.
 
-## 4. Known blocker: the delta-SPH path is not float64-audited
+## 4. float64 blocker: found, root-caused, FIXED (one line)
 
-Running `tgv-wc` under `warpSPHCore_PRECISION=float64` fails at
+Running `tgv-wc` under `warpSPHCore_PRECISION=float64` initially failed at
 `warpSPH/modules/deltaSPH/densityDiffusion.py:75`
 (`delta * currentState.supports / xi * c0`, `xi = sphKernel_xi(...)`):
 
 - `sphKernel_xi` is a `@wp.func` (warpSPHCore); called eagerly it returns a
   **Python float in float32 mode but a Warp float64 scalar in float64 mode**.
 - Warp 1.17.0 has no `div(Tensor, float64)` builtin, so the
-  `torch_tensor / warp_scalar` fallback raises
+  `torch_tensor / warp_scalar` fallback raised
   `RuntimeError: Couldn't find a function 'div' compatible with the
   arguments 'Tensor, float64'`.
 
+**Root cause is a missing eager-scalar coercion, not a deep precision gap.**
 The DFSPH path is float64-audited (the whole Pass-2 benchmark runs it); the
-delta-SPH path has evidently never run in float64. The comparison leg runs in
-float32, which is immaterial here: TGV's error (~1e-2) is five orders of
-magnitude above the float32 floor. Fixing it properly (eager-scalar coercion
-or a `div(Tensor, float64)` registration) is a warpSPHCore/Warp item, not a
-benchmark one.
+delta-SPH path simply had one unwrapped eager `@wp.func` call where every
+sibling call site (shifting, WCSPH timestep, cases) already wrapped the same
+helper in `float(...)`.
+
+**Fix (one line, in the frontend `warpSPH` repo):**
+`densityDiffusion.py` — `xi = float(sphKernel_xi(config.kernel.value,
+config.dim))`, matching the established `float(...)` convention. After it,
+`tgv-wc` runs cleanly in float64 end-to-end; the full 6-point float64 ladder
+(§3) matches the earlier float32 leg at every point within unseeded-start
+run scatter, so the fix is numerically inert. With the blocker gone, `tgv-wc`
+satisfies the harness's float64 contract and can be registered as a
+first-class `CASES` entry.
