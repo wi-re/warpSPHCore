@@ -301,3 +301,61 @@ remainder is the (small) spatial term + Ma² + a little time error.
   validated on this benchmark**: its value would show up on problems where the
   *time* error is the dominant error (stiff / high-frequency dynamics), not on
   the smooth TGV vortex, where per-step accumulation dominates.
+
+## 6. PST causal test: the floor *is* the particle shifting, and the default is too weak (2026-09-24)
+
+Section 5 localized the delta+ floor to per-step accumulation and named the
+prime suspect: the particle shifting (PST) — the `+` of delta+-SPH. This
+section tests that causally by varying the *shift strength* at fixed
+`nx=128`, RK2, `dt=1e-3` (2001 steps), float64, legacy back-solve, so that
+only the shifting differs between legs.
+
+**The key frontend fact** (`configurations/weaklyCompressible.py`): the shared
+default shift is **1/8 of Sun 2017 Eq. (7)'s full strength** — so weak that on
+TGV the current delta+ "sits on top of plain delta-SPH instead of improving on
+it." The paper's actual delta+ (full-strength Eq. 7 shift) is the
+`sun2017DeltaSPH` scheme. So the ~8.5e-3 floor measured in §3–§5 may be
+"delta+ with a weakened shift," not the real delta+ floor. (Case knob: the
+`shifting` param — `None`=scheme default on, `False`=PST off — wired in
+`cases/tgvWeaklyCompressible.py`; full strength via `scheme='sun2017DeltaSPH'`,
+which also sets `freezeDiffusionAcrossStages=True`, a secondary co-change.)
+
+| leg | scheme | shift | dt | steps | Ma | vel err | vol err |
+|---|---|---|---|---|---|---|---|
+| A off | deltaSPH | off | 1e-3 | 2001 | 0.037 | 1.02e-2 | 5.44e-2 |
+| B 1/8 | deltaSPH | 1/8 | 1e-3 | 2001 | 0.037 | 8.44e-3 | 8.11e-2 |
+| **C full** | sun2017DeltaSPH | Eq. 7 | 1e-3 | 2001 | 0.037 | **5.94e-3** | **1.81e-2** |
+| C2 full@5e-4 | sun2017DeltaSPH | Eq. 7 | 5e-4 | 4001 | 0.018 | 8.30e-3 | 2.39e-2 |
+
+**Findings:**
+
+- **The floor is the particle shifting — confirmed causally.** At fixed
+  dt/steps/Ma (rows A/B/C) the velocity error decreases *monotonically* with
+  shift strength (off 1.02e-2 > 1/8 8.44e-3 > full 5.94e-3), and the volume
+  error is best at full strength (1.81e-2 ≪ 5.44e-2 < 8.11e-2). The shifting
+  is not an incidental correction — its strength *sets* the floor level.
+- **The A→B leg isolates the shift** (both use `deltaSPH`, so
+  `freezeDiffusionAcrossStages` is constant). Turning it on improves velocity
+  (−18 %) but worsens volume (+50 %) — the 1/8 strength is a net-negative
+  trade for volume, matching the docstring's "sits on top of plain delta-SPH."
+- **The current default (1/8) is suboptimal.** The paper's full-strength
+  delta+ (`sun2017DeltaSPH`) is **30 % lower on velocity** (5.94e-3 vs
+  8.44e-3) and **4.5× better on volume** (1.81e-2 vs 8.11e-2) than the current
+  tgv-wc default. The ~8.5e-3 "floor" of §3–§5 was therefore an artifact of
+  the weakened default shift, not a fundamental delta+ limit. (The B→C step
+  also adds frozen diffusion, a secondary co-change; the 8× shift-strength
+  change is the dominant factor.)
+- **The n^0.4 per-step accumulation persists even with full shifting, at a
+  lower level.** C (5.94e-3, 2001 steps) → C2 (8.30e-3, 4001 steps, lower Ma):
+  more steps still means more error, so the §5 accumulation is *mitigated* by
+  the right shift strength, not eliminated. C2 (8.30e-3) is nonetheless well
+  below the 1/8 leg at 4001 steps (1.05e-2, §5), so full shifting suppresses
+  the accumulation relative to 1/8.
+
+**Actionable:** the `tgv-wc` case currently selects the generic `deltaSPH`
+scheme (1/8 shift). Switching it to the `sun2017DeltaSPH` scheme (the paper's
+full-strength delta+) lowers the TGV velocity-error floor by ~30 % and improves
+the volume error by ~4.5×, at the same step count and cost. This is a
+case-config change (it moves the case onto the named paper prescription rather
+than the generic default), so it is flagged for the user's decision rather than
+applied unilaterally.
