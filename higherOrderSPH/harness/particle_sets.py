@@ -53,7 +53,7 @@ from warpSPHCore.enumTypes import (
 from warpSPHCore.sampling import sampleDensestLattice
 from warpSPHCore.util import volumeToSupport
 
-__all__ = ["Case", "build_case", "cell_volume"]
+__all__ = ["Case", "build_case", "build_case_from_positions", "cell_volume"]
 
 
 def cell_volume(dim: int, dx: float) -> float:
@@ -175,6 +175,97 @@ def build_case(
         target_neighbors=target_neighbors,
         h_over_dx=h / dx,
         cell_vol=cell_vol,
+        interior_mask=interior,
+        boundary_mask=boundary,
+        kernel=kernel,
+    )
+
+
+def build_case_from_positions(
+    positions: torch.Tensor,
+    masses: torch.Tensor,
+    h: float,
+    box: np.ndarray,
+    dx: float,
+    target_neighbors: int,
+    periodic: bool = True,
+    device: str = "cuda",
+    kernel: KernelFunctions = KernelFunctions.Wendland4,
+    margin: float = 0.0,
+) -> Case:
+    """Build a probe case from an *existing* particle distribution (e.g. the
+    uncorrected end state of a saved simulation) instead of sampling a
+    lattice: same domain/adjacency/density machinery as `build_case`, with
+    masses as given and `cell_vol` the mean mass.
+
+    `positions` (N, dim) raw simulation coordinates (for a periodic `box`
+    they may lie outside it -- the code does not re-wrap, and the drift
+    grows with the simulated time; the periodic neighbourhood search
+    handles the wrap, as it does in the simulation), `masses` (N,), `h` the
+    uniform support, `dx` the reference spacing (for `h_over_dx`
+    reporting), `target_neighbors` the nominal neighbour count (metadata
+    only -- h is taken as given).
+    """
+    positions = torch.as_tensor(positions, dtype=torch.float64, device=device)
+    masses = torch.as_tensor(masses, dtype=torch.float64, device=device)
+    N, dim = positions.shape
+    box = np.asarray(box, dtype=float)
+    h = float(h)
+    dx = float(dx)
+
+    if periodic:
+        dmin = torch.zeros(dim, dtype=torch.float64, device=device)
+        dmax = torch.tensor(box, dtype=torch.float64, device=device)
+        periodicity = torch.ones(dim, dtype=torch.bool, device=device)
+    else:
+        dmin = torch.full((dim,), -margin, dtype=torch.float64, device=device)
+        dmax = torch.tensor(box, dtype=torch.float64, device=device) + margin
+        periodicity = torch.zeros(dim, dtype=torch.bool, device=device)
+    domain = DomainDescription(dmin, dmax, periodicity, dim)
+
+    particles = ParticleState(
+        positions=positions.contiguous(),
+        supports=torch.full((N,), h, dtype=torch.float64, device=device),
+        masses=masses.contiguous(),
+        densities=None,
+        kinds=torch.zeros(N, dtype=torch.int32, device=device),
+    )
+    adjacency = radiusSearchCompactHashMap(
+        particles, domain, mode=SupportScheme.SuperSymmetric)
+    densities = warpOperation(
+        particles,
+        OperationProperties(kernel=kernel, operation=WarpOperation.Density,
+                            supportMode=SupportScheme.Gather,
+                            operationMode=OperationDirection.AllToAll),
+        domain, adjacency=adjacency,
+    )
+    particles.densities = densities
+
+    interior = None
+    boundary = None
+    if not periodic:
+        interior = torch.ones(N, dtype=torch.bool, device=device)
+        for d in range(dim):
+            interior &= positions[:, d] > domain.min[d] + h
+            interior &= positions[:, d] < domain.max[d] - h
+        boundary = ~interior
+
+    return Case(
+        particles=particles,
+        domain=domain,
+        adjacency=adjacency,
+        positions=positions,
+        box=box,
+        N=N,
+        dim=dim,
+        periodic=periodic,
+        jitter=0.0,
+        seed=None,
+        dx=dx,
+        h=h,
+        target_neighbors=int(target_neighbors),
+        h_over_dx=h / dx,
+        cell_vol=float(masses.mean().item()),
         interior_mask=interior,
         boundary_mask=boundary,
         kernel=kernel,

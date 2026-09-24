@@ -352,10 +352,133 @@ which also sets `freezeDiffusionAcrossStages=True`, a secondary co-change.)
   below the 1/8 leg at 4001 steps (1.05e-2, §5), so full shifting suppresses
   the accumulation relative to 1/8.
 
-**Actionable:** the `tgv-wc` case currently selects the generic `deltaSPH`
-scheme (1/8 shift). Switching it to the `sun2017DeltaSPH` scheme (the paper's
-full-strength delta+) lowers the TGV velocity-error floor by ~30 % and improves
-the volume error by ~4.5×, at the same step count and cost. This is a
-case-config change (it moves the case onto the named paper prescription rather
-than the generic default), so it is flagged for the user's decision rather than
-applied unilaterally.
+**Actionable (decision taken, see section 7):** the *frontend* default shift
+stays 1/8 (it balances other case families, e.g. free-surface, which are
+outside the scope of the higher-order survey). For the *harness* tgv-wc leg,
+the user directed the full-strength shift: the PDE registry now runs
+`scheme="sun2017DeltaSPH"` for tgv-wc (a harness-side `PDECase.scheme`
+override; the frontend is untouched). See section 7 for the consequences —
+including a ladder crossover at coarse resolution that the naive
+"full shift is better everywhere" reading of this table would miss.
+
+## 7. Distribution anisotropy: instrumentation + saved TGV distributions as test data (2026-09-24)
+
+Motivation (user): the Vacondio 2021 GC1 framing (section 6's literature
+cross-check) says convergence depends critically on the *particle
+distribution*, so the natural test data for the static higher-order harness
+is not only lattice + jitter but a *physically disordered* distribution —
+e.g. the uncorrected TGV end state — with its anisotropy measured, so that
+higher-order probes can show how the distribution (not just the resolution)
+limits the recorded field.
+
+### 7.1 Instrumentation: `harness/distribution.py` (pure torch, CPU-tested)
+
+Two per-particle, dimensionless measures that are properties of the
+distribution alone (no flow state):
+
+* **first-moment residual** `f_i = Σ_j m_j W_ij (x_j − x_i)`, measure
+  `|f_i| / (h C_i)` (`C_i` the kernel sum); vanishes for a locally symmetric
+  neighbourhood.
+* **second-moment (shape) anisotropy** `M_i = Σ_j m_j W_ij (x_j−x_i)(x_j−x_i)^T`,
+  measure `(λ_max − λ_min)/λ_max` of the PSD tensor `M_i` ∈ [0, 1]
+  (0 = isotropic, 1 = rank-1 / all mass on a line); an eigenvalue ratio, so
+  rotationally invariant in any dimension.
+
+Kernel *normalisation* cancels in both (ratios), so the unnormalised Wendland
+shapes are used (they match `warpSPHCore`'s `kernelFunctions/wendland{2,4,6}`).
+CPU unit tests: exact isotropy of a periodic triangular lattice, rotation /
+translation invariance, 1D-chain extremum, truncation direction, periodic
+wrap, and self-consistency of the saved data below (tests/convergence/
+test_distribution.py, 14 tests).
+
+### 7.2 Saved distributions (committed test data)
+
+Two files, `higherOrderSPH/harness/data/` (layout + usage: the dir's
+README.md): nx=128, RK2, float64, legacy back-solve, dt=1e-3, t=0→2.0,
+positions + masses at t = 0, 0.5, 1.0, 1.5, 2.0, plus the anisotropy
+summaries computed at capture time:
+
+* `tgv2d_noshift_nx128.npz` — delta-SPH, PST **off** (the uncorrected state)
+* `tgv2d_fullshift_nx128.npz` — delta+-SPH, **full-strength** Eq. (7) shift
+
+Second-moment anisotropy (rms / max; kernel-sum spread in parentheses):
+
+| leg | t=0 | t=0.5 | t=1.0 | t=1.5 | t=2.0 |
+|---|---|---|---|---|---|
+| noshift | 8.5e-3 (3.0e-2) | 1.17e-2 | 1.79e-2 | 1.74e-2 | 1.75e-2 (9.0e-2) |
+| fullshift | **0.339** (0.73) | 8.2e-3 | 7.0e-3 | 6.6e-3 | 6.5e-3 (2.8e-2) |
+
+kernel sum `C_i` spread: noshift ≈ 8 % at every t; fullshift 3× at t=0,
+≈ 1 % from t=0.5 on.
+
+**Findings:**
+
+1. **The uncorrected flow accumulates disorder** (noshift a2-rms 8.5e-3 →
+   1.75e-2, saturating ~t=1) — the TGV shear stretches the neighbourhoods
+   away from isotropy; at t=2 the distribution is 2.7× more anisotropic than
+   the shifted leg's. This is the "sufficiently disordered" state of the
+   Vacondio flat-lining, quantified.
+2. **Full shifting re-regularises**: from a deliberately disordered start
+   (a2-rms 0.339) to 8.2e-3 within 500 steps (a 41× collapse), then a slow
+   continued decline; the kernel-sum spread tightens from 3× to 1 %
+   (density uniformity to ±0.6 % vs ±4 % for noshift at t=2).
+3. **The two files start from DIFFERENT t=0 states** — a trap for leg
+   comparisons: the case's `shuffleParticles` build-time relaxation
+   (128 iterations, 10× scale each) honours the *scheme's* shift strength
+   (`computeDeltaShift` gets the live `schemeConfig`), so the full-strength
+   leg's IC is far more disordered (a2-rms 0.339 vs 8.5e-3) than the 1/8
+   leg's. Section 6's causal conclusion is unaffected (leg C won *despite*
+   the worse start) but the t=0 rows of the table are not comparable across
+   legs.
+4. **Positions are never re-wrapped**: the saved coordinates drift outside
+   the box with t (net COM wander, up to ~0.4 L at t=2). Both the
+   minimum-image anisotropy sums and the compact-hash neighbourhood search
+   handle it (the simulation runs on these coordinates natively).
+5. **Cross-validation**: on the saved t=2 noshift distribution, the warp
+   GPU SPH density (compact-hash adjacency, normalised) reproduces the
+   pure-torch O(N²) kernel sum of the anisotropy module to 6 digits
+   (min/max ratio 0.921735 vs 0.921735) — two independent implementations
+   agree on a drifted, disordered 16k-particle distribution.
+
+### 7.3 Consequence for the harness leg: a ladder crossover
+
+The registry change (`PDECase.scheme = "sun2017DeltaSPH"` for tgv-wc; the
+frontend default stays 1/8) re-ran the tgv-wc ladder:
+
+| nx | 32 | 48 | 64 | 96 |
+|---|---|---|---|---|
+| previous (1/8, deltaSPH) | 7.42e-2 | 3.77e-2 | 2.24e-2 | 1.17e-2 |
+| now (full, sun2017DeltaSPH) | 1.46e-1 | 4.78e-2 | 1.88e-2 | **7.06e-3** |
+
+The full-shift leg is **worse at the coarse end and better at the fine end**
+(crossover between nx=48 and 64). A trajectory probe (same two schemes,
+velocity error vs t at nx=32 and 96) decouples the mechanism:
+
+| leg | t=0.25 | t=0.5 | t=1.0 | t=1.5 | t=2.0 |
+|---|---|---|---|---|---|
+| 32, 1/8 | 6.6e-3 | 1.5e-2 | 5.8e-2 | 6.3e-2 | 6.6e-2 |
+| 32, full | **3.3e-1** | 2.4e-1 | 1.6e-1 | 1.4e-1 | 1.4e-1 |
+| 96, 1/8 | 6.5e-3 | 7.0e-3 | 1.0e-2 | 1.1e-2 | 1.2e-2 |
+| 96, full | 2.6e-2 | 1.4e-2 | 1.3e-2 | 1.0e-2 | **8.2e-3** |
+
+- Both legs start with zero error (exact velocity IC); the full-shift leg
+  then *generates* a large initial error from its disordered IC — 3.3e-1 at
+  nx=32, scaling down with h to 2.6e-2 at nx=96 (≈ 12× smaller, ≈ the h
+  ratio) — while the 1/8 legs sit at ~6.5e-3 by t=0.25 at both resolutions.
+- The IC penalty decays (the shifting re-regularises, finding 2) at a
+  resolution-dependent rate: at nx=32 the full leg is still 2× worse at
+  t=2 (1.4e-1 vs 6.6e-2); at nx=96 it crosses *under* the 1/8 leg between
+  t=1.5 and 2 and ends 31 % lower (8.2e-3 vs 1.2e-2).
+- So the ladder crossover is exactly this: fine enough resolution sheds the
+  IC penalty before t=2 and the low per-step shifting error (sections 5–6)
+  wins; coarse resolution does not.
+
+Consequences for reading the fresh ladder: the fitted "2.79 order" is a
+crossover artifact (the shrinking IC penalty riding on top of the ~0.4-order
+flattening past nx≈96 — nx=128 full-shift err ≈ 6.3e-3, section 7.2 leg C),
+not a super-convergent scheme; the tgv-wc leg measures "full-strength
+delta+ *including its relaxed-IC transient*", and its coarse-resolution rows
+are IC-dominated. If a clean full-shift spatial ladder is wanted, the IC
+transient must be removed (e.g. a scheme-strength-agnostic shuffle, or a
+longer relaxation budget for the full-strength scheme) — a frontend change,
+flagged rather than made.

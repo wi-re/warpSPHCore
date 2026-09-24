@@ -234,6 +234,106 @@ def test_renorm_value_scalar_and_vector_broadcast():
 
 
 # ---------------------------------------------------------------------------
+# particle sets: build_case_from_positions round-trip (GPU)
+# ---------------------------------------------------------------------------
+
+def test_build_case_from_positions_roundtrip():
+    # build_case_from_positions must reproduce exactly the probe case
+    # (densities, adjacency, domain) that build_case produces for the same
+    # positions/masses/support: it is the glue for loading saved
+    # distributions (e.g. higherOrderSPH/harness/data/tgv2d_*.npz) as probe
+    # cases. Runs in a float64 subprocess (the precision the harness is
+    # written for; the session's own precision is left untouched).
+    if not torch.cuda.is_available():
+        pytest.skip("requires a CUDA device")
+    code = (
+        "import warp as wp; wp.init()\n"
+        "import torch\n"
+        "from harness.particle_sets import (build_case,\n"
+        "                                   build_case_from_positions)\n"
+        "from warpSPHCore.enumTypes import KernelFunctions\n"
+        "a = build_case(n=64, dim=2, target_neighbors=4, jitter=0.5,\n"
+        "               seed=11, periodic=True, device='cuda',\n"
+        "               kernel=KernelFunctions.Wendland4)\n"
+        "b = build_case_from_positions(a.positions, a.particles.masses,\n"
+        "                              a.h, a.box, a.dx,\n"
+        "                              a.target_neighbors, periodic=True,\n"
+        "                              device='cuda',\n"
+        "                              kernel=KernelFunctions.Wendland4)\n"
+        "assert b.N == a.N and b.dim == a.dim\n"
+        "assert abs(b.h_over_dx - a.h_over_dx) <= 1e-12 * a.h_over_dx\n"
+        "assert abs(b.cell_vol - a.cell_vol) <= 1e-12 * a.cell_vol\n"
+        "assert torch.allclose(b.positions, a.positions)\n"
+        "assert torch.equal(b.particles.densities, a.particles.densities)\n"
+        "print('roundtrip ok')\n"
+    )
+    env = dict(os.environ, warpSPHCore_PRECISION="float64",
+               OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4",
+               MKL_NUM_THREADS="4")
+    pp = str(HARNESS_DIR.parent)
+    env["PYTHONPATH"] = (pp + os.pathsep + env["PYTHONPATH"]
+                         if env.get("PYTHONPATH") else pp)
+    proc = subprocess.run([sys.executable, "-c", code],
+                          env=env, capture_output=True, text=True,
+                          timeout=300)
+    assert proc.returncode == 0, (
+        f"roundtrip exited {proc.returncode}\nstdout:\n{proc.stdout[-2000:]}\n"
+        f"stderr:\n{proc.stderr[-2000:]}")
+
+
+def test_build_case_from_positions_on_saved_tgv_data():
+    # The saved TGV distributions (disordered, and with positions drifted
+    # outside the box -- the code never re-wraps) must load through
+    # build_case_from_positions and reproduce the anisotropy module's
+    # kernel sum: for uniform masses the SPH density is the normalised
+    # kernel sum, so the min/max ratios must agree.
+    if not torch.cuda.is_available():
+        pytest.skip("requires a CUDA device")
+    data_dir = HARNESS_DIR / "data"
+    if not (data_dir / "tgv2d_noshift_nx128.npz").exists():
+        pytest.skip("saved TGV test data not present")
+    code = (
+        "import warp as wp; wp.init()\n"
+        "import numpy as np\n"
+        "import torch\n"
+        "from pathlib import Path\n"
+        "from harness.particle_sets import build_case_from_positions\n"
+        "from warpSPHCore.enumTypes import KernelFunctions\n"
+        "DATA_DIR = Path(__DATA_DIR__)\n"
+        "for name in ('tgv2d_noshift_nx128.npz', 'tgv2d_fullshift_nx128.npz'):\n"
+        "    d = np.load(DATA_DIR / name)\n"
+        "    L = float(d['L'])\n"
+        "    case = build_case_from_positions(\n"
+        "        positions=torch.tensor(d['t2_positions'],\n"
+        "                               dtype=torch.float64, device='cuda'),\n"
+        "        masses=torch.tensor(d['t2_masses'],\n"
+        "                            dtype=torch.float64, device='cuda'),\n"
+        "        h=float(d['t2_h']), box=np.array([L, L]),\n"
+        "        dx=float(d['dx']), target_neighbors=32,\n"
+        "        periodic=True, device='cuda',\n"
+        "        kernel=KernelFunctions.Wendland4)\n"
+        "    rho = case.particles.densities.detach().cpu()\n"
+        "    ratio = float(rho.min() / rho.max())\n"
+        "    cs = float(d['t2_kernel_sum_min'] / d['t2_kernel_sum_max'])\n"
+        "    assert abs(ratio - cs) < 1e-9, (name, ratio, cs)\n"
+        "print('saved-data glue ok')\n"
+    ).replace("__DATA_DIR__", repr(str(data_dir)))
+    env = dict(os.environ, warpSPHCore_PRECISION="float64",
+               OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4",
+               MKL_NUM_THREADS="4")
+    pp = str(HARNESS_DIR.parent)
+    env["PYTHONPATH"] = (pp + os.pathsep + env["PYTHONPATH"]
+                         if env.get("PYTHONPATH") else pp)
+    proc = subprocess.run([sys.executable, "-c", code],
+                          env=env, capture_output=True, text=True,
+                          timeout=600)
+    assert proc.returncode == 0, (
+        f"saved-data glue exited {proc.returncode}\n"
+        f"stdout:\n{proc.stdout[-2000:]}\n"
+        f"stderr:\n{proc.stderr[-2000:]}")
+
+
+# ---------------------------------------------------------------------------
 # smoke (subprocess, float64)
 # ---------------------------------------------------------------------------
 

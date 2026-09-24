@@ -52,7 +52,7 @@ REPORT = HERE / "REPORT_pde.md"
 
 
 def build_spec(case, entry, nx: int, device: str) -> CaseSpec:
-    spec = CaseSpec(caseName=entry.name, scheme=case.scheme,
+    spec = CaseSpec(caseName=entry.name, scheme=entry.scheme or case.scheme,
                     params=dict(case.params))
     spec = spec.merged(**case.defaults)
     return spec.merged(
@@ -103,6 +103,7 @@ def run_one(case, entry, nx: int, device: str) -> dict:
         "dim": entry.dim,
         "dx": float(spec.L / nx),
         "n_h": float(spec.n_h),
+        "scheme": entry.scheme or case.scheme,
         "t_final": t_final,
         "n_steps": int(res.nSteps),
         "wall_s": round(wall, 2),

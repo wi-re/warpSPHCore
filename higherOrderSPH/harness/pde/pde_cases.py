@@ -42,6 +42,11 @@ class PDECase:
     metric: str                       # 'analytic' | 'reference'
     nx_ladder: list                   # 4 resolutions (particles across / count)
     t_star: float                     # final simulated time
+    # harness-side scheme override (None = the case's own registered scheme).
+    # The frontend defaults are deliberately left untouched (they balance
+    # other case families); the harness picks the scheme that best represents
+    # the method under test.
+    scheme: Optional[str] = None
     ref_nx: Optional[int] = None      # reference resolution (reference metric)
     # analytic field for the 'analytic' metric: (positions, t, params) -> (N, dim)
     analytic: Optional[Callable] = None
@@ -117,9 +122,17 @@ CASES: dict[str, PDECase] = {
         dim=2, metric="analytic",
         nx_ladder=[32, 48, 64, 96], t_star=2.0,
         analytic=tgv_analytic_velocity, field="velocities",
-        notes="delta+-SPH (deltaSPH + PST) leg of the TGV vortex; same IC/"
-              "analytic as tgv; explicit WCSPH so each step is far cheaper "
-              "than the incompressible leg; needs the frontend densityDiffusion "
+        # The shared frontend default shift is 1/8 of Sun 2017 Eq. (7),
+        # weakened for free-surface cases; on TGV that is too weak to improve
+        # on plain delta-SPH (it "sits on top of" it). The real delta+ is the
+        # full-strength shift, so this leg runs sun2017DeltaSPH
+        # (TGV_NOTES.md section 6: -30% velocity error, 4.5x less volume
+        # drift, same cost).
+        scheme="sun2017DeltaSPH",
+        notes="delta+-SPH leg of the TGV vortex, full-strength Sun 2017 "
+              "Eq.(7) shifting (see `scheme`); same IC/analytic as tgv; "
+              "explicit WCSPH so each step is far cheaper than the "
+              "incompressible leg; needs the frontend densityDiffusion "
               "eager-scalar coercion for float64 (TGV_NOTES.md section 4)",
     ),
     "linearWave": PDECase(
