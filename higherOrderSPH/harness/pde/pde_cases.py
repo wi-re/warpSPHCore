@@ -111,6 +111,17 @@ CASES: dict[str, PDECase] = {
         analytic=tgv_analytic_velocity, field="velocities",
         notes="primary order-of-convergence benchmark (smooth, exact solution)",
     ),
+    "tgv-wc": PDECase(
+        name="tgv-wc", module="warpSPH.cases.tgvWeaklyCompressible",
+        case_attr="tgvWeaklyCompressibleCase",
+        dim=2, metric="analytic",
+        nx_ladder=[32, 48, 64, 96], t_star=2.0,
+        analytic=tgv_analytic_velocity, field="velocities",
+        notes="delta+-SPH (deltaSPH + PST) leg of the TGV vortex; same IC/"
+              "analytic as tgv; explicit WCSPH so each step is far cheaper "
+              "than the incompressible leg; needs the frontend densityDiffusion "
+              "eager-scalar coercion for float64 (TGV_NOTES.md section 4)",
+    ),
     "linearWave": PDECase(
         name="linearWave", module="warpSPH.cases.linearWave",
         case_attr="linearWaveCase",

@@ -221,8 +221,8 @@ def test_linearWave_analytic_travels_right():
 
 
 def test_cases_registry_complete():
-    expected = {"tgv", "linearWave", "gresho", "kelvinHelmholtz", "sod",
-                "sedov"}
+    expected = {"tgv", "tgv-wc", "linearWave", "gresho",
+                "kelvinHelmholtz", "sod", "sedov"}
     assert set(CASES) == expected
     for name, e in CASES.items():
         assert len(e.nx_ladder) == 4, name
