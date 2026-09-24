@@ -97,19 +97,29 @@ weak.
 
 ### Results (float32, dt = 1e-3, 2001 steps)
 
-| nx | 32 | 48 | 64 | 96 |
-|---|---|---|---|---|
-| delta+ err_l2 | 7.68e-2 | 3.83e-2 | 2.42e-2 | 1.26e-2 |
-| DFSPH err_l2 (benchmark) | 2.55e-2 | 1.79e-2 | 1.46e-2 | 1.19e-2 |
-| delta+ pairwise order | 1.72 | 1.60 | 1.61 | |
+| nx | 32 | 48 | 64 | 96 | 128 | 160 |
+|---|---|---|---|---|---|---|
+| delta+ err_l2 | 7.68e-2 | 3.83e-2 | 2.42e-2 | 1.26e-2 | 8.37e-3 | 8.60e-3 |
+| DFSPH err_l2 (benchmark) | 2.55e-2 | 1.79e-2 | 1.46e-2 | 1.19e-2 | 1.08e-2 | 1.17e-2 |
+| delta+ pairwise order | 1.72 | 1.60 | 1.61 | 1.42 | ≈0 | |
 
-- **Delta+ converges cleanly at ~1.6 order** with no visible floor in the
-  ladder — in contrast to DFSPH's 0.69, which is its non-converging
-  compressibility bias of §2.
-- **Crossover:** delta+ is ~3× worse at nx=32 but catches up by nx=96
-  (1.26e-2 vs 1.19e-2). Extrapolated at 1.6 order, delta+ passes below
-  DFSPH's ~1.2e-2 plateau around nx ≈ 110–130 and keeps improving, while
-  DFSPH asymptotes toward its ~3e-3 floor.
+- **Delta+ converges cleanly at ~1.5–1.6 order** from nx=32 to 128 — in
+  contrast to DFSPH's 0.69, which is its non-converging compressibility bias
+  of §2.
+- **Overtake confirmed (nx=128/160 runs):** at nx=96 DFSPH is still 6%
+  better (1.19e-2 vs 1.26e-2); by nx=128 delta+ is 22% better
+  (8.37e-3 vs 1.08e-2) and by nx=160 27% better (8.60e-3 vs 1.17e-2).
+  Crossover between nx=96 and 128, as the 1.6-order extrapolation predicted.
+- **Both schemes are now on their respective floors.** DFSPH sits on its
+  ~1.1e-2 plateau (the §2 compressibility bias + per-step accumulation).
+  Delta+ flattens at ~8.5e-3 and even rises slightly 128→160 — a constant
+  floor cannot rise, so its floor is at least partly the *growing* Ma²
+  weakly-compressible physics error (the legacy back-solve makes Ma ∝ nx:
+  0.036 → 0.045 across 128→160, Ma²: 1.3e-3 → 2.0e-3) plus the fixed-dt
+  (1e-3) time error. (tgv-wc's start jitter is unseeded, so runs carry a
+  few-percent run-to-run scatter; the 9% DFSPH 128→160 rise is at that
+  level too.) Delta+'s true spatial order past its floor would need dt
+  refined with nx.
 - nx=64 diagnostics: density RMS(ρ−1) = 6.9e-4 (consistent with Ma² ≈ 3.4e-4
   at this resolution); primary (1,±1) modes match (2.39e-1 vs an 2.40e-1).
 - **The delta+ flow carries no excess (2,0)/(0,2) content**: its (2,0)-u
