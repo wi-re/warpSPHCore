@@ -557,8 +557,8 @@ Results, Wendland4 (the simulation's kernel), l2 (rms) error:
 
 (`renorm` interpolate ≡ standard by construction — renorm corrects only the
 gradient — so that column is omitted; renormVal equals renorm on the
-gradient probe. Full 120-row table: `.tmp/disorder_probe_rows.csv`, driver
-`.tmp/tgv_disorder_probe.py`.)
+gradient probe. Full 120-row table: `harness/run_disorder_probe.py` →
+`harness/results/disorder_probe_rows.csv`; `--smoke` is the CI-gate subset.)
 
 **Findings:**
 

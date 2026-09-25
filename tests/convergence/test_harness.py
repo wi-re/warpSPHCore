@@ -370,3 +370,53 @@ def test_smoke_verdict_ok(smoke_run):
     assert c["standard_grad_linear_interior_linf"] > 1e-3
     assert c["standard_interp_const_boundary_linf"] > \
         c["standard_interp_const_interior_linf"]
+
+
+# ---------------------------------------------------------------------------
+# disorder probe smoke (subprocess, float64)
+# ---------------------------------------------------------------------------
+
+DISORDER_DRIVER = HARNESS_DIR / "run_disorder_probe.py"
+DISORDER_VERDICT = HARNESS_DIR / "results" / "disorder_probe_verdict.json"
+
+
+@pytest.fixture(scope="session")
+def disorder_smoke_run():
+    if not torch.cuda.is_available():
+        pytest.skip("disorder probe smoke requires a CUDA device")
+    data = HARNESS_DIR / "data" / "tgv2d_noshift_nx128.npz"
+    if not data.exists():
+        pytest.skip("saved TGV test data not present")
+    env = dict(os.environ, warpSPHCore_PRECISION="float64",
+               OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4",
+               MKL_NUM_THREADS="4")
+    proc = subprocess.run(
+        [sys.executable, str(DISORDER_DRIVER), "--smoke"],
+        env=env, cwd=str(HARNESS_DIR),
+        capture_output=True, text=True, timeout=1200,
+    )
+    payload = json.loads(DISORDER_VERDICT.read_text()) \
+        if DISORDER_VERDICT.exists() else {}
+    return proc, payload
+
+
+def test_disorder_probe_smoke_exits_zero(disorder_smoke_run):
+    proc, _payload = disorder_smoke_run
+    assert proc.returncode == 0, (
+        f"disorder smoke exited {proc.returncode}\n"
+        f"stdout:\n{proc.stdout[-3000:]}\nstderr:\n{proc.stderr[-3000:]}")
+
+
+def test_disorder_probe_smoke_verdict_ok(disorder_smoke_run):
+    # The headline invariants of TGV_NOTES.md section 7.5: CRK interpolate
+    # is distribution-independent (glass vs strongly disordered within 2x),
+    # while the standard operators are disorder-sensitive (>10x) -- a
+    # regression in the operators or the saved data breaks one or the other.
+    _proc, payload = disorder_smoke_run
+    assert payload, "no disorder probe verdict written"
+    assert payload.get("ok") is True, json.dumps(payload, indent=2)
+    c = payload["checks"]
+    assert c["crk_interp_flat_ratio"] < 2.0
+    assert c["std_interp_disorder_ratio"] > 10.0
+    assert c["std_grad_disorder_ratio"] > 10.0
+    assert c["all_errors_finite_positive"] is True
