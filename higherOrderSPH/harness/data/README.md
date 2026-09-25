@@ -18,6 +18,8 @@ lattice + random jitter, the operator-consistency probes can now run on a
 anisotropy degrades the recorded field (Vacondio et al. 2021, SPH grand
 challenges, GC1). The per-snapshot anisotropy summaries below were computed
 with `harness/distribution.py` at capture time and are stored in the file.
+First usage: the disorder probe of `pde/TGV_NOTES.md` section 7.5 (static
+operator probes on these distributions vs a purely-jittered baseline).
 
 ## npz layout
 

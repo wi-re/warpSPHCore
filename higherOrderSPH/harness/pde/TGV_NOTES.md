@@ -523,3 +523,80 @@ Also fixed in the same pass: `run_pde.py` wrote `pde_rows.csv` /
 `REPORT_pde.md` unconditionally, so every `--smoke` CI run clobbered the
 full-suite results with the single smoke row; smoke now writes
 `pde_rows_smoke.csv` / `REPORT_pde_smoke.md`.
+
+### 7.5 Disorder probe: how the operators record the field from disordered distributions (2026-09-25)
+
+The follow-on the section 7.2 data was built for: run the static-harness
+operator probes (`harness/operators.py`: interpolate / gradient × standard /
+CRK / renorm / renormVal) at fixed N = 16384, h = 4 dx, L = 2 π on the saved
+distributions plus a purely-jittered baseline, with the analytic TGV
+velocity at t = 2 (k = 2, nu = 0.01, uMag = 1 — the case's own params) as
+the probe field. Its analytic gradient is exact (the field is biharmonic,
+∇²v = 0, so the Laplacian probe has a zero target and is skipped); a
+central-difference guard verifies it to 1.1e-10. Field vector RMS ≈ 0.68,
+gradient Frobenius RMS ≈ 0.96. Five distributions, in ascending anisotropy
+(a2-rms, W4) and with the SPH density spread per kernel:
+
+| dist | origin | a1-rms | a2-rms | density spread W2 / W4 / W6 |
+|---|---|---|---|---|
+| fullshift_t2 | re-regularised end state (saved) | 3.5e-4 | **6.5e-3** | 1.0 / 1.0 / 1.0 × |
+| noshift_t0 | reference glass (saved) | 6.5e-4 | 8.5e-3 | 1.1 / 1.1 / 1.1 × |
+| noshift_t2 | accumulated flow disorder (saved) | 1.3e-3 | 1.75e-2 | 1.1 / 1.1 / 1.1 × |
+| fullshift_t0 | over-mixed IC (saved) | 5.1e-2 | **0.339** | 2.2 / 2.9 / 3.6 × |
+| jitter | lattice + Gaussian σ = h, no relaxation (seed 42) | 6.2e-2 | **0.352** | 5.2 / 6.8 / 7.9 × |
+
+Results, Wendland4 (the simulation's kernel), l2 (rms) error:
+
+| dist | interp std | interp CRK | interp renormVal | grad std | grad CRK | grad renorm |
+|---|---|---|---|---|---|---|
+| fullshift_t2 | 1.49e-3 | 1.39e-3 | 1.39e-3 | 5.18e-3 | 1.97e-3 | 1.97e-3 |
+| noshift_t0 | 1.59e-3 | 1.39e-3 | 1.39e-3 | 5.91e-3 | 1.98e-3 | 1.97e-3 |
+| noshift_t2 | 1.95e-3 | 1.38e-3 | 1.39e-3 | 1.06e-2 | 2.09e-3 | 2.03e-3 |
+| fullshift_t0 | 5.76e-2 | 1.28e-3 | 5.21e-3 | 1.79e-1 | 1.55e-2 | 8.39e-3 |
+| jitter | 6.27e-2 | 1.25e-3 | 6.07e-3 | 2.09e-1 | 2.50e-2 | 1.12e-2 |
+
+(`renorm` interpolate ≡ standard by construction — renorm corrects only the
+gradient — so that column is omitted; renormVal equals renorm on the
+gradient probe. Full 120-row table: `.tmp/disorder_probe_rows.csv`, driver
+`.tmp/tgv_disorder_probe.py`.)
+
+**Findings:**
+
+1. **The standard operator's error tracks the anisotropy, and the two
+   strongly disordered states are equivalent.** Pure jitter (σ = h, no
+   relaxation) and the over-mixed full-strength IC have nearly identical a2
+   (0.352 / 0.339 — a strong jitter destroys the lattice about as thoroughly
+   as 128 full-strength relaxation iterations) and nearly identical standard
+   operator errors (interp 6.27e-2 vs 5.76e-2; grad 2.09e-1 vs 1.79e-1,
+   within 15 %). The 1/8-strength glass construction is exactly
+   what makes the low-anisotropy state; without it (or with too strong a
+   relaxation) the distribution is "amorphous" either way.
+2. **The error-vs-anisotropy curve is flat, then steep.** Flow-accumulated
+   disorder (noshift_t2, a2 1.75e-2) costs the standard operators only
+   ×1.2–1.6 on interpolate (1.95e-3 vs 1.59e-3) and ×1.8 on gradient
+   (1.06e-2 vs 5.91e-3) relative to the t=0 glass; strong disorder (a2 0.34)
+   costs ×30–40. Within the probed range there is no moderate regime — the
+   saved snapshots span a2 ≤ 1.8e-2 and ≥ 0.34 only.
+3. **CRK makes the interpolate (field-recording) operator essentially
+   distribution-independent**: 1.25–1.39e-3 (≈ 0.2 % of the field RMS) on
+   *all five* distributions, including the two strongly disordered ones —
+   the most robust single operator in the study. For recording the field
+   from a disordered distribution, the CRK value correction erases the
+   disorder effect at this level of disorder.
+4. **The corrections decouple the gradient less completely.** Bonet–Lok
+   renorm is the most robust gradient correction (glass 1.97–2.03e-3, strong
+   disorder 8.4–11.2e-3, ×4–6), ahead of CRK (1.55–2.50e-2, ×8–12) and
+   standard (1.79–2.09e-1, ×30). renormVal's 0th-order value renormalization
+   fixes the kernel sum but not the first-moment asymmetry: 5.2–6.1e-3 on
+   strong disorder, ×4 worse than CRK for the interpolate. And the
+   distribution still dominates the operator: the *uncorrected* gradient on
+   the good glass (5.91e-3) beats the Bonet–Lok-corrected gradient on a
+   strongly disordered distribution (8.39e-3).
+5. **Higher-order kernels are *worse* under strong disorder for the standard
+   operators** (interp/standard W2→W6: 5.78→6.56e-2 on jitter;
+   grad/standard 1.76→2.41e-1): the sharper Wendland peak amplifies the
+   local density fluctuation (measured spread grows 5.2→6.8→7.9× W2→W6 on
+   jitter, 2.2→2.9→3.6× on fullshift_t0, vs 1.0–1.1× on the glasses). The
+   higher-order-kernel advantage (grad/renorm on glass: W6 1.61e-3 < W4
+   1.97e-3 < W2 2.58e-3; CRK interpolate improves W2→W6 everywhere) is
+   realised only on well-ordered distributions.
