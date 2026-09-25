@@ -177,18 +177,23 @@ CASES: dict[str, PDECase] = {
         dim=1, metric="reference",
         nx_ladder=[200, 400, 800, 1600], t_star=0.15,
         field="densities",
-        notes="shock tube; shock swamps the order (diagnostic); vs reference",
+        notes="shock tube; the clean shock case: L2 1.31 (monotonic), L1 1.46, "
+              "aligned L2 0.99; shock position stable to ~0.1 dx (sub-cell "
+              "shifts); vs reference",
     ),
     "sedov": PDECase(
         name="sedov", module="warpSPH.cases.sedov", case_attr="sedovCase",
         dim=1, metric="reference",
         nx_ladder=[200, 400, 800, 1600], t_star=1.0,
         field="densities",
-        notes="blast wave; raw L2 (order 0.47, non-monotonic) is dominated by "
-              "the resolution-dependent shock structure, not position (the "
-              "alignment shifts are sub-cell) -- the L1 area norm (order 0.92) "
-              "and the shift-aligned L2 (order 0.75) are the robust shock "
-              "metrics; SEDov_NOTES.md",
+        notes="blast wave; the error is a width-mismatch spike at the shock "
+              "(coarse peak lower/wider, no overshoot) and the shock is "
+              "positioned correctly (sub-cell, sign-convergent shifts) -- "
+              "the raw common-cells L2 (order 0.47, non-monotonic) is a "
+              "sampling artifact (it evaluates only where the coarse "
+              "particles sit: the compressed shell = the error spike); the "
+              "full-grid L2 is monotonic (order 0.75) and the L1 area norm "
+              "(order 0.92) is the robust shock metric; SEDov_NOTES.md",
     ),
 }
 

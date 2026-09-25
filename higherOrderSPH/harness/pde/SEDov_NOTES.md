@@ -23,6 +23,11 @@ the non-monotonicity.
   cells hold 0 — so both profiles are first densified (periodic linear
   interpolation over the gaps); shifting the zero-padded profile directly
   interpolates across zeros and inverts the error landscape.
+- **Ensemble note (matters for this case):** `error_l2` / `error_l1` are
+  evaluated over the *common cells* only (cells both projections fill — i.e.
+  where the coarse particles sit), while `error_l2_aligned` is over *all*
+  cells of the densified profile. The two ensembles disagree materially
+  (finding 2), so every number below states its ensemble.
 
 ## Results (reference = nx=1600)
 
@@ -35,28 +40,71 @@ the non-monotonicity.
 Observed orders: L2 0.47 (r² 0.51, non-monotonic); L1 **0.92** (r² 0.82);
 aligned L2 **0.75** (r² 0.96, monotonic).
 
+All-cells raw L2 (densified profile, no shift — not a CSV column):
+2.68e-1 / 1.93e-1 / 9.48e-2 — **monotonic**, order ≈ 0.75. The
+non-monotonicity is confined to the common-cells ensemble (finding 2).
+
 ## Findings
 
 1. **The shock is positioned correctly.** The optimal alignment shifts are
    sub-cell (+0.42, +0.41, −0.05 of the *coarse* dx) and sign-convergent —
    coarse shocks lag the reference, the finest-probed lead it slightly — and
-   sit far inside the ±4 dx search range (no boundary saturation). Misalignment
-   is not the error source.
-2. **The L2 non-monotonicity survives alignment** (0.266 → 0.192 → 0.094 still
-   has 400 > 200), so it is resolution-dependent shock *structure* (numerical
-   dissipation), not position. The L1-down/L2-up pattern on 200→400 (L1
-   0.158→0.139, L2 0.333→0.417) says the nx=400 error is more *concentrated*
-   — a localized overshoot-type feature near the shock with less total area
-   but a taller peak — not merely wider.
-3. **L1 (area) is the robust shock metric**: order 0.92 (r² 0.82), consistent
-   with the first-order accuracy a discontinuity limits shock-capturing to
-   (shock width O(dx)). The 200→400 leg is nearly flat (pairwise 0.18); the
-   400→800 leg is 1.65.
-4. **Aligned L2 (order 0.75, r² 0.96) is the cleanest L2-family diagnostic** —
-   monotonic with a tight fit — but it is still dissipation-limited.
-5. **Implication:** judge shock cases on L1 (or aligned L2), not raw L2. The
-   suite's raw-L2 "0.47 order" for Sedov was a metric artifact on top of the
-   genuine first-order shock limit.
+   sit far inside the ±4 dx search range (no boundary saturation). Alignment
+   changes the all-cells L2 by < 0.7% at every resolution; misalignment is not
+   the error source.
+2. **The L2 non-monotonicity (0.333 → 0.417 → 0.173) is a common-cells
+   ensemble artifact on top of a real effect.** The raw L2 is evaluated only
+   on the cells both projections fill — where the coarse particles sit. Those
+   cluster in the compressed post-shock shell: 29–33% of the common cells fall
+   inside the 10%-wide shock band at every resolution (3× the uniform rate).
+   Inside that band the mean e² of the *common* cells RISES 200→400
+   (0.317 → 0.523) because the coarse shock sharpens toward the reference's
+   2–3-cell drop (finding 3): wherever the reference has already dropped to
+   1.0, the coarse profile is still near its 3.9–4.0 plateau, so the local
+   error peak grows (2.89 → 2.93) and narrows. The band's 32% weight of the
+   common cells outweighs the ×4.3 collapse of the error outside the band, so
+   the common-cell L2² rises 200→400. On the full grid the band is only 10%
+   of the weight, so the same physics gives a monotonic L2 (0.268 → 0.193 →
+   0.095).
+3. **The error is a width-mismatch spike, not an overshoot.** The reference
+   shock is a 2–3-cell drop: post-shock plateau peaking at 4.004 right at the
+   front (x ≈ 0.800), falling to the undisturbed 1.0 by x ≈ 0.805; behind it a
+   broad compression ramp (2.88 at x = 0.74 → 4.0 at the front); the interior
+   (|x| < 0.6) is clean (ρ → 0.03 at the centre). The coarse profiles peak
+   LOWER and WIDER (max 3.875 / 3.950 / 3.903 at 200/400/800, spanning ~12/7/4
+   cells vs ~2–3; no overshoot above the reference max at any resolution).
+   Peak |err|: 2.89 / 2.93 / 2.26 ≈ the post-shock jump of 3.0; peakiness
+   (RMS/mean) rises 2.77 → 3.60 → 4.30. Budget (±0.05 band around both
+   shocks, all cells): the shock carries 43 / 45 / 37% of the L1; the
+   ramp/contact 8–10%; the rest 47–55% — the contact is not an issue.
+4. **L1 (area) is the robust shock metric**: order 0.92 (r² 0.82, common
+   cells; ≈ 1.05 all-cells), consistent with the first-order accuracy a
+   discontinuity limits shock-capturing to (shock width O(dx)). The 200→400
+   leg is nearly flat on the common cells (pairwise 0.18); the 400→800 leg is
+   1.65.
+5. **Aligned L2 (order 0.75, r² 0.96) is the cleanest L2-family diagnostic** —
+   monotonic with a tight fit; the all-cells raw L2 is equally monotonic
+   (alignment is a < 0.7% no-op at sub-cell shifts) — but both are
+   dissipation-limited (the width-mismatch spike).
+6. **Implication:** judge shock cases on L1 (or the full-grid L2 / aligned
+   L2), not the common-cells raw L2. The suite's raw-L2 "0.47 order" for
+   Sedov was a sampling artifact on top of the genuine first-order shock
+   limit.
+
+## Profile inspection (2026-09-25)
+
+The findings above came from inspecting the run states directly (the harness
+driver discards them). The ladder was re-run with a scratch driver
+(`.tmp/sedov_state_dump.py` → `.tmp/sedov_states/sedov_nx{200,400,800,
+1600}.pt`) and the analysis is pure-CPU on the dump
+(`.tmp/sedov_error_profiles.py` → `.tmp/sedov_error_profiles.png` +
+`.tmp/sedov_errprof_{200,400,800}.csv`; probes `.tmp/allcells_l2.py`,
+`.tmp/common_cells_bias.py`, `.tmp/check_800.py`).
+
+**Reproducibility check:** the runs are bit-reproducible — the committed
+metric functions, run on the dumped states, reproduce the CSV exactly
+(L2 0.333057 / 0.417460 / 0.172644; aligned 0.266370 / 0.192173 / 0.094480;
+shifts +0.004218 / +0.002030 / −0.000123).
 
 ## Driver / tests
 
