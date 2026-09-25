@@ -103,6 +103,7 @@ higherOrderSPH/harness/results/
 higherOrderSPH/harness/pde/figures/
 higherOrderSPH/harness/pde/results/
 higherOrderSPH/harness/pde/REPORT_pde.md
+higherOrderSPH/harness/pde/REPORT_pde_smoke.md
 
 # scratch space (probes, extracted paper text, throwaway scripts)
 .tmp/
