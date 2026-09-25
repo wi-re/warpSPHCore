@@ -357,9 +357,11 @@ stays 1/8 (it balances other case families, e.g. free-surface, which are
 outside the scope of the higher-order survey). For the *harness* tgv-wc leg,
 the user directed the full-strength shift: the PDE registry now runs
 `scheme="sun2017DeltaSPH"` for tgv-wc (a harness-side `PDECase.scheme`
-override; the frontend is untouched). See section 7 for the consequences —
-including a ladder crossover at coarse resolution that the naive
-"full shift is better everywhere" reading of this table would miss.
+override; the frontend is otherwise untouched, plus the opt-in `shuffleEq7`
+IC knob of section 7.4). Section 7 records the consequence of the scheme
+switch alone — a ladder crossover at coarse resolution that the naive
+"full shift is better everywhere" reading of this table would miss — and
+section 7.4 removes it.
 
 ## 7. Distribution anisotropy: instrumentation + saved TGV distributions as test data (2026-09-24)
 
@@ -429,7 +431,8 @@ kernel sum `C_i` spread: noshift ≈ 8 % at every t; fullshift 3× at t=0,
    leg's IC is far more disordered (a2-rms 0.339 vs 8.5e-3) than the 1/8
    leg's. Section 6's causal conclusion is unaffected (leg C won *despite*
    the worse start) but the t=0 rows of the table are not comparable across
-   legs.
+   legs. (Captured under the default, pre-knob behaviour; the opt-in
+   `shuffleEq7=False` knob of section 7.4 removes this difference.)
 4. **Positions are never re-wrapped**: the saved coordinates drift outside
    the box with t (net COM wander, up to ~0.4 L at t=2). Both the
    minimum-image anisotropy sums and the compact-hash neighbourhood search
@@ -473,12 +476,50 @@ velocity error vs t at nx=32 and 96) decouples the mechanism:
   IC penalty before t=2 and the low per-step shifting error (sections 5–6)
   wins; coarse resolution does not.
 
-Consequences for reading the fresh ladder: the fitted "2.79 order" is a
-crossover artifact (the shrinking IC penalty riding on top of the ~0.4-order
-flattening past nx≈96 — nx=128 full-shift err ≈ 6.3e-3, section 7.2 leg C),
-not a super-convergent scheme; the tgv-wc leg measures "full-strength
-delta+ *including its relaxed-IC transient*", and its coarse-resolution rows
-are IC-dominated. If a clean full-shift spatial ladder is wanted, the IC
-transient must be removed (e.g. a scheme-strength-agnostic shuffle, or a
-longer relaxation budget for the full-strength scheme) — a frontend change,
-flagged rather than made.
+The fitted "2.79 order" of that intermediate ladder was a crossover artifact
+(the shrinking IC penalty riding on top of the ~0.4-order flattening past
+nx≈96 — nx=128 full-shift err ≈ 6.3e-3, section 7.2 leg C), not a
+super-convergent scheme: the leg measured "full-strength delta+ *including
+its relaxed-IC transient*", and its coarse-resolution rows were IC-dominated.
+
+### 7.4 Resolution: the `shuffleEq7` knob (2026-09-25) — the clean full-shift ladder
+
+The IC transient is now removable: the frontend gained an **opt-in**
+`shuffleEq7` param on the TGV case (default `None` = the scheme's own
+strength, so no existing run changes; `False` = relax at the historical 2h²
+"reference" shift regardless of scheme). It shallow-copies the scheme
+config with its own `shiftProperties` and passes that to `shuffleParticles`
+only — the in-run scheme is untouched. `tgvWeaklyCompressible` is the only
+caller that shifts during the shuffle (staticBlob/incompressible are
+jitter-only, `shiftIters=0`), so the blast radius is this one case.
+
+Knob probe (nx=64, full-strength in-run scheme on both legs):
+
+| leg | a2(t=0) | err(t=2) | a2(t=2) |
+|---|---|---|---|
+| `shuffleEq7=None` (as before) | 3.5e-1 | 2.83e-2 | 8.5e-3 |
+| `shuffleEq7=False` (reference IC) | **8.4e-3** | **1.53e-2** | 7.4e-3 |
+
+The reference IC reproduces the 1/8-leg glass (a2(t=0) 8.4e-3 vs 8.5e-3 in
+the section 7.2 noshift file) and removes the IC penalty while the in-run
+shifting stays full strength. The harness leg now sets it
+(`PDECase.params = {"shuffleEq7": False}`, a new harness-side param-override
+field merged in `run_pde.build_spec`), and the re-run ladder:
+
+| nx | 32 | 48 | 64 | 96 |
+|---|---|---|---|---|
+| 1/8 (deltaSPH) | 7.42e-2 | 3.77e-2 | 2.24e-2 | 1.17e-2 |
+| full, IC transient (7.3) | 1.46e-1 | 4.78e-2 | 1.88e-2 | 7.06e-3 |
+| **full, reference IC (current rows)** | **5.48e-2** | **2.47e-2** | **1.63e-2** | **6.60e-3** |
+
+Full-strength delta+ now beats the 1/8 leg at **every** resolution
+(−26/−35/−27/−44 %); pairwise orders 1.73 / 1.42 / 1.88 (fit ≈ 2.0 — an
+honest number, no crossover riding on it), flattening to ~0.4 order at the
+96→128 transition where the ~6.3e-3 per-step accumulation floor (section 6)
+takes over. The tgv-wc leg is now a clean "full-strength delta+ with a
+comparable IC" spatial ladder.
+
+Also fixed in the same pass: `run_pde.py` wrote `pde_rows.csv` /
+`REPORT_pde.md` unconditionally, so every `--smoke` CI run clobbered the
+full-suite results with the single smoke row; smoke now writes
+`pde_rows_smoke.csv` / `REPORT_pde_smoke.md`.

@@ -23,6 +23,9 @@ PDE_DIR = REPO_ROOT / "higherOrderSPH" / "harness" / "pde"
 DRIVER = PDE_DIR / "run_pde.py"
 REPORT = PDE_DIR / "REPORT_pde.md"
 ROWS_CSV = PDE_DIR / "results" / "pde_rows.csv"
+# smoke writes its own artifacts so it never clobbers the full-suite results
+SMOKE_REPORT = PDE_DIR / "REPORT_pde_smoke.md"
+SMOKE_CSV = PDE_DIR / "results" / "pde_rows_smoke.csv"
 
 sys.path.insert(0, str(PDE_DIR))
 
@@ -260,10 +263,21 @@ def test_pde_smoke_exits_zero(smoke_run):
 def test_pde_smoke_writes_outputs(smoke_run):
     if smoke_run.returncode != 0:
         pytest.skip("smoke did not succeed")
-    assert REPORT.exists() and REPORT.stat().st_size > 0
-    assert ROWS_CSV.exists()
-    with ROWS_CSV.open() as fh:
+    assert SMOKE_REPORT.exists() and SMOKE_REPORT.stat().st_size > 0
+    assert SMOKE_CSV.exists()
+    with SMOKE_CSV.open() as fh:
         lines = [ln for ln in fh.read().splitlines() if ln.strip()]
     # header + exactly one row (smoke = single lowest resolution)
     assert len(lines) == 2, f"expected 2 CSV lines, got {len(lines)}"
     assert "linearWave" in lines[1]
+
+
+def test_pde_smoke_does_not_clobber_full_suite_results(smoke_run):
+    # A smoke run must not overwrite the full-suite results file (it used
+    # to, silently destroying the committed local results on every CI run).
+    if smoke_run.returncode != 0:
+        pytest.skip("smoke did not succeed")
+    if not ROWS_CSV.exists():
+        pytest.skip("no full-suite results file present")
+    assert ROWS_CSV.read_bytes() != SMOKE_CSV.read_bytes(), (
+        "smoke run clobbered the full-suite pde_rows.csv")

@@ -47,6 +47,10 @@ class PDECase:
     # other case families); the harness picks the scheme that best represents
     # the method under test.
     scheme: Optional[str] = None
+    # harness-side case-parameter overrides (merged over the case's own
+    # defaults in run_pde.build_spec) -- e.g. holding the build-time IC
+    # fixed while the scheme varies.
+    params: dict = field(default_factory=dict)
     ref_nx: Optional[int] = None      # reference resolution (reference metric)
     # analytic field for the 'analytic' metric: (positions, t, params) -> (N, dim)
     analytic: Optional[Callable] = None
@@ -129,11 +133,20 @@ CASES: dict[str, PDECase] = {
         # (TGV_NOTES.md section 6: -30% velocity error, 4.5x less volume
         # drift, same cost).
         scheme="sun2017DeltaSPH",
+        # Relax the build-time shuffle at the reference (1/8) shift strength
+        # so the IC is comparable across schemes: the full-strength
+        # relaxation over-mixes the lattice (a2-rms 0.34 at t=0 vs 8.5e-3
+        # for the reference glass), which dominated the coarse-resolution
+        # ladder rows (TGV_NOTES.md section 7.3). In-run shifting is
+        # unaffected (full strength, via `scheme`).
+        params={"shuffleEq7": False},
         notes="delta+-SPH leg of the TGV vortex, full-strength Sun 2017 "
-              "Eq.(7) shifting (see `scheme`); same IC/analytic as tgv; "
-              "explicit WCSPH so each step is far cheaper than the "
-              "incompressible leg; needs the frontend densityDiffusion "
-              "eager-scalar coercion for float64 (TGV_NOTES.md section 4)",
+              "Eq.(7) shifting in-run (see `scheme`); build-time shuffle "
+              "relaxation held at the reference strength (`params`); same "
+              "IC/analytic as tgv; explicit WCSPH so each step is far "
+              "cheaper than the incompressible leg; needs the frontend "
+              "densityDiffusion eager-scalar coercion for float64 "
+              "(TGV_NOTES.md section 4)",
     ),
     "linearWave": PDECase(
         name="linearWave", module="warpSPH.cases.linearWave",

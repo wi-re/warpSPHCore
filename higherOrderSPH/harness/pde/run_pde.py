@@ -53,7 +53,7 @@ REPORT = HERE / "REPORT_pde.md"
 
 def build_spec(case, entry, nx: int, device: str) -> CaseSpec:
     spec = CaseSpec(caseName=entry.name, scheme=entry.scheme or case.scheme,
-                    params=dict(case.params))
+                    params={**dict(case.params), **entry.params})
     spec = spec.merged(**case.defaults)
     return spec.merged(
         nx=nx, tLimit=entry.t_star, nSteps=None,
@@ -192,7 +192,11 @@ def main(argv=None):
         all_rows.extend(rows)
 
     orders = observed_orders(all_rows)
-    REPORT.write_text(render_report(all_rows, orders))
+    # Smoke runs (the CI gate) write their own artifacts so they never
+    # clobber the full-suite results file.
+    report = HERE / ("REPORT_pde_smoke.md" if args.smoke else "REPORT_pde.md")
+    csv_name = "pde_rows_smoke.csv" if args.smoke else "pde_rows.csv"
+    report.write_text(render_report(all_rows, orders))
     RESULTS.mkdir(parents=True, exist_ok=True)
     # For the PDE suite we write a plain flat CSV of the row dicts
     # (self-describing). The union of keys is used because analytic and
@@ -203,14 +207,14 @@ def main(argv=None):
             for k in r:
                 if k not in cols:
                     cols.append(k)
-        with (RESULTS / "pde_rows.csv").open("w") as fh:
+        with (RESULTS / csv_name).open("w") as fh:
             import csv as _csv
             w = _csv.DictWriter(fh, fieldnames=cols)
             w.writeheader()
             for r in all_rows:
                 w.writerow({k: (f"{v:.10g}" if isinstance(v, float) else v)
                             for k, v in r.items()})
-    print(f"wrote {REPORT} and {RESULTS / 'pde_rows.csv'}")
+    print(f"wrote {report} and {RESULTS / csv_name}")
     return 0
 
 
