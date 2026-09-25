@@ -30,9 +30,11 @@ SMOKE_CSV = PDE_DIR / "results" / "pde_rows_smoke.csv"
 sys.path.insert(0, str(PDE_DIR))
 
 from conservation import ConservedQuantities, conserved, drift  # noqa: E402
-from field_error import grid_l2_error                            # noqa: E402
+from field_error import (aligned_1d_l2_error, grid_error_p,      # noqa: E402
+                         grid_l2_error)
 from pde_cases import (CASES, linearWave_analytic,                # noqa: E402
                        tgv_analytic_velocity)
+from report_pde import load_rows, observed_orders                 # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -174,6 +176,137 @@ def test_grid_l2_error_periodic_wrap():
     # periodic grid) -> zero error
     assert grid_l2_error(d, m, p, d, m, p_wrapped, L=1.0, dim=1,
                          periodic=True, n_grid=64) < 1e-9
+
+
+# ---------------------------------------------------------------------------
+# field_error: shock metrics (L1, aligned L2)
+# ---------------------------------------------------------------------------
+
+def test_grid_error_p_l1_l2_zero_and_constant():
+    m, p = _uniform_1d(64)
+    d = torch.ones(64)
+    for pnorm in (1, 2):
+        assert grid_error_p(d, m, p, d, m, p, L=1.0, dim=1, periodic=True,
+                            n_grid=128, p=pnorm) == 0.0
+    d_hi = torch.ones(64) * 2.0
+    for pnorm in (1, 2):
+        assert grid_error_p(d, m, p, d_hi, m, p, L=1.0, dim=1, periodic=True,
+                            n_grid=128, p=pnorm) == pytest.approx(1.0, abs=1e-9)
+
+
+def _full_coverage_1d(n, offset=0.3):
+    """One particle per grid cell, offset so every cell gets mass from two
+    particles (a full-coverage CIC projection = a smooth field on all
+    cells). Positions in [-0.5, 0.5), float64."""
+    pos = ((torch.arange(n, dtype=torch.float64) + offset) / n - 0.5)[:, None]
+    m = torch.full((n,), 1.0 / n, dtype=torch.float64)
+    return m, pos
+
+
+def test_grid_error_p_l1_linear_in_shift_l2_sqrt():
+    # The reason L1 is the standard shock metric: a step of height Delta
+    # shifted by delta costs O(delta) in L1 but O(sqrt(delta)) in L2.
+    n = 1024
+    m, pos = _full_coverage_1d(n)
+
+    def step(x0):
+        return torch.where(pos[:, 0] >= x0,
+                           torch.ones_like(pos[:, 0]),
+                           torch.zeros_like(pos[:, 0]))
+    e1 = {}
+    e2 = {}
+    for delta in (0.02, 0.005):
+        e1[delta] = grid_error_p(step(0.1), m, pos, step(0.1 + delta), m, pos,
+                                 L=1.0, dim=1, periodic=True, n_grid=n, p=1)
+        e2[delta] = grid_error_p(step(0.1), m, pos, step(0.1 + delta), m, pos,
+                                 L=1.0, dim=1, periodic=True, n_grid=n, p=2)
+    assert e1[0.02] / e1[0.005] == pytest.approx(4.0, rel=0.15)
+    assert e2[0.02] / e2[0.005] == pytest.approx(2.0, rel=0.15)
+
+
+def test_aligned_1d_l2_recovers_shift_and_reduces_error():
+    # Coarse field = reference field translated by a fractional number of
+    # grid cells: the aligned error must collapse and the search must
+    # recover the shift.
+    n = 1024
+    m, pos = _full_coverage_1d(n)
+    dxg = 1.0 / n
+    delta_true = 2.7 * dxg
+
+    def f(x):
+        return 1.0 + 0.5 * torch.sin(2.0 * np.pi * x[:, 0]) \
+            + 0.3 * torch.cos(4.0 * np.pi * x[:, 0])
+    fc = f(pos + delta_true)      # coarse features left of the reference
+    fr = f(pos)
+    e_un = grid_l2_error(fc, m, pos, fr, m, pos, L=1.0, dim=1, periodic=True,
+                         n_grid=n)
+    e_al, shift = aligned_1d_l2_error(fc, m, pos, fr, m, pos, L=1.0,
+                                      periodic=True, n_grid=n,
+                                      max_shift=0.05)
+    assert shift == pytest.approx(delta_true, abs=0.2 * dxg)
+    assert e_al < 0.05 * e_un
+
+
+def test_aligned_1d_l2_gappy_projection():
+    # Sparse particles on integer grid fractions: each fills exactly ONE
+    # grid cell, so half the projection is empty (the real Sedov situation:
+    # a particle spreads over 2 of the ~4-8 cells between neighbours). The
+    # densification must keep the shift search well-posed.
+    n_grid = 1024
+    dxg = 1.0 / n_grid
+    delta_true = 5.3 * dxg
+    n = 512
+    pos = ((torch.arange(n, dtype=torch.float64) + 0.5) / n - 0.5)[:, None]
+    m = torch.full((n,), 1.0 / n, dtype=torch.float64)
+
+    def f(x):
+        return 1.0 + 0.5 * torch.sin(2.0 * np.pi * x[:, 0]) \
+            + 0.3 * torch.cos(4.0 * np.pi * x[:, 0])
+    fc = f(pos + delta_true)
+    fr = f(pos)
+    e_al, shift = aligned_1d_l2_error(fc, m, pos, fr, m, pos, L=1.0,
+                                      periodic=True, n_grid=n_grid,
+                                      max_shift=0.05)
+    assert shift == pytest.approx(delta_true, abs=0.2 * dxg)
+    assert e_al < 1e-4
+
+
+def test_aligned_1d_rejects_2d():
+    n = 32
+    m = torch.full((n,), 1.0 / n)
+    p = (torch.rand(n, 2) - 0.5)
+    d = torch.ones(n)
+    with pytest.raises(ValueError):
+        aligned_1d_l2_error(d, m, p, d, m, p, L=1.0, periodic=True,
+                            n_grid=64, max_shift=0.1)
+
+
+def test_observed_orders_alt_yattr_and_blank_columns():
+    rows = []
+    for dx in (0.1, 0.05, 0.025, 0.0125):
+        rows.append({"case": "a", "N": int(1.0 / dx), "dx": dx,
+                     "error_l2": 0.1 * dx ** 3, "error_l1": 0.1 * dx ** 2})
+        rows.append({"case": "b", "N": int(2.0 / dx), "dx": dx,
+                     "error_l2": 0.05 * dx, "error_l1": ""})   # blank (old row)
+    o2 = observed_orders(rows)
+    assert o2["a"]["slope"] == pytest.approx(3.0, abs=1e-6)
+    assert o2["b"]["slope"] == pytest.approx(1.0, abs=1e-6)
+    o1 = observed_orders(rows, yattr="error_l1")
+    assert set(o1) == {"a"}
+    assert o1["a"]["slope"] == pytest.approx(2.0, abs=1e-6)
+
+
+def test_load_rows_roundtrip_blank_alt_column(tmp_path):
+    csv = tmp_path / "rows.csv"
+    csv.write_text(
+        "case,nx,N,dx,error_l2,error_l1\n"
+        "a,32,32,0.03,1.5e-3,\n"       # error_l1 blank (pre-metric row)
+        "a,64,64,0.015,3.75e-4,7.5e-4\n")
+    rows = load_rows(csv)
+    assert rows[0]["error_l1"] == ""
+    assert rows[1]["error_l1"] == pytest.approx(7.5e-4)
+    # one blank -> the case is excluded from the L1 fit, not a crash
+    assert "a" not in observed_orders(rows, yattr="error_l1")
 
 
 # ---------------------------------------------------------------------------

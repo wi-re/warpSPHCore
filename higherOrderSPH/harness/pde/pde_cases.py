@@ -184,7 +184,11 @@ CASES: dict[str, PDECase] = {
         dim=1, metric="reference",
         nx_ladder=[200, 400, 800, 1600], t_star=1.0,
         field="densities",
-        notes="blast wave; shock swamps the order (diagnostic); vs reference",
+        notes="blast wave; raw L2 (order 0.47, non-monotonic) is dominated by "
+              "the resolution-dependent shock structure, not position (the "
+              "alignment shifts are sub-cell) -- the L1 area norm (order 0.92) "
+              "and the shift-aligned L2 (order 0.75) are the robust shock "
+              "metrics; SEDov_NOTES.md",
     ),
 }
 

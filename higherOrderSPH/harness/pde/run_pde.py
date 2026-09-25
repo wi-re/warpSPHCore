@@ -42,7 +42,8 @@ from warpSPH.runner import CaseSpec, run            # noqa: E402
 
 from conservation import (ConservedQuantities, conserved,
                           drift)                     # noqa: E402
-from field_error import grid_l2_error                # noqa: E402
+from field_error import (aligned_1d_l2_error, grid_error_p,
+                         grid_l2_error)              # noqa: E402
 from pde_cases import CASES, load_case_entry        # noqa: E402
 from metrics import error_norms                      # noqa: E402
 from report_pde import observed_orders, render_report  # noqa: E402
@@ -124,12 +125,19 @@ def run_one(case, entry, nx: int, device: str) -> dict:
 
 
 def apply_reference_metric(rows: list[dict], states: dict, entry, case) -> None:
-    """Fill `error_l2` for a reference-metric case in place.
+    """Fill the reference-metric error columns for a case, in place.
 
     The finest ladder run is the reference; each coarser run's field is
     compared to it on a common grid (mass-weighted cell averages). The finest
-    row is the reference itself (error 0) and is excluded from the order fit
+    row is the reference itself (errors 0) and is excluded from the order fit
     downstream by keeping only the 3 coarser points.
+
+    Columns: `error_l2` (and its `error_linf` stand-in, as before),
+    `error_l1` (the shock-friendly area norm), and -- for 1D cases, where a
+    translation is a well-defined alignment -- `error_l2_aligned` plus
+    `align_shift` (the reference translation that best aligns the shock; a
+    resolution-dependent shock position is the main L2 error source for
+    shock cases, so the aligned metric isolates the shape error).
     """
     ladder = sorted(states)
     ref_nx = max(ladder)
@@ -144,7 +152,11 @@ def apply_reference_metric(rows: list[dict], states: dict, entry, case) -> None:
         if nx == ref_nx:
             by_nx[nx]["error_l2"] = 0.0
             by_nx[nx]["error_linf"] = 0.0
+            by_nx[nx]["error_l1"] = 0.0
             by_nx[nx]["is_reference"] = True   # excluded from the order fit
+            if entry.dim == 1:
+                by_nx[nx]["error_l2_aligned"] = 0.0
+                by_nx[nx]["align_shift"] = 0.0
             continue
         st = states[nx]
         err = grid_l2_error(
@@ -154,6 +166,22 @@ def apply_reference_metric(rows: list[dict], states: dict, entry, case) -> None:
         )
         by_nx[nx]["error_l2"] = err
         by_nx[nx]["error_linf"] = err
+        by_nx[nx]["error_l1"] = grid_error_p(
+            getattr(st, entry.field), st.masses, st.positions,
+            getattr(ref_state, entry.field), ref_state.masses, ref_state.positions,
+            L=L, dim=entry.dim, periodic=periodic, n_grid=n_grid, p=1,
+        )
+        if entry.dim == 1:
+            # 4x the coarse dx bounds the shock-position drift to search.
+            aerr, shift = aligned_1d_l2_error(
+                getattr(st, entry.field), st.masses, st.positions,
+                getattr(ref_state, entry.field), ref_state.masses,
+                ref_state.positions,
+                L=L, periodic=periodic, n_grid=n_grid,
+                max_shift=4.0 * float(by_nx[nx]["dx"]),
+            )
+            by_nx[nx]["error_l2_aligned"] = aerr
+            by_nx[nx]["align_shift"] = shift
 
 
 def main(argv=None):

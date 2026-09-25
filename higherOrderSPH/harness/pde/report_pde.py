@@ -22,8 +22,20 @@ if str(_HERE.parent) not in sys.path:      # harness dir: metrics
 from metrics import observed_order          # noqa: E402
 
 
-def observed_orders(rows: list[dict], xattr: str = "dx") -> dict:
-    """Group rows by case and fit the observed order of error vs resolution."""
+def _as_num(v):
+    """Coerce a row value to float; missing / blank / non-numeric -> nan
+    (older CSV rows predate newer metric columns and read back as blanks)."""
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
+def observed_orders(rows: list[dict], xattr: str = "dx",
+                    yattr: str = "error_l2") -> dict:
+    """Group rows by case and fit the observed order of the `yattr` error
+    column vs `xattr`. Cases with fewer than two finite points (e.g. because
+    an older CSV predates the metric) are omitted from the result."""
     orders = {}
     by_case = {}
     for r in rows:
@@ -35,7 +47,7 @@ def observed_orders(rows: list[dict], xattr: str = "dx") -> dict:
     for case, rs in by_case.items():
         rs = sorted(rs, key=lambda r: r["N"])
         x = np.array([r[xattr] for r in rs])
-        y = np.array([r.get("error_l2", float("nan")) for r in rs])
+        y = np.array([_as_num(r.get(yattr)) for r in rs])
         if len(rs) < 2 or np.any(np.isnan(y)):
             continue
         res = observed_order(x, y)
@@ -45,6 +57,23 @@ def observed_orders(rows: list[dict], xattr: str = "dx") -> dict:
             "pairwise": res.pairwise_slopes,
         }
     return orders
+
+
+# extra error columns rendered as their own order tables when present
+ALT_METRICS = (("error_l1", "error L1 (area norm) vs dx"),
+               ("error_l2_aligned",
+                "error L2 after optimal 1D shock alignment vs dx"))
+
+
+def _order_table(lines: list[str], orders: dict) -> None:
+    lines += ["| case | slope | r^2 | saturated | exact |",
+              "|---|---|---|---|---|"]
+    for case, o in orders.items():
+        slope = "exact" if o["exact"] else ("n/a" if o["saturated"]
+                                            else f"{o['slope']:.2f}")
+        r2 = "n/a" if o["saturated"] or o["exact"] else f"{o['r_squared']:.3f}"
+        lines.append(f"| {case} | {slope} | {r2} | {o['saturated']} | "
+                     f"{o['exact']} |")
 
 
 def render_report(rows: list[dict], orders: dict) -> str:
@@ -64,15 +93,13 @@ def render_report(rows: list[dict], orders: dict) -> str:
             f"{r['total_energy_drift']:+.2e} | "
             f"{r['momentum_norm_final']:.3e} | {r['angmom_norm_final']:.3e} | "
             f"{r['diverged']} | {r['wall_s']:.1f} |")
-    lines += ["", "## Observed orders (error L2 vs dx)", "",
-              "| case | slope | r^2 | saturated | exact |",
-              "|---|---|---|---|---|"]
-    for case, o in orders.items():
-        slope = "exact" if o["exact"] else ("n/a" if o["saturated"]
-                                            else f"{o['slope']:.2f}")
-        r2 = "n/a" if o["saturated"] or o["exact"] else f"{o['r_squared']:.3f}"
-        lines.append(f"| {case} | {slope} | {r2} | {o['saturated']} | "
-                     f"{o['exact']} |")
+    lines += ["", "## Observed orders (error L2 vs dx)", ""]
+    _order_table(lines, orders)
+    for yattr, title in ALT_METRICS:
+        alt = observed_orders(rows, yattr=yattr)
+        if alt:
+            lines += ["", f"## Observed orders ({title})", ""]
+            _order_table(lines, alt)
     return "\n".join(lines) + "\n"
 
 
