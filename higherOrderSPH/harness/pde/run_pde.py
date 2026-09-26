@@ -41,7 +41,8 @@ wp.init()
 
 from warpSPH.runner import CaseSpec, run            # noqa: E402
 
-from conservation import conserved, drift          # noqa: E402
+from conservation import (KE_REBOUND_TOL, conserved,  # noqa: E402
+                          drift, ke_rebound)
 from field_error import (aligned_1d_l2_error, grid_error_p,  # noqa: E402
                          grid_l2_error, particle_error_norms)
 from pde_cases import CASES, load_case_entry        # noqa: E402
@@ -113,6 +114,11 @@ def run_one(case, entry, nx: int, device: str) -> dict:
     init_c = box["init"]
     drifts = drift(init_c, final_c)
     drifts["mass_final"] = final_c.mass
+    # KE monotonicity: a steady / decaying unforced flow must not regain KE
+    ke_series = res.series("kineticEnergy") if res.trajectory else []
+    drifts["ke_rebound"] = ke_rebound(ke_series)
+    drifts["ke_rebound_flag"] = bool(entry.ke_nonincreasing
+                                     and drifts["ke_rebound"] > KE_REBOUND_TOL)
 
     row = {
         "case": entry.name, "nx": nx,

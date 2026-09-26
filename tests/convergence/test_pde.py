@@ -29,7 +29,8 @@ SMOKE_CSV = PDE_DIR / "results" / "pde_rows_smoke.csv"
 
 sys.path.insert(0, str(PDE_DIR))
 
-from conservation import ConservedQuantities, conserved, drift  # noqa: E402
+from conservation import (KE_REBOUND_TOL, ConservedQuantities,  # noqa: E402
+                          conserved, drift, ke_rebound)
 from field_error import (aligned_1d_l2_error, grid_error_p,      # noqa: E402
                          grid_l2_error, particle_error_norms)
 from pde_cases import (CASES, linearWave_analytic,                # noqa: E402
@@ -103,6 +104,19 @@ def test_drift_vector_drift_with_nonzero_initial_momentum():
     assert d["momentum_norm_final"] == pytest.approx(np.hypot(0.23, 1e-3))
     assert d["momentum_drift_abs"] == pytest.approx(1e-3)
     assert d["angmom_drift_abs"] == pytest.approx(2e-4)
+
+
+def test_ke_rebound_catches_dip_then_spin_up():
+    # monotone decay: no rebound
+    assert ke_rebound([1.0, 0.9, 0.8, 0.75]) == 0.0
+    # the CRKSPH Gresho signature: -3.8% dip, then +7.3% net -> the final
+    # drift (+0.073) understates the anti-dissipation (0.038 + 0.073)
+    ke = [1.0, 0.962, 0.97, 1.0, 1.04, 1.073]
+    assert ke_rebound(ke) == pytest.approx(0.111)
+    assert ke_rebound(ke) > KE_REBOUND_TOL
+    # sub-tolerance wiggles (acoustics) pass
+    assert ke_rebound([1.0, 0.99, 0.995, 0.98, 0.983]) < KE_REBOUND_TOL
+    assert np.isnan(ke_rebound([])) and np.isnan(ke_rebound([0.0, 1.0]))
 
 
 def test_drift_total_energy_compressible():
@@ -392,6 +406,9 @@ def test_cases_registry_complete():
         assert (a.module, a.nx_ladder, a.metric, a.field, a.exact,
                 a.t_star) == (b.module, b.nx_ladder, b.metric, b.field,
                               b.exact, b.t_star)
+    # KE-monotonicity check applies to the unforced steady / decaying flows
+    assert {n for n, e in CASES.items() if e.ke_nonincreasing} == {
+        "tgv", "tgv-wc", "gresho", "gresho-std"}
     # CRKSPH needs symmetric support for exact energy conservation
     assert CASES["sod-crk"].spec == {"supportMode": "KernelMeanSymmetric"}
     for name, e in CASES.items():

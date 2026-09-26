@@ -65,6 +65,9 @@ class PDECase:
     exact: Optional[Callable] = None
     # which state field the metric measures (default 'velocities')
     field: str = "velocities"
+    # unforced steady / decaying flow: kinetic energy must never climb back
+    # above its running minimum (checked via conservation.ke_rebound)
+    ke_nonincreasing: bool = False
     notes: str = ""
 
 
@@ -187,6 +190,7 @@ def sedov_exact_density(positions: torch.Tensor, t: float,
 CASES: dict[str, PDECase] = {
     "tgv": PDECase(
         name="tgv", module="warpSPH.cases.tgv", case_attr="tgvCase",
+        ke_nonincreasing=True,
         dim=2, metric="analytic",
         nx_ladder=[32, 48, 64, 96], t_star=2.0,
         analytic=tgv_analytic_velocity, field="velocities",
@@ -195,6 +199,7 @@ CASES: dict[str, PDECase] = {
     "tgv-wc": PDECase(
         name="tgv-wc", module="warpSPH.cases.tgvWeaklyCompressible",
         case_attr="tgvWeaklyCompressibleCase",
+        ke_nonincreasing=True,
         dim=2, metric="analytic",
         nx_ladder=[32, 48, 64, 96], t_star=2.0,
         analytic=tgv_analytic_velocity, field="velocities",
@@ -231,6 +236,7 @@ CASES: dict[str, PDECase] = {
     "gresho": PDECase(
         name="gresho", module="warpSPH.cases.greshoVortex",
         case_attr="greshoVortexCase",
+        ke_nonincreasing=True,
         dim=2, metric="reference",
         nx_ladder=[32, 48, 64, 96], t_star=3.0,
         field="velocities", exact=gresho_exact_velocity,

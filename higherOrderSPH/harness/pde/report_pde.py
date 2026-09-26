@@ -153,7 +153,31 @@ def render_report(rows: list[dict], orders: dict) -> str:
             lines += ["", f"## Observed orders ({title})", ""]
             _order_table(lines, alt)
     _corrected_section(lines, rows)
+    _ke_section(lines, rows)
     return "\n".join(lines) + "\n"
+
+
+def _ke_section(lines: list[str], rows: list[dict]) -> None:
+    """KE-monotonicity check for cases declared KE-non-increasing (unforced
+    steady / decaying flows): `ke_rebound` = largest KE rise above its
+    running minimum / KE(0). Flagged rows are anti-dissipative."""
+    rs = [r for r in rows if not np.isnan(_as_num(r.get("ke_rebound")))
+          and str(r.get("ke_rebound_flag")) in ("True", "False")]
+    if not rs:
+        return
+    flagged = [r for r in rs if str(r.get("ke_rebound_flag")) == "True"]
+    lines += ["", "## Kinetic-energy monotonicity", "",
+              "`ke_rebound` = max over t of (KE(t) − running min KE) / KE(0). "
+              "For an unforced steady / decaying flow (TGV, tgv-wc, Gresho) "
+              "any rebound above 1 % is anti-dissipation and is **flagged**. "
+              f"{len(flagged)} of {len(rs)} rows flagged.", "",
+              "| case | scheme | nx | ke_rebound | final KE drift | flag |",
+              "|---|---|---|---|---|---|"]
+    for r in rs:
+        flag = "**FLAG**" if str(r.get("ke_rebound_flag")) == "True" else ""
+        lines.append(f"| {r['case']} | {r.get('scheme') or '?'} | {r['nx']} | "
+                     f"{_as_num(r['ke_rebound']):.2e} | "
+                     f"{_as_num(r['ke_drift']):+.2e} | {flag} |")
 
 
 def _corrected_section(lines: list[str], rows: list[dict]) -> None:

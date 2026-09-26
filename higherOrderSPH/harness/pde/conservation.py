@@ -32,7 +32,8 @@ from dataclasses import dataclass
 
 import torch
 
-__all__ = ["ConservedQuantities", "conserved", "drift"]
+__all__ = ["ConservedQuantities", "conserved", "drift", "ke_rebound",
+           "KE_REBOUND_TOL"]
 
 
 @dataclass
@@ -157,3 +158,30 @@ def drift(initial: ConservedQuantities,
         "angmom_drift_abs": float(
             (final.angular_momentum - initial.angular_momentum).norm()),
     }
+
+
+# A KE rise above its running minimum larger than this fraction of the
+# initial KE flags a KE-non-increasing case (steady / decaying, unforced).
+KE_REBOUND_TOL = 1e-2
+
+
+def ke_rebound(kinetic_energy) -> float:
+    """Largest rise of the kinetic energy above its own running minimum,
+    relative to the initial value: ``max_t (KE(t) - min_{s<=t} KE(s)) / KE(0)``.
+
+    For an unforced steady or decaying flow (Gresho, TGV) KE may drop
+    (dissipation) but must never climb back: energy flowing from internal to
+    kinetic energy there is anti-dissipation (negative entropy production).
+    The final-state `ke_drift` cannot see this when an early dissipative dip
+    and a later spin-up partly cancel -- the CRKSPH Gresho vortex dips -3.8%
+    and then gains +7.3% (nx=64), which went unnoticed until this check
+    (`higher_order.md`, Phase 1). Returns nan for an empty / zero-KE series.
+    """
+    ke = [float(k) for k in kinetic_energy]
+    if not ke or ke[0] == 0.0:
+        return float("nan")
+    run_min, worst = ke[0], 0.0
+    for k in ke:
+        run_min = min(run_min, k)
+        worst = max(worst, k - run_min)
+    return worst / ke[0]
