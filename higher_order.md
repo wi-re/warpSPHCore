@@ -219,7 +219,10 @@ on the CRK fix: the 1D rows (linearWave, Sedov) are **bit-identical**
 before and after it (`gradB` is 1×1 in 1D, the transpose a no-op).
 
 **Gresho anomaly — CRKSPH spins the vortex up (investigated 2026-09-26;
-source located, fix open).** At nx=64 kinetic energy dips −1.6 % by
+source located, fix open).** *The frontend follow-up — limiter
+parameter-stability map, formulation variants, spin-up source, acceptance
+criteria — lives in warpSPH `CRKSPH_LIMITER_PLAN.md` (branch `acsph-plan`);
+this section keeps the harness-side record.* At nx=64 kinetic energy dips −1.6 % by
 t≈0.5, then rises monotonically to +7.3 % at t=3 (+13 % at nx=96), total
 energy exact; the exact-solution error *rises* at the finest rung while the
 finest-run reference metric reported a clean "2.06" (every rung shares the
