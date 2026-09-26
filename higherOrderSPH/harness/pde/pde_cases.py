@@ -24,13 +24,14 @@ dev/test path.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Optional
 
 import numpy as np
 import torch
 
-__all__ = ["PDECase", "CASES", "tgv_analytic_velocity", "linearWave_analytic"]
+__all__ = ["PDECase", "CASES", "tgv_analytic_velocity", "linearWave_analytic",
+           "sod_exact_density", "sedov_exact_density", "gresho_exact_velocity"]
 
 
 @dataclass
@@ -51,9 +52,17 @@ class PDECase:
     # defaults in run_pde.build_spec) -- e.g. holding the build-time IC
     # fixed while the scheme varies.
     params: dict = field(default_factory=dict)
+    # harness-side CaseSpec overrides (fields of the run spec rather than case
+    # params, e.g. supportMode), merged over the case defaults in build_spec
+    spec: dict = field(default_factory=dict)
     ref_nx: Optional[int] = None      # reference resolution (reference metric)
     # analytic field for the 'analytic' metric: (positions, t, params) -> (N, dim)
     analytic: Optional[Callable] = None
+    # exact solution of a 'reference' case, scored *in addition* to the
+    # reference metric (columns error_l1_exact / error_l2_exact, every rung
+    # including the finest): (positions, t, params) -> field. Removes the
+    # finite-reference bias and the per-run t_final mismatch.
+    exact: Optional[Callable] = None
     # which state field the metric measures (default 'velocities')
     field: str = "velocities"
     notes: str = ""
@@ -105,6 +114,69 @@ def linearWave_analytic(positions: torch.Tensor, t: float,
     x = positions[:, 0]
     v = (c_s / rho0) * A * torch.sin(2.0 * np.pi * (x - c_s * t) / lamda)
     return v.view(-1, 1)
+
+
+def sod_exact_density(positions: torch.Tensor, t: float,
+                      params: dict) -> torch.Tensor:
+    """Exact Riemann-solution density for the frontend Sod case at time `t`.
+
+    Geometry (`caseUtils/compressible/sod/sod.py`): a periodic [-1, 1] box,
+    left state on |x| < 0.5, right state outside, i.e. two mirror-image
+    shock tubes with interfaces at x = +-0.5. By symmetry the density at x is
+    the single-tube solution at |x| with the interface at 0.5 -- the same
+    `solve(..., geometry=(0, 1, 0.5))` the case's own plot overlays. Valid
+    while no wave reaches x = 0 or |x| = 1 (t_star = 0.15 is well inside).
+    The solution is tabulated on a fine grid (2e5 points, spacing 5e-6 --
+    ~250x finer than the finest ladder dx) and linearly interpolated.
+    """
+    from warpSPH.caseUtils.compressible.sod.sodSolution import solve
+    left = (float(params["left_pressure"]), float(params["left_rho"]),
+            float(params["left_velocity"]))
+    right = (float(params["right_pressure"]), float(params["right_rho"]),
+             float(params["right_velocity"]))
+    _, _, values = solve(left_state=left, right_state=right,
+                         geometry=(0.0, 1.0, 0.5), t=float(t),
+                         gamma=float(params["gamma"]), npts=200001)
+    x = positions[:, 0].detach().abs().cpu().numpy()
+    rho = np.interp(x, values["x"], values["rho"])
+    return torch.as_tensor(rho, dtype=positions.dtype, device=positions.device)
+
+
+def gresho_exact_velocity(positions: torch.Tensor, t: float,
+                          params: dict) -> torch.Tensor:
+    """Exact Gresho-Chan velocity: the vortex is a *steady* solution of the
+    Euler equations, so the exact field at any t is the initial azimuthal
+    profile (`caseUtils/compressible/greshoVortex/sample.py`) evaluated at
+    the particle's current position: v_phi = 5r (r < 0.2), 2 - 5r
+    (0.2 <= r < 0.4), 0 outside; centred at the origin of the periodic unit
+    box. The standard Gresho metric (Springel 2010, Frontiere 2017) is the
+    L1 error of this profile. Particles with r >= 0.4 have zero exact
+    velocity, so periodic wrap-around of the (almost) static outer particles
+    cannot misplace a moving target."""
+    x = positions.detach()
+    r = torch.linalg.norm(x, dim=-1)
+    vphi = torch.where(r < 0.2, 5.0 * r,
+                       torch.where(r < 0.4, 2.0 - 5.0 * r,
+                                   torch.zeros_like(r)))
+    safe = torch.where(r > 0, r, torch.ones_like(r))
+    v = torch.stack([-vphi * x[:, 1] / safe, vphi * x[:, 0] / safe], dim=-1)
+    return v
+
+
+def sedov_exact_density(positions: torch.Tensor, t: float,
+                        params: dict) -> torch.Tensor:
+    """Exact self-similar Sedov-Taylor density (1D planar) at time `t`, from
+    the frontend's `SedovSolution` (the same solve the case uses for its
+    stopping rule). The blast is centred at the origin of the periodic
+    [-1, 1] box; outside the shock the density is rho0."""
+    from warpSPH.caseUtils.compressible.sedov.sedovSolution import (
+        SedovSolution)
+    sol = SedovSolution(nDim=1, gamma=float(params["gamma"]),
+                        rho0=float(params["rho0"]), E0=float(params["E0"]))
+    r = positions[:, 0].detach().cpu().numpy().tolist()
+    _, _, _, rho, _, _, _ = sol.solution(float(t), r)
+    return torch.as_tensor(np.asarray(rho), dtype=positions.dtype,
+                           device=positions.device)
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +233,11 @@ CASES: dict[str, PDECase] = {
         case_attr="greshoVortexCase",
         dim=2, metric="reference",
         nx_ladder=[32, 48, 64, 96], t_star=3.0,
-        field="velocities",
-        notes="decaying vortex; no clean analytic -> vs finest-ladder reference",
+        field="velocities", exact=gresho_exact_velocity,
+        notes="steady Gresho-Chan vortex: the exact solution is the initial "
+              "v_phi(r) profile at all t (`exact`, the standard Gresho "
+              "metric); the finest-ladder reference metric is kept as a "
+              "secondary column",
     ),
     "kelvinHelmholtz": PDECase(
         name="kelvinHelmholtz", module="warpSPH.cases.kelvinHelmholtz",
@@ -176,16 +251,18 @@ CASES: dict[str, PDECase] = {
         name="sod", module="warpSPH.cases.sod", case_attr="sodCase",
         dim=1, metric="reference",
         nx_ladder=[200, 400, 800, 1600], t_star=0.15,
-        field="densities",
-        notes="shock tube; the clean shock case: L2 1.31 (monotonic), L1 1.46, "
-              "aligned L2 0.99; shock position stable to ~0.1 dx (sub-cell "
-              "shifts); vs reference",
+        field="densities", exact=sod_exact_density,
+        notes="shock tube; vs the exact Riemann solution (`exact`): L1 0.98, "
+              "L2 0.53 (r^2 >= 0.999) -- textbook first-order shock "
+              "capturing. The reference-metric orders (L2 1.31, L1 1.46, "
+              "aligned L2 0.99) are inflated by the finite reference; shock "
+              "position stable to ~0.1 dx (sub-cell shifts)",
     ),
     "sedov": PDECase(
         name="sedov", module="warpSPH.cases.sedov", case_attr="sedovCase",
         dim=1, metric="reference",
         nx_ladder=[200, 400, 800, 1600], t_star=1.0,
-        field="densities",
+        field="densities", exact=sedov_exact_density,
         notes="blast wave; the error is a width-mismatch spike at the shock "
               "(coarse peak lower/wider, no overshoot) and the shock is "
               "positioned correctly (sub-cell, sign-convergent shifts) -- "
@@ -193,9 +270,37 @@ CASES: dict[str, PDECase] = {
               "sampling artifact (it evaluates only where the coarse "
               "particles sit: the compressed shell = the error spike); the "
               "full-grid L2 is monotonic (order 0.75) and the L1 area norm "
-              "(order 0.92) is the robust shock metric; SEDov_NOTES.md",
+              "(order 0.92) is the robust reference-metric shock metric; vs "
+              "the exact self-similar solution (`exact`): L1 1.03, L2 0.59 "
+              "(pre-CRK-fix run); SEDov_NOTES.md",
     ),
 }
+
+
+# Matched-scheme legs (2026-09-26). The registry above runs each case's
+# frontend default scheme, which made the Pass-2 table a per-case mix
+# (Gresho / KH / linearWave / Sedov default to CRKSPH, Sod to CompSPH). These
+# legs run the same case, ladder, metric and IC under the *other* scheme, so
+# every comparison is like-for-like: `<case>-std` = standard compressible SPH
+# (CompSPH) on the four CRKSPH-default cases, `sod-crk` = CRKSPH on Sod.
+_STD_NOTE = ("standard-SPH (CompSPH) leg of `{0}` -- same case / ladder / "
+             "metric / IC, scheme swapped; the Phase 1 counterpart of the "
+             "CRKSPH default")
+for _base in ("linearWave", "gresho", "kelvinHelmholtz", "sedov"):
+    CASES[f"{_base}-std"] = replace(
+        CASES[_base], name=f"{_base}-std", scheme="CompSPH",
+        notes=_STD_NOTE.format(_base))
+CASES["sod-crk"] = replace(
+    CASES["sod"], name="sod-crk", scheme="CRKSPH",
+    # CRKSPH's compatible energy update needs symmetric pair interactions:
+    # under Sod's default supportMode='Gather' it drifts total energy by
+    # -7.3e-6 at nx=200 (vs +2.5e-16 with KernelMeanSymmetric, the support
+    # mode every CRKSPH-default case uses; CompSPH is exact under both).
+    spec={"supportMode": "KernelMeanSymmetric"},
+    notes="CRKSPH leg of `sod` -- same case / ladder / metric / IC, scheme "
+          "swapped (+ the symmetric support CRKSPH's energy conservation "
+          "needs); the Phase 2 counterpart of the CompSPH default")
+del _base
 
 
 def load_case_entry(entry: PDECase):

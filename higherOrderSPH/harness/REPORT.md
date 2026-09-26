@@ -1,6 +1,6 @@
 # Convergence harness -- baseline report (before column)
 
-Generated 2026-09-23 08:17 by `run_baseline.py` (float64, kernels: Wendland2, jitter 0.3, default target neighbors 40, patch N target 1152).
+Generated 2026-09-26 17:27 by `run_baseline.py` (float64, kernels: Wendland2, jitter 0.3, default target neighbors 40, patch N target 1152).
 
 Frozen reference for the higher-order phases (parent plan `../../higher_order.md`): later phases diff against these numbers and do not re-baseline silently. A harness change is a versioning event that re-runs every phase.
 
@@ -12,46 +12,58 @@ Max error per monomial / probe / mode. ~1e-15 (float64) = exact reproduction.
 |---|---|---|---|---|---|---|---|
 | Wendland2 | 1 | 0 | gradient | 0.000e+00 | 0.000e+00 | 0.000e+00 | 0.000e+00 |
 | Wendland2 | 1 | 0 | interpolate | 5.548e-02 | 6.661e-16 | 5.548e-02 | 0.000e+00 |
-| Wendland2 | Mx | 1 | gradient | 1.599e-01 | 1.450e-03 | 2.215e-15 | 2.215e-15 |
+| Wendland2 | Mx | 1 | gradient | 1.599e-01 | 2.278e-15 | 2.215e-15 | 2.215e-15 |
 | Wendland2 | Mx | 1 | interpolate | 5.764e-02 | 8.899e-16 | 5.764e-02 | 3.255e-03 |
-| Wendland2 | x | 1 | gradient | 9.980e-02 | 7.482e-04 | 7.777e-16 | 7.777e-16 |
+| Wendland2 | x | 1 | gradient | 9.980e-02 | 6.676e-16 | 7.777e-16 | 7.777e-16 |
 | Wendland2 | x | 1 | interpolate | 4.091e-02 | 5.551e-16 | 4.091e-02 | 2.050e-03 |
-| Wendland2 | x^2 | 2 | gradient | 1.639e-01 | 6.703e-03 | 3.656e-03 | 3.656e-03 |
+| Wendland2 | x^2 | 2 | gradient | 1.639e-01 | 6.683e-03 | 3.656e-03 | 3.656e-03 |
+| Wendland2 | x^2 | 2 | hessian | 3.711e+00 | 2.058e+00 | 2.037e+00 | 2.037e+00 |
 | Wendland2 | x^2 | 2 | interpolate | 3.492e-02 | 8.212e-04 | 3.492e-02 | 3.620e-03 |
 | Wendland2 | x^2 | 2 | laplacian | 7.253e+00 | 7.515e-01 | 7.416e+00 | 7.416e+00 |
-| Wendland2 | x^2y | 3 | gradient | 1.268e-01 | 7.311e-03 | 4.886e-03 | 4.886e-03 |
+| Wendland2 | x^2y | 3 | gradient | 1.268e-01 | 7.319e-03 | 4.886e-03 | 4.886e-03 |
+| Wendland2 | x^2y | 3 | hessian | 4.325e+00 | 3.032e+00 | 3.043e+00 | 3.043e+00 |
 | Wendland2 | x^2y | 3 | interpolate | 2.349e-02 | 6.958e-04 | 2.349e-02 | 3.309e-03 |
 | Wendland2 | x^2y | 3 | laplacian | 7.053e+00 | 6.619e-01 | 6.702e+00 | 6.702e+00 |
-| Wendland2 | x^2y^2 | 4 | gradient | 1.168e-01 | 1.176e-02 | 6.251e-03 | 6.251e-03 |
+| Wendland2 | x^2y^2 | 4 | gradient | 1.168e-01 | 1.172e-02 | 6.251e-03 | 6.251e-03 |
+| Wendland2 | x^2y^2 | 4 | hessian | 6.146e+00 | 4.797e+00 | 4.796e+00 | 4.796e+00 |
 | Wendland2 | x^2y^2 | 4 | interpolate | 1.760e-02 | 1.132e-03 | 1.760e-02 | 3.672e-03 |
 | Wendland2 | x^2y^2 | 4 | laplacian | 6.590e+00 | 6.730e-01 | 6.255e+00 | 6.255e+00 |
-| Wendland2 | x^3 | 3 | gradient | 1.998e-01 | 1.911e-02 | 1.185e-02 | 1.185e-02 |
+| Wendland2 | x^3 | 3 | gradient | 1.998e-01 | 1.909e-02 | 1.185e-02 | 1.185e-02 |
+| Wendland2 | x^3 | 3 | hessian | 7.495e+00 | 5.307e+00 | 5.312e+00 | 5.312e+00 |
 | Wendland2 | x^3 | 3 | interpolate | 3.158e-02 | 2.146e-03 | 3.158e-02 | 5.852e-03 |
 | Wendland2 | x^3 | 3 | laplacian | 9.871e+00 | 1.039e+00 | 1.005e+01 | 1.005e+01 |
-| Wendland2 | x^3y | 4 | gradient | 1.460e-01 | 1.463e-02 | 7.374e-03 | 7.374e-03 |
+| Wendland2 | x^3y | 4 | gradient | 1.460e-01 | 1.468e-02 | 7.374e-03 | 7.374e-03 |
+| Wendland2 | x^3y | 4 | hessian | 7.262e+00 | 5.585e+00 | 5.614e+00 | 5.614e+00 |
 | Wendland2 | x^3y | 4 | interpolate | 2.123e-02 | 1.716e-03 | 2.123e-02 | 5.037e-03 |
 | Wendland2 | x^3y | 4 | laplacian | 9.004e+00 | 7.438e-01 | 8.485e+00 | 8.485e+00 |
-| Wendland2 | x^4 | 4 | gradient | 2.141e-01 | 3.592e-02 | 2.529e-02 | 2.529e-02 |
+| Wendland2 | x^4 | 4 | gradient | 2.141e-01 | 3.590e-02 | 2.529e-02 | 2.529e-02 |
+| Wendland2 | x^4 | 4 | hessian | 1.175e+01 | 9.357e+00 | 9.482e+00 | 9.482e+00 |
 | Wendland2 | x^4 | 4 | interpolate | 3.055e-02 | 3.839e-03 | 3.055e-02 | 8.170e-03 |
 | Wendland2 | x^4 | 4 | laplacian | 1.195e+01 | 1.288e+00 | 1.212e+01 | 1.212e+01 |
-| Wendland2 | xy | 2 | gradient | 9.272e-02 | 3.068e-03 | 2.872e-03 | 2.872e-03 |
+| Wendland2 | xy | 2 | gradient | 9.272e-02 | 3.057e-03 | 2.872e-03 | 2.872e-03 |
+| Wendland2 | xy | 2 | hessian | 2.368e+00 | 1.438e+00 | 1.433e+00 | 1.433e+00 |
 | Wendland2 | xy | 2 | interpolate | 2.650e-02 | 5.236e-05 | 2.650e-02 | 2.166e-03 |
 | Wendland2 | xy | 2 | laplacian | 5.058e+00 | 5.514e-01 | 5.076e+00 | 5.076e+00 |
-| Wendland2 | xy^2 | 3 | gradient | 1.248e-01 | 6.786e-03 | 4.197e-03 | 4.197e-03 |
+| Wendland2 | xy^2 | 3 | gradient | 1.248e-01 | 6.785e-03 | 4.197e-03 | 4.197e-03 |
+| Wendland2 | xy^2 | 3 | hessian | 4.481e+00 | 2.992e+00 | 2.997e+00 | 2.997e+00 |
 | Wendland2 | xy^2 | 3 | interpolate | 1.916e-02 | 7.178e-04 | 1.916e-02 | 2.606e-03 |
 | Wendland2 | xy^2 | 3 | laplacian | 5.404e+00 | 6.261e-01 | 5.514e+00 | 5.514e+00 |
-| Wendland2 | xy^3 | 4 | gradient | 1.585e-01 | 1.499e-02 | 1.076e-02 | 1.076e-02 |
+| Wendland2 | xy^3 | 4 | gradient | 1.585e-01 | 1.498e-02 | 1.076e-02 | 1.076e-02 |
+| Wendland2 | xy^3 | 4 | hessian | 7.256e+00 | 5.432e+00 | 5.451e+00 | 5.451e+00 |
 | Wendland2 | xy^3 | 4 | interpolate | 1.800e-02 | 1.679e-03 | 1.800e-02 | 3.514e-03 |
 | Wendland2 | xy^3 | 4 | laplacian | 6.351e+00 | 7.307e-01 | 6.434e+00 | 6.434e+00 |
-| Wendland2 | y | 1 | gradient | 1.015e-01 | 8.165e-04 | 6.673e-16 | 6.673e-16 |
+| Wendland2 | y | 1 | gradient | 1.015e-01 | 6.712e-16 | 6.673e-16 | 6.673e-16 |
 | Wendland2 | y | 1 | interpolate | 3.802e-02 | 6.661e-16 | 3.802e-02 | 2.457e-03 |
-| Wendland2 | y^2 | 2 | gradient | 1.678e-01 | 6.638e-03 | 4.233e-03 | 4.233e-03 |
+| Wendland2 | y^2 | 2 | gradient | 1.678e-01 | 6.669e-03 | 4.233e-03 | 4.233e-03 |
+| Wendland2 | y^2 | 2 | hessian | 3.735e+00 | 2.054e+00 | 2.038e+00 | 2.038e+00 |
 | Wendland2 | y^2 | 2 | interpolate | 3.399e-02 | 8.292e-04 | 3.399e-02 | 3.224e-03 |
 | Wendland2 | y^2 | 2 | laplacian | 6.412e+00 | 8.300e-01 | 6.536e+00 | 6.536e+00 |
-| Wendland2 | y^3 | 3 | gradient | 2.233e-01 | 1.687e-02 | 1.329e-02 | 1.329e-02 |
+| Wendland2 | y^3 | 3 | gradient | 2.233e-01 | 1.686e-02 | 1.329e-02 | 1.329e-02 |
+| Wendland2 | y^3 | 3 | hessian | 7.229e+00 | 5.060e+00 | 5.130e+00 | 5.130e+00 |
 | Wendland2 | y^3 | 3 | interpolate | 3.100e-02 | 2.142e-03 | 3.100e-02 | 5.002e-03 |
 | Wendland2 | y^3 | 3 | laplacian | 8.064e+00 | 1.124e+00 | 8.177e+00 | 8.177e+00 |
-| Wendland2 | y^4 | 4 | gradient | 2.668e-01 | 3.194e-02 | 2.705e-02 | 2.705e-02 |
+| Wendland2 | y^4 | 4 | gradient | 2.668e-01 | 3.193e-02 | 2.705e-02 | 2.705e-02 |
+| Wendland2 | y^4 | 4 | hessian | 1.092e+01 | 8.651e+00 | 8.688e+00 | 8.688e+00 |
 | Wendland2 | y^4 | 4 | interpolate | 2.876e-02 | 3.710e-03 | 2.876e-02 | 6.692e-03 |
 | Wendland2 | y^4 | 4 | laplacian | 9.511e+00 | 1.354e+00 | 9.164e+00 | 9.164e+00 |
 
@@ -63,46 +75,58 @@ Same tests on particles within one support of an open wall (truncated kernel sup
 |---|---|---|---|---|---|---|---|
 | Wendland2 | 1 | 0 | gradient | 0.000e+00 | 0.000e+00 | 0.000e+00 | 0.000e+00 |
 | Wendland2 | 1 | 0 | interpolate | 2.268e-01 | 8.882e-16 | 2.268e-01 | 0.000e+00 |
-| Wendland2 | Mx | 1 | gradient | 1.236e+00 | 2.454e-01 | 6.077e-15 | 6.077e-15 |
+| Wendland2 | Mx | 1 | gradient | 1.236e+00 | 6.287e-15 | 6.077e-15 | 6.077e-15 |
 | Wendland2 | Mx | 1 | interpolate | 3.549e-01 | 9.155e-16 | 3.549e-01 | 2.359e-02 |
-| Wendland2 | x | 1 | gradient | 5.782e-01 | 1.473e-01 | 6.685e-16 | 6.685e-16 |
+| Wendland2 | x | 1 | gradient | 5.782e-01 | 1.443e-15 | 6.685e-16 | 6.685e-16 |
 | Wendland2 | x | 1 | interpolate | 2.252e-01 | 6.661e-16 | 2.252e-01 | 1.577e-02 |
-| Wendland2 | x^2 | 2 | gradient | 1.154e+00 | 2.872e-01 | 4.715e-02 | 4.715e-02 |
+| Wendland2 | x^2 | 2 | gradient | 1.154e+00 | 4.166e-02 | 4.715e-02 | 4.715e-02 |
+| Wendland2 | x^2 | 2 | hessian | 1.286e+01 | 2.136e+00 | 2.130e+00 | 2.130e+00 |
 | Wendland2 | x^2 | 2 | interpolate | 2.320e-01 | 9.591e-04 | 2.320e-01 | 3.065e-02 |
 | Wendland2 | x^2 | 2 | laplacian | 6.649e+01 | 1.393e+02 | 1.268e+02 | 1.268e+02 |
-| Wendland2 | x^2y | 3 | gradient | 9.424e-01 | 3.278e-01 | 6.010e-02 | 6.010e-02 |
+| Wendland2 | x^2y | 3 | gradient | 9.424e-01 | 4.925e-02 | 6.010e-02 | 6.010e-02 |
+| Wendland2 | x^2y | 3 | hessian | 1.157e+01 | 3.374e+00 | 3.007e+00 | 3.007e+00 |
 | Wendland2 | x^2y | 3 | interpolate | 2.252e-01 | 1.006e-03 | 2.252e-01 | 3.204e-02 |
 | Wendland2 | x^2y | 3 | laplacian | 6.607e+01 | 1.695e+02 | 1.551e+02 | 1.551e+02 |
-| Wendland2 | x^2y^2 | 4 | gradient | 1.137e+00 | 3.588e-01 | 1.143e-01 | 1.143e-01 |
+| Wendland2 | x^2y^2 | 4 | gradient | 1.137e+00 | 9.780e-02 | 1.143e-01 | 1.143e-01 |
+| Wendland2 | x^2y^2 | 4 | hessian | 1.297e+01 | 5.388e+00 | 4.821e+00 | 4.821e+00 |
 | Wendland2 | x^2y^2 | 4 | interpolate | 2.187e-01 | 1.308e-03 | 2.187e-01 | 3.726e-02 |
 | Wendland2 | x^2y^2 | 4 | laplacian | 7.859e+01 | 1.963e+02 | 1.803e+02 | 1.803e+02 |
-| Wendland2 | x^3 | 3 | gradient | 1.726e+00 | 4.212e-01 | 1.319e-01 | 1.319e-01 |
+| Wendland2 | x^3 | 3 | gradient | 1.726e+00 | 1.214e-01 | 1.319e-01 | 1.319e-01 |
+| Wendland2 | x^3 | 3 | hessian | 1.678e+01 | 5.339e+00 | 5.526e+00 | 5.526e+00 |
 | Wendland2 | x^3 | 3 | interpolate | 2.402e-01 | 2.653e-03 | 2.402e-01 | 4.468e-02 |
 | Wendland2 | x^3 | 3 | laplacian | 9.986e+01 | 2.055e+02 | 1.870e+02 | 1.870e+02 |
-| Wendland2 | x^3y | 4 | gradient | 1.431e+00 | 4.522e-01 | 1.416e-01 | 1.416e-01 |
+| Wendland2 | x^3y | 4 | gradient | 1.431e+00 | 1.175e-01 | 1.416e-01 | 1.416e-01 |
+| Wendland2 | x^3y | 4 | hessian | 1.439e+01 | 6.411e+00 | 6.009e+00 | 6.009e+00 |
 | Wendland2 | x^3y | 4 | interpolate | 2.305e-01 | 2.644e-03 | 2.305e-01 | 4.279e-02 |
 | Wendland2 | x^3y | 4 | laplacian | 9.111e+01 | 2.311e+02 | 2.111e+02 | 2.111e+02 |
-| Wendland2 | x^4 | 4 | gradient | 2.294e+00 | 5.500e-01 | 2.558e-01 | 2.558e-01 |
+| Wendland2 | x^4 | 4 | gradient | 2.294e+00 | 2.359e-01 | 2.558e-01 | 2.558e-01 |
+| Wendland2 | x^4 | 4 | hessian | 2.017e+01 | 9.495e+00 | 9.804e+00 | 9.804e+00 |
 | Wendland2 | x^4 | 4 | interpolate | 2.479e-01 | 4.893e-03 | 2.479e-01 | 5.790e-02 |
 | Wendland2 | x^4 | 4 | laplacian | 1.334e+02 | 2.697e+02 | 2.453e+02 | 2.453e+02 |
-| Wendland2 | xy | 2 | gradient | 5.847e-01 | 2.062e-01 | 2.120e-02 | 2.120e-02 |
+| Wendland2 | xy | 2 | gradient | 5.847e-01 | 1.320e-02 | 2.120e-02 | 2.120e-02 |
+| Wendland2 | xy | 2 | hessian | 8.291e+00 | 1.506e+00 | 1.432e+00 | 1.432e+00 |
 | Wendland2 | xy | 2 | interpolate | 2.195e-01 | 2.155e-04 | 2.195e-01 | 2.053e-02 |
 | Wendland2 | xy | 2 | laplacian | 4.130e+01 | 1.058e+02 | 9.731e+01 | 9.731e+01 |
-| Wendland2 | xy^2 | 3 | gradient | 1.062e+00 | 2.817e-01 | 7.691e-02 | 7.691e-02 |
+| Wendland2 | xy^2 | 3 | gradient | 1.062e+00 | 6.892e-02 | 7.691e-02 | 7.691e-02 |
+| Wendland2 | xy^2 | 3 | hessian | 1.169e+01 | 3.266e+00 | 2.936e+00 | 2.936e+00 |
 | Wendland2 | xy^2 | 3 | interpolate | 2.135e-01 | 9.070e-04 | 2.135e-01 | 2.662e-02 |
 | Wendland2 | xy^2 | 3 | laplacian | 5.570e+01 | 1.371e+02 | 1.266e+02 | 1.266e+02 |
-| Wendland2 | xy^3 | 4 | gradient | 1.582e+00 | 4.085e-01 | 1.763e-01 | 1.763e-01 |
+| Wendland2 | xy^3 | 4 | gradient | 1.582e+00 | 1.621e-01 | 1.763e-01 | 1.763e-01 |
+| Wendland2 | xy^3 | 4 | hessian | 1.462e+01 | 6.316e+00 | 5.715e+00 | 5.715e+00 |
 | Wendland2 | xy^3 | 4 | interpolate | 2.072e-01 | 2.050e-03 | 2.072e-01 | 3.169e-02 |
 | Wendland2 | xy^3 | 4 | laplacian | 7.598e+01 | 1.649e+02 | 1.529e+02 | 1.529e+02 |
-| Wendland2 | y | 1 | gradient | 6.501e-01 | 1.209e-01 | 6.668e-16 | 6.668e-16 |
+| Wendland2 | y | 1 | gradient | 6.501e-01 | 1.782e-15 | 6.668e-16 | 6.668e-16 |
 | Wendland2 | y | 1 | interpolate | 2.132e-01 | 4.441e-16 | 2.132e-01 | 1.386e-02 |
-| Wendland2 | y^2 | 2 | gradient | 1.247e+00 | 2.191e-01 | 5.139e-02 | 5.139e-02 |
+| Wendland2 | y^2 | 2 | gradient | 1.247e+00 | 4.875e-02 | 5.139e-02 | 5.139e-02 |
+| Wendland2 | y^2 | 2 | hessian | 1.341e+01 | 2.126e+00 | 2.107e+00 | 2.107e+00 |
 | Wendland2 | y^2 | 2 | interpolate | 2.077e-01 | 8.915e-04 | 2.077e-01 | 2.519e-02 |
 | Wendland2 | y^2 | 2 | laplacian | 5.681e+01 | 1.147e+02 | 1.028e+02 | 1.028e+02 |
-| Wendland2 | y^3 | 3 | gradient | 1.794e+00 | 3.199e-01 | 1.431e-01 | 1.431e-01 |
+| Wendland2 | y^3 | 3 | gradient | 1.794e+00 | 1.358e-01 | 1.431e-01 | 1.431e-01 |
+| Wendland2 | y^3 | 3 | hessian | 1.727e+01 | 5.367e+00 | 5.309e+00 | 5.309e+00 |
 | Wendland2 | y^3 | 3 | interpolate | 2.020e-01 | 2.320e-03 | 2.020e-01 | 3.530e-02 |
 | Wendland2 | y^3 | 3 | laplacian | 8.205e+01 | 1.630e+02 | 1.461e+02 | 1.461e+02 |
-| Wendland2 | y^4 | 4 | gradient | 2.292e+00 | 4.644e-01 | 2.655e-01 | 2.655e-01 |
+| Wendland2 | y^4 | 4 | gradient | 2.292e+00 | 2.523e-01 | 2.655e-01 | 2.655e-01 |
+| Wendland2 | y^4 | 4 | hessian | 1.978e+01 | 9.302e+00 | 8.957e+00 | 8.957e+00 |
 | Wendland2 | y^4 | 4 | interpolate | 1.962e-01 | 4.145e-03 | 1.962e-01 | 4.399e-02 |
 | Wendland2 | y^4 | 4 | laplacian | 1.054e+02 | 2.060e+02 | 1.846e+02 | 1.846e+02 |
 
@@ -120,7 +144,7 @@ Same tests on particles within one support of an open wall (truncated kernel sup
 | gradient | 1 | renormVal | interior | exact | exact | no |
 | gradient | 1 | standard | boundary | exact | exact | no |
 | gradient | 1 | standard | interior | exact | exact | no |
-| gradient | gauss | crk | boundary | 1.62 | 0.980 | no |
+| gradient | gauss | crk | boundary | 1.63 | 0.980 | no |
 | gradient | gauss | crk | interior | 1.60 | 0.999 | no |
 | gradient | gauss | renorm | boundary | 1.69 | 0.975 | no |
 | gradient | gauss | renorm | interior | 1.76 | 0.998 | no |
@@ -128,7 +152,7 @@ Same tests on particles within one support of an open wall (truncated kernel sup
 | gradient | gauss | renormVal | interior | 1.76 | 0.998 | no |
 | gradient | gauss | standard | boundary | 1.41 | 0.941 | no |
 | gradient | gauss | standard | interior | 0.95 | 0.982 | no |
-| gradient | sin_cos | crk | boundary | 0.70 | 0.983 | no |
+| gradient | sin_cos | crk | boundary | 0.76 | 0.971 | no |
 | gradient | sin_cos | crk | interior | 1.70 | 0.996 | no |
 | gradient | sin_cos | renorm | boundary | 0.86 | 0.986 | no |
 | gradient | sin_cos | renorm | interior | 1.86 | 0.997 | no |
@@ -136,7 +160,7 @@ Same tests on particles within one support of an open wall (truncated kernel sup
 | gradient | sin_cos | renormVal | interior | 1.86 | 0.997 | no |
 | gradient | sin_cos | standard | boundary | n/a | n/a | yes |
 | gradient | sin_cos | standard | interior | n/a | n/a | yes |
-| gradient | x | crk | boundary | -0.15 | 0.025 | no |
+| gradient | x | crk | boundary | n/a | n/a | yes |
 | gradient | x | crk | interior | n/a | n/a | yes |
 | gradient | x | renorm | boundary | n/a | n/a | yes |
 | gradient | x | renorm | interior | n/a | n/a | yes |
@@ -144,7 +168,7 @@ Same tests on particles within one support of an open wall (truncated kernel sup
 | gradient | x | renormVal | interior | n/a | n/a | yes |
 | gradient | x | standard | boundary | n/a | n/a | yes |
 | gradient | x | standard | interior | n/a | n/a | yes |
-| gradient | x^2 | crk | boundary | -0.09 | 0.008 | no |
+| gradient | x^2 | crk | boundary | 1.00 | 1.000 | no |
 | gradient | x^2 | crk | interior | n/a | n/a | yes |
 | gradient | x^2 | renorm | boundary | 1.01 | 0.999 | no |
 | gradient | x^2 | renorm | interior | 1.03 | 0.998 | no |
@@ -152,8 +176,8 @@ Same tests on particles within one support of an open wall (truncated kernel sup
 | gradient | x^2 | renormVal | interior | 1.03 | 0.998 | no |
 | gradient | x^2 | standard | boundary | n/a | n/a | yes |
 | gradient | x^2 | standard | interior | n/a | n/a | yes |
-| gradient | xy | crk | boundary | -0.56 | 0.241 | no |
-| gradient | xy | crk | interior | 0.97 | 0.970 | no |
+| gradient | xy | crk | boundary | 0.80 | 0.996 | no |
+| gradient | xy | crk | interior | 0.98 | 0.968 | no |
 | gradient | xy | renorm | boundary | 0.95 | 0.979 | no |
 | gradient | xy | renorm | interior | n/a | n/a | yes |
 | gradient | xy | renormVal | boundary | 0.95 | 0.979 | no |
@@ -168,14 +192,54 @@ Same tests on particles within one support of an open wall (truncated kernel sup
 | gradient | y | renormVal | interior | n/a | n/a | yes |
 | gradient | y | standard | boundary | n/a | n/a | yes |
 | gradient | y | standard | interior | n/a | n/a | yes |
-| gradient | y^2 | crk | boundary | n/a | n/a | yes |
-| gradient | y^2 | crk | interior | 0.79 | 0.962 | no |
+| gradient | y^2 | crk | boundary | 1.06 | 0.994 | no |
+| gradient | y^2 | crk | interior | 0.78 | 0.960 | no |
 | gradient | y^2 | renorm | boundary | 1.05 | 0.996 | no |
 | gradient | y^2 | renorm | interior | 0.94 | 0.995 | no |
 | gradient | y^2 | renormVal | boundary | 1.05 | 0.996 | no |
 | gradient | y^2 | renormVal | interior | 0.94 | 0.995 | no |
 | gradient | y^2 | standard | boundary | n/a | n/a | yes |
 | gradient | y^2 | standard | interior | -0.65 | 0.766 | no |
+| hessian | gauss | crk | boundary | 0.94 | 0.983 | no |
+| hessian | gauss | crk | interior | n/a | n/a | yes |
+| hessian | gauss | renorm | boundary | 0.92 | 0.982 | no |
+| hessian | gauss | renorm | interior | n/a | n/a | yes |
+| hessian | gauss | renormVal | boundary | 0.92 | 0.982 | no |
+| hessian | gauss | renormVal | interior | n/a | n/a | yes |
+| hessian | gauss | standard | boundary | 0.82 | 0.988 | no |
+| hessian | gauss | standard | interior | n/a | n/a | yes |
+| hessian | sin_cos | crk | boundary | n/a | n/a | yes |
+| hessian | sin_cos | crk | interior | n/a | n/a | yes |
+| hessian | sin_cos | renorm | boundary | n/a | n/a | yes |
+| hessian | sin_cos | renorm | interior | n/a | n/a | yes |
+| hessian | sin_cos | renormVal | boundary | n/a | n/a | yes |
+| hessian | sin_cos | renormVal | interior | n/a | n/a | yes |
+| hessian | sin_cos | standard | boundary | n/a | n/a | yes |
+| hessian | sin_cos | standard | interior | n/a | n/a | yes |
+| hessian | x^2 | crk | boundary | n/a | n/a | yes |
+| hessian | x^2 | crk | interior | n/a | n/a | yes |
+| hessian | x^2 | renorm | boundary | n/a | n/a | yes |
+| hessian | x^2 | renorm | interior | n/a | n/a | yes |
+| hessian | x^2 | renormVal | boundary | n/a | n/a | yes |
+| hessian | x^2 | renormVal | interior | n/a | n/a | yes |
+| hessian | x^2 | standard | boundary | -1.26 | 0.999 | no |
+| hessian | x^2 | standard | interior | n/a | n/a | yes |
+| hessian | xy | crk | boundary | n/a | n/a | yes |
+| hessian | xy | crk | interior | n/a | n/a | yes |
+| hessian | xy | renorm | boundary | n/a | n/a | yes |
+| hessian | xy | renorm | interior | n/a | n/a | yes |
+| hessian | xy | renormVal | boundary | n/a | n/a | yes |
+| hessian | xy | renormVal | interior | n/a | n/a | yes |
+| hessian | xy | standard | boundary | -1.17 | 0.992 | no |
+| hessian | xy | standard | interior | n/a | n/a | yes |
+| hessian | y^2 | crk | boundary | n/a | n/a | yes |
+| hessian | y^2 | crk | interior | n/a | n/a | yes |
+| hessian | y^2 | renorm | boundary | n/a | n/a | yes |
+| hessian | y^2 | renorm | interior | n/a | n/a | yes |
+| hessian | y^2 | renormVal | boundary | n/a | n/a | yes |
+| hessian | y^2 | renormVal | interior | n/a | n/a | yes |
+| hessian | y^2 | standard | boundary | -1.13 | 0.990 | no |
+| hessian | y^2 | standard | interior | n/a | n/a | yes |
 | interpolate | 1 | crk | boundary | n/a | n/a | yes |
 | interpolate | 1 | crk | interior | n/a | n/a | yes |
 | interpolate | 1 | renorm | boundary | n/a | n/a | yes |
@@ -281,7 +345,7 @@ Same tests on particles within one support of an open wall (truncated kernel sup
 | laplacian | y^2 | standard | boundary | -1.04 | 0.989 | no |
 | laplacian | y^2 | standard | interior | -1.32 | 0.947 | no |
 
-Saturated series: gradient/sin_cos/standard (boundary), gradient/sin_cos/standard (interior), gradient/x/crk (interior), gradient/x/renorm (boundary), gradient/x/renorm (interior), gradient/x/renormVal (boundary), gradient/x/renormVal (interior), gradient/x/standard (boundary), gradient/x/standard (interior), gradient/x^2/crk (interior), gradient/x^2/standard (boundary), gradient/x^2/standard (interior), gradient/xy/renorm (interior), gradient/xy/renormVal (interior), gradient/xy/standard (boundary), gradient/xy/standard (interior), gradient/y/crk (boundary), gradient/y/crk (interior), gradient/y/renorm (boundary), gradient/y/renorm (interior), gradient/y/renormVal (boundary), gradient/y/renormVal (interior), gradient/y/standard (boundary), gradient/y/standard (interior), gradient/y^2/crk (boundary), gradient/y^2/standard (boundary), interpolate/1/crk (boundary), interpolate/1/crk (interior), interpolate/1/renorm (boundary), interpolate/1/renorm (interior), interpolate/1/standard (boundary), interpolate/1/standard (interior), interpolate/sin_cos/renorm (boundary), interpolate/sin_cos/standard (boundary), interpolate/x/crk (boundary), interpolate/x/crk (interior), interpolate/x/renorm (boundary), interpolate/x/renorm (interior), interpolate/x/standard (boundary), interpolate/x/standard (interior), interpolate/x^2/renorm (boundary), interpolate/x^2/renorm (interior), interpolate/x^2/standard (boundary), interpolate/x^2/standard (interior), interpolate/xy/renorm (boundary), interpolate/xy/renorm (interior), interpolate/xy/renormVal (interior), interpolate/xy/standard (boundary), interpolate/xy/standard (interior), interpolate/y/crk (interior), interpolate/y/renorm (boundary), interpolate/y/renorm (interior), interpolate/y/renormVal (interior), interpolate/y/standard (boundary), interpolate/y/standard (interior), interpolate/y^2/renorm (boundary), interpolate/y^2/renorm (interior), interpolate/y^2/standard (boundary), interpolate/y^2/standard (interior), laplacian/gauss/crk (boundary), laplacian/gauss/renorm (boundary), laplacian/gauss/renorm (interior), laplacian/gauss/renormVal (boundary), laplacian/gauss/renormVal (interior), laplacian/gauss/standard (boundary), laplacian/gauss/standard (interior), laplacian/sin_cos/crk (interior)
+Saturated series: gradient/sin_cos/standard (boundary), gradient/sin_cos/standard (interior), gradient/x/crk (boundary), gradient/x/crk (interior), gradient/x/renorm (boundary), gradient/x/renorm (interior), gradient/x/renormVal (boundary), gradient/x/renormVal (interior), gradient/x/standard (boundary), gradient/x/standard (interior), gradient/x^2/crk (interior), gradient/x^2/standard (boundary), gradient/x^2/standard (interior), gradient/xy/renorm (interior), gradient/xy/renormVal (interior), gradient/xy/standard (boundary), gradient/xy/standard (interior), gradient/y/crk (boundary), gradient/y/crk (interior), gradient/y/renorm (boundary), gradient/y/renorm (interior), gradient/y/renormVal (boundary), gradient/y/renormVal (interior), gradient/y/standard (boundary), gradient/y/standard (interior), gradient/y^2/standard (boundary), hessian/gauss/crk (interior), hessian/gauss/renorm (interior), hessian/gauss/renormVal (interior), hessian/gauss/standard (interior), hessian/sin_cos/crk (boundary), hessian/sin_cos/crk (interior), hessian/sin_cos/renorm (boundary), hessian/sin_cos/renorm (interior), hessian/sin_cos/renormVal (boundary), hessian/sin_cos/renormVal (interior), hessian/sin_cos/standard (boundary), hessian/sin_cos/standard (interior), hessian/x^2/crk (boundary), hessian/x^2/crk (interior), hessian/x^2/renorm (boundary), hessian/x^2/renorm (interior), hessian/x^2/renormVal (boundary), hessian/x^2/renormVal (interior), hessian/x^2/standard (interior), hessian/xy/crk (boundary), hessian/xy/crk (interior), hessian/xy/renorm (boundary), hessian/xy/renorm (interior), hessian/xy/renormVal (boundary), hessian/xy/renormVal (interior), hessian/xy/standard (interior), hessian/y^2/crk (boundary), hessian/y^2/crk (interior), hessian/y^2/renorm (boundary), hessian/y^2/renorm (interior), hessian/y^2/renormVal (boundary), hessian/y^2/renormVal (interior), hessian/y^2/standard (interior), interpolate/1/crk (boundary), interpolate/1/crk (interior), interpolate/1/renorm (boundary), interpolate/1/renorm (interior), interpolate/1/standard (boundary), interpolate/1/standard (interior), interpolate/sin_cos/renorm (boundary), interpolate/sin_cos/standard (boundary), interpolate/x/crk (boundary), interpolate/x/crk (interior), interpolate/x/renorm (boundary), interpolate/x/renorm (interior), interpolate/x/standard (boundary), interpolate/x/standard (interior), interpolate/x^2/renorm (boundary), interpolate/x^2/renorm (interior), interpolate/x^2/standard (boundary), interpolate/x^2/standard (interior), interpolate/xy/renorm (boundary), interpolate/xy/renorm (interior), interpolate/xy/renormVal (interior), interpolate/xy/standard (boundary), interpolate/xy/standard (interior), interpolate/y/crk (interior), interpolate/y/renorm (boundary), interpolate/y/renorm (interior), interpolate/y/renormVal (interior), interpolate/y/standard (boundary), interpolate/y/standard (interior), interpolate/y^2/renorm (boundary), interpolate/y^2/renorm (interior), interpolate/y^2/standard (boundary), interpolate/y^2/standard (interior), laplacian/gauss/crk (boundary), laplacian/gauss/renorm (boundary), laplacian/gauss/renorm (interior), laplacian/gauss/renormVal (boundary), laplacian/gauss/renormVal (interior), laplacian/gauss/standard (boundary), laplacian/gauss/standard (interior), laplacian/sin_cos/crk (interior)
 
 ## 4. Observed orders -- resolve-periodic/wendland2 (error vs dx)
 
@@ -305,6 +369,22 @@ Saturated series: gradient/sin_cos/standard (boundary), gradient/sin_cos/standar
 | gradient | sin_cos | renorm | interior | 1.83 | 0.998 | no |
 | gradient | sin_cos | renormVal | interior | 1.83 | 0.998 | no |
 | gradient | sin_cos | standard | interior | n/a | n/a | yes |
+| hessian | gauss_periodic | crk | interior | n/a | n/a | yes |
+| hessian | gauss_periodic | renorm | interior | n/a | n/a | yes |
+| hessian | gauss_periodic | renormVal | interior | n/a | n/a | yes |
+| hessian | gauss_periodic | standard | interior | n/a | n/a | yes |
+| hessian | sin_a | crk | interior | n/a | n/a | yes |
+| hessian | sin_a | renorm | interior | n/a | n/a | yes |
+| hessian | sin_a | renormVal | interior | n/a | n/a | yes |
+| hessian | sin_a | standard | interior | n/a | n/a | yes |
+| hessian | sin_b | crk | interior | n/a | n/a | yes |
+| hessian | sin_b | renorm | interior | n/a | n/a | yes |
+| hessian | sin_b | renormVal | interior | n/a | n/a | yes |
+| hessian | sin_b | standard | interior | n/a | n/a | yes |
+| hessian | sin_cos | crk | interior | n/a | n/a | yes |
+| hessian | sin_cos | renorm | interior | n/a | n/a | yes |
+| hessian | sin_cos | renormVal | interior | n/a | n/a | yes |
+| hessian | sin_cos | standard | interior | n/a | n/a | yes |
 | interpolate | gauss_periodic | crk | interior | 1.84 | 1.000 | no |
 | interpolate | gauss_periodic | renorm | interior | 0.98 | 0.892 | no |
 | interpolate | gauss_periodic | renormVal | interior | 1.84 | 1.000 | no |
@@ -338,7 +418,7 @@ Saturated series: gradient/sin_cos/standard (boundary), gradient/sin_cos/standar
 | laplacian | sin_cos | renormVal | interior | -1.14 | 0.863 | no |
 | laplacian | sin_cos | standard | interior | -1.13 | 0.872 | no |
 
-Saturated series: gradient/sin_a/standard (interior), gradient/sin_b/standard (interior), gradient/sin_cos/standard (interior), interpolate/sin_a/renorm (interior), interpolate/sin_a/standard (interior), interpolate/sin_b/renorm (interior), interpolate/sin_b/standard (interior), laplacian/gauss_periodic/renorm (interior), laplacian/gauss_periodic/renormVal (interior), laplacian/gauss_periodic/standard (interior), laplacian/sin_cos/crk (interior)
+Saturated series: gradient/sin_a/standard (interior), gradient/sin_b/standard (interior), gradient/sin_cos/standard (interior), hessian/gauss_periodic/crk (interior), hessian/gauss_periodic/renorm (interior), hessian/gauss_periodic/renormVal (interior), hessian/gauss_periodic/standard (interior), hessian/sin_a/crk (interior), hessian/sin_a/renorm (interior), hessian/sin_a/renormVal (interior), hessian/sin_a/standard (interior), hessian/sin_b/crk (interior), hessian/sin_b/renorm (interior), hessian/sin_b/renormVal (interior), hessian/sin_b/standard (interior), hessian/sin_cos/crk (interior), hessian/sin_cos/renorm (interior), hessian/sin_cos/renormVal (interior), hessian/sin_cos/standard (interior), interpolate/sin_a/renorm (interior), interpolate/sin_a/standard (interior), interpolate/sin_b/renorm (interior), interpolate/sin_b/standard (interior), laplacian/gauss_periodic/renorm (interior), laplacian/gauss_periodic/renormVal (interior), laplacian/gauss_periodic/standard (interior), laplacian/sin_cos/crk (interior)
 
 ## 5. Observed orders -- smoothing/wendland2 (error vs h)
 
@@ -370,16 +450,16 @@ Saturated series: gradient/sin_a/standard (interior), gradient/sin_b/standard (i
 | gradient | sin_cos | renormVal | interior | n/a | n/a | yes |
 | gradient | sin_cos | standard | boundary | n/a | n/a | yes |
 | gradient | sin_cos | standard | interior | -1.29 | 0.928 | no |
-| gradient | x | crk | boundary | n/a | n/a | yes |
-| gradient | x | crk | interior | -4.99 | 0.965 | no |
+| gradient | x | crk | boundary | 0.93 | 0.798 | no |
+| gradient | x | crk | interior | n/a | n/a | yes |
 | gradient | x | renorm | boundary | n/a | n/a | yes |
 | gradient | x | renorm | interior | n/a | n/a | yes |
 | gradient | x | renormVal | boundary | n/a | n/a | yes |
 | gradient | x | renormVal | interior | n/a | n/a | yes |
 | gradient | x | standard | boundary | n/a | n/a | yes |
 | gradient | x | standard | interior | -2.01 | 0.992 | no |
-| gradient | y | crk | boundary | n/a | n/a | yes |
-| gradient | y | crk | interior | -4.61 | 0.985 | no |
+| gradient | y | crk | boundary | 1.26 | 0.960 | no |
+| gradient | y | crk | interior | n/a | n/a | yes |
 | gradient | y | renorm | boundary | n/a | n/a | yes |
 | gradient | y | renorm | interior | n/a | n/a | yes |
 | gradient | y | renormVal | boundary | n/a | n/a | yes |
@@ -427,7 +507,7 @@ Saturated series: gradient/sin_a/standard (interior), gradient/sin_b/standard (i
 | interpolate | y | standard | boundary | 1.52 | 0.997 | no |
 | interpolate | y | standard | interior | -1.51 | 0.997 | no |
 
-Saturated series: gradient/gauss/crk (boundary), gradient/gauss/crk (interior), gradient/gauss/standard (boundary), gradient/sin_cos/crk (boundary), gradient/sin_cos/crk (interior), gradient/sin_cos/renorm (boundary), gradient/sin_cos/renorm (interior), gradient/sin_cos/renormVal (boundary), gradient/sin_cos/renormVal (interior), gradient/sin_cos/standard (boundary), gradient/x/crk (boundary), gradient/x/renorm (boundary), gradient/x/renorm (interior), gradient/x/renormVal (boundary), gradient/x/renormVal (interior), gradient/x/standard (boundary), gradient/y/crk (boundary), gradient/y/renorm (boundary), gradient/y/renorm (interior), gradient/y/renormVal (boundary), gradient/y/renormVal (interior), gradient/y/standard (boundary), interpolate/1/crk (boundary), interpolate/1/crk (interior), interpolate/gauss/renorm (interior), interpolate/gauss/standard (interior), interpolate/sin_cos/renorm (interior), interpolate/sin_cos/standard (interior), interpolate/x/crk (interior)
+Saturated series: gradient/gauss/crk (boundary), gradient/gauss/crk (interior), gradient/gauss/standard (boundary), gradient/sin_cos/crk (boundary), gradient/sin_cos/crk (interior), gradient/sin_cos/renorm (boundary), gradient/sin_cos/renorm (interior), gradient/sin_cos/renormVal (boundary), gradient/sin_cos/renormVal (interior), gradient/sin_cos/standard (boundary), gradient/x/crk (interior), gradient/x/renorm (boundary), gradient/x/renorm (interior), gradient/x/renormVal (boundary), gradient/x/renormVal (interior), gradient/x/standard (boundary), gradient/y/crk (interior), gradient/y/renorm (boundary), gradient/y/renorm (interior), gradient/y/renormVal (boundary), gradient/y/renormVal (interior), gradient/y/standard (boundary), interpolate/1/crk (boundary), interpolate/1/crk (interior), interpolate/gauss/renorm (interior), interpolate/gauss/standard (interior), interpolate/sin_cos/renorm (interior), interpolate/sin_cos/standard (interior), interpolate/x/crk (interior)
 
 ## 6. Renorm condition numbers
 

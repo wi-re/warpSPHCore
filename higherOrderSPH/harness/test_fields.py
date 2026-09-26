@@ -327,3 +327,27 @@ def smooth_open_fields(dim: int, box) -> list[Field]:
                             is_vector=False, value=prod_value,
                             grad=prod_grad, lap=prod_lap))
     return fields
+
+
+def analytic_hessian(field: Field, x: torch.Tensor) -> torch.Tensor:
+    """Exact Hessian ``H[:, a, b] = d^2 f / dx_a dx_b`` of a *scalar* field,
+    ``(N, dim, dim)``, obtained by autodiff of the field's closed-form
+    gradient (so it is exact to round-off and covers every field --
+    monomials, the image-summed periodic Gaussians, mode products -- without
+    a hand-derived second derivative per field). Layout matches the core
+    `Gradient` of a vector input (``out[:, r, c] = d f_r / dx_c``), so the
+    grad-of-grad probe compares index-for-index."""
+    if field.is_vector:
+        raise ValueError("analytic_hessian is defined for scalar fields")
+    xg = x.detach().clone().requires_grad_(True)
+    g = field.grad(xg)                               # (N, dim)
+    rows = []
+    for a in range(g.shape[1]):
+        ga = g[:, a]
+        # a gradient component built as a constant (e.g. d(x^2)/dy = 0) has
+        # no graph at all -- its derivative row is identically zero
+        r = (torch.autograd.grad(ga.sum(), xg, retain_graph=True,
+                                 allow_unused=True)[0]
+             if ga.requires_grad else None)
+        rows.append(torch.zeros_like(xg) if r is None else r)
+    return torch.stack(rows, dim=1).detach()          # (N, a, b)

@@ -47,10 +47,31 @@ from warpSPHCore.renorm import computeRenormalizationMatrices
 
 from particle_sets import Case
 
-__all__ = ["MODES", "PROBES", "CorrectionCache", "run_probe"]
+__all__ = ["MODES", "PROBES", "CorrectionCache", "run_probe",
+           "register_mode", "EXTERNAL_MODES"]
 
 MODES = ("standard", "crk", "renorm", "renormVal")
-PROBES = ("interpolate", "gradient", "laplacian")
+# `hessian` is grad-of-grad through the mode's own gradient (the core has no
+# Hessian operator); it is the baseline column a p >= 2 operator (Phase 4
+# MLS/RKPM, Phase 5 LABFM) is compared against.
+PROBES = ("interpolate", "gradient", "laplacian", "hessian")
+
+# Operators from later phases plug in here instead of editing the dispatch:
+# name -> fn(case, cache, values, probe) returning the operator output in the
+# same layout as `run_probe` (interpolate (N,)/(N,D), gradient (N,dim) /
+# (N,D,dim), laplacian (N,), hessian (N,dim,dim)), or None when that mode
+# does not provide the probe (the caller skips the row). Registering is how
+# a new operator's OWN Laplacian/Hessian is measured, rather than Brookshaw /
+# grad-of-grad via `warpOperation`.
+EXTERNAL_MODES: dict = {}
+
+
+def register_mode(name: str, fn) -> None:
+    """Register an external operator mode (see `EXTERNAL_MODES`). Built-in
+    mode names cannot be shadowed."""
+    if name in MODES:
+        raise ValueError(f"{name!r} is a built-in mode")
+    EXTERNAL_MODES[name] = fn
 
 _OP_BY_PROBE = {
     "interpolate": WarpOperation.Interpolate,
@@ -142,10 +163,18 @@ def run_probe(case: Case, cache: CorrectionCache,
               values: torch.Tensor, probe: str, mode: str) -> torch.Tensor:
     """Run one operator probe on `values` (the field at the particles) and
     return the operator output (torch tensor on the case device)."""
-    if probe not in _OP_BY_PROBE:
+    if probe not in PROBES:
         raise ValueError(f"unknown probe {probe!r}; expected one of {PROBES}")
+    if mode in EXTERNAL_MODES:
+        return EXTERNAL_MODES[mode](case, cache, values, probe)
     if mode not in MODES:
-        raise ValueError(f"unknown mode {mode!r}; expected one of {MODES}")
+        raise ValueError(f"unknown mode {mode!r}; expected one of {MODES} "
+                         f"or a registered external mode")
+    if probe == "hessian":
+        # grad-of-grad: the mode's gradient applied to its own gradient
+        # (a vector field), giving out[:, a, b] = d/dx_b (d f / dx_a).
+        g = run_probe(case, cache, values, "gradient", mode)
+        return run_probe(case, cache, g.contiguous(), "gradient", mode)
 
     properties = OperationProperties(
         kernel=case.kernel,

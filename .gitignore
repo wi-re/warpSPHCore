@@ -99,6 +99,7 @@ higherOrderSPH/dehnen2012_convergence-without-pairing-instability/results/
 # Convergence harness outputs (regenerable from the drivers)
 higherOrderSPH/harness/figures/
 higherOrderSPH/harness/results/
+higherOrderSPH/harness/REPORT_frozen_smoke.md
 # Pass-2 PDE benchmark outputs (regenerable from pde/run_pde.py)
 higherOrderSPH/harness/pde/figures/
 higherOrderSPH/harness/pde/results/

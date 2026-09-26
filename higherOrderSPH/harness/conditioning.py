@@ -20,7 +20,8 @@ from __future__ import annotations
 
 import torch
 
-__all__ = ["condition_numbers", "fallback_mask", "cond_summary"]
+__all__ = ["condition_numbers", "matrix_condition_numbers", "fallback_mask",
+           "cond_summary"]
 
 
 def fallback_mask(C: torch.Tensor) -> torch.Tensor:
@@ -46,6 +47,39 @@ def condition_numbers(eigvals: torch.Tensor) -> torch.Tensor:
     # flag via the where.
     cond = torch.where(lam_min == 0, torch.full_like(lam_max, float("inf")),
                        lam_max / lam_min)
+    return cond
+
+
+def matrix_condition_numbers(M: torch.Tensor,
+                             equilibrate: bool = False) -> torch.Tensor:
+    """Per-particle 2-norm condition number sigma_max / sigma_min of a batch
+    of n x n matrices ``(N, n, n)`` -- the general path for the order-p
+    moment matrices of Phase 4/5 (n = 3..20; not necessarily symmetric), where
+    `computeRenormalizationMatrices`' d x d eigenvalues do not exist. For a
+    symmetric matrix this equals `condition_numbers` of its eigenvalues.
+
+    `equilibrate=True` first applies the symmetric Jacobi scaling
+    ``D^-1/2 M D^-1/2`` with ``D = |diag M|``: an unscaled monomial basis
+    mixes powers of h (a p=2 moment matrix has entries from O(1) to O(h^4)),
+    so its raw kappa mostly measures that scaling, not the particle geometry.
+    Report the equilibrated value for geometry studies (or build the matrix
+    in the h-scaled basis x_ij / h). Returns +inf for a zero smallest
+    singular value, and for equilibration of a row with a zero diagonal.
+    """
+    if M.ndim != 3 or M.shape[1] != M.shape[2]:
+        raise ValueError("M must be a (N, n, n) batch of square matrices")
+    A = M
+    if equilibrate:
+        d = M.diagonal(dim1=1, dim2=2).abs()
+        bad = (d == 0).any(dim=1)
+        s_ = torch.where(d == 0, torch.ones_like(d), d).rsqrt()
+        A = s_[:, :, None] * M * s_[:, None, :]
+    sv = torch.linalg.svdvals(A)                     # (N, n), descending
+    smax, smin = sv[:, 0], sv[:, -1]
+    cond = torch.where(smin == 0, torch.full_like(smax, float("inf")),
+                       smax / smin)
+    if equilibrate:
+        cond = torch.where(bad, torch.full_like(cond, float("inf")), cond)
     return cond
 
 

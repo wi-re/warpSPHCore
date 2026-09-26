@@ -52,6 +52,7 @@ from operators import CorrectionCache, MODES, run_probe
 from particle_sets import build_case
 from report import (Row, plot_error_curves, render_pivot, write_rows_csv)
 from test_fields import (
+    analytic_hessian,
     monomial_fields,
     smooth_open_fields,
     smooth_periodic_fields,
@@ -96,6 +97,11 @@ def measure(case, cache, field, probe, mode, region) -> dict | None:
             return None
         out = run_probe(case, cache, values, "laplacian", mode)
         analytic = field.lap(case.positions)
+    elif probe == "hessian":
+        if field.is_vector:
+            return None
+        out = run_probe(case, cache, values, "hessian", mode)
+        analytic = analytic_hessian(field, case.positions)
     else:
         raise ValueError(probe)
     norms = error_norms(out, analytic, mask)
@@ -129,6 +135,12 @@ def probe_fields(case, cache, fields, probes, modes, regions) -> list[Row]:
                                          or (field.degree >= 0
                                              and field.degree < 2)):
                 continue
+            # Hessian: same rule (degree < 2 -> identically-zero target);
+            # scalar fields only.
+            if probe == "hessian" and (field.is_vector
+                                       or (field.degree >= 0
+                                           and field.degree < 2)):
+                continue
             for mode in modes:
                 for region in regions:
                     m = measure(case, cache, field, probe, mode, region)
@@ -156,7 +168,7 @@ def suite_patch(kernel, args, device) -> list[Row]:
     if args.dim >= 2:
         fields = fields + [vector_field(args.dim)]
     return probe_fields(case, cache, fields,
-                       ["interpolate", "gradient", "laplacian"],
+                       ["interpolate", "gradient", "laplacian", "hessian"],
                        args.modes, case_regions(case))
 
 
@@ -178,7 +190,7 @@ def suite_resolve(kernel, args, device, periodic: bool) -> list[Row]:
             fields = (monomial_fields(args.dim, degree_max=2)
                       + smooth_open_fields(args.dim, case.box))
         rows += probe_fields(case, cache, fields,
-                            ["interpolate", "gradient", "laplacian"],
+                            ["interpolate", "gradient", "laplacian", "hessian"],
                             args.modes, case_regions(case))
     return rows
 
@@ -375,6 +387,11 @@ def run_smoke(device: str, kernel: KernelFunctions) -> dict:
     c6 = linf(f_const, "interpolate", "standard", "boundary")
     c7 = linf(f_const, "interpolate", "renormVal", "interior")
     c8 = linf(f_lin, "gradient", "renormVal", "interior")
+    # CRK linear *gradient* exactness (needs dB/dx contracted on the right
+    # axis -- the 5ca1882 transpose regression gave a flat ~1e-3 here; on a
+    # jittered set gradB is asymmetric, so this is what catches it).
+    c9 = linf(f_lin, "gradient", "crk", "interior")
+    c10 = linf(f_lin, "gradient", "crk", "boundary")
     _C, eigvals, _ = cache.renorm()
     cond_mean = float(condition_numbers(eigvals)[case.interior_mask].mean())
 
@@ -387,6 +404,8 @@ def run_smoke(device: str, kernel: KernelFunctions) -> dict:
         "standard_interp_const_boundary_linf": c6,     # > interior
         "renormVal_interp_const_interior_linf": c7,    # ~1e-15 (value corrected)
         "renormVal_grad_linear_interior_linf": c8,     # ~1e-15 (Bonet-Lok grad)
+        "crk_grad_linear_interior_linf": c9,           # ~1e-15
+        "crk_grad_linear_boundary_linf": c10,          # ~1e-14
         "renorm_cond_interior_mean": cond_mean,        # O(1)
     }
     thresholds = {
@@ -398,6 +417,8 @@ def run_smoke(device: str, kernel: KernelFunctions) -> dict:
         "standard_interp_const_boundary_gt_interior": True,
         "renormVal_interp_const_interior_linf_max": 1e-10,
         "renormVal_grad_linear_interior_linf_max": 1e-10,
+        "crk_grad_linear_interior_linf_max": 1e-10,
+        "crk_grad_linear_boundary_linf_max": 1e-10,
         "renorm_cond_interior_mean_max": 10.0,
         "synthetic_order": 2.0,
     }
@@ -406,6 +427,7 @@ def run_smoke(device: str, kernel: KernelFunctions) -> dict:
     ok &= c1 < 1e-10 and c2 < 1e-10 and c3 < 1e-10
     ok &= c4 > 1e-3 and c5 > 1e-4 and c6 > c5
     ok &= c7 < 1e-10 and c8 < 1e-10
+    ok &= c9 < 1e-10 and c10 < 1e-10
     ok &= np.isfinite(cond_mean) and cond_mean < 10.0
     verdict["ok"] = bool(ok)
 

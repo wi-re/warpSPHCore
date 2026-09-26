@@ -90,6 +90,23 @@ non-monotonicity is confined to the common-cells ensemble (finding 2).
    L2), not the common-cells raw L2. The suite's raw-L2 "0.47 order" for
    Sedov was a sampling artifact on top of the genuine first-order shock
    limit.
+7. **Exact-solution check (2026-09-26) — confirms finding 4.** Scoring
+   every rung against the frontend's exact self-similar solution
+   (`SedovSolution`, at each run's own t_final; `error_l1_exact` /
+   `error_l2_exact`, volume-weighted, 4-point fit incl. nx=1600) gives
+   **L1 order 1.03 (r² 0.993)** and **L2 0.59 (r² 0.987)** — exactly the
+   first-order shock-capturing signature (L1 ~ dx, L2 ~ √dx). (Pre-CRK-fix
+   run; see `higher_order.md` Phase 2 — to be re-read after the re-run.)
+   A same-day caveat here had claimed the opposite: fitting the
+   finite-reference model e = C(h^p − h_ref^p) to the reference-metric L1
+   gave p ≈ 0.23, "below first order". **That was wrong** — the model
+   assumes the coarse-vs-reference error keeps one sign structure across
+   rungs, but here the shock-position error changes sign between rungs
+   (alignment shifts +0.42, +0.41, −0.05 dx, finding 1), so the correction
+   over-corrects. For Sod, where the assumption holds, the corrected fit
+   (1.07) does land near the exact-solution order (0.98). Rule: prefer the
+   exact metric; treat the bias-corrected fit as unreliable unless validated
+   against an exact solution for that case.
 
 ## Profile inspection (2026-09-25)
 

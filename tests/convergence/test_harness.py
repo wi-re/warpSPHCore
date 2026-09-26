@@ -26,7 +26,8 @@ DRIVER = HARNESS_DIR / "run_baseline.py"
 
 sys.path.insert(0, str(REPO_ROOT / "higherOrderSPH"))
 
-from harness.metrics import SATURATION_RATIO, observed_order  # noqa: E402
+from harness.metrics import (REF_ORDER_MIN, SATURATION_RATIO,  # noqa: E402
+                             observed_order, reference_corrected_order)
 from harness import conditioning  # noqa: E402
 from harness import test_fields  # noqa: E402
 
@@ -70,6 +71,37 @@ def test_observed_order_rejects_bad_input():
         observed_order([1.0, 0.0], [1.0, 1.0])
     with pytest.raises(ValueError):
         observed_order([1.0, 2.0], [1.0, -1.0])
+
+
+@pytest.mark.parametrize("p", [0.5, 1.0, 2.0])
+@pytest.mark.parametrize("ladder, ref", [([200, 400, 800], 1600),
+                                         ([32, 48, 64], 96)])
+def test_reference_corrected_order_recovers_true_order(p, ladder, ref):
+    # e(h) = C (h^p - h_ref^p): the plain fit over-reads (a true first order
+    # fits ~1.4 / ~2.0 on these ladders); the corrected fit recovers p.
+    x = 1.0 / np.array(ladder, dtype=float)
+    y = 3.0 * (x ** p - (1.0 / ref) ** p)
+    plain = observed_order(x, y)
+    res = reference_corrected_order(x, y, 1.0 / ref)
+    assert plain.slope > p + 0.15
+    assert not res.saturated
+    assert res.slope == pytest.approx(p, abs=1e-4)
+    assert res.r_squared == pytest.approx(1.0, abs=1e-8)
+
+
+def test_reference_corrected_order_flags_bound():
+    # An error that *decelerates* toward the reference cannot be produced by
+    # the model: the fit runs to the lower search bound and is flagged.
+    x = 1.0 / np.array([32.0, 48.0, 64.0])
+    y = np.array([1.0e-1, 4.0e-2, 3.9e-2])
+    res = reference_corrected_order(x, y, 1.0 / 96)
+    assert res.saturated
+    assert res.slope == pytest.approx(REF_ORDER_MIN, abs=1e-2)
+
+
+def test_reference_corrected_order_rejects_bad_reference():
+    with pytest.raises(ValueError):
+        reference_corrected_order([0.1, 0.05], [1.0, 0.5], 0.05)
 
 
 # ---------------------------------------------------------------------------
@@ -160,6 +192,55 @@ def test_monomial_fields_no_duplicates(dim):
                 f.name
 
 
+def test_analytic_hessian_monomial_and_smooth():
+    from harness.test_fields import analytic_hessian, smooth_open_fields
+    x = torch.rand(50, 2, dtype=torch.float64)
+    f = {fl.name: fl for fl in test_fields.monomial_fields(2, 3)}["x^2y"]
+    H = analytic_hessian(f, x)
+    X, Y = x[:, 0], x[:, 1]
+    expect = torch.stack([torch.stack([2 * Y, 2 * X], -1),
+                          torch.stack([2 * X, torch.zeros_like(X)], -1)], 1)
+    assert torch.allclose(H, expect, atol=1e-12)
+    # a field with an identically-constant gradient component (d(x^2)/dy)
+    # and a linear one (all-zero Hessian, no graph at all)
+    fx2 = {fl.name: fl for fl in test_fields.monomial_fields(2, 2)}
+    H2 = analytic_hessian(fx2["x^2"], x)
+    assert torch.allclose(H2[:, 0, 0], torch.full_like(X, 2.0))
+    assert H2[:, 1].abs().max() == 0 and H2[:, 0, 1].abs().max() == 0
+    assert analytic_hessian(fx2["x"], x).abs().max() == 0
+    # trace == the field's own analytic Laplacian, for every smooth field
+    for fl in smooth_open_fields(2, np.array([1.0, 1.0])):
+        if fl.is_vector:
+            continue
+        H = analytic_hessian(fl, x)
+        tr = H.diagonal(dim1=1, dim2=2).sum(-1)
+        assert torch.allclose(tr, fl.lap(x), rtol=1e-10, atol=1e-10), fl.name
+        assert torch.allclose(H, H.transpose(1, 2), atol=1e-10), fl.name
+
+
+def test_external_mode_dispatch():
+    # same local-import pattern as test_renorm_value_scalar_and_vector_broadcast
+    sys.path.insert(0, str(HARNESS_DIR))
+    from harness import operators
+    calls = []
+
+    def fake(case, cache, values, probe):
+        calls.append(probe)
+        return values * 2
+
+    operators.register_mode("fakeMLS", fake)
+    try:
+        v = torch.ones(3)
+        out = operators.run_probe(None, None, v, "hessian", "fakeMLS")
+        assert torch.equal(out, v * 2) and calls == ["hessian"]
+        with pytest.raises(ValueError):
+            operators.register_mode("crk", fake)      # no shadowing built-ins
+        with pytest.raises(ValueError):
+            operators.run_probe(None, None, v, "nope", "fakeMLS")
+    finally:
+        operators.EXTERNAL_MODES.pop("fakeMLS", None)
+
+
 def test_vector_field_derivatives():
     x = torch.rand(32, 2, dtype=torch.float64)
     f = test_fields.vector_field(2)
@@ -215,6 +296,58 @@ def test_condition_numbers_and_fallback():
 # ---------------------------------------------------------------------------
 # value renormalization (Randles--Libersky) helper
 # ---------------------------------------------------------------------------
+
+def test_matrix_condition_numbers_general_n():
+    # symmetric: agrees with the eigenvalue path
+    A = torch.diag(torch.tensor([4.0, 2.0, 0.5], dtype=torch.float64))[None]
+    k = conditioning.matrix_condition_numbers(A)
+    assert k.item() == pytest.approx(8.0)
+    assert conditioning.condition_numbers(
+        torch.tensor([[4.0, 2.0, 0.5]])).item() == pytest.approx(8.0)
+    # non-symmetric 6x6 (p=2 moment-matrix size in 2D) vs numpy's cond
+    g = torch.Generator().manual_seed(0)
+    M = torch.randn(5, 6, 6, generator=g, dtype=torch.float64)
+    k = conditioning.matrix_condition_numbers(M)
+    ref = np.linalg.cond(M.numpy())
+    assert np.allclose(k.numpy(), ref, rtol=1e-10)
+    # singular -> inf
+    S = torch.zeros(1, 3, 3, dtype=torch.float64)
+    S[0, 0, 0] = 1.0
+    assert torch.isinf(conditioning.matrix_condition_numbers(S)).all()
+    # equilibration removes a pure basis-scaling spread
+    D = torch.diag(torch.tensor([1.0, 1e-2, 1e-4], dtype=torch.float64))[None]
+    assert conditioning.matrix_condition_numbers(D).item() == pytest.approx(1e4)
+    assert conditioning.matrix_condition_numbers(
+        D, equilibrate=True).item() == pytest.approx(1.0)
+
+
+def test_frozen_leg_pure_pieces():
+    # exact solutions + RK4 of the frozen-particle PDE leg (no warp needed:
+    # run_frozen only imports warp/warpSPHCore inside its driver functions)
+    sys.path.insert(0, str(HARNESS_DIR))
+    from harness import run_frozen as rf
+    box = (1.0, 2.0)
+    kappa = rf.wavevector(box, (1, 2))
+    assert torch.allclose(kappa, torch.tensor([2 * np.pi, 2 * np.pi],
+                                              dtype=torch.float64))
+    x = torch.rand(20, 2, dtype=torch.float64)
+    a = torch.tensor([1.0, 0.5], dtype=torch.float64)
+    # advection: periodic in time with the box period along a
+    u = rf.exact_solution("advection", x, 0.3, kappa, a=a)
+    assert torch.allclose(u, torch.sin((x - 0.3 * a) @ kappa))
+    ud = rf.exact_solution("diffusion", x, 0.2, kappa, nu=0.1)
+    assert torch.allclose(ud, np.exp(-0.1 * float(kappa @ kappa) * 0.2)
+                          * torch.sin(x @ kappa))
+    # RK4 on u' = -u: 4th-order accurate, lands exactly on t_end
+    u1, n, div = rf.rk4(lambda u: -u, torch.ones(1, dtype=torch.float64),
+                        1.0, 0.1)
+    assert n == 10 and not div
+    assert abs(float(u1) - np.exp(-1.0)) < 1e-6
+    # blow-up detection: u' = +50 u explodes past BLOWUP
+    _, _, div = rf.rk4(lambda u: 50.0 * u, torch.ones(1, dtype=torch.float64),
+                       1.0, 0.01)
+    assert div
+
 
 def test_renorm_value_scalar_and_vector_broadcast():
     # Local import: operators pulls in warpSPHCore (kept out of the pure-CPU
@@ -367,6 +500,10 @@ def test_smoke_verdict_ok(smoke_run):
     c = payload["checks"]
     assert c["crk_interp_linear_interior_linf"] < 1e-10
     assert c["renorm_grad_linear_interior_linf"] < 1e-10
+    # CRK linear-gradient exactness on a jittered open set (regression guard
+    # for the crk/kernel.py gradB-transpose bug, 2026-09-26)
+    assert c["crk_grad_linear_interior_linf"] < 1e-10
+    assert c["crk_grad_linear_boundary_linf"] < 1e-10
     assert c["standard_grad_linear_interior_linf"] > 1e-3
     assert c["standard_interp_const_boundary_linf"] > \
         c["standard_interp_const_interior_linf"]
@@ -420,3 +557,37 @@ def test_disorder_probe_smoke_verdict_ok(disorder_smoke_run):
     assert c["std_interp_disorder_ratio"] > 10.0
     assert c["std_grad_disorder_ratio"] > 10.0
     assert c["all_errors_finite_positive"] is True
+
+
+# ---------------------------------------------------------------------------
+# frozen-particle PDE leg smoke (subprocess, float64)
+# ---------------------------------------------------------------------------
+
+FROZEN_DRIVER = HARNESS_DIR / "run_frozen.py"
+FROZEN_VERDICT = HARNESS_DIR / "results" / "frozen_verdict_smoke.json"
+
+
+@pytest.fixture(scope="session")
+def frozen_smoke_run():
+    if not torch.cuda.is_available():
+        pytest.skip("frozen-leg smoke requires a CUDA device")
+    env = dict(os.environ, warpSPHCore_PRECISION="float64",
+               OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4",
+               MKL_NUM_THREADS="4")
+    proc = subprocess.run([sys.executable, str(FROZEN_DRIVER), "--smoke"],
+                          env=env, cwd=str(HARNESS_DIR),
+                          capture_output=True, text=True, timeout=900)
+    payload = (json.loads(FROZEN_VERDICT.read_text())
+               if FROZEN_VERDICT.exists() else None)
+    return proc, payload
+
+
+def test_frozen_smoke_ok(frozen_smoke_run):
+    proc, payload = frozen_smoke_run
+    assert proc.returncode == 0, (
+        f"frozen smoke exited {proc.returncode}\nstdout:\n{proc.stdout[-3000:]}"
+        f"\nstderr:\n{proc.stderr[-3000:]}")
+    assert payload and payload["ok"] is True, payload
+    # every built-in mode is stable on the smoke problem
+    assert payload["diverged"] == []
+    assert payload["n_rows"] == 2 * 4 * 2     # equations x modes x ladder

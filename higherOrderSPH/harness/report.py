@@ -43,7 +43,7 @@ class Row:
     h_over_dx: float
     target_neighbors: int
     # probe description
-    probe: str                # interpolate | gradient | laplacian
+    probe: str                # interpolate | gradient | laplacian | hessian
     field: str
     field_degree: int         # -1 for smooth fields
     region: str               # interior | boundary

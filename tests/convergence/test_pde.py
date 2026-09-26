@@ -31,10 +31,11 @@ sys.path.insert(0, str(PDE_DIR))
 
 from conservation import ConservedQuantities, conserved, drift  # noqa: E402
 from field_error import (aligned_1d_l2_error, grid_error_p,      # noqa: E402
-                         grid_l2_error)
+                         grid_l2_error, particle_error_norms)
 from pde_cases import (CASES, linearWave_analytic,                # noqa: E402
                        tgv_analytic_velocity)
-from report_pde import load_rows, observed_orders                 # noqa: E402
+from report_pde import (load_rows, merge_rows,                    # noqa: E402
+                        observed_orders, reference_corrected_orders)
 
 
 # ---------------------------------------------------------------------------
@@ -79,10 +80,29 @@ def test_drift_relative_and_absolute():
     assert d["mass_drift"] == pytest.approx(0.0)
     assert d["ke_drift"] == pytest.approx((1.4 - 1.5) / 1.5)
     assert d["total_energy_drift"] == pytest.approx((1.4 - 1.5) / 1.5)
-    # ~0-initial quantities are reported as absolute final norms
+    # init/final norms are reported as-is (absolute, not relative)
     assert d["momentum_norm_final"] == pytest.approx(0.2)
     assert d["angmom_norm_final"] == pytest.approx(0.1)
     assert d["momentum_norm_init"] == pytest.approx(0.0)
+    # from a zero initial state the vector drift equals the final norm
+    assert d["momentum_drift_abs"] == pytest.approx(0.2)
+    assert d["angmom_drift_abs"] == pytest.approx(0.1)
+
+
+def test_drift_vector_drift_with_nonzero_initial_momentum():
+    # KH-like: the IC already carries |p| ~ 0.23 that is conserved. The final
+    # norm alone looks like a big "drift"; the vector drift is the real one.
+    def cq(p, lz):
+        p = torch.tensor(p, dtype=torch.float64)
+        return ConservedQuantities(
+            mass=1.0, momentum=p, momentum_norm=float(p.norm()),
+            kinetic_energy=1.0,
+            angular_momentum=torch.tensor([lz], dtype=torch.float64),
+            angular_momentum_norm=abs(lz))
+    d = drift(cq([0.23, 0.0], 0.06), cq([0.23, 1e-3], 0.0598))
+    assert d["momentum_norm_final"] == pytest.approx(np.hypot(0.23, 1e-3))
+    assert d["momentum_drift_abs"] == pytest.approx(1e-3)
+    assert d["angmom_drift_abs"] == pytest.approx(2e-4)
 
 
 def test_drift_total_energy_compressible():
@@ -358,13 +378,128 @@ def test_linearWave_analytic_travels_right():
 
 def test_cases_registry_complete():
     expected = {"tgv", "tgv-wc", "linearWave", "gresho",
-                "kelvinHelmholtz", "sod", "sedov"}
+                "kelvinHelmholtz", "sod", "sedov",
+                # matched-scheme legs (2026-09-26)
+                "linearWave-std", "gresho-std", "kelvinHelmholtz-std",
+                "sedov-std", "sod-crk"}
     assert set(CASES) == expected
+    # the legs differ from their base case only in name / scheme / notes
+    for leg, base, scheme in [("gresho-std", "gresho", "CompSPH"),
+                              ("sedov-std", "sedov", "CompSPH"),
+                              ("sod-crk", "sod", "CRKSPH")]:
+        a, b = CASES[leg], CASES[base]
+        assert a.scheme == scheme
+        assert (a.module, a.nx_ladder, a.metric, a.field, a.exact,
+                a.t_star) == (b.module, b.nx_ladder, b.metric, b.field,
+                              b.exact, b.t_star)
+    # CRKSPH needs symmetric support for exact energy conservation
+    assert CASES["sod-crk"].spec == {"supportMode": "KernelMeanSymmetric"}
     for name, e in CASES.items():
         assert len(e.nx_ladder) == 4, name
         assert e.metric in ("analytic", "reference"), name
         if e.metric == "analytic":
             assert e.analytic is not None, name
+
+
+# ---------------------------------------------------------------------------
+# exact-solution metric (Sod / Sedov) + finite-reference-corrected orders
+# ---------------------------------------------------------------------------
+
+def test_particle_error_norms_volume_weighted():
+    # 3 dense particles (V=1/3 each) with error 1, 1 sparse particle (V=1)
+    # with error 0: by count the L1 would be 0.75, by volume it is 0.5.
+    f = torch.tensor([1.0, 1.0, 1.0, 0.0], dtype=torch.float64)
+    ex = torch.zeros(4, dtype=torch.float64)
+    V = torch.tensor([1 / 3, 1 / 3, 1 / 3, 1.0], dtype=torch.float64)
+    n = particle_error_norms(f, ex, V)
+    assert n["l1"] == pytest.approx(0.5)
+    assert n["l2"] == pytest.approx(0.5 ** 0.5)
+
+
+def test_merge_rows_replaces_only_run_cases(tmp_path):
+    import csv
+    path = tmp_path / "rows.csv"
+    with path.open("w") as fh:
+        w = csv.DictWriter(fh, fieldnames=["case", "nx", "error_l2"])
+        w.writeheader()
+        for case, nx, e in [("tgv", 32, 0.1), ("sod", 200, 0.5),
+                            ("sedov", 200, 0.7)]:
+            w.writerow({"case": case, "nx": nx, "error_l2": e})
+    new = [{"case": "sod", "nx": 200, "error_l2": 0.4},
+           {"case": "sod", "nx": 400, "error_l2": 0.2}]
+    out = merge_rows(path, new, ["sod"], order=["tgv", "sod", "sedov"])
+    assert [(r["case"], r["nx"]) for r in out] == [
+        ("tgv", 32), ("sod", 200), ("sod", 400), ("sedov", 200)]
+    assert out[1]["error_l2"] == pytest.approx(0.4)
+    # no existing file: just the new rows
+    assert merge_rows(tmp_path / "none.csv", new, ["sod"],
+                      order=["sod"]) == new
+
+
+def test_exact_rows_keep_reference_rung_in_fit():
+    # the finest (reference) rung is excluded from reference-metric fits but
+    # is a real point for the exact-solution columns
+    rows = [{"case": "sod", "N": n, "dx": 1.0 / n, "error_l2": e,
+             "error_l1_exact": 2.0 / n, "is_reference": ref}
+            for n, e, ref in [(200, 0.3, False), (400, 0.2, False),
+                              (800, 0.1, False), (1600, 0.0, True)]]
+    exact = observed_orders(rows, yattr="error_l1_exact")["sod"]
+    assert exact["slope"] == pytest.approx(1.0)
+    corr = reference_corrected_orders(rows, yattr="error_l2")
+    assert "sod" in corr and not np.isnan(corr["sod"]["slope"])
+
+
+def _sod_params():
+    return dict(left_pressure=1.0, left_rho=1.0, left_velocity=0.0,
+                right_pressure=0.1795, right_rho=0.25, right_velocity=0.0,
+                gamma=5 / 3)
+
+
+def test_sod_exact_density_geometry():
+    pytest.importorskip("warpSPH")
+    from pde_cases import sod_exact_density
+    x = torch.tensor([[-0.95], [-0.1], [0.0], [0.1], [0.95]],
+                     dtype=torch.float64)
+    rho = sod_exact_density(x, 0.15, _sod_params())
+    # undisturbed left state at the centre, right state near the wrap
+    assert rho[2] == pytest.approx(1.0)
+    assert rho[0] == pytest.approx(0.25) and rho[4] == pytest.approx(0.25)
+    # mirror symmetric
+    assert rho[1] == pytest.approx(rho[3])
+    # at t -> 0 the profile is the initial step at |x| = 0.5
+    rho0 = sod_exact_density(torch.tensor([[0.49], [0.51]],
+                                          dtype=torch.float64),
+                             1e-6, _sod_params())
+    assert rho0[0] == pytest.approx(1.0) and rho0[1] == pytest.approx(0.25)
+
+
+def test_gresho_exact_velocity_profile():
+    from pde_cases import gresho_exact_velocity
+    x = torch.tensor([[0.1, 0.0], [0.0, 0.3], [0.45, 0.0], [0.0, 0.0]],
+                     dtype=torch.float64)
+    v = gresho_exact_velocity(x, 1.7, {})
+    # counter-clockwise: at (0.1, 0) v = (0, 0.5); at (0, 0.3) v = (-0.5, 0)
+    assert torch.allclose(v[0], torch.tensor([0.0, 0.5], dtype=torch.float64))
+    assert torch.allclose(v[1], torch.tensor([-0.5, 0.0], dtype=torch.float64))
+    assert torch.equal(v[2], torch.zeros(2, dtype=torch.float64))
+    assert torch.isfinite(v[3]).all() and v[3].abs().max() == 0   # centre
+
+
+def test_sedov_exact_density_shock_state():
+    pytest.importorskip("warpSPH")
+    from pde_cases import sedov_exact_density
+    from warpSPH.caseUtils.compressible.sedov.sedovSolution import (
+        SedovSolution)
+    params = dict(gamma=5 / 3, rho0=1.0, E0=1.0)
+    t = 0.5
+    _, r2, _, rho2, _ = SedovSolution(nDim=1, gamma=5 / 3).shockState(t)
+    x = torch.tensor([[-(r2 + 0.05)], [r2 * 0.999], [r2 + 0.05]],
+                     dtype=torch.float64)
+    rho = sedov_exact_density(x, t, params)
+    assert rho[0] == pytest.approx(1.0) and rho[2] == pytest.approx(1.0)
+    # just inside the front: the strong-shock jump (g+1)/(g-1) = 4
+    assert rho[1] == pytest.approx(rho2, rel=2e-2)
+    assert rho2 == pytest.approx(4.0)
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +538,20 @@ def test_pde_smoke_writes_outputs(smoke_run):
     # header + exactly one row (smoke = single lowest resolution)
     assert len(lines) == 2, f"expected 2 CSV lines, got {len(lines)}"
     assert "linearWave" in lines[1]
+
+
+def test_pde_smoke_measures_initial_state(smoke_run):
+    # The driver must measure the t=0 conserved quantities on the real state
+    # (it used to zero-fill momentum/angmom and copy the final mass) and
+    # record the scheme the case actually ran.
+    if smoke_run.returncode != 0:
+        pytest.skip("smoke did not succeed")
+    (row,) = load_rows(SMOKE_CSV)
+    assert row["scheme"] == "CRKSPH"          # linearWave's frontend default
+    assert "momentum_drift_abs" in row and "angmom_drift_abs" in row
+    # 1D periodic acoustic wave: CRKSPH conserves momentum to round-off
+    assert abs(row["momentum_drift_abs"]) < 1e-10
+    assert row["mass_drift"] == pytest.approx(0.0, abs=1e-14)
 
 
 def test_pde_smoke_does_not_clobber_full_suite_results(smoke_run):

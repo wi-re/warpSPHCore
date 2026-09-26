@@ -24,6 +24,7 @@ import os
 os.environ["warpSPHCore_PRECISION"] = "float64"   # must precede warpSPH import
 
 import argparse
+import dataclasses
 import json
 import sys
 import time
@@ -40,13 +41,13 @@ wp.init()
 
 from warpSPH.runner import CaseSpec, run            # noqa: E402
 
-from conservation import (ConservedQuantities, conserved,
-                          drift)                     # noqa: E402
-from field_error import (aligned_1d_l2_error, grid_error_p,
-                         grid_l2_error)              # noqa: E402
+from conservation import conserved, drift          # noqa: E402
+from field_error import (aligned_1d_l2_error, grid_error_p,  # noqa: E402
+                         grid_l2_error, particle_error_norms)
 from pde_cases import CASES, load_case_entry        # noqa: E402
 from metrics import error_norms                      # noqa: E402
-from report_pde import observed_orders, render_report  # noqa: E402
+from report_pde import (merge_rows, observed_orders,  # noqa: E402
+                        render_report)
 
 RESULTS = HERE / "results"
 REPORT = HERE / "REPORT_pde.md"
@@ -56,6 +57,8 @@ def build_spec(case, entry, nx: int, device: str) -> CaseSpec:
     spec = CaseSpec(caseName=entry.name, scheme=entry.scheme or case.scheme,
                     params={**dict(case.params), **entry.params})
     spec = spec.merged(**case.defaults)
+    if entry.spec:
+        spec = spec.merged(**entry.spec)
     return spec.merged(
         nx=nx, tLimit=entry.t_star, nSteps=None,
         plot=False, show=False, store=False, video=False,
@@ -63,10 +66,35 @@ def build_spec(case, entry, nx: int, device: str) -> CaseSpec:
     )
 
 
+def _capture_initial(case, box: dict):
+    """Return a copy of `case` whose `extraData` hook also records the
+    conserved quantities of the state it is first handed.
+
+    The runner calls `extraData(ctx, runningState)` exactly once on the t=0
+    state (after `initialConditions` and `initializeNewState`, before the
+    first step); with store/plot off it is not called again. Piggy-backing on
+    it gives the true initial momentum / angular momentum / mass without a
+    second system build and without a frontend change. The case's own hook
+    (if any) still runs and its return value is passed through.
+    """
+    inner = case.extraData
+
+    def hook(ctx, system):
+        if "init" not in box:
+            # same unwrap as the final state in `run_one`
+            st = system.state if hasattr(system, "state") else system
+            box["init"] = conserved(st.masses, st.velocities, st.positions,
+                                    getattr(st, "internalEnergies", None))
+        return inner(ctx, system) if inner is not None else {}
+
+    return dataclasses.replace(case, extraData=hook)
+
+
 def run_one(case, entry, nx: int, device: str) -> dict:
     spec = build_spec(case, entry, nx, device)
+    box: dict = {}
     t0 = time.perf_counter()
-    res = run(case, spec)
+    res = run(_capture_initial(case, box), spec)
     wall = time.perf_counter() - t0
 
     state = res.state.state if hasattr(res.state, "state") else res.state
@@ -76,25 +104,13 @@ def run_one(case, entry, nx: int, device: str) -> dict:
     final_c = conserved(state.masses, state.velocities, state.positions,
                         getattr(state, "internalEnergies", None))
 
-    # Initial conserved quantities from the t=0 trajectory entry (scalars) +
-    # the final mass (mass is exactly conserved, masses are never modified).
-    # The t=0 entry carries the initial KE (all cases) and, for compressible
-    # cases, the initial thermal (internal) energy. Momentum / angular
-    # momentum start ~0 for the symmetric ICs, so the *final* norms are the
-    # spurious-growth signal (a relative drift would divide by ~0). This
-    # avoids a second (wasted) system build for the initial state.
-    traj0 = res.trajectory[0] if res.trajectory else {}
-    ke_0 = float(traj0.get("kineticEnergy", final_c.kinetic_energy))
-    ie_0 = float(traj0.get("thermalEnergy", 0.0))
-    init_c = ConservedQuantities(
-        mass=final_c.mass,
-        momentum=torch.zeros_like(final_c.momentum),
-        momentum_norm=0.0,
-        kinetic_energy=ke_0,
-        angular_momentum=torch.zeros(1, dtype=final_c.momentum.dtype),
-        angular_momentum_norm=0.0,
-        internal_energy=ie_0,
-    )
+    # Initial conserved quantities measured on the actual t=0 state (captured
+    # by `_capture_initial`). Before 2026-09-26 the driver zero-filled the
+    # initial momentum / angular momentum and copied the final mass, so the
+    # old `momentum_norm_final` / `angmom_norm_final` columns were the
+    # carried-through initial values (KH |p| ~ 0.23, Gresho |L| ~ 0.06), not
+    # drift, and `mass_drift` was 0 by construction.
+    init_c = box["init"]
     drifts = drift(init_c, final_c)
     drifts["mass_final"] = final_c.mass
 
@@ -120,6 +136,16 @@ def run_one(case, entry, nx: int, device: str) -> dict:
         sim = getattr(state, entry.field)
         row["error_l2"] = error_norms(sim, analytic)["l2"]
         row["error_linf"] = error_norms(sim, analytic)["linf"]
+    # exact solution of a reference case (Sod / Sedov), evaluated at this
+    # run's own t_final: no finite-reference bias, no t_final mismatch, and
+    # the finest rung gets a real error too.
+    if entry.exact is not None:
+        exact = entry.exact(state.positions, t_final,
+                            {**dict(case.params), **entry.params})
+        ex = particle_error_norms(getattr(state, entry.field), exact,
+                                  state.masses / state.densities)
+        row["error_l1_exact"] = ex["l1"]
+        row["error_l2_exact"] = ex["l2"]
 
     return row, state
 
@@ -219,11 +245,14 @@ def main(argv=None):
         del states                       # free GPU tensors before the next case
         all_rows.extend(rows)
 
-    orders = observed_orders(all_rows)
     # Smoke runs (the CI gate) write their own artifacts so they never
     # clobber the full-suite results file.
     report = HERE / ("REPORT_pde_smoke.md" if args.smoke else "REPORT_pde.md")
     csv_name = "pde_rows_smoke.csv" if args.smoke else "pde_rows.csv"
+    if not args.smoke:
+        all_rows = merge_rows(RESULTS / csv_name, all_rows, args.cases,
+                              order=list(CASES))
+    orders = observed_orders(all_rows)
     report.write_text(render_report(all_rows, orders))
     RESULTS.mkdir(parents=True, exist_ok=True)
     # For the PDE suite we write a plain flat CSV of the row dicts

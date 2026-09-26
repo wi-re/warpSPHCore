@@ -14,15 +14,16 @@ The conserved quantities and the drift convention:
 * **momentum** -- ``sum(m v)``. Reported as a vector and its norm. Cases with
   a symmetric initial condition (TGV, Gresho) start at net momentum ~0, so a
   *relative* drift is division by ~0 and meaningless there; the meaningful
-  signal is the **absolute** norm ``|p|`` (a good scheme keeps the spurious
-  net momentum small). ``conserved`` returns the vector; the caller decides
-  relative-vs-absolute per case.
+  signal is the **absolute** vector drift ``|p_f - p_0|`` (a good scheme keeps
+  it at round-off). Not every IC starts at ~0 (KH's unequal-density shear
+  layers carry net |p| ~ 0.23), so the final norm alone is not a drift.
 * **kineticEnergy** -- ``0.5 sum(m |v|^2)``. For compressible cases the total
   energy (KE + internal) is the conserved quantity; for the first pass we track
   KE (incompressible cases like TGV have KE decay viscously, so its drift is
   the dissipation signal, not a conservation violation).
 * **angularMom** -- the out-of-plane component ``sum(m (x v_y - y v_x))`` in 2D
-  (the full vector in 3D). Same ~0-initial-value caveat as momentum.
+  (the full vector in 3D), reported as ``|L_f - L_0|`` like momentum. About
+  the origin, so only an invariant on open domains (see `drift`).
 """
 
 from __future__ import annotations
@@ -115,9 +116,21 @@ def drift(initial: ConservedQuantities,
           final: ConservedQuantities,
           eps: float = 1e-30) -> dict:
     """Relative drift ``(final - initial)/initial`` for the O(1) quantities
-    (mass, kinetic energy, total energy), plus the **absolute** final norms
-    for the ~0-initial-value quantities (momentum, angular momentum) -- a
-    relative drift there would divide by ~0 and be meaningless.
+    (mass, kinetic energy, total energy), plus the **absolute** drift of the
+    momentum / angular-momentum *vectors* ``|p_f - p_0|``, ``|L_f - L_0|``
+    (a relative drift would divide by ~0 for the symmetric ICs). The init and
+    final norms are reported too; the final norm alone is NOT a drift -- KH
+    (shear layers of unequal density) and Gresho (a vortex) start with O(0.1)
+    |p| / |L| that is simply carried through.
+
+    `initial` must be measured on the actual t=0 state (see
+    `run_pde.run_one`); a zero-filled stand-in makes every drift equal the
+    final value.
+
+    Angular momentum is taken about the origin; on a periodic domain it is
+    not an invariant of the exact dynamics (the pairwise forces across the
+    seam carry a net torque), so `angmom_drift_abs` is only a conservation
+    check on open domains.
 
     `ke_drift` is the dissipation signal for incompressible cases (KE decays
     viscously); `total_energy_drift` is the conservation check for
@@ -139,4 +152,8 @@ def drift(initial: ConservedQuantities,
         "momentum_norm_final": final.momentum_norm,
         "angmom_norm_init": initial.angular_momentum_norm,
         "angmom_norm_final": final.angular_momentum_norm,
+        "momentum_drift_abs": float(
+            (final.momentum - initial.momentum).norm()),
+        "angmom_drift_abs": float(
+            (final.angular_momentum - initial.angular_momentum).norm()),
     }

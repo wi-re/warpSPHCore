@@ -44,7 +44,8 @@ import itertools
 
 import torch
 
-__all__ = ["grid_l2_error", "grid_error_p", "aligned_1d_l2_error"]
+__all__ = ["grid_l2_error", "grid_error_p", "aligned_1d_l2_error",
+           "particle_error_norms"]
 
 
 def _row_major(idx: torch.Tensor, n_grid: int, dim: int) -> torch.Tensor:
@@ -254,3 +255,27 @@ def aligned_1d_l2_error(field_coarse: torch.Tensor,
             d_star = min(max(d_star, fine_deltas[j - 1].item()),
                          fine_deltas[j + 1].item())
     return err2(d_star) ** 0.5, d_star * dx_grid
+
+
+def particle_error_norms(field: torch.Tensor, exact: torch.Tensor,
+                         volumes: torch.Tensor) -> dict[str, float]:
+    """Volume-weighted particle L1 / L2 error of `field` against an exact
+    solution sampled at the particle positions (the `exact` metric of the
+    reference cases).
+
+    ``L1 = sum V|e| / sum V``, ``L2 = sqrt(sum V e^2 / sum V)`` with
+    ``V = m / rho`` -- a quadrature of the continuous norm, so a case whose
+    particle spacing varies across the domain (Sod: 4x denser on the left)
+    is not weighted by particle count. Vector fields are reduced per
+    particle by the Euclidean norm.
+    """
+    e = (field - exact).detach()
+    if e.ndim > 1:
+        e = e.flatten(start_dim=1).norm(dim=1)
+    e = e.abs()
+    w = volumes.detach().to(e.dtype)
+    wsum = w.sum()
+    return {
+        "l1": float((w * e).sum() / wsum),
+        "l2": float(((w * e * e).sum() / wsum).sqrt()),
+    }
