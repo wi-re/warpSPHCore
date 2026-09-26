@@ -142,18 +142,24 @@ def test_field_copy_deepcopy_reduce_degrade_to_none():
 
 
 # --------------------------------------------------------------------------
-# Test 9: tangent-slot inertness
+# Test 9: no tangent affordance on the Field abstraction
 # --------------------------------------------------------------------------
 
-def test_tangent_slot_inert_when_unset():
+def test_no_tangent_affordance_on_field_or_role():
+    # Forward-mode AD landed as flat-tensor tangent arguments to
+    # `warpOperationJVP`, NOT as a second Field role or a primal->tangent
+    # slot (Role's docstring records the decision; the slot and the
+    # Role.TANGENT member once declared here were removed in 609fb18).
+    # Forward-mode tangent behaviour itself is covered in
+    # test_forward_mode_tier1.py.
     t = torch.zeros(8, dtype=torch.float32)
     view_a = acquireView(t, role=Role.PRIMAL)
     field = t._wsc_field
-    assert field.tangent is None
+    assert not hasattr(field, "tangent")
     assert set(field.views.keys()) == {Role.PRIMAL}
+    assert list(Role) == [Role.PRIMAL]
 
-    # Re-acquiring PRIMAL is bit-identical (same cached object) regardless of
-    # the tangent slot's presence.
+    # Re-acquiring PRIMAL is bit-identical (same cached object).
     view_b = acquireView(t, role=Role.PRIMAL)
     assert view_a is view_b
 
