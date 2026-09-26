@@ -115,6 +115,16 @@ reference columns but block Phases 4/5 — see the pre-Phase-4 checklist.
   volume-weighted (`field_error.particle_error_norms`), as new columns
   `error_l1_exact` / `error_l2_exact`. No reference bias, no t_final
   mismatch, 4-point fits.
+- [x] **Kinetic-energy monotonicity check** (2026-09-26) —
+  `conservation.ke_rebound` = largest KE rise above its running minimum /
+  KE(0), computed from each run's KE trajectory; cases declared
+  `ke_nonincreasing` (TGV, tgv-wc, Gresho — unforced steady / decaying
+  flows) are flagged above 1 % in `REPORT_pde.md`. The final-state
+  `ke_drift` could not see the CRKSPH Gresho spin-up where an early
+  dissipative dip and the later gain partly cancel. Full ladders
+  (2026-09-26): TGV, tgv-wc and CompSPH-Gresho rebound exactly 0 at every
+  rung; CRKSPH-Gresho is flagged at nx = 48 / 64 / 96 (4.7 / 11.2 /
+  15.1 %) — including nx=48, whose final drift (−3.9 %) looks healthy.
 - [x] **Partial runs merge into the results CSV** (2026-09-26) —
   `run_pde.py --cases X` used to overwrite `pde_rows.csv` with case X
   only; it now replaces just those cases' rows (`report_pde.merge_rows`).
@@ -196,25 +206,57 @@ every CompSPH / CRKSPH row (except `sod-crk` under Gather, fixed —
 Phase 2); linear momentum |Δp| ≤ 2e-15 in every compressible row, but
 **not** in the incompressible legs: DFSPH TGV 2.1e-3 → 4.8e-4 (iterative
 solve tolerance), δ⁺-SPH tgv-wc 7e-4 → **1.2e-2, growing with resolution**
-(plausibly the particle shifting, non-conservative by construction —
-unverified; |ΔL| is not an invariant on the periodic TGV box and positions
+(the particle shifting runs *without* the ALE-style `correctdrhodt` /
+`correctdvdt` terms — both default False, no scheme enables them; an A/B
+at nx=64 with both on **doubles** |Δp| (1.3e-2 → 2.7e-2) at unchanged L2
+error, so in their current form they do not make shifting more
+conservative — a conservative (pairwise-antisymmetric) δr·∇v form would
+be needed; |ΔL| is not an invariant on the periodic TGV box and positions
 are never re-wrapped, so ignore it there); angular momentum (open
 question only for Gresho): CRKSPH 4.5e-3 → 3.9e-5, CompSPH 2.4e-2 →
 4.0e-3 over the ladder — both converge, CRKSPH faster. Consistency check
 on the CRK fix: the 1D rows (linearWave, Sedov) are **bit-identical**
 before and after it (`gradB` is 1×1 in 1D, the transpose a no-op).
 
-**Gresho anomaly — CRKSPH spins the vortex up (open, frontend).** At
-nx=64 kinetic energy dips −3.8 % by t≈0.25 (viscous transient), then
-*rises monotonically* (≈ +3 % per time unit) to +7.3 % at t=3, total energy
-exact — internal energy is being converted to kinetic energy in a steady
-vortex (anti-dissipation). CompSPH under the same case decays monotonically
-(−74 %). The effect grows with resolution (+13 % at nx=96) and makes the
-exact-solution error *rise* at the finest rung, while the finest-run
-reference metric reported a clean "2.06" — all rungs share the growing
-error. Present before the CRK fix too (+6.5 / +10.9 %). Suspects (not
-investigated): the compatible-energy partition f_ij, the RK2 + compatible
-energy pairing, the viscosity (`viscositySwitch='NoneSwitch'`).
+**Gresho anomaly — CRKSPH spins the vortex up (investigated 2026-09-26;
+source located, fix open).** At nx=64 kinetic energy dips −1.6 % by
+t≈0.5, then rises monotonically to +7.3 % at t=3 (+13 % at nx=96), total
+energy exact; the exact-solution error *rises* at the finest rung while the
+finest-run reference metric reported a clean "2.06" (every rung shares the
+growing error). Present before the CRK gradB fix as well. Experiments
+(nx=64 unless noted; scratch hooks, no frontend change kept):
+
+| experiment | KE(t=3) | reading |
+|---|---|---|
+| baseline (van Leer limiter, C_l = C_q = 1) | +7.3 % | spin-up in the **mean** v_φ profile (+6.8 %), not noise (0.35 %) or radial (0.19 %) |
+| CFL / 2 | +7.8 % | **not** the time integrator |
+| AV × 0.5 / × 2 | +5.3 % / +9.0 % | scales with AV … |
+| AV off (nx=48) | +199 %, vortex destroyed | … but without AV the scheme is violently unstable (CompSPH w/o AV: +37 %) |
+| limiter φ forced 0 / 1 | −96 % / **+52 %** | the velocity reconstruction in Q strongly shapes it |
+| Q gated on raw compression | −36 % (φ=1: −25 %) | spin-up gone, vortex now over-damped |
+| velocity-gradient `.mT` removed | bit-identical | only x·Gx enters μ_ij — transpose-invariant, not a bug |
+| AV gradient projected radial | +5.4 % | AV's tangential work is not the source |
+| **power budget** (P_i = m_i v_i·Σ a_ij, t ∈ [0, 1.5]) | — | **viscosity is net dissipative (−0.37 KE₀/time); the *pressure* term injects +0.39 (φ=1: +0.52) KE₀/time**, concentrated in 0.22 < r < 0.38 |
+| **pressure forces projected central** | −72 %, no spin-up | pressure power flips to −0.045 — **source confirmed** — but the vortex collapses (the non-central CRK components are needed for an accurate pressure gradient), so not a fix |
+
+**Mechanism:** CRKSPH's pair pressure forces
+(P_i+P_j)(∂W^R_ij − ∂W^R_ji) are *non-central* (W^R_ij ≠ W^R_ji — the
+paper notes this). In an exact equilibrium vortex the pressure force is
+radial and does no work on the azimuthal flow; here the tangential
+components do net positive work in the annulus, i.e. they redistribute
+angular momentum radially (|ΔL| stays small and converges, but the
+profile shows inner-core and r≈0.26 bands too fast, r≈0.2/0.36 too
+slow). The viscosity removes most of the injected energy; the residue is
+the spin-up, and it grows with resolution. **Open question** — inherent to
+CRKSPH (the paper shows no spin-up at 64², t=5, but also used Cullen-type
+limiting and a different IC), or an implementation deviation. Concrete
+candidates to check next: (i) `modules/crk/accel.py` evaluates the pair
+gradients with single supports `(h_j, h_j)` / `(h_i, h_i)` where the paper's
+pair kernel is the kernel mean (Eq. 8); (ii) `limiter.py` η_ij uses the
+support radius H where the paper uses the smoothing scale h (off by the
+kernel scale factor); (iii) the AV coefficients / switch
+(`viscositySwitch='NoneSwitch'`, C_l = C_q = 1). **Check that now catches
+it:** `ke_rebound` (Phase 0 / PDE driver).
 
 **Tasks:**
 - [x] Run Phase 0 harness against uncorrected SPH kernel
@@ -468,8 +510,11 @@ Do these, then re-run Phases 1–3 (static + PDE) before Phase 4 starts:
   the drift (the Owen adaptive-support solve is the other consumer). Side
   finding: `geometry/sdfFunctionality/implicitFunctions.py` installs a
   blanket `warnings.filterwarnings("ignore")` at import, silencing **every**
-  warning in any process that loads it — the CRK warning bypasses it with a
-  scoped filter; the blanket filter itself is left for a decision.
+  warning in any process that loads it — **removed** (warpSPH `5d2ce17`): it
+  hid exactly one warning, a deprecated `.T` on a 1-D tensor in
+  `sdHorseshoe` (fixed, same value); representative Sod / Gresho / tgv-wc /
+  dambreak runs emit no warnings without it; `sdPolygon` export fixed on
+  the way (`sdStar` / `sdRing` remain broken: `device=` passed to numpy).
 - [x] Brookshaw static-vs-diffusion discrepancy — explained (modal probe).
 - [x] TGV 49²/97² particles at nx=48/96 — **root-caused, frontend bug**:
   `warpSPH/src/warpSPH/sample/regular.py:112` (`buildPointCloud`'s default
