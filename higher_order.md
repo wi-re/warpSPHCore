@@ -279,6 +279,38 @@ and Sod must end up matching the paper's Fig. 4):
   visually the paper's Fig. 4 CRKSPH column; L1 unchanged, entropy
   better). **Not applied** — a limiter trade-off for a decision. Remaining
   spin-up after it: the non-central pressure work (source above).
+- **Derivation + full compressible sweep (2026-09-26).**
+  `pde/derive_crk_limiter.py` measures Δx (from particle volume) and H on
+  each case's sampled particles and derives η_crit = Δx/H, η_fold =
+  0.2 Δx/H (the paper's CRKSPH constants in the frontend's r/H units;
+  kernel-independent in units of spacing — the D&A-σ reading of h is
+  reported alongside). All 14 compressible cases measure Δx/H = 0.245 –
+  0.2505 (nearest-neighbour η equal to it), so derived ≈ (0.25, 0.05) in
+  1D, (0.246, 0.049) in 2D. `pde/run_crk_limiter_sweep.py` runs every case
+  under CRKSPH with current (1/3, 0.2) vs derived:
+
+  | case | reference metric | current → derived |
+  |---|---|---|
+  | Kidder | L1 ρ vs exact | 2.96e-5 → **5.33e-6 (×0.18)** |
+  | linearWave | L2 v vs analytic / KE loss | 6.7e-9 → **3.0e-9** / −1.36 % → **−0.03 %** |
+  | Yee vortex | L1 v vs exact (core) / KE loss | 2.90e-3 → 2.73e-3 / −1.9 % → −1.6 % |
+  | Sod | L1 ρ / entropy / plateau u std / TV excess | 2.95e-3 → 2.90e-3 / **−14 %** / **+18 %** / **+22 %** |
+  | Sedov | L1 ρ vs exact | 6.09e-2 → 6.63e-2 (**+9 %**) |
+  | Noh | L1 ρ vs exact | 0.106 → 0.110 (+3 %) |
+  | Gresho | KE(3) / ke_rebound / L1 v | +7.3 % → +4.8 % / 0.112 → 0.091 / +10 % |
+  | KH | KE loss / rebound | −5.8 % → −5.6 % / 2.1e-3 → 7.2e-4 |
+  | hydrostatic | spurious max |v| | 5.7e-7 → 6.3e-7 |
+  | Woodward–Colella, triple point, RT, shearing Noh, 2D Sod | no reference | stable, energy at round-off, final-state Lagrangian Δρ 0.02 – 3.7 % |
+
+  Reading: the derived constants remove the extra nearest-neighbour
+  damping — large gains on the smooth / weakly nonlinear cases (Kidder,
+  linearWave, Yee), a cost on the shock cases (Sod ringing +18–28 %,
+  Sedov +9 %, Noh +3 %). **Gresho is threshold-sensitive:** η_crit = 0.25
+  gave +0.7 %, the per-case derived 0.2458 (the measured 2D nearest-
+  neighbour η after the support solve) +4.8 % — a 2 % shift in the
+  threshold changes the spin-up ~7×, so the limiter constants modulate
+  the spin-up but are not a robust fix for it. Still a decision, now with
+  the full trade-off on the table.
   **Check that now catches it:** `ke_rebound` (Phase 0 / PDE driver).
 
 **Tasks:**

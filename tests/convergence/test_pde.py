@@ -580,3 +580,25 @@ def test_pde_smoke_does_not_clobber_full_suite_results(smoke_run):
         pytest.skip("no full-suite results file present")
     assert ROWS_CSV.read_bytes() != SMOKE_CSV.read_bytes(), (
         "smoke run clobbered the full-suite pde_rows.csv")
+
+
+# ---------------------------------------------------------------------------
+# CRK limiter-constant derivation (derive_crk_limiter.py)
+# ---------------------------------------------------------------------------
+
+def test_crk_limiter_derivation_units():
+    import derive_crk_limiter as D
+    # n_h = 4 (H = 4 dx): the paper's CRKSPH constants (1/n_h, 0.2) in r/h
+    # with h = dx become (0.25, 0.05) in the frontend's r/H
+    d = D.derive(0.25, ks=2.291288)
+    assert d["spacing"] == pytest.approx((0.25, 0.05))
+    # D&A-sigma reading of h: fold 0.2 / ks
+    assert d["sigma"] == pytest.approx((0.25, 0.2 / 2.291288))
+    # the frontend's current hard-coded pair is 1/n_h for n_h = 3
+    assert D.CURRENT[0] == pytest.approx(1 / 3, rel=1e-6)
+
+
+def test_crk_limiter_sweep_cases_have_derivation_entries():
+    import derive_crk_limiter as D
+    import run_crk_limiter_sweep as S
+    assert set(S.SWEEP) <= set(D.CASES)
