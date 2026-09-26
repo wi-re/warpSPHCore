@@ -17,6 +17,8 @@ from __future__ import annotations
 import pytest
 import torch
 
+from conftest import stable_seed
+
 from warpSPHCore import (
     DomainDescription,
     OperationProperties,
@@ -75,7 +77,7 @@ def _check_jacobian_reference(positions, supports, masses, domain, adjacency, mo
     n = positions.shape[0]
     kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
     densities = _densities_for(positions, supports, masses, kinds, domain, adjacency)
-    torch.manual_seed(hash((mode, scheme)) % (2 ** 31))
+    torch.manual_seed(stable_seed((mode, scheme)))
     queryValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
     referenceValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
 
@@ -128,7 +130,7 @@ def _check_combined_jacobian_reference(positions, supports, masses, domain, adja
     n = positions.shape[0]
     kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
     densities = _densities_for(positions, supports, masses, kinds, domain, adjacency)
-    torch.manual_seed(hash(("combined", mode, scheme)) % (2 ** 31))
+    torch.manual_seed(stable_seed(("combined", mode, scheme)))
     queryValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
     referenceValues = torch.randn(n, dtype=DTYPE, device=DEVICE)
 
@@ -231,7 +233,7 @@ def _check_jacobian_reference_vector_field(positions, supports, masses, domain, 
     n = positions.shape[0]
     kinds = torch.zeros(n, dtype=torch.int32, device=DEVICE)
     densities = _densities_for(positions, supports, masses, kinds, domain, adjacency)
-    torch.manual_seed(hash(("vector", mode, scheme)) % (2 ** 31))
+    torch.manual_seed(stable_seed(("vector", mode, scheme)))
     queryValues = torch.randn(n, dim, dtype=DTYPE, device=DEVICE)
     referenceValues = torch.randn(n, dim, dtype=DTYPE, device=DEVICE)
 

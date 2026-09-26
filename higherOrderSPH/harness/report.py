@@ -20,9 +20,6 @@ from dataclasses import dataclass, asdict, fields
 from pathlib import Path
 from typing import Iterable
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
 __all__ = ["Row", "write_rows_csv", "render_markdown", "render_pivot",
@@ -152,6 +149,12 @@ def plot_error_curves(rows: Iterable[Row], path: str | Path,
     present = [rg for rg in regions if any(r.region == rg for r in rows)]
     if not present:
         return path
+
+    # matplotlib only here, so the CSV / markdown path (and the CI smoke
+    # gate, which never plots) works without it installed
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
 
     fig, axes = plt.subplots(1, len(present),
                              figsize=(6 * len(present), 4.5), sharey=False)

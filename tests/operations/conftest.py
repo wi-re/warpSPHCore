@@ -1,4 +1,5 @@
 import math
+import zlib
 
 import pytest
 import torch
@@ -208,3 +209,15 @@ def mean_abs_error(actual, expected, mask):
     if diff.ndim > 1:
         diff = torch.sum(diff, dim=tuple(range(1, diff.ndim))) / float(math.prod(diff.shape[1:]))
     return torch.mean(diff[mask]).item()
+
+
+def stable_seed(key) -> int:
+    """Process-independent RNG seed for a test-parameter tuple.
+
+    `hash()` of strings / enum members is salted per process
+    (PYTHONHASHSEED), so `torch.manual_seed(hash(key) % 2**31)` drew fresh
+    random data on every run -- an occasional float32 draw then landed just
+    past a tight tolerance (a ~1-in-30 flake in the Laplacian-Dot geometry
+    JVP test on CPU). CRC32 of the key's repr is identical across runs, so a
+    parametrised case always sees the same data."""
+    return zlib.crc32(repr(key).encode()) % (2 ** 31)

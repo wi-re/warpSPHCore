@@ -38,6 +38,9 @@ dev = [
     "pytest",
     "build",
     "twine",
+    # tests/kernels/test_kernel_audit.py + scripts/kernels/kernel_audit.py
+    # read scripts/kernels/kernel_specs.yaml
+    "pyyaml",
 ]
 
 [tool.setuptools]
