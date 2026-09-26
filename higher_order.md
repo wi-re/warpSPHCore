@@ -249,14 +249,37 @@ profile shows inner-core and r≈0.26 bands too fast, r≈0.2/0.36 too
 slow). The viscosity removes most of the injected energy; the residue is
 the spin-up, and it grows with resolution. **Open question** — inherent to
 CRKSPH (the paper shows no spin-up at 64², t=5, but also used Cullen-type
-limiting and a different IC), or an implementation deviation. Concrete
-candidates to check next: (i) `modules/crk/accel.py` evaluates the pair
-gradients with single supports `(h_j, h_j)` / `(h_i, h_i)` where the paper's
-pair kernel is the kernel mean (Eq. 8); (ii) `limiter.py` η_ij uses the
-support radius H where the paper uses the smoothing scale h (off by the
-kernel scale factor); (iii) the AV coefficients / switch
-(`viscositySwitch='NoneSwitch'`, C_l = C_q = 1). **Check that now catches
-it:** `ke_rebound` (Phase 0 / PDE driver).
+limiting), or an implementation deviation. **Follow-up (same day)**, every
+change measured on Gresho *and* on the CRK-Sod ripple probe
+(`pde/run_sod_ripple.py`, the paper's Sod: (400, 100) per tube, t = 0.15 —
+per guidance, any CRK limiter / AV change must be checked for Sod ripple
+and Sod must end up matching the paper's Fig. 4):
+
+- ruled out: viscosity switches (CRKSPH evaluations use none, by design);
+  the pair-force prefactor (code ≡ Eq. 38); single-support vs kernel-mean
+  pair gradients (Gresho supports are exactly uniform at t=0 and vary
+  0.8 % (std) by t=3 — second-order at most).
+- **limiter constants are in the wrong units.** The paper's CRKSPH kernel
+  has extent η_max = 4 in units of h with n_h = 1 (≈ 4 radial neighbours) —
+  the same resolution as our n_h = 4, H = 4 Δx — so its
+  (η_crit, η_fold) = (1/n_h, 0.2) = (1, 0.2) in r/h is **(0.25, 0.05)** in
+  our r/H. The code uses (1/3, 0.2): every nearest-neighbour pair is
+  limited (factor ≈ 0.83) and the fall-off is 4× too wide. In units of the
+  nominal spacing the paper's values are kernel-independent (η_crit = 1 Δx,
+  η_fold = 0.2 Δx), so they should be derived from n_h, not hard-coded.
+
+| (η_crit, η_fold) | Gresho KE(3) / rebound | Sod plateau u std / max | Sod TV excess | Sod entropy err |
+|---|---|---|---|---|
+| (1/3, 0.2) current | +7.3 % / 0.112 | 8.0e-3 / 3.1e-2 | 0.076 | 1.9e-3 |
+| (1/4, 0.2) | +27 % / 0.292 | 1.05e-2 / 4.4e-2 | 0.099 | 1.7e-3 |
+| **(1/4, 0.05) paper** | **+0.7 % / 0.056** | 9.4e-3 / 3.9e-2 | 0.092 | **1.6e-3** |
+
+  The paper-consistent constants cut the Gresho gain ~10× (still flagged:
+  rebound 5.6 %) at the cost of ~17–22 % more Sod ringing (profile still
+  visually the paper's Fig. 4 CRKSPH column; L1 unchanged, entropy
+  better). **Not applied** — a limiter trade-off for a decision. Remaining
+  spin-up after it: the non-central pressure work (source above).
+  **Check that now catches it:** `ke_rebound` (Phase 0 / PDE driver).
 
 **Tasks:**
 - [x] Run Phase 0 harness against uncorrected SPH kernel
