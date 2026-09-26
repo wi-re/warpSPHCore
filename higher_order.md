@@ -172,20 +172,49 @@ reference columns but block Phases 4/5 — see the pre-Phase-4 checklist.
 
 **Goal:** Establish the reference point everything else is measured against.
 
-**Status: static DONE; PDE column MISLABELLED** — the static column
-(`REPORT.md` mode `standard`) is a true standard-SPH baseline. The Pass-2
-PDE suite is **not**: each case runs its frontend default scheme, and only
-Sod runs a standard (CompSPH) scheme.
+**Status: DONE (static + matched-scheme PDE, post CRK fix, 2026-09-26).**
+The static column (`REPORT.md` mode `standard`) is a true standard-SPH
+baseline. The Pass-2 PDE suite originally ran each case's frontend default
+scheme (4 of 7 CRKSPH); it now has matched legs, so every case except TGV
+has a standard-SPH (CompSPH) *and* a CRKSPH row on the same case / ladder /
+metric / IC. Numbers below are from the post-fix re-run (CRK gradient fix;
+conservation measured from t=0; sampler fix for TGV). Exact-solution
+metrics where they exist; KH has only the finest-run reference.
 
-| case | scheme actually run | L2 order | notes |
-|---|---|---|---|
-| tgv | DFSPH (`divergenceFree`) | 0.69 (r² 0.98) | analytic; floor-limited (below) |
-| tgv-wc | δ⁺-SPH (`sun2017DeltaSPH`) | 1.90 (r² 0.995) | analytic; pre-floor (flattens at nx=128) |
-| linearWave | **CRKSPH** | 1.05 (r² 0.99) | analytic; pairwise 1.24 → 1.04 → 0.87 |
-| gresho | **CRKSPH** | 1.54 (r² 0.89) | reference metric, unreliable (r², 1.5× reference); exact-solution (steady v_φ) metric now added — pending re-run |
-| kelvinHelmholtz | **CRKSPH** | "saturated" | reference metric; flag is borderline (error ratio 1.986 vs threshold 2) |
-| sod | CompSPH | 1.31 (L1 1.46, aligned L2 0.99) | reference metric, inflated; **vs exact Riemann solution: L1 0.98, L2 0.53** (r² ≥ 0.999) — first-order shock capturing |
-| sedov | **CRKSPH** | 0.47 raw (L1 0.92, aligned L2 0.75) | reference metric; **vs exact self-similar solution: L1 1.03, L2 0.59** (pre-CRK-fix run) — first-order shock capturing |
+| case | metric | standard (CompSPH) | CRKSPH | reading |
+|---|---|---|---|---|
+| linearWave | L2 vs analytic | 0.85 (err 5.3e-8 → 9.4e-9) | 1.05 (1.6e-8 → 1.8e-9) | CRKSPH 3–5× more accurate |
+| sod | L1 / L2 vs exact Riemann | **0.98 / 0.53** | **0.96 / 0.56** (symmetric support; errors ~1.3× CompSPH's) | both first-order shock capturing |
+| sedov | L1 / L2 vs exact self-similar | 0.43 / sat. (L1 9.6e-2 → 4.0e-2) | **1.03 / 0.59** (1.1e-1 → 1.3e-2) | CRKSPH converges, CompSPH barely |
+| gresho | L1 vs exact (steady v_φ) | 0.44 (2.2e-1 → 1.3e-1; below the saturation flag's 2× range); KE −90 … −62 % | **non-monotone** 9.1e-2 → 2.9e-2 → 2.9e-2 → **3.4e-2**; KE **+7.3 / +13 %** at nx 64 / 96 | CompSPH over-dissipates; CRKSPH spins up (anomaly below) |
+| kelvinHelmholtz | L2 vs finest run | 1.69 | sat. (7.6e-2 → 4.4e-2) | reference metric only; KE loss at nx=96: CompSPH −36 %, CRKSPH −3.6 % |
+| tgv | L2 vs analytic | — | — | DFSPH: 0.68 (r² 0.96), floor-limited (TGV_NOTES) |
+| tgv-wc | L2 vs analytic | — | — | δ⁺-SPH: 1.89 (r² 0.99), pre-floor |
+
+Conservation (post-fix, measured from t=0): total energy 1e-16 – 4e-14 in
+every CompSPH / CRKSPH row (except `sod-crk` under Gather, fixed —
+Phase 2); linear momentum |Δp| ≤ 2e-15 in every compressible row, but
+**not** in the incompressible legs: DFSPH TGV 2.1e-3 → 4.8e-4 (iterative
+solve tolerance), δ⁺-SPH tgv-wc 7e-4 → **1.2e-2, growing with resolution**
+(plausibly the particle shifting, non-conservative by construction —
+unverified; |ΔL| is not an invariant on the periodic TGV box and positions
+are never re-wrapped, so ignore it there); angular momentum (open
+question only for Gresho): CRKSPH 4.5e-3 → 3.9e-5, CompSPH 2.4e-2 →
+4.0e-3 over the ladder — both converge, CRKSPH faster. Consistency check
+on the CRK fix: the 1D rows (linearWave, Sedov) are **bit-identical**
+before and after it (`gradB` is 1×1 in 1D, the transpose a no-op).
+
+**Gresho anomaly — CRKSPH spins the vortex up (open, frontend).** At
+nx=64 kinetic energy dips −3.8 % by t≈0.25 (viscous transient), then
+*rises monotonically* (≈ +3 % per time unit) to +7.3 % at t=3, total energy
+exact — internal energy is being converted to kinetic energy in a steady
+vortex (anti-dissipation). CompSPH under the same case decays monotonically
+(−74 %). The effect grows with resolution (+13 % at nx=96) and makes the
+exact-solution error *rise* at the finest rung, while the finest-run
+reference metric reported a clean "2.06" — all rungs share the growing
+error. Present before the CRK fix too (+6.5 / +10.9 %). Suspects (not
+investigated): the compatible-energy partition f_ij, the RK2 + compatible
+energy pairing, the viscosity (`viscositySwitch='NoneSwitch'`).
 
 **Tasks:**
 - [x] Run Phase 0 harness against uncorrected SPH kernel
@@ -196,12 +225,10 @@ Sod runs a standard (CompSPH) scheme.
   further at boundaries (4–15×): confirmed and documented in `FINDINGS.md`.
 - [x] Run full PDE benchmark suite — 2026-09-23 full run, no divergences
   (numbers above; per-scheme, not standard SPH).
-- [ ] **Run the standard-SPH PDE leg on the four CRKSPH cases** —
-  Gresho / KH / linearWave / Sedov with `PDECase.scheme = 'CompSPH'` (the
-  override mechanism already exists; register as `<case>-std` legs like
-  tgv-wc). Without this there is no standard-SPH PDE baseline for them.
-- [ ] Re-run the full suite with the fixed conservation driver (drift
-  columns are blank for the 2026-09-23 rows).
+- [x] **Standard-SPH PDE legs on the four CRKSPH cases** — `<case>-std`
+  (CompSPH), full ladders run 2026-09-26 (table above).
+- [x] Re-run the full suite with the fixed conservation driver
+  (2026-09-26; all drift columns filled).
 - [x] Record baseline numbers — `REPORT_pde.md` + `results/pde_rows.csv`
   (now with the `scheme` column).
 
@@ -217,22 +244,19 @@ Sod runs a standard (CompSPH) scheme.
   2026-09-26: those orders are still measured against the nx=1600 run
   and carry the finite-reference bias (Verification pass, finding 3).*
 
-**Open anomalies (found 2026-09-26, not investigated):**
-- **Gresho KE gain:** kinetic energy *rises* +6.5% / +10.9% at nx=64 / 96
-  (CRKSPH, t=3) while total energy holds to 1e-16 — internal energy is
-  being converted to KE in a case with artificial viscosity.
+**Anomalies found 2026-09-26:**
+- **Gresho KE gain — confirmed, open:** a secular CRKSPH spin-up, not a
+  transient or a metric artifact (see the anomaly paragraph above).
 - **linearWave "float64 floor" is not supported:** A = 1e-6, so the
   relative velocity error is ~2e-3 … 2e-2, far above round-off. All four
   rungs run exactly 999 steps (fixed dt), so a temporal floor is the more
   likely cause of the declining pairwise order (untested).
-- **TGV particle count:** nx=48 / 96 produce 49² / 97² particles (nx=32 /
-  64 are exact), so the `dx` column is ~2% off on those rungs. Effect on
-  the fitted slope is 0.003. Root cause: frontend sampler round-off
-  (`regular.py:112`, see the checklist).
+- **TGV particle count — fixed** (frontend sampler round-off, warpSPH
+  `bb88b46`; see the checklist).
 
-**Deliverable:** ✅ static baseline report — the "before" column. PDE
-baseline: ✅ for TGV / Sod only; ⬜ for the CRKSPH cases (standard leg
-missing).
+**Deliverable:** ✅ static baseline report — the "before" column. ✅
+matched-scheme PDE baseline (standard SPH vs CRKSPH on every compressible
+case).
 
 ---
 
@@ -282,10 +306,11 @@ counterpart (Phase 1 task) and a CRKSPH run of Sod / TGV-like cases.
   Gresho angular momentum drifts +7.8% at nx=32, converging with
   resolution (~0.3% at nx=96 by the old columns). Full-ladder re-run
   still needed for the table.
-- [~] Run PDE benchmark suite, compare dissipation/order against Phase 1 —
-  CRKSPH side exists (4 cases); comparison blocked on the Phase 1
-  standard-SPH legs. Add `sod-crk` (Sod with `scheme='CRKSPH'`) for the
-  other direction.
+- [x] Run PDE benchmark suite, compare dissipation/order against Phase 1 —
+  done 2026-09-26 with matched legs (Phase 1 table): CRKSPH is 3–5× more
+  accurate on linearWave, converges on Sedov where CompSPH barely does
+  (L1 1.03 vs 0.43), dissipates ~10× less on KH, matches CompSPH on Sod —
+  but **spins up the Gresho vortex** (open anomaly, Phase 1).
 - [x] Document gaps between harness results and paper-reported behavior —
   `FINDINGS.md` (static); the delta+ leg's floor analysis is the
   de-facto "what does a corrected scheme still fail at" study.
@@ -423,27 +448,38 @@ Do these, then re-run Phases 1–3 (static + PDE) before Phase 4 starts:
 - [x] `conditioning.matrix_condition_numbers` for any n×n.
 - [x] Degree cap: none in code; `--degree-max`.
 - [x] CRK linear-gradient residual — core bug, fixed (Phase 2).
-- [ ] **Re-run** (in progress 2026-09-26): full PDE ladders for the four
-  CRKSPH cases (post-fix), the five matched-scheme legs, TGV / tgv-wc
-  (drift columns); static sweep again for the additive Hessian rows.
+- [x] **Re-run** (2026-09-26): full PDE ladders for the four CRKSPH cases
+  (post-fix), the five matched-scheme legs, TGV / tgv-wc (drift columns,
+  sampler fix); static sweep for the additive Hessian rows (320 rows, no
+  existing row changed; grad-of-grad Hessian does not converge in any mode
+  — Hessian of x² is off by ~2 against a true value of 2).
 - [x] `sod-crk` total-energy drift −7.3e-6 — **root-caused**: CRKSPH's
   compatible-energy update needs symmetric pair interactions, and Sod's
   default `supportMode='Gather'` is asymmetric (CRKSPH+Gather −7.3e-6;
   CRKSPH+KernelMeanSymmetric +2.5e-16; CompSPH exact under both). The leg
   now overrides `supportMode='KernelMeanSymmetric'` (the mode every
   CRKSPH-default case uses) via a new `PDECase.spec` field. Frontend
-  suggestion (not changed here): warn when CRKSPH runs with a non-symmetric
-  support mode.
+  (warpSPH `6574d01`): `crkSPH_step` now warns (`CRKSupportWarning`, once
+  per mode) for any non-kernel-mean support. Frontiere et al. 2017 *define*
+  the CRKSPH pair kernel as the kernel mean (Eq. 8), so Gather is outside
+  the method; a Gather-conserving variant would be derivation work (their
+  Eq. 60 keeps both a_ij and a_ji in general) and is not pursued. Pinning
+  just the f_ij balance term to the kernel-mean support does *not* remove
+  the drift (the Owen adaptive-support solve is the other consumer). Side
+  finding: `geometry/sdfFunctionality/implicitFunctions.py` installs a
+  blanket `warnings.filterwarnings("ignore")` at import, silencing **every**
+  warning in any process that loads it — the CRK warning bypasses it with a
+  scoped filter; the blanket filter itself is left for a decision.
 - [x] Brookshaw static-vs-diffusion discrepancy — explained (modal probe).
 - [x] TGV 49²/97² particles at nx=48/96 — **root-caused, frontend bug**:
   `warpSPH/src/warpSPH/sample/regular.py:112` (`buildPointCloud`'s default
   nx-driven branch) does `ceil(l / dx)` with no tolerance; float64 round-off
   gives l/dx = 48.00000000000001 → 49 cells. The explicit-dx branch of the
   same function already uses `ceil(l/dx - 1e-3)` for exactly this reason;
-  the one-line fix is the same tolerance here. Not changed from this repo —
-  it alters particle counts of every regular-sampled frontend case at the
-  affected nx. Impact on the harness: 2% dx mislabel, 0.003 on the TGV
-  slope.
+  **fixed in warpSPH `bb88b46`** with the same tolerance (+ a regression
+  test over L × nx × dtype × CPU/CUDA — the round-off only shows on CUDA;
+  float32 L=3 at nx=100/200 was hit too). TGV / tgv-wc re-run with the
+  corrected counts (48², 96²).
 
 ---
 
