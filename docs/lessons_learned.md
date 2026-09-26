@@ -320,6 +320,34 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   / `--dim` and the CI matrix built on top of it exist specifically to make
   this cheap to check.
 
+* **Tensors that are symmetric on a regular lattice hide transposition
+  bugs — exactness checks need jittered *and* boundary particles.** The CRK
+  kernel-gradient correction contracted `gradB` (stored
+  [derivative, component]) on the wrong axis from 2026-08-11 to 2026-09-26:
+  `matmul(wp.transpose(gradBi), x_ij)` instead of `matmul(gradBi, x_ij)`.
+  On a regular interior lattice `gradB` is symmetric (asymmetry ~7e-14), so
+  every lattice-based test, the CRK gradcheck/JVP suites (they differentiate
+  whatever forward formula exists, consistently) and a 0.25-tolerance
+  analytic test all passed. It only showed up as a flat ~1e-3
+  linear-gradient residual on a jittered set (0.12–0.25 in the open-wall
+  band) in the higher-order harness — which first misreported it as
+  "intrinsic". Guard: `run_baseline.py --smoke` now asserts CRK
+  linear-gradient exactness (< 1e-10, float64) on a jittered open domain,
+  interior and boundary. General rule: a correction scheme's defining
+  exactness property (CRK: degree-1 value **and** gradient; renorm:
+  degree-1 gradient) must be asserted to machine precision on a disordered,
+  truncated-support set, not to a loose tolerance on a lattice.
+
+* **An adjoint-motivated rewrite must be checked for forward-value
+  equivalence, not just for a now-passing gradcheck.** The CRK bug above
+  was introduced by 5ca1882, which correctly replaced a manual
+  loop-accumulated contraction with `matmul` to fix a Warp reverse-mode
+  adjoint bug (see the loop-accumulator gotcha) — but wrote the
+  *transposed* contraction. The gradcheck went green because it checks the
+  adjoint against the new forward formula, not the old one. When
+  restructuring a kernel for AD reasons, diff the forward output against
+  the pre-change version on a non-trivial (jittered, non-symmetric) input.
+
 * **Jitter beyond ~0.01 is not currently validated to stay under the MAE
   threshold — do not gate CI on it without first investigating sound
   thresholds.** Heavier jitter (0.15-0.3, the range that actually stresses

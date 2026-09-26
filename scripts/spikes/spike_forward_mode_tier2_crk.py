@@ -87,7 +87,7 @@ spike_forward_mode_tier2_renorm.py's module docstring).
        term1 = (Ai*Wij)*Bi
        term2 = (Ai*(1+dot(Bi,xij)))*gradWij
        term3 = ((1+dot(Bi,xij))*Wij)*gradAi
-       term4 = (Ai*Wij)*(gradBi^T @ xij)
+       term4 = (Ai*Wij)*(gradBi @ xij)
 
    with `Wij, gradWij` and their tangents from Tier 2.1/2.2's dispatch (evaluated at
    whatever `SupportScheme` the *consuming operator* uses -- `SupportScheme.Gather` in
@@ -97,11 +97,13 @@ spike_forward_mode_tier2_renorm.py's module docstring).
    `getCRK_i`: `correctionData.queryA[i]` etc., indexed at `i` only, constant across the
    `j` loop -- these are NOT the same as `gradA_i`/`gradB_i` being re-differentiated
    again; they are simply held fixed while summing over neighbors, exactly like `fi` in
-   every earlier tier's field-value coefficient). `d(term4)`'s `gradBi^T @ xij` product
-   needs the SAME first-axis-vs-second-axis contraction care crk/kernel.py's own
-   docstring already flags (`matmul(wp.transpose(gradBi), x_ij)`) -- matched here via
-   `einsum('icl,ijc->ijl', gradBi, x_ij)` (contract gradBi's first/component axis `c`
-   against `x_ij`, leave the differentiation axis `l` free), and its tangent needs BOTH
+   every earlier tier's field-value coefficient). `d(term4)`'s `gradBi @ xij` product
+   needs the axis care crk/kernel.py's own comment spells out (`matmul(gradBi,
+   x_ij)`; gradBi is stored [differentiation, component]) -- matched here via
+   `einsum('ilc,ijc->ijl', gradBi, x_ij)` (contract gradBi's second/component axis
+   `c` against `x_ij`, leave the differentiation axis `l` free; corrected
+   2026-09-26 -- it previously mirrored a transposed kernel contraction, see the
+   regression note in crk/kernel.py), and its tangent needs BOTH
    `dgradBi` and `dx_ij` terms (ordinary product rule over a bilinear contraction).
    `Gradient_i = Sum_j coeff_ij * correctedG_ij` then reuses Tier 2.2's
    `_gradient_weights` (mass/density-based `coeff_ij`, unrelated to CRK's `A_i/B_i`)
@@ -496,11 +498,12 @@ def assembled_correctedGradient_jvp(pos, sup, mass, density, dpos, dsup, dmass, 
     term3 = factor3.unsqueeze(-1) * gradAi_b
     dterm3 = dfactor3.unsqueeze(-1) * gradAi_b + factor3.unsqueeze(-1) * dgradAi_b
 
-    # product[i,j,l] = sum_c gradBi[i,c,l]*x_ij[i,j,c] -- contract gradBi's
-    # FIRST (component) axis against x_ij, leave the differentiation axis l
-    # free, matching crk/kernel.py's matmul(wp.transpose(gradBi), x_ij).
-    product = torch.einsum("icl,ijc->ijl", gradBi, x_ij)
-    d_product = torch.einsum("icl,ijc->ijl", dgradBi, x_ij) + torch.einsum("icl,ijc->ijl", gradBi, dx_ij)
+    # product[i,j,l] = sum_c gradBi[i,l,c]*x_ij[i,j,c] -- gradBi is stored
+    # [differentiation l, component c]; contract the SECOND (component) axis
+    # against x_ij, leave the differentiation axis l free, matching
+    # crk/kernel.py's matmul(gradBi, x_ij).
+    product = torch.einsum("ilc,ijc->ijl", gradBi, x_ij)
+    d_product = torch.einsum("ilc,ijc->ijl", dgradBi, x_ij) + torch.einsum("ilc,ijc->ijl", gradBi, dx_ij)
 
     factor4 = Ai_b * W
     dfactor4 = dAi_b * W + Ai_b * dW

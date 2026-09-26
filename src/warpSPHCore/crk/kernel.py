@@ -20,13 +20,22 @@ def correctGradientCRK(
     term3 = ((scalar_t(1.0) + wp.dot(Bi, x_ij)) * W_ij) * gradAi
 
     factor = Ai * W_ij
-    # gradBi[c, g] = d(B[c]) / d(x_i[g]) (component index first, differentiation
-    # index second -- same convention crk_terms.py's computeCRKTermsWarp produces
-    # gradB in). The product-rule term needs that contracted against x_ij on the
-    # component index c, leaving the differentiation index g free in the output
-    # (matching term1..term3, which are all indexed by the differentiation/output
-    # direction) -- i.e. contract gradBi's FIRST axis against x_ij, not its second.
-    product = matmul(wp.transpose(gradBi), x_ij)
+    # gradBi[g, c] = d(B[c]) / d(x_i[g]) -- DIFFERENTIATION index first,
+    # component index second. That is the layout crk_terms.py's
+    # computeCRKTermsWarp produces (its einsums index the output 'nki' with k
+    # the gamma/derivative axis of dm_1dgamma/dm_2dgamma and i the component
+    # axis of m_2_inv). The product-rule term is sum_c x_ij[c] dB[c]/dx[g]:
+    # contract gradBi's SECOND (component) axis against x_ij, leaving the
+    # differentiation index g free -- i.e. gradBi @ x_ij.
+    #
+    # Regression note (2026-09-26): 5ca1882 (2026-08-11) replaced the original
+    # explicit loop `product[row] += x_ij[col] * gradBi[row, col]` (correct)
+    # with matmul(wp.transpose(gradBi), x_ij) under the opposite layout
+    # assumption. gradBi is not symmetric on disordered/boundary particles, so
+    # that broke CRK's exact linear-gradient reproduction (flat ~1e-3 error in
+    # the higher-order harness, higherOrderSPH/harness/FINDINGS.md section 1);
+    # with gradBi @ x_ij it is exact to ~1e-15 again.
+    product = matmul(gradBi, x_ij)
     term4 = factor * product
 
     return term1 + term2 + term3  + term4
@@ -50,12 +59,12 @@ def correctGradientCRKJVP(
     function's callers, all of which pass `iCorrectionData.A/B/gradA/gradB`);
     `dAi`/`dBi`/`dgradAi`/`dgradBi` are their tangents.
 
-    `term4`'s contraction needs the SAME first-axis-vs-second-axis care
-    `correctGradientCRK`'s own docstring flags (`matmul(wp.transpose(gradBi),
-    x_ij)`, contracting `gradBi`'s component axis against `x_ij`, leaving the
-    differentiation axis free) -- its tangent is an ordinary product rule
-    over that same bilinear contraction, needing BOTH the `dgradBi` and
-    `dx_ij` terms.
+    `term4`'s contraction needs the SAME axis care `correctGradientCRK`'s own
+    comment spells out (`matmul(gradBi, x_ij)`: `gradBi` is stored
+    [differentiation, component], so its second/component axis is contracted
+    against `x_ij`, leaving the differentiation axis free) -- its tangent is
+    an ordinary product rule over that same bilinear contraction, needing
+    BOTH the `dgradBi` and `dx_ij` terms.
     """
     dot_Bx = wp.dot(Bi, x_ij)
     d_dot_Bx = wp.dot(dBi, x_ij) + wp.dot(Bi, dx_ij)
@@ -75,8 +84,8 @@ def correctGradientCRKJVP(
 
     factor4 = Ai * W_ij
     dfactor4 = dAi * W_ij + Ai * dW_ij
-    product = matmul(wp.transpose(gradBi), x_ij)
-    dproduct = matmul(wp.transpose(dgradBi), x_ij) + matmul(wp.transpose(gradBi), dx_ij)
+    product = matmul(gradBi, x_ij)
+    dproduct = matmul(dgradBi, x_ij) + matmul(gradBi, dx_ij)
     term4 = factor4 * product
     dterm4 = dfactor4 * product + factor4 * dproduct
 

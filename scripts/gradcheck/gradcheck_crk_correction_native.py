@@ -28,10 +28,14 @@ term4's original manual double `for row / for col: product[row] += x_ij[col]
 * gradBi[row, col]` accumulation produced a wrong *adjoint* under Warp's
 reverse-mode AD -- not a forward-value bug, and not an index-order/transpose
 bug either (the failure reproduces even in 1D, where a transpose is a no-op
-on a 1x1 matrix). Routing the exact same contraction through the existing
-`matmul(wp.transpose(gradBi), x_ij)` @wp.func (already used elsewhere in this
-codebase, e.g. wp_gradient.py's renormalization path) instead of a manual
-loop fixes it. This is the same "index-accumulated loop can silently produce
+on a 1x1 matrix). Routing the contraction through the existing `matmul`
+@wp.func (already used elsewhere in this codebase, e.g. wp_gradient.py's
+renormalization path) instead of a manual loop fixes it. (2026-09-26
+correction: the original loop computed `gradBi @ x_ij`; the 5ca1882 rewrite
+used `matmul(wp.transpose(gradBi), x_ij)`, which is NOT the same contraction
+in 2D/3D -- the adjoint fix was right but it transposed the forward value and
+broke CRK's exact linear-gradient reproduction. crk/kernel.py now uses
+`matmul(gradBi, x_ij)`; see the regression note there.) This is the same "index-accumulated loop can silently produce
 a wrong adjoint" bug class flagged in docs/lessons_learned.md, but confirmed
 here as a distinct instance from the previously-fixed dynamic-loop/division
 and ternary-adjoint-zeroing bugs -- worth treating any new manual
