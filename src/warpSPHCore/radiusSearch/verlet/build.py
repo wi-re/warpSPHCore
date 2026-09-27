@@ -17,6 +17,30 @@ from .validCheck import _verlet_validity_metrics
 from .util import _minimum_image_delta
 
 # @torch.jit.script
+# --- deferred validity checks (CUDA-graph capture of a whole step) ----------
+# The validity check reads its "rebuild?" flag back to the host and branches.
+# Inside `deferVerletChecks()` a check against an existing list instead
+# appends its device flag to the yielded list and returns the prior list
+# unchanged -- no sync. A caller replaying a captured step ORs the flags after
+# the fact and, if any is set, discards the replay and re-runs that step
+# eagerly (where the check rebuilds for real). When every flag is clear the
+# eager checks would all have kept the prior list, so the result is identical.
+import contextlib as _contextlib
+
+_DEFERRED_CHECKS = [None]
+
+
+@_contextlib.contextmanager
+def deferVerletChecks():
+    prev = _DEFERRED_CHECKS[0]
+    flags = []
+    _DEFERRED_CHECKS[0] = flags
+    try:
+        yield flags
+    finally:
+        _DEFERRED_CHECKS[0] = prev
+
+
 def buildVerletList_(
         queryPositions: torch.Tensor, referencePositions: torch.Tensor,
         querySupports: torch.Tensor, referenceSupports: torch.Tensor,
@@ -71,6 +95,12 @@ def buildVerletList_(
                         verletScale,
                         support_case,
                     )
+                    if _DEFERRED_CHECKS[0] is not None:
+                        # deferVerletChecks(): record the device flag and keep
+                        # the prior list; the caller decides after the fact
+                        # (it re-runs the whole step eagerly if any flag is set)
+                        _DEFERRED_CHECKS[0].append(shouldRebuild_t)
+                        return priorNeighborhood
                     shouldRebuild = bool(shouldRebuild_t.item())
 
                     if verbose:

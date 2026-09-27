@@ -166,3 +166,67 @@ def getIndexRange(
             domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
         )
         return beginIndex, numIndices
+
+
+@wp.func
+def laneSubRange(beginIndex: wp.int32, numIndices: wp.int32, lane: wp.int32, lanes: wp.int32):
+    """The contiguous slice of ``[beginIndex, beginIndex + numIndices)`` that
+    lane ``lane`` of ``lanes`` cooperating threads owns (possibly empty).
+    ``lanes == 1`` returns the range unchanged. Used by the tiled
+    (multi-lane-per-particle) operator kernels -- see ``autograd/lanes.py``."""
+    chunk = (numIndices + lanes - wp.int32(1)) // lanes
+    start = lane * chunk
+    count = wp.max(wp.int32(0), wp.min(chunk, numIndices - start))
+    return beginIndex + start, count
+
+
+@wp.func
+def laneSlice(beginIndex: wp.int32, numIndices: wp.int32, lane: wp.int32, lanes: wp.int32,
+              useAdjacency: wp.bool):
+    """This lane's share of one traversal range: a contiguous slice of a
+    neighbour list (`laneSubRange`), or -- grid traversal, where the caller
+    already skipped the cells this lane does not own (`o % lanes != lane`) --
+    the whole cell."""
+    if useAdjacency:
+        return laneSubRange(beginIndex, numIndices, lane, lanes)
+    return beginIndex, numIndices
+
+
+@wp.func
+def getIndexRangeLane(
+    i: wp.int32,
+    o: wp.int32,
+    lane: wp.int32,
+    lanes: wp.int32,
+    useAdjacency: wp.bool,
+    adjacencyState: adjacencyData,
+    gridState: gridData,
+    queryState: Any, # particleDataSoA_1/2/3
+    domainState: domainData,
+):
+    """``getIndexRange`` restricted to lane ``lane`` of ``lanes``: the union
+    over all lanes is exactly ``getIndexRange``'s range, in the same order.
+    ``(lane, lanes) == (0, 1)`` is ``getIndexRange`` itself. A neighbour list
+    is split into contiguous slices; grid cells go to lanes whole,
+    round-robin (``o % lanes == lane``), others return ``beginIndex < 0``."""
+    if not useAdjacency and (o % lanes) != lane:
+        # grid traversal: lanes take whole cells round-robin (a cell holds a
+        # handful of particles -- splitting it 32 ways left most lanes idle
+        # while every lane repeated the hash lookup for every cell)
+        return wp.int32(-1), wp.int32(-1)
+    beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+    if beginIndex < 0:
+        return wp.int32(beginIndex), wp.int32(numIndices)
+    return laneSlice(wp.int32(beginIndex), wp.int32(numIndices), lane, lanes, useAdjacency)
+
+@wp.func
+def laneSum(value: Any):
+    """Sum ``value`` over the lanes (threads) of the current block and return
+    the total to *every* lane. The reduction step of the tiled operator
+    kernels (``autograd/lanes.py``); deterministic (fixed tree order).
+
+    Every lane of the block must reach this call, and callers must read the
+    result in all lanes before branching on the lane index: a tile access
+    whose adjoint carries a block barrier deadlocks the backward kernel if
+    only lane 0 performs it."""
+    return wp.tile_sum(wp.tile(value, preserve_type=True))[0]

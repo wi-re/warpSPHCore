@@ -10,7 +10,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import getIndexRange, checkOffset
+from ..radiusSearch.grid_util import getIndexRange, checkOffset, getIndexRangeLane, laneSum
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -109,7 +109,7 @@ def computeSPHDivergenceTensor_Func_i(
 
 @wp.func
 def computeSPHDivergenceTensor_Func_Adjacency(
-    i: wp.int32, dim: wp.int32,
+    i: wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
     # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
     # Domain properties 
@@ -138,7 +138,7 @@ def computeSPHDivergenceTensor_Func_Adjacency(
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
-        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, useAdjacency, adjacencyState, gridState, queryState, domainState)
         if beginIndex < 0:
             continue
 
@@ -188,7 +188,7 @@ def computeSPHDivergenceTensor_Kernel(
         return
 
     outputValues[i] = computeSPHDivergenceTensor_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
@@ -200,12 +200,53 @@ def computeSPHDivergenceTensor_Kernel(
     )
 
 
+@wp.kernel
+def computeSPHDivergenceTensor_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above -- canonical structured kernel ABI, see warpier_core.md
+
+    consistentDivergence: wp.bool,
+
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    queryValues: Any, referenceValues: Any, # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = Any) # type: ignore
+):
+    # Multi-lane variant of computeSPHDivergenceTensor_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeSPHDivergenceTensor_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        consistentDivergence,
+        numDims, flatInputShape, flatOutputShape,
+        queryValues, referenceValues,
+
+        zero_like_warp(outputValues[i]),
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = total
+
+
 def _divergenceOutputDtype(ctx, extras):
     return _get_warp_vector_dtype(int(extras["flatOutputShape"]), extras["queryValuesFlat"].dtype)
 
 
 _DIVERGENCE_SPEC = OperatorSpec(
     kernel=computeSPHDivergenceTensor_Kernel,
+    tiledKernel=computeSPHDivergenceTensor_KernelTiled,
     outputs=(OutputSpec(dtype=_divergenceOutputDtype),),
     extras=(
         ExtraSpec("consistentDivergence", ExtraKind.SCALAR),

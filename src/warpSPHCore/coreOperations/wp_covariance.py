@@ -9,7 +9,7 @@ from ..type_config import *
 from ..autograd import *
 
 from ..dataTypes import *
-from ..radiusSearch.grid_util import getIndexRange, checkOffset
+from ..radiusSearch.grid_util import getIndexRange, checkOffset, getIndexRangeLane, laneSum
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -111,7 +111,7 @@ def computeCovariance_Func_i(
 
 @wp.func
 def computeCovariance_Func_Adjacency(
-    i: wp.int32, dim: wp.int32,
+    i: wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
     # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
     # Domain properties 
@@ -136,7 +136,7 @@ def computeCovariance_Func_Adjacency(
     numNeighbors = wp.int32(0)
 
     for o in range(numOffsets):
-        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, useAdjacency, adjacencyState, gridState, queryState, domainState)
         if beginIndex < 0:
             continue
 
@@ -181,7 +181,7 @@ def computeCovariance_Kernel(
         return
 
     C, N = computeCovariance_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
@@ -199,6 +199,43 @@ def computeCovariance_Kernel(
     outputNeighbors[i] = N
 
 
+@wp.kernel
+def computeCovariance_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above -- this is the canonical structured kernel ABI
+    # (see warpier_core.md, Phase 1 / Step 1); other operators share this argument prefix.
+
+    # The last parameter is always the output array and should not be changed
+    outputValues : wp.array(dtype = Any), # type: ignore
+    outputNeighbors : wp.array(dtype = wp.int32) # type: ignore
+):
+    # Multi-lane variant of computeCovariance_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    C, N = computeCovariance_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+
+        zero_like_warp(outputValues[i]),
+        0,
+    )
+    Ct = laneSum(C)
+    Nt = laneSum(N)
+    if lane == 0:
+        outputValues[i] = Ct
+        outputNeighbors[i] = Nt
+
+
 def _covarianceMatrixDtype(ctx, extras):
     dim = ctx.query.positions.shape[1]
     return _get_warp_matrix_dtype(dim, dim, ctx.query.positions.dtype)
@@ -206,6 +243,7 @@ def _covarianceMatrixDtype(ctx, extras):
 
 _COVARIANCE_SPEC = OperatorSpec(
     kernel=computeCovariance_Kernel,
+    tiledKernel=computeCovariance_KernelTiled,
     outputs=(
         OutputSpec(dtype=_covarianceMatrixDtype),
         OutputSpec(dtype=wp.int32),

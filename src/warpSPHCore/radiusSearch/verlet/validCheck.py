@@ -10,8 +10,10 @@ from ...util import *
 from ...dataTypes import *
 from ...enumTypes import *
 from .util import _minimum_image_delta
+from ...autograd.compileGlue import compileGlue
 
 # @torch.jit.script # jit script is deprecated :/
+@compileGlue
 def _verlet_validity_metrics(
         queryPositions: torch.Tensor,
         referencePositions: torch.Tensor,
@@ -30,17 +32,29 @@ def _verlet_validity_metrics(
     priorQuerySupports = supports_a / verletScale
     priorReferenceSupports = supports_b / verletScale
 
+    # Query and reference are usually the same particle set (the same
+    # tensors): the reference half is then the identical computation, reused
+    # (bitwise the same numbers, half the kernels of a check that runs up to
+    # three times per step).
+    sameSet = (queryPositions is referencePositions and priorQueryPositions is priorReferencePositions
+               and querySupports is referenceSupports and supports_a is supports_b)
+
     delta_a = _minimum_image_delta(queryPositions, priorQueryPositions, periodicity, domainMin, domainMax)
-    delta_b = _minimum_image_delta(referencePositions, priorReferencePositions, periodicity, domainMin, domainMax)
     distance_a_max = torch.linalg.vector_norm(delta_a, dim=-1).amax()
-    distance_b_max = torch.linalg.vector_norm(delta_b, dim=-1).amax()
+    if sameSet:
+        distance_b_max = distance_a_max
+    else:
+        delta_b = _minimum_image_delta(referencePositions, priorReferencePositions, periodicity, domainMin, domainMax)
+        distance_b_max = torch.linalg.vector_norm(delta_b, dim=-1).amax()
     maxDistance = distance_a_max + distance_b_max
 
     querySupportDeltaMax = torch.abs(priorQuerySupports - querySupports).amax()
-    referenceSupportDeltaMax = torch.abs(priorReferenceSupports - referenceSupports).amax()
-
     queryMinSupport = torch.minimum(priorQuerySupports.amin(), querySupports.amin())
-    referenceMinSupport = torch.minimum(priorReferenceSupports.amin(), referenceSupports.amin())
+    if sameSet:
+        referenceSupportDeltaMax, referenceMinSupport = querySupportDeltaMax, queryMinSupport
+    else:
+        referenceSupportDeltaMax = torch.abs(priorReferenceSupports - referenceSupports).amax()
+        referenceMinSupport = torch.minimum(priorReferenceSupports.amin(), referenceSupports.amin())
 
     if support_case == 0:
         supportFactor = querySupportDeltaMax

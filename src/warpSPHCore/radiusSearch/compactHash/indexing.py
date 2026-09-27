@@ -64,7 +64,8 @@ def linearIndexing(cellIndices, cellCounts):
     return linearIndex
 
 
-def delinearizeIndices(linearIndices: torch.Tensor, cellCounts: torch.Tensor, D: int) -> torch.Tensor:
+def delinearizeIndices(linearIndices: torch.Tensor, cellCounts: torch.Tensor, D: int,
+                       cellCountsHost=None) -> torch.Tensor:
     """Recover D-dimensional cell indices from x-major linear indices.
 
     This keeps hashing and lookup consistent with getLinearIndex64/getLinearIndex.
@@ -72,7 +73,7 @@ def delinearizeIndices(linearIndices: torch.Tensor, cellCounts: torch.Tensor, D:
     linear = linearIndices.to(torch.int64).clone()
     grid = torch.zeros((linear.shape[0], D), dtype=torch.int32, device=linear.device)
     for d in range(D):
-        cd = int(cellCounts[d].item())
+        cd = int(cellCountsHost[d]) if cellCountsHost is not None else int(cellCounts[d].item())
         grid[:, d] = torch.remainder(linear, cd).to(torch.int32)
         linear = torch.div(linear, cd, rounding_mode="floor")
     return grid

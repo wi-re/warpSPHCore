@@ -10,7 +10,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import checkOffset, getIndexRange
+from ..radiusSearch.grid_util import checkOffset, getIndexRange, getIndexRangeLane, laneSum
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -121,7 +121,7 @@ def computeSPHGradientTensor_Func_i(
 
 @wp.func
 def computeSPHGradientTensor_Func_Adjacency(
-    i: wp.int32, dim: wp.int32,
+    i: wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
     # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
     # Domain properties 
@@ -150,7 +150,7 @@ def computeSPHGradientTensor_Func_Adjacency(
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
-        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, useAdjacency, adjacencyState, gridState, queryState, domainState)
         if beginIndex < 0:
             continue
 
@@ -198,7 +198,7 @@ def computeSPHGradientTensor_Kernel(
         return
 
     outputValues[i] = computeSPHGradientTensor_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
@@ -217,6 +217,45 @@ def computeSPHGradientTensor_Kernel(
     )
 
 
+@wp.kernel
+def computeSPHGradientTensor_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above -- this is the canonical structured kernel ABI
+    # (see warpier_core.md, Phase 1 / Step 1); other operators share this argument prefix.
+
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    queryValues: Any, referenceValues: Any, # type: ignore
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = Any) # type: ignore
+):
+    # Multi-lane variant of computeSPHGradientTensor_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    partial = computeSPHGradientTensor_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+
+        numDims, flatInputShape, flatOutputShape,
+        queryValues, referenceValues,
+
+        zero_like_warp(outputValues[i]),
+    )
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = total
+
+
 def _gradientOutputDtype(ctx, extras):
     # Read the already-computed flatOutputShape extra rather than
     # re-deriving it here: it depends on the *unflattened* input shape
@@ -227,6 +266,7 @@ def _gradientOutputDtype(ctx, extras):
 
 _GRADIENT_SPEC = OperatorSpec(
     kernel=computeSPHGradientTensor_Kernel,
+    tiledKernel=computeSPHGradientTensor_KernelTiled,
     outputs=(OutputSpec(dtype=_gradientOutputDtype),),
     extras=(
         ExtraSpec("numDims", ExtraKind.SCALAR),

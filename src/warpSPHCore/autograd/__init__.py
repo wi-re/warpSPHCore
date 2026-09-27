@@ -21,6 +21,11 @@ __all__ = [
     "OutputSpec", "ExtraSpec", "ExtraKind", "ShapeOf", "ThreadSpec", "JVPSpec", "launchOperator",
 ]
 
+from .lanes import neighborLanes, setNeighborLanes, DEFAULT_NEIGHBOR_LANES
+__all__.extend(["neighborLanes", "setNeighborLanes", "DEFAULT_NEIGHBOR_LANES"])
+from .compileGlue import compileGlue, compileGlueEnabled, markDynamic, setCompileGlue
+__all__.extend(["compileGlue", "compileGlueEnabled", "markDynamic", "setCompileGlue"])
+
 from .cache import getCachedDummyTensor, getCachedIdentityMatrices, clearWarpArrayCache, clearKernelArgsCache
 __all__.extend([
     "getCachedDummyTensor",

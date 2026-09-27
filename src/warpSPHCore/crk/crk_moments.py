@@ -9,7 +9,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import checkOffset, getIndexRange
+from ..radiusSearch.grid_util import checkOffset, getIndexRange, getIndexRangeLane, laneSum
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -111,7 +111,7 @@ def computeCRKMoments_Func_i(
 
 @wp.func
 def computeCRKMoments_Func_Adjacency(
-    i: wp.int32, dim: wp.int32,
+    i: wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
     # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
     # Domain properties 
@@ -148,7 +148,7 @@ def computeCRKMoments_Func_Adjacency(
     numNeighbors = wp.int32(0)
 
     for o in range(numOffsets):
-        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, useAdjacency, adjacencyState, gridState, queryState, domainState)
         if beginIndex < 0:
             continue
 
@@ -203,7 +203,7 @@ def computeCRKMoments_Kernel(
         return
 
     m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma, numNeighbors = computeCRKMoments_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
@@ -227,12 +227,64 @@ def computeCRKMoments_Kernel(
     output_numNeighbors[i] = numNeighbors
 
 
+@wp.kernel
+def computeCRKMoments_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above -- this is the canonical structured kernel ABI
+    # (see warpier_core.md, Phase 1 / Step 1); other operators share this argument prefix.
+
+    # The last parameters are always the output arrays and should not be changed
+    output_m_0 : wp.array(dtype = Any), # type: ignore
+    output_m_1 : wp.array(dtype = Any), # type: ignore
+    output_m_2 : wp.array(dtype = Any), # type: ignore
+    output_dm_0dgamma : wp.array(dtype = Any), # type: ignore
+    output_dm_1dgamma : wp.array(dtype = Any), # type: ignore
+    output_dm_2dgamma : wp.array(dtype = Any), # type: ignore (flattened to avoid issues with warp's handling of rank-3 tensors)
+    output_numNeighbors : wp.array(dtype = wp.int32) # type: ignore
+):
+    # Multi-lane variant of computeCRKMoments_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma, numNeighbors = computeCRKMoments_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        zero_like_warp(output_m_0[i]), zero_like_warp(output_m_1[i]), zero_like_warp(output_m_2[i]),
+        zero_like_warp(output_dm_0dgamma[i]), zero_like_warp(output_dm_1dgamma[i]), zero_like_warp(output_dm_2dgamma[i]),
+    )
+    s_m0 = laneSum(m_0)
+    s_m1 = laneSum(m_1)
+    s_m2 = laneSum(m_2)
+    s_dm0 = laneSum(dm_0dgamma)
+    s_dm1 = laneSum(dm_1dgamma)
+    s_dm2 = laneSum(dm_2dgamma)
+    s_n = laneSum(numNeighbors)
+    if lane == 0:
+        output_m_0[i] = s_m0
+        output_m_1[i] = s_m1
+        output_m_2[i] = s_m2
+        output_dm_0dgamma[i] = s_dm0
+        output_dm_1dgamma[i] = s_dm1
+        output_dm_2dgamma[i] = s_dm2
+        output_numNeighbors[i] = s_n
+
+
 def _dimOf(ctx, extras):
     return ctx.query.positions.shape[1]
 
 
 _CRK_MOMENTS_SPEC = OperatorSpec(
     kernel=computeCRKMoments_Kernel,
+    tiledKernel=computeCRKMoments_KernelTiled,
     outputs=(
         OutputSpec(dtype=scalar_t),
         OutputSpec(dtype=lambda ctx, extras: vector(length=_dimOf(ctx, extras), dtype=scalar_t)),

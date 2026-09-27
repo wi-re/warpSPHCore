@@ -44,7 +44,9 @@ def _allocate_output(shape, dtype, device, requires_grad):
     return output_torch, output_warp
 
 
-def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
+def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None, lanes=None):
+    # `lanes` (autograd/lanes.py): launch a tiled kernel as dim=[N, lanes],
+    # block_dim=lanes -- `lanes` cooperating threads per query particle.
     # with record_function(f"Warp Kernel Launch"):
     inputs = list(args)
 
@@ -85,23 +87,20 @@ def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None):
         actual_dim = numThreads if numThreads is not None else kernel_dim
         kernel_inputs = inputs + outputs_warp
 
-        wp.launch(
-            kernel,
-            dim = actual_dim,
-            inputs = kernel_inputs,
-            device = device
-        )
+        _launchMaybeTiled(kernel, actual_dim, kernel_inputs, device, lanes)
         return tuple(outputs_torch)
 
     output_torch, output_warp = _allocate_output(output_shape, output_dtype, device, requires_grad)
     kernel_inputs = inputs + [output_warp]
 
     actual_dim = numThreads if numThreads is not None else (output_shape[0] if not isinstance(output_shape, int) else output_shape)
-    wp.launch(
-        kernel,
-        dim = actual_dim,
-        inputs = kernel_inputs,
-        device = device
-    )
+    _launchMaybeTiled(kernel, actual_dim, kernel_inputs, device, lanes)
 
     return output_torch
+
+
+def _launchMaybeTiled(kernel, dim, inputs, device, lanes):
+    if lanes is not None and lanes > 1:
+        wp.launch(kernel, dim=[dim, lanes], inputs=inputs, device=device, block_dim=lanes)
+    else:
+        wp.launch(kernel, dim=dim, inputs=inputs, device=device)

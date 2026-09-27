@@ -19,12 +19,14 @@ def computeGridSupport(supportsX, supportsY, scheme: SupportScheme):
         return torch.max(supportsY)
     elif scheme == SupportScheme.MeanSymmetric: # partialSymmetric
         return torch.max((supportsX + supportsY) / 2)
+    # torch.maximum, not Python max(): the latter compares two device tensors
+    # on the host (a sync); the value is the same either way
     elif scheme == SupportScheme.KernelMeanSymmetric:  # symmetric
-        return max(torch.max(supportsX), torch.max(supportsY))
+        return torch.maximum(torch.max(supportsX), torch.max(supportsY))
     elif scheme == SupportScheme.SuperSymmetric:  # superSymmetric
-        return max(torch.max(supportsX), torch.max(supportsY))
+        return torch.maximum(torch.max(supportsX), torch.max(supportsY))
     elif scheme == SupportScheme.PartialSymmetric:  # partialSymmetric
-        return max(torch.max(supportsX), torch.max(supportsY))
+        return torch.maximum(torch.max(supportsX), torch.max(supportsY))
     else:
         raise ValueError('Invalid scheme value. Must be a valid SupportScheme. Value is {}'.format(scheme))
 

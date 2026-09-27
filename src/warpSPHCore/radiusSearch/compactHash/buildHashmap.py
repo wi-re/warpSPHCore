@@ -46,6 +46,14 @@ def buildCompactHashMap(
             y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
 
             sortedLinear, sortIndex, numCells, qMin, qMax, hCell = sortReferenceParticles(x, hMax, minD, maxD, periodicity)
+            # The grid scalars the host needs (search radius, cell counts,
+            # hCell as a kernel argument) in ONE transfer instead of a sync
+            # each. float64 holds the float32 values exactly; hCell is rounded
+            # to the build precision as `scalar_t(hCell)` used to do.
+            _host = torch.cat([torch.as_tensor(hMax, device=numCells.device).reshape(1).double(),
+                               torch.as_tensor(hCell, device=numCells.device).reshape(1).to(get_torch_precision()).double(),
+                               numCells.double()]).cpu().tolist()
+            hMaxValue, hCellValue, numCellsHost = _host[0], _host[1], [int(c) for c in _host[2:]]
 
 
 
@@ -58,11 +66,11 @@ def buildCompactHashMap(
             cellCounters = cellCounters.to(torch.int32)
             # Needs to zero padded for the indexing to work properly as the 0th cell is valid and cumsum doesn't include the first element
 
-            cumCell = torch.hstack((torch.tensor([0], device = cellIndices.device, dtype=cellCounters.dtype),torch.cumsum(cellCounters,dim=0)))[:-1].to(torch.int32)
+            cumCell = torch.hstack((torch.zeros(1, device = cellIndices.device, dtype=cellCounters.dtype),torch.cumsum(cellCounters,dim=0)))[:-1].to(torch.int32)
 
             # Derive grid indices directly from linear cell ids to avoid any floating-point
             # boundary mismatch between build and lookup paths.
-            cellGridIndices = delinearizeIndices(cellIndices, numCells, domainDescription.dim)
+            cellGridIndices = delinearizeIndices(cellIndices, numCells, domainDescription.dim, cellCountsHost=numCellsHost)
             # Cell indices contains the linear indices of the particles in each cell
             # cellCounters contains the number of particles in each cell
             # cumCell contains the cumulative sum of the number of particles in each cell, i.e., the offset into the cell
@@ -84,9 +92,11 @@ def buildCompactHashMap(
             # uint32), so this already gives us an int32 tensor directly --
             # matches the .to(torch.int32) the old wp.to_torch() path needed.
             hashedIndices, hashedIndices_warp = allocateTorchWarp(cellGridIndices.shape[0], wp.uint32, warpDevice)
-            wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice)
-            wp.synchronize()  # ensure hashCells is done before PyTorch reads on its own stream
-            referenceHashedIndices = hashGridIndicesTorch(cellGridIndices, hashMapLength)
+            # launched on torch's current stream, so the torch ops below are
+            # ordered after it without the device-wide wp.synchronize() this
+            # used to need (nor the unused torch reference hash it computed)
+            wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice,
+                      stream=wp.stream_from_torch(torch.cuda.current_stream(torchDevice)) if torchDevice.type == 'cuda' else None)
             # if not torch.equal(hashedIndices, referenceHashedIndices):
             #     mismatch = torch.nonzero(hashedIndices != referenceHashedIndices, as_tuple=False).flatten()
             #     sample = mismatch[:8]
@@ -120,15 +130,13 @@ def buildCompactHashMap(
             hashTable = hashMap.new_ones(hashMapLength,2, dtype = torch.int32) * -1
             hashTable[:,1] = 0
             hashMap64 = hashMap.to(torch.int64)
-            hashTable[hashMap64,0] = torch.hstack((torch.tensor([0], device = sortedCellIndices.device, dtype=torch.int32),torch.cumsum(hashMapCounters,dim=0)))[:-1].to(torch.int32) #torch.cumsum(hashMapCounters, dim = 0) #torch.arange(hashMap.shape[0], device=hashMap.device)
+            hashTable[hashMap64,0] = torch.hstack((torch.zeros(1, device = sortedCellIndices.device, dtype=torch.int32),torch.cumsum(hashMapCounters,dim=0)))[:-1].to(torch.int32) #torch.cumsum(hashMapCounters, dim = 0) #torch.arange(hashMap.shape[0], device=hashMap.device)
 
             hashTable[hashMap64,1] = hashMapCounters
         
         with record_function("neighborSearch - precomputeOffsets"):
             # we precompute the offset we want to iterate over based on the searchradius parameter
             # in 3D for a search radius of n we will iterate over (2n+1)^3 cells, in 2D we will iterate over (2n+1)^2 cells, and in 1D we will iterate over 2n+1 cells
-            hMaxValue = float(hMax.item()) if torch.is_tensor(hMax) else float(hMax)
-            hCellValue = float(hCell.item()) if torch.is_tensor(hCell) else float(hCell)
             # If hCell is smaller than the interaction support, we must expand the cell stencil.
             # Small epsilon avoids promoting exactly-1 ratios to radius=2 from FP noise.
             searchRadius = max(1, int(np.ceil(hMaxValue / max(hCellValue, 1e-12) - 1e-6)))

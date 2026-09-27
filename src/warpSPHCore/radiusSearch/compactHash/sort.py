@@ -74,6 +74,8 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     sortingIndices = torch.argsort(linearIndices)
     # with record_function("neighborSearch - sortReferenceParticles[resort]"): 
     sortedLinearIndices = linearIndices[sortingIndices]
+    # hCell stays a device tensor: the caller reads it back together with
+    # the other grid scalars in one transfer (buildCompactHashMap)
     return sortedLinearIndices, sortingIndices, \
-            cellCount, domainMin, domainMax, scalar_t(hCell)
+            cellCount, domainMin, domainMax, hCell
             

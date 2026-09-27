@@ -39,6 +39,7 @@ from ..dataTypes import (
     RenormalizationTangentState,
 )
 from .launcher import launch_kernel
+from .lanes import neighborLanes
 from .stateAwareWarpFunction import _liveTangentMask
 from .wrapper import _launch
 
@@ -176,6 +177,11 @@ class OperatorSpec:
     threads: ThreadSpec = ThreadSpec.QUERY_COUNT
     numThreads: Optional[Callable[["SPHContext", Dict[str, Any]], int]] = None
     jvp: Optional[JVPSpec] = None
+    #: Optional multi-lane variant of ``kernel`` (same arguments), launched
+    #: as ``dim=[N, lanes]`` / ``block_dim=lanes`` whenever
+    #: ``lanes.neighborLanes() > 1`` -- see ``autograd/lanes.py``. It must
+    #: produce ``kernel``'s outputs up to float summation order.
+    tiledKernel: Any = None
 
 
 @dataclass
@@ -514,13 +520,22 @@ def launchOperator(
         ctx.corrections.renorm,
     )
 
+    kernel, lanes = spec.kernel, None
+    # CPU launches force block_dim=1, where a tiled kernel is correct (lane 0
+    # takes the whole range) but pays for `lanes`x the threads -- CUDA only.
+    if spec.tiledKernel is not None and ctx.query.positions.is_cuda:
+        nLanes = neighborLanes()
+        if nLanes > 1:
+            kernel, lanes = spec.tiledKernel, nLanes
+
     return _launch(
         launcher=launch_kernel,
-        kernel=spec.kernel,
+        kernel=kernel,
         outputSizes=outputSizes,
         outputDtypes=outputDtypes,
         defaultStateArguments=defaultStateArguments,
         additionalArguments=additionalArguments,
         numThreads=spec.numThreads(ctx, extras) if spec.numThreads is not None else None,
         jvp_fn=jvp_fn,
+        lanes=lanes,
     )

@@ -31,6 +31,7 @@ def _launch(
     additionalArguments: tuple = (),
     numThreads: Optional[int] = None,
     jvp_fn: Optional[Callable] = None,
+    lanes: Optional[int] = None,
 ):
     """Shared engine behind both ``warpWrapper2`` (the untyped, positional
     legacy entry point) and ``launchOperator`` (Step I, ``operator_spec.py``
@@ -118,11 +119,16 @@ def _launch(
 
             return struct_args + tuple(reconstructed)
 
-        # Wrap launcher to inject numThreads if provided
-        if numThreads is not None:
+        # Wrap launcher to inject numThreads / lanes if provided
+        if numThreads is not None or lanes is not None:
             original_launcher = launcher
+            launchKw = {}
+            if numThreads is not None:
+                launchKw['numThreads'] = numThreads
+            if lanes is not None:
+                launchKw['lanes'] = lanes
             def launcher_with_threads(kernel, output_shape, output_dtype, *args):
-                return original_launcher(kernel, output_shape, output_dtype, *args, numThreads=numThreads)
+                return original_launcher(kernel, output_shape, output_dtype, *args, **launchKw)
             launcher = launcher_with_threads
 
         # jvp_fn (operator_spec.py's _build_geometry_jvp_fn) indexes

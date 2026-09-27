@@ -9,7 +9,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import checkOffset, getIndexRange
+from ..radiusSearch.grid_util import checkOffset, getIndexRange, getIndexRangeLane, laneSum
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -93,7 +93,7 @@ def computeCRKDensity_Func_i(
 
 @wp.func
 def computeCRKDensity_Func_Adjacency(
-    i: wp.int32, dim: wp.int32,
+    i: wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
     # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
     # Domain properties 
@@ -120,7 +120,7 @@ def computeCRKDensity_Func_Adjacency(
     mDensity = scalar_t(0.0)
     vol1 = scalar_t(0.0)
     for o in range(numOffsets):
-        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, useAdjacency, adjacencyState, gridState, queryState, domainState)
         if beginIndex < 0:
             continue
 
@@ -163,7 +163,7 @@ def computeCRKDensity_Kernel(
         return
 
     mDensity, vol1, masked = computeCRKDensity_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
@@ -177,8 +177,46 @@ def computeCRKDensity_Kernel(
         outputValues[i] = mDensity / vol1
 
 
+@wp.kernel
+def computeCRKDensity_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above -- this is the canonical structured kernel ABI
+    # (see warpier_core.md, Phase 1 / Step 1); other operators share this argument prefix.
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = scalar_t) # type: ignore
+):
+    # Multi-lane variant of computeCRKDensity_Kernel (warpSPHCore autograd/lanes.py):
+    # launched dim=[N, lanes]; each lane walks a slice of i's neighbours.
+
+    i, lane = wp.tid()
+    mDensity, vol1, masked = computeCRKDensity_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+    )
+    # the ratio after the lane reduction, outside the dynamic loop (see the
+    # thread-per-particle kernel's comment on warp's loop adjoint)
+    mD = laneSum(mDensity)
+    v1 = laneSum(vol1)
+    if lane == 0:
+        if masked:
+            outputValues[i] = scalar_t(0.0)
+        else:
+            outputValues[i] = mD / v1
+
+
 _CRK_DENSITY_SPEC = OperatorSpec(
     kernel=computeCRKDensity_Kernel,
+    tiledKernel=computeCRKDensity_KernelTiled,
     outputs=(OutputSpec(dtype=scalar_t),),
 )
 
