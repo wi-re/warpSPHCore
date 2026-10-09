@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import torch
+import torch.autograd.forward_ad as fwAD
 
 from ..dataTypes import DomainDescription, ParticleState
 from ..enumTypes import OperationDirection, SupportScheme, KernelFunctions
@@ -134,7 +135,22 @@ class PolyFit:
     # ------------------------------------------------------------------
     def coefficients(self, f: torch.Tensor) -> torch.Tensor:
         """Fit coefficients ``(N, n)`` for a scalar field ``(N,)`` or
-        ``(N, n, D)`` for ``(N, D)``."""
+        ``(N, n, D)`` for ``(N, D)``.
+
+        Forward mode: for a dual ``f`` (``torch.autograd.forward_ad``) the
+        result is dual too. The fit is exactly linear in the field values for
+        fixed geometry, so the tangent is this same operator applied to the
+        field tangent (the existing kernels re-launched, as the Tier-1 value
+        JVP of the other operators). Tangents of the *geometry* (positions,
+        supports, masses, densities) are not supported and raise."""
+        primal, tangent = fwAD.unpack_dual(f)
+        if tangent is not None:
+            c = self._coefficientsPrimal(primal)
+            dc = self._coefficientsPrimal(tangent)
+            return fwAD.make_dual(c, dc)
+        return self._coefficientsPrimal(f)
+
+    def _coefficientsPrimal(self, f: torch.Tensor) -> torch.Tensor:
         scalar = f.dim() == 1
         F = (f[:, None] if scalar else f).contiguous()
         a = self._args

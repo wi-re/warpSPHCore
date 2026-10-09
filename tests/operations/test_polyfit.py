@@ -279,3 +279,28 @@ def test_arbitrary_derivative(case2d):
     assert (pf.derivative(f, (1, 1)) - X).abs()[m].max() < tol
     with pytest.raises(ValueError):
         pf.derivative(f, (4, 0))
+
+
+@pytest.mark.parametrize("constant", [True, False])
+def test_forward_mode_field_tangent(case2d, constant):
+    """JVP wrt the field: the fit is linear in f, so the output tangent equals
+    the operator applied to the tangent (checked for value, gradient and
+    Laplacian), and the primal is unchanged."""
+    import torch.autograd.forward_ad as fwAD
+    c = case2d
+    pf = PolyFit.build(c["particles"], c["domain"], KERNEL, 2, constant=constant,
+                       adjacency=c["adjacency"])
+    x = c["positions"]
+    f = torch.sin(3 * x[:, 0]) * torch.cos(2 * x[:, 1])
+    v = torch.cos(5 * x[:, 0] + x[:, 1])
+    m = pf.cond < 100
+    with fwAD.dual_level():
+        fd = fwAD.make_dual(f, v)
+        for name in ("gradient", "laplacian"):
+            out = getattr(pf, name)(fd)
+            primal, tangent = fwAD.unpack_dual(out)
+            assert tangent is not None
+            ref_p, ref_t = getattr(pf, name)(f), getattr(pf, name)(v)
+            tol = 1e-3 if x.dtype == torch.float32 else 1e-9
+            assert (primal - ref_p).abs()[m].max() < tol * max(1.0, float(ref_p.abs().max()))
+            assert (tangent - ref_t).abs()[m].max() < tol * max(1.0, float(ref_t.abs().max()))
