@@ -48,6 +48,7 @@ import math
 from typing import Optional
 
 import torch
+import torch.autograd.forward_ad as fwAD
 
 from ..dataTypes import DomainDescription, ParticleState
 from ..enumTypes import KernelFunctions, SupportScheme
@@ -119,8 +120,13 @@ class Reconstructor:
         maxR = torch.stack([s["radius"] for s in specs]).amax(0)
         if adjacency is None:
             from ..radiusSearch import radiusSearchCompactHashMap
-            adjacency = radiusSearchCompactHashMap(cls._candidateState(q, maxR), domain,
-                                                   mode=SupportScheme.SuperSymmetric)
+            # the neighbour search is structural: build it from the primals (forward-mode
+            # duals on the particle tensors are handled by PolyFit.build, not here)
+            prim = lambda t: t if t is None else fwAD.unpack_dual(t).primal
+            adjacency = radiusSearchCompactHashMap(
+                ParticleState(positions=prim(q.positions), supports=prim(maxR),
+                              masses=prim(q.masses), densities=prim(q.densities), kinds=q.kinds),
+                domain, mode=SupportScheme.SuperSymmetric)
         fits = []
         for sp in specs:
             fits.append(PolyFit.build(

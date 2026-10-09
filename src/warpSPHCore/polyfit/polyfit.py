@@ -33,10 +33,11 @@ from typing import Optional
 import torch
 import torch.autograd.forward_ad as fwAD
 
-from ..dataTypes import DomainDescription, ParticleState
+from ..dataTypes import DomainDescription, ParticleState, ParticleTangentState
 from ..enumTypes import OperationDirection, SupportScheme, KernelFunctions
 from ..dataTypes import OperationProperties
 from .wp_polyfit import _computePolyMoments_stateBackend, _computePolyRHS_stateBackend
+from .wp_polyfitJVP import computePolyMomentsGeometryJVP, computePolyRHSGeometryJVP
 
 __all__ = ["PolyFit", "monomialExponents"]
 
@@ -71,6 +72,10 @@ class PolyFit:
     deficient: torch.Tensor        # (N,) bool
     # call context for the right-hand-side kernel
     _args: dict
+    # forward mode: tangent of the geometry (positions / supports / masses /
+    # densities) and of the moment matrices, when the particle tensors were dual
+    _tangent: Optional[ParticleTangentState] = None
+    _dM: Optional[torch.Tensor] = None
 
     @property
     def n_basis(self) -> int:
@@ -87,6 +92,30 @@ class PolyFit:
               equilibrate: bool = True, rtol: float = 1e-12,
               cond_max: float = 1e10, sector: int = -1, numSectors: int = 8,
               unitWeights: bool = False, minNeighbors: Optional[int] = None) -> "PolyFit":
+        # forward mode: dual particle tensors carry geometry tangents. The kernels
+        # run on the primals; the tangents are applied through the JVP kernels.
+        supportsDual = queryParticles.supports
+        tangents = None
+        parts = []
+        anyTangent = False
+        for name in ("positions", "supports", "masses", "densities"):
+            t = getattr(queryParticles, name)
+            pr, tg = fwAD.unpack_dual(t) if t is not None else (None, None)
+            anyTangent |= tg is not None
+            parts.append((pr, tg))
+        if anyTangent:
+            queryParticles = ParticleState(
+                positions=parts[0][0], supports=parts[1][0], masses=parts[2][0],
+                densities=parts[3][0], kinds=queryParticles.kinds)
+            tangents = ParticleTangentState(
+                positions=parts[0][1], supports=parts[1][1], masses=parts[2][1],
+                densities=parts[3][1])
+            if queryVolumes is not None or referenceVolumes is not None \
+                    or referenceParticles is not None:
+                raise NotImplementedError(
+                    "PolyFit geometry tangents are supported for the plain m/rho volumes "
+                    "and a single particle set (no queryVolumes/referenceVolumes/"
+                    "referenceParticles).")
         pos = queryParticles.positions
         N, dim = pos.shape
         exps_all = monomialExponents(dim, order)
@@ -127,32 +156,57 @@ class PolyFit:
         args = dict(queryParticles=queryParticles, props=props, domain=domain,
                     queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
                     adjacency=adjacency, referenceParticles=referenceParticles,
-                    stencil=stencil)
+                    stencil=stencil, kernel=kernel)
+        dM = None
+        if tangents is not None:
+            dMp = computePolyMomentsGeometryJVP(
+                queryParticles, domain, kernel, adjacency, tangents, exps,
+                supportMode=SupportScheme.Gather, **stencil)
+            dM = torch.zeros(N, n, n, dtype=dMp.dtype, device=pos.device)
+            dM[:, rows, cols] = dMp
+            dM = dM + torch.tril(dM, -1).transpose(1, 2)
+        # `h` keeps the (possibly dual) supports so that the 1/h^|a| read-out scaling
+        # propagates the support tangent through ordinary torch forward AD
         return cls(dim=dim, order=order, constant=constant, exps=exps,
-                   h=queryParticles.supports, M=M, Minv=Minv, cond=cond,
-                   num_nbrs=nnb, deficient=deficient, _args=args)
+                   h=supportsDual, M=M, Minv=Minv, cond=cond,
+                   num_nbrs=nnb, deficient=deficient, _args=args,
+                   _tangent=tangents, _dM=dM)
 
     # ------------------------------------------------------------------
     def coefficients(self, f: torch.Tensor) -> torch.Tensor:
         """Fit coefficients ``(N, n)`` for a scalar field ``(N,)`` or
         ``(N, n, D)`` for ``(N, D)``.
 
-        Forward mode: for a dual ``f`` (``torch.autograd.forward_ad``) the
-        result is dual too. The fit is exactly linear in the field values for
-        fixed geometry, so the tangent is this same operator applied to the
-        field tangent (the existing kernels re-launched, as the Tier-1 value
-        JVP of the other operators). Tangents of the *geometry* (positions,
-        supports, masses, densities) are not supported and raise."""
+        Forward mode (``torch.autograd.forward_ad`` duals): the result is dual
+        when the field is dual *or* the particle tensors were dual at
+        :meth:`build` time. The field tangent is exact and cheap (the fit is
+        linear in the field: the same kernels applied to the tangent). Geometry
+        tangents (positions, supports, masses, densities) use dedicated JVP
+        kernels, ``dc = M^-1 (db - dM c)``; they must be used inside the same
+        ``dual_level`` the particle tensors were made dual in. Rank-deficient
+        rows (pseudo-inverse at a rank change) have no meaningful tangent."""
         primal, tangent = fwAD.unpack_dual(f)
-        if tangent is not None:
-            c = self._coefficientsPrimal(primal)
-            dc = self._coefficientsPrimal(tangent)
-            return fwAD.make_dual(c, dc)
-        return self._coefficientsPrimal(f)
+        scalar = primal.dim() == 1
+        F = (primal[:, None] if scalar else primal).contiguous()
+        c = self._coefficients3(F)
+        if tangent is None and self._tangent is None:
+            return c[:, :, 0] if scalar else c
+        dF = None if tangent is None else (tangent[:, None] if scalar else tangent).contiguous()
+        a = self._args
+        db = computePolyRHSGeometryJVP(
+            a["queryParticles"], a["domain"], a["kernel"], a["adjacency"], self._tangent,
+            self.exps, F, dF, subtractCenter=not self.constant,
+            sector=a["stencil"]["sector"], numSectors=a["stencil"]["numSectors"],
+            unitWeights=a["stencil"]["unitWeights"])
+        db = db.reshape(F.shape[0], self.n_basis, F.shape[1])
+        if self._dM is not None:
+            db = db - torch.einsum("nab,nbd->nad", self._dM, c)
+        dc = torch.einsum("nab,nbd->nad", self.Minv, db)
+        out = fwAD.make_dual(c, dc)
+        return out[:, :, 0] if scalar else out
 
-    def _coefficientsPrimal(self, f: torch.Tensor) -> torch.Tensor:
-        scalar = f.dim() == 1
-        F = (f[:, None] if scalar else f).contiguous()
+    def _coefficients3(self, F: torch.Tensor) -> torch.Tensor:
+        """``(N, n, D)`` fit coefficients of the primal 2-D field ``(N, D)``."""
         a = self._args
         b = _computePolyRHS_stateBackend(
             a["queryParticles"], a["props"], a["domain"], self.exps, F,
@@ -161,8 +215,7 @@ class PolyFit:
             adjacency=a["adjacency"], referenceParticles=a["referenceParticles"],
             **a["stencil"])
         b = b.reshape(F.shape[0], self.n_basis, F.shape[1])
-        c = torch.einsum("nab,nbd->nad", self.Minv, b)
-        return c[:, :, 0] if scalar else c
+        return torch.einsum("nab,nbd->nad", self.Minv, b)
 
     def _col(self, c: torch.Tensor, e: tuple[int, ...]) -> torch.Tensor:
         idx = self._index(e)

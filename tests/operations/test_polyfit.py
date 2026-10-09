@@ -304,3 +304,63 @@ def test_forward_mode_field_tangent(case2d, constant):
             tol = 1e-3 if x.dtype == torch.float32 else 1e-9
             assert (primal - ref_p).abs()[m].max() < tol * max(1.0, float(ref_p.abs().max()))
             assert (tangent - ref_t).abs()[m].max() < tol * max(1.0, float(ref_t.abs().max()))
+
+
+def _periodic_lattice_case(device, n=10, nbrs=16, jitter=0.2, seed=3):
+    dtype = torch.float32
+    g = torch.Generator().manual_seed(seed)
+    ax = torch.arange(n, dtype=torch.float64)
+    pts = torch.stack(torch.meshgrid(ax, ax, indexing="ij"), -1).reshape(-1, 2) / n
+    pts = pts + (torch.rand(pts.shape, generator=g, dtype=torch.float64) - 0.5) * jitter / n
+    N = pts.shape[0]
+    h = float(volumeToSupport((1.0 / n) ** 2, nbrs, 2))
+    domain = DomainDescription(torch.zeros(2, dtype=dtype, device=device),
+                               torch.ones(2, dtype=dtype, device=device),
+                               torch.ones(2, dtype=torch.bool, device=device), 2)
+    P = ParticleState(positions=pts.to(dtype).to(device),
+                      supports=torch.full((N,), h, dtype=dtype, device=device),
+                      masses=torch.full((N,), (1.0 / n) ** 2, dtype=dtype, device=device),
+                      densities=None, kinds=torch.zeros(N, dtype=torch.int32, device=device))
+    adj = radiusSearchCompactHashMap(P, domain, mode=SupportScheme.SuperSymmetric)
+    P.densities = warpOperation(P, OperationProperties(
+        kernel=KERNEL, operation=WarpOperation.Density, supportMode=SupportScheme.Gather,
+        operationMode=OperationDirection.AllToAll), domain, adjacency=adj).detach()
+    return P, domain, adj
+
+
+@pytest.mark.parametrize("constant", [True, False])
+def test_forward_mode_geometry_tangent_matches_the_adjoint(device, constant):
+    """<u, J v> (forward mode, geometry + field tangents together) must equal
+    <J^T u, v> (reverse mode, itself verified against finite differences in
+    scripts/gradcheck/gradcheck_polyfit_native.py)."""
+    import torch.autograd.forward_ad as fwAD
+    P, domain, adj = _periodic_lattice_case(device)
+    kinds = P.kinds
+    names = ("positions", "supports", "masses", "densities")
+    base = {k: getattr(P, k).detach().clone() for k in names}
+    f0 = torch.sin(3 * base["positions"][:, 0]) * torch.cos(2 * base["positions"][:, 1])
+    torch.manual_seed(0)
+    tan = {k: 0.3 * torch.randn_like(v) for k, v in base.items()}
+    tf = torch.randn_like(f0)
+    u = torch.randn(f0.shape[0], 2, dtype=f0.dtype, device=f0.device)
+
+    def run(state, f):
+        pf = PolyFit.build(ParticleState(positions=state["positions"], supports=state["supports"],
+                                         masses=state["masses"], densities=state["densities"],
+                                         kinds=kinds), domain, KERNEL, 2, constant=constant,
+                           adjacency=adj)
+        assert not pf.deficient.any()
+        return pf.gradient(f)
+
+    with fwAD.dual_level():
+        dual = {k: fwAD.make_dual(base[k], tan[k]) for k in names}
+        out = run(dual, fwAD.make_dual(f0, tf))
+        t_out = fwAD.unpack_dual(out).tangent
+    forward = (u * t_out).sum()
+
+    leaves = {k: v.clone().requires_grad_(True) for k, v in base.items()}
+    fl = f0.clone().requires_grad_(True)
+    out = run(leaves, fl)
+    grads = torch.autograd.grad(out, list(leaves.values()) + [fl], u.clone())
+    reverse = sum((g * tan[k]).sum() for g, k in zip(grads[:4], names)) + (grads[4] * tf).sum()
+    assert abs(forward.item() - reverse.item()) < 2e-3 * max(1.0, abs(reverse.item()))

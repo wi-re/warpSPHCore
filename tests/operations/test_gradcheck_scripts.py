@@ -45,6 +45,7 @@ GRADCHECK_SCRIPTS = [
     "gradcheck_pinv_native.py",
     "gradcheck_scalar_arg_native.py",
     "gradcheck_polyfit_native.py",
+    "gradcheck_polyfit_jvp_native.py",
     "gradcheck_twice_in_process.py",
     "gradcheck_tier2_jvp_density.py",
     "gradcheck_tier2_jvp_interpolate.py",

@@ -11,6 +11,7 @@ per-query-particle convention closely enough that a dedicated `build_fn`
 untouched) was all reverse-mode differentiability needed.
 """
 
+import functools
 from typing import Any, Optional, Union
 import torch
 import warp as wp
@@ -333,6 +334,7 @@ def launchGeometryJVP(
 
     extraTensors: tuple = (),
     extraScalars: tuple = (),
+    numThreads: Optional[int] = None,
 ) -> torch.Tensor:
     """Autograd-bridged launcher for every Tier-2 JVP kernel's shared CSR
     argument order (`queryState, referenceState, queryTangentState,
@@ -553,6 +555,10 @@ def launchGeometryJVP(
             correctionData, correctionTangentData, kernelProperties,
         ) + extra + extraScalars
 
+    # `outputShape` may be a tuple (a 2-D scalar output) and `numThreads` the
+    # launch size when it differs from the first output dimension (polyfit's
+    # one-thread-per-matrix-entry kernels); both default to the old behaviour.
+    launcher = launch_kernel if numThreads is None else functools.partial(launch_kernel, numThreads=numThreads)
     return StateAwareWarpFunction.apply(
-        None, build_fn, launch_kernel, kernel, outputShape, outputDtype, *flat_tensors,
+        None, build_fn, launcher, kernel, outputShape, outputDtype, *flat_tensors,
     )
