@@ -111,3 +111,105 @@ def test_gradient_flows_through_the_nonlinear_weights(device):
     fl, fr = rec.interfaceStates(f, i, j, d)
     (fl.sum() + fr.sum()).backward()
     assert torch.isfinite(f.grad).all() and f.grad.abs().max() > 0
+
+
+# --- pair lists and bundles of fields ------------------------------------------
+
+def test_pairs_match_a_brute_force_pair_list(device):
+    from warpSPHCore.polyfit import interfacePairs
+    P, dom, *_ = _periodic_case(device, 20)
+    P.supports = P.supports * (1.0 + 0.2 * torch.rand_like(P.supports))     # unequal supports
+    i, j, d = interfacePairs(P, dom)
+    x = P.positions
+    dd = x[None, :, :] - x[:, None, :]
+    dd = dd - torch.round(dd)
+    r = torch.linalg.norm(dd, dim=-1)
+    thr = torch.maximum(P.supports[:, None], P.supports[None, :])
+    bi, bj = torch.nonzero((r <= thr) & (torch.arange(len(x), device=device)[:, None]
+                                         < torch.arange(len(x), device=device)[None, :]),
+                           as_tuple=True)
+    key = lambda a, b: set(zip(a.tolist(), b.tolist()))
+    # the neighbour search and the brute force may differ only on pairs at the support edge
+    sym = key(i, j) ^ key(bi, bj)
+    assert all(abs(r[a, b] - thr[a, b]) < 1e-5 for a, b in sym)
+    assert (i < j).all()
+    assert torch.allclose(d, dd[i, j])
+    fi, fj, fd = interfacePairs(P, dom, halfList=False)
+    assert len(fi) == 2 * len(i) and (fi != fj).all()
+
+
+def _bundle(x):
+    base = _smooth(x)
+    step = (torch.sin(2 * math.pi * x[:, 0] + 0.3) > 0).to(x.dtype)
+    return torch.stack([base, step, base + 0.5 * step], dim=1)
+
+
+@pytest.mark.parametrize("make", [
+    lambda P, dom: Reconstructor.teno(P, dom, KERNEL, "O4"),
+    lambda P, dom: Reconstructor.weno(P, dom, KERNEL, degree=2),
+])
+def test_field_bundle_equals_componentwise(device, make):
+    P, dom, *_ = _periodic_case(device, 28)
+    rec = make(P, dom)
+    i, j, d = rec.pairs()
+    F = _bundle(P.positions)
+    fl, fr = rec.interfaceStates(F, i, j, d)
+    assert fl.shape == (len(i), 3) and fr.shape == fl.shape
+    for k in range(3):
+        sl, sr = rec.interfaceStates(F[:, k].contiguous(), i, j, d)
+        # float32 round-off in the coefficients is amplified by the nonlinear weights of
+        # the discontinuous components for the few pairs near a selection threshold
+        for a, b in ((fl[:, k], sl), (fr[:, k], sr)):
+            err = (a - b).abs()
+            assert err.max() < (1e-5 if k == 0 else 1e-2) and (err > 1e-4).float().mean() < 0.02
+    # the components are weighted independently: the smooth one keeps its central stencil
+    rec.interfaceStates(F, i, j, d)
+    assert rec.last_omega.shape[-1] == 3
+    if rec.kind == "teno":
+        assert rec.last_central[:, 0].float().mean() > rec.last_central[:, 1].float().mean()
+
+
+def test_polyfit_bundle_interface_states(device):
+    from warpSPHCore.polyfit import PolyFit
+    P, dom, *_ = _periodic_case(device, 24)
+    fit = PolyFit.build(P, dom, KERNEL, 2)
+    i, j, d = fit.pairs()
+    F = _bundle(P.positions)
+    fl, fr = fit.interfaceStates(F, i, j, d)
+    for k in range(3):
+        sl, sr = fit.interfaceStates(F[:, k].contiguous(), i, j, d)
+        assert torch.allclose(fl[:, k], sl, atol=1e-5) and torch.allclose(fr[:, k], sr, atol=1e-5)
+
+
+def test_pairs_feed_the_smooth_reconstruction(device):
+    P, dom, *_ = _periodic_case(device, 32)
+    rec = Reconstructor.teno(P, dom, KERNEL, "O4")
+    i, j, d = rec.pairs()
+    fl, fr = rec.interfaceStates(_smooth(P.positions), i, j, d)
+    ex = _exact_at(P, i, j, d, rec)
+    assert (fl - ex).abs().max() < 1e-3 and (fr - ex).abs().max() < 1e-3
+
+
+def test_bundle_gradient_and_field_tangent(device):
+    import torch.autograd.forward_ad as fwAD
+    P, dom, *_ = _periodic_case(device, 24)
+    rec = Reconstructor.teno(P, dom, KERNEL, "O4")
+    i, j, d = rec.pairs()
+    F = _bundle(P.positions)
+    Fg = F.clone().requires_grad_(True)
+    fl, fr = rec.interfaceStates(Fg, i, j, d)
+    (fl.sum() + fr.sum()).backward()
+    assert torch.isfinite(Fg.grad).all() and Fg.grad.abs().max() > 0
+    # smooth data keep the central stencil (the plain linear fit), so the field tangent
+    # of a smooth bundle is that fit applied to the tangent
+    S = torch.stack([_smooth(P.positions), torch.cos(2 * math.pi * P.positions[:, 1])], dim=1)
+    v = torch.stack([torch.cos(2 * math.pi * P.positions[:, 0]), _smooth(P.positions)], dim=1)
+    with fwAD.dual_level():
+        fl, fr = rec.interfaceStates(fwAD.make_dual(S, v), i, j, d)
+        tl = fwAD.unpack_dual(fl).tangent
+    assert rec.last_central.all()
+    from warpSPHCore.polyfit import PolyFit
+    h = rec.interfaceSupports
+    oi, _ = PolyFit.interfaceOffsets(d, h[i], h[j])        # Eq. 25 uses the particle supports
+    ref = rec.fits[0].evaluate(v, i, oi)
+    assert torch.allclose(tl, ref, atol=2e-4)

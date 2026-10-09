@@ -39,7 +39,7 @@ from ..dataTypes import OperationProperties
 from .wp_polyfit import _computePolyMoments_stateBackend, _computePolyRHS_stateBackend
 from .wp_polyfitJVP import computePolyMomentsGeometryJVP, computePolyRHSGeometryJVP
 
-__all__ = ["PolyFit", "monomialExponents"]
+__all__ = ["PolyFit", "monomialExponents", "interfacePairs", "minimumImage"]
 
 
 def monomialExponents(dim: int, order: int) -> list[tuple[int, ...]]:
@@ -296,21 +296,67 @@ class PolyFit:
 
     def evaluate(self, f: torch.Tensor, idx: torch.Tensor, offset: torch.Tensor,
                  coefficients: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """Particle ``idx``'s fit of the scalar field ``f`` evaluated at
-        ``x_idx + offset`` (``offset`` of shape ``(P, dim)``)."""
+        """Particle ``idx``'s fit of the field ``f`` evaluated at
+        ``x_idx + offset`` (``offset`` of shape ``(P, dim)``). ``f`` is ``(N,)``
+        (result ``(P,)``) or ``(N, D)`` (result ``(P, D)``)."""
         c = self.coefficients(f) if coefficients is None else coefficients
         xi = offset / self.h[idx].unsqueeze(-1).to(offset.dtype)
         e = self.exps.to(offset.dtype)
         P = torch.prod(xi.unsqueeze(1) ** e.unsqueeze(0), dim=-1)          # (P, n)
-        v = (c[idx] * P).sum(-1)
+        ci = c[idx]
+        v = (ci * P).sum(1) if ci.dim() == 2 else torch.einsum("pnd,pn->pd", ci, P)
         return v if self.constant else v + f[idx]
+
+    def pairs(self, adjacency=None, halfList: bool = True):
+        """``(i, j, d)`` of the particle pairs a pairwise scheme couples (see
+        :func:`interfacePairs`), for :meth:`interfaceStates`."""
+        a = self._args
+        return interfacePairs(a["queryParticles"], a["domain"], adjacency, halfList)
 
     def interfaceStates(self, f: torch.Tensor, i: torch.Tensor, j: torch.Tensor,
                         d: torch.Tensor):
-        """Left / right states of a scalar field at the interface points of
-        the pairs ``(i, j)`` (``d = r_j - r_i``, minimum image): ``f_L`` is
-        ``i``'s fit and ``f_R`` is ``j``'s fit, both evaluated at the Eq. 25
-        point. In a smooth region both equal ``f(r_ij)`` to O(h^(order+1))."""
+        """Left / right states of a field (``(N,)`` or ``(N, D)``) at the
+        interface points of the pairs ``(i, j)`` (``d = r_j - r_i``, minimum
+        image; ``fit.interfaceStates(f, *fit.pairs())``): ``f_L`` is ``i``'s
+        fit and ``f_R`` is ``j``'s fit, both evaluated at the Eq. 25 point. In
+        a smooth region both equal ``f(r_ij)`` to O(h^(order+1))."""
         c = self.coefficients(f)
         oi, oj = self.interfaceOffsets(d, self.h[i].to(d.dtype), self.h[j].to(d.dtype))
         return (self.evaluate(f, i, oi, c), self.evaluate(f, j, oj, c))
+
+
+def minimumImage(d: torch.Tensor, domain: DomainDescription) -> torch.Tensor:
+    """Wrap pair vectors ``d`` (``(P, dim)``) into ``[-L/2, L/2]`` along the
+    periodic axes of ``domain`` (ordinary torch ops, so forward and reverse
+    mode pass through)."""
+    L = (domain.max - domain.min).to(d.dtype)
+    per = domain.periodic.to(d.device)
+    return torch.where(per, d - L * torch.round(d / L), d)
+
+
+def interfacePairs(particles: ParticleState, domain: DomainDescription,
+                   adjacency=None, halfList: bool = True):
+    """The particle pairs of a pairwise (Riemann / Godunov) scheme as
+    ``(i, j, d)`` with ``d = r_j - r_i`` (minimum image), ready for
+    ``interfaceStates(f, i, j, d)``.
+
+    Without ``adjacency`` the pairs are found with a symmetric radius search at
+    ``particles.supports`` (``|r_ij| <= max(h_i, h_j)``, the SuperSymmetric
+    convention; self pairs excluded). A supplied ``adjacency`` is used as given
+    -- it has to be a symmetric list for ``halfList`` (each unordered pair once,
+    ``i < j``, which is what an antisymmetric interface flux needs); pass
+    ``halfList=False`` for the full directed list. ``d`` is differentiable in
+    the positions."""
+    if adjacency is None:
+        from ..radiusSearch import radiusSearchCompactHashMap
+        prim = lambda t: t if t is None else fwAD.unpack_dual(t).primal
+        adjacency = radiusSearchCompactHashMap(
+            ParticleState(positions=prim(particles.positions), supports=prim(particles.supports),
+                          masses=prim(particles.masses), densities=prim(particles.densities),
+                          kinds=particles.kinds),
+            domain, mode=SupportScheme.SuperSymmetric)
+    i, j = adjacency.i.long(), adjacency.j.long()
+    keep = (i < j) if halfList else (i != j)
+    i, j = i[keep], j[keep]
+    x = particles.positions
+    return i, j, minimumImage(x[j] - x[i], domain)

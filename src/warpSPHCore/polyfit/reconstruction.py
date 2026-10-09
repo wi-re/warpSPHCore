@@ -52,7 +52,7 @@ import torch.autograd.forward_ad as fwAD
 
 from ..dataTypes import DomainDescription, ParticleState
 from ..enumTypes import KernelFunctions, SupportScheme
-from .polyfit import PolyFit
+from .polyfit import PolyFit, interfacePairs
 
 __all__ = ["Reconstructor", "smoothnessGram"]
 
@@ -99,12 +99,15 @@ class Reconstructor:
     :meth:`weno`."""
 
     def __init__(self, kind: str, fits: list, ell: torch.Tensor, params: dict,
-                 interfaceSupports: torch.Tensor):
+                 interfaceSupports: torch.Tensor, particles: Optional[ParticleState] = None,
+                 domain: Optional[DomainDescription] = None):
         self.kind = kind
         self.fits = fits                      # list[PolyFit], index 0 = central
         self.ell = ell                        # (N,) common length for the indicators
         self.params = params
         self.interfaceSupports = interfaceSupports
+        self.particles = particles
+        self.domain = domain
         self.dim = fits[0].dim
         self._gram: dict = {}
         self.last_central: Optional[torch.Tensor] = None
@@ -134,7 +137,7 @@ class Reconstructor:
                 constant=sp["constant"], adjacency=adjacency, cond_max=cond_max,
                 sector=sp["sector"], numSectors=sp["numSectors"],
                 unitWeights=sp["unitWeights"], minNeighbors=sp["minNbrs"]))
-        return cls(kind, fits, ell, params, q.supports)
+        return cls(kind, fits, ell, params, q.supports, q, domain)
 
     @classmethod
     def teno(cls, queryParticles: ParticleState, domain: DomainDescription,
@@ -180,24 +183,40 @@ class Reconstructor:
 
     # ------------------------------------------------------------------
     def smoothness(self, coeffs: list) -> torch.Tensor:
-        """``beta`` (N, K); deactivated stencils get +inf."""
+        """``beta`` (N, K) for the fit coefficients of a scalar field
+        (``(N, n)`` each) or (N, K, D) for a ``(N, D)`` field (``(N, n, D)``
+        each; the indicator is evaluated per component); deactivated stencils
+        get +inf."""
         cols = []
         for k, (pf, cf) in enumerate(zip(self.fits, coeffs)):
+            vec = cf.dim() == 3
+            c3 = cf if vec else cf.unsqueeze(-1)                         # (N, n, D)
             deg = torch.tensor([sum(e) for e in pf.exps.tolist()], dtype=cf.dtype, device=cf.device)
-            ct = cf * (self.ell / pf.h).unsqueeze(-1).to(cf.dtype) ** deg
+            ct = c3 * ((self.ell / pf.h).unsqueeze(-1).to(cf.dtype) ** deg).unsqueeze(-1)
             if self.kind == "weno":
-                beta = (ct ** 2).sum(-1)
+                beta = (ct ** 2).sum(1)
             else:
                 if k not in self._gram:
                     self._gram[k] = smoothnessGram(pf.exps).to(cf)
-                beta = torch.einsum("na,ab,nb->n", ct, self._gram[k], ct)
+                beta = torch.einsum("nad,ab,nbd->nd", ct, self._gram[k], ct)
             cols.append(beta)
-        beta = torch.stack(cols, dim=1)
-        active = torch.stack([~pf.deficient for pf in self.fits], dim=1)
-        return torch.where(active, beta, torch.full_like(beta, float("inf")))
+        beta = torch.stack(cols, dim=1)                                  # (N, K, D)
+        active = torch.stack([~pf.deficient for pf in self.fits], dim=1).unsqueeze(-1)
+        beta = torch.where(active, beta, torch.full_like(beta, float("inf")))
+        return beta if coeffs[0].dim() == 3 else beta[..., 0]
 
     def weights(self, beta: torch.Tensor) -> torch.Tensor:
-        """Nonlinear weights ``omega`` (N, K), rows summing to 1."""
+        """Nonlinear weights ``omega``, rows summing to 1: (N, K) for ``beta``
+        (N, K), (N, K, D) for ``beta`` (N, K, D) (independent per component)."""
+        if beta.dim() == 3:
+            N, K, D = beta.shape
+            w = self._weights2(beta.permute(0, 2, 1).reshape(N * D, K))
+            if self.kind == "teno":
+                self.last_central = self.last_central.reshape(N, D)
+            return w.reshape(N, D, K).permute(0, 2, 1)
+        return self._weights2(beta)
+
+    def _weights2(self, beta: torch.Tensor) -> torch.Tensor:
         act = torch.isfinite(beta)
         big = torch.finfo(beta.dtype).max
         if self.kind == "weno":
@@ -229,24 +248,40 @@ class Reconstructor:
         w[dead, 0] = 1.0
         return w
 
+    def pairs(self, adjacency=None, halfList: bool = True):
+        """``(i, j, d)`` of the pairs of a pairwise scheme (see
+        :func:`warpSPHCore.polyfit.interfacePairs`): a radius search at the
+        particle supports unless ``adjacency`` is given. Use as
+        ``rec.interfaceStates(f, *rec.pairs())``."""
+        return interfacePairs(self.particles, self.domain, adjacency, halfList)
+
     def interfaceStates(self, f: torch.Tensor, i: torch.Tensor, j: torch.Tensor, d: torch.Tensor):
-        """Left / right states of the scalar field ``f`` at the Eq. 25 interface
-        points of the pairs ``(i, j)`` (``d = r_j - r_i``, minimum image).
-        Returns ``(f_L, f_R)``; the stencil weights and indicators of the last
-        call are kept in ``last_omega`` / ``last_beta``."""
+        """Left / right states of the field ``f`` at the Eq. 25 interface
+        points of the pairs ``(i, j)`` (``d = r_j - r_i``, minimum image; see
+        :meth:`pairs`). ``f`` is ``(N,)`` or a bundle of ``D`` fields
+        ``(N, D)`` (e.g. rho, v, P): every candidate fit then solves all
+        components in one kernel launch and each component gets its own
+        smoothness indicators and weights (component-wise reconstruction).
+        Returns ``(f_L, f_R)`` of shape ``(P,)`` / ``(P, D)``; the stencil
+        weights and indicators of the last call are kept in ``last_omega`` /
+        ``last_beta`` (with a trailing component axis for ``(N, D)``)."""
         coeffs = [pf.coefficients(f) for pf in self.fits]
         beta = self.smoothness(coeffs)
         omega = self.weights(beta)
         self.last_beta, self.last_omega = beta, omega
+        vec = f.dim() == 2
+        om = omega if vec else omega.unsqueeze(-1)                       # (N, K, D)
         h = self.interfaceSupports.to(d.dtype)
         oi, oj = PolyFit.interfaceOffsets(d, h[i], h[j])
 
         def state(idx, off):
-            val = torch.zeros(idx.shape[0], dtype=f.dtype, device=f.device)
+            val = None
             for k, pf in enumerate(self.fits):
-                wk = omega[idx, k]
+                wk = om[idx, k]                                          # (P, D)
                 v = pf.evaluate(f, idx, off, coeffs[k])
-                val = val + torch.where(wk != 0, wk * v, torch.zeros_like(v))
-            return val
+                v = v if vec else v.unsqueeze(-1)
+                term = torch.where(wk != 0, wk * v, torch.zeros_like(v))
+                val = term if val is None else val + term
+            return val if vec else val[..., 0]
 
         return state(i, oi), state(j, oj)
