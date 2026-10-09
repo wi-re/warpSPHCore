@@ -77,19 +77,53 @@ def polyMonomial(e: Any, xi: Any, dim: wp.int32):
 
 
 @wp.func
+def polyInSector(d: Any, dim: wp.int32, sector: wp.int32, numSectors: wp.int32):
+    """Whether the pair vector ``d = x_j - x_i`` lies in angular sector
+    ``sector`` of ``numSectors`` equal sectors (2-D: ``[s, s+1) * 2 pi / ns``
+    measured from the +x axis; 1-D: sector 0 is ``d < 0``, sector 1 ``d > 0``).
+    ``sector < 0`` selects everything. The indicator is piecewise constant, so
+    it has no derivative to propagate."""
+    if sector < 0:
+        return True
+    if dim == 1:
+        if sector == 0:
+            return d[0] < scalar_t(0.0)
+        return d[0] > scalar_t(0.0)
+    th = wp.atan2(d[1], d[0])
+    if th < scalar_t(0.0):
+        th = th + scalar_t(6.283185307179586)
+    width = scalar_t(6.283185307179586) / scalar_t(numSectors)
+    lo = scalar_t(sector) * width
+    return (th >= lo) and (th < lo + width)
+
+
+@wp.func
 def polyFitWeight(
+    i: wp.int32, j: wp.int32,
     iPtcl: Any, jPtcl: Any, domainState: domainData, kernelProperties: kernelState,
-    correctionData: Any, j: wp.int32,
+    correctionData: Any, dim: wp.int32,
+    sector: wp.int32, numSectors: wp.int32, unitWeights: wp.int32,
 ):
-    """``(w_ij, xi_ij)`` for the pair: quadrature weight ``V_j W_ij`` and the
-    scaled offset ``(x_j - x_i) / h_i``."""
+    """``(w_ij, xi_ij)`` for the pair: quadrature weight and the scaled offset
+    ``(x_j - x_i) / h_i``. Stencil options (the Phase 6/7 candidate
+    stencils): ``sector`` restricts the pairs to an angular sector (the self
+    pair is always kept), ``unitWeights`` replaces ``V_j W_ij`` by 1 inside
+    the support ``|x_ij| < h_i`` (plain least squares, Avesani et al. 2014)."""
     if correctionData.useVolume:
         vj = correctionData.referenceVolumes[j]
     else:
         vj = jPtcl.mass / jPtcl.density
     x_ij = computeDistanceVec(iPtcl.position, jPtcl.position, domainState)   # x_i - x_j
-    w = vj * sphKernel_ij(x_ij, iPtcl.support, jPtcl.support, kernelProperties, domainState)
     xi = (-x_ij) / iPtcl.support
+    w = scalar_t(0.0)
+    if unitWeights != 0:
+        if wp.length(x_ij) < iPtcl.support:
+            w = scalar_t(1.0)
+    else:
+        w = vj * sphKernel_ij(x_ij, iPtcl.support, jPtcl.support, kernelProperties, domainState)
+    if i != j:
+        if not polyInSector(-x_ij, dim, sector, numSectors):
+            w = scalar_t(0.0)
     return w, xi
 
 
@@ -108,6 +142,7 @@ def computePolyMoments_Func_i(
 
     ea: Any,  # type: ignore   exponents of the row basis function
     eb: Any,  # type: ignore   exponents of the column basis function
+    sector: wp.int32, numSectors: wp.int32, unitWeights: wp.int32,
 ):
     s = scalar_t(0.0)
     count = wp.int32(0)
@@ -118,7 +153,8 @@ def computePolyMoments_Func_i(
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
                 continue
-        w, xi = polyFitWeight(iPtcl, jPtcl, domainState, kernelProperties, correctionData, j)
+        w, xi = polyFitWeight(i, j, iPtcl, jPtcl, domainState, kernelProperties, correctionData, dim,
+                              sector, numSectors, unitWeights)
         s += w * polyMonomial(ea, xi, dim) * polyMonomial(eb, xi, dim)
         # count only pairs inside the kernel support: the on-the-fly grid
         # traversal also visits the whole neighbouring cells, whose members
@@ -140,6 +176,7 @@ def computePolyMoments_Func_Adjacency(
 
     ea: Any,  # type: ignore
     eb: Any,  # type: ignore
+    sector: wp.int32, numSectors: wp.int32, unitWeights: wp.int32,
 ):
     iPtcl = getParticleData(queryState, i)
     s = scalar_t(0.0)
@@ -157,7 +194,7 @@ def computePolyMoments_Func_Adjacency(
             i, dim, iPtcl, referenceState, domainState, kernelProperties,
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
             iCorrectionData, correctionData,
-            ea, eb,
+            ea, eb, sector, numSectors, unitWeights,
         )
         s += ss
         count += cc
@@ -173,6 +210,7 @@ def computePolyMoments_Kernel(
 
     exponents: wp.array(dtype=Any),  # type: ignore
     rowCol: wp.array(dtype=wp.vec2i),
+    sector: wp.int32, numSectors: wp.int32, unitWeights: wp.int32,
 
     output_M: wp.array2d(dtype=scalar_t),  # type: ignore
     output_numNeighbors: wp.array(dtype=wp.int32),
@@ -189,7 +227,7 @@ def computePolyMoments_Kernel(
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
-        exponents[rc[0]], exponents[rc[1]],
+        exponents[rc[0]], exponents[rc[1]], sector, numSectors, unitWeights,
     )
     output_M[i, l] = s
     if l == 0:
@@ -211,7 +249,10 @@ _POLY_MOMENTS_SPEC = OperatorSpec(
         OutputSpec(dtype=wp.int32),
     ),
     extras=(ExtraSpec("exponents", ExtraKind.TENSOR),
-            ExtraSpec("rowCol", ExtraKind.TENSOR)),
+            ExtraSpec("rowCol", ExtraKind.TENSOR),
+            ExtraSpec("sector", ExtraKind.SCALAR),
+            ExtraSpec("numSectors", ExtraKind.SCALAR),
+            ExtraSpec("unitWeights", ExtraKind.SCALAR)),
     numThreads=lambda ctx, extras: ctx.query.positions.shape[0] * extras["rowCol"].shape[0],
 )
 
@@ -224,6 +265,7 @@ def _computePolyMoments_stateBackend(
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     adjacency=None,
     referenceParticles: Optional[ParticleState] = None,
+    sector: int = -1, numSectors: int = 8, unitWeights: bool = False,
 ):
     """Packed lower-triangle moment matrices ``(N, n(n+1)/2)`` (row-major:
     entry ``a(a+1)/2 + b`` is ``M[a, b]``, ``b <= a``) and neighbour counts."""
@@ -234,7 +276,8 @@ def _computePolyMoments_stateBackend(
             corrections=Corrections(volumes=(queryVolumes, referenceVolumes)),
         )
         return launchOperator(_POLY_MOMENTS_SPEC, ctx, exponents=exponents,
-                              rowCol=_momentRowCol(exponents))
+                              rowCol=_momentRowCol(exponents), sector=int(sector),
+                              numSectors=int(numSectors), unitWeights=int(unitWeights))
 
 
 # --------------------------------------------------------------------------
@@ -254,6 +297,7 @@ def computePolyRHS_Func_i(
     values: wp.array(dtype=Any),  # type: ignore
     centerValue: Any,  # type: ignore   f_i (zero for the MLS form)
     comp: wp.int32,
+    sector: wp.int32, numSectors: wp.int32, unitWeights: wp.int32,
 ):
     s = scalar_t(0.0)
     for neighborIndex in range(numIndices):
@@ -263,7 +307,8 @@ def computePolyRHS_Func_i(
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
             if not checkDirectionality_j(jPtcl.kind, kernelProperties.operationMode):
                 continue
-        w, xi = polyFitWeight(iPtcl, jPtcl, domainState, kernelProperties, correctionData, j)
+        w, xi = polyFitWeight(i, j, iPtcl, jPtcl, domainState, kernelProperties, correctionData, dim,
+                              sector, numSectors, unitWeights)
         fj = values[j]
         s += w * polyMonomial(ea, xi, dim) * (fj[comp] - centerValue[comp])
     return s
@@ -282,6 +327,7 @@ def computePolyRHS_Func_Adjacency(
     values: wp.array(dtype=Any),  # type: ignore
     subtractCenter: wp.int32,
     comp: wp.int32,
+    sector: wp.int32, numSectors: wp.int32, unitWeights: wp.int32,
 ):
     iPtcl = getParticleData(queryState, i)
     s = scalar_t(0.0)
@@ -301,7 +347,7 @@ def computePolyRHS_Func_Adjacency(
             i, dim, iPtcl, referenceState, domainState, kernelProperties,
             beginIndex, numIndices, adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
             iCorrectionData, correctionData,
-            ea, values, centerValue, comp,
+            ea, values, centerValue, comp, sector, numSectors, unitWeights,
         )
     return s
 
@@ -317,6 +363,7 @@ def computePolyRHS_Kernel(
     values: wp.array(dtype=Any),  # type: ignore
     subtractCenter: wp.int32,
     numComponents: wp.int32,
+    sector: wp.int32, numSectors: wp.int32, unitWeights: wp.int32,
 
     output_B: wp.array2d(dtype=scalar_t),  # type: ignore
 ):
@@ -333,7 +380,7 @@ def computePolyRHS_Kernel(
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
-        exponents[a], values, subtractCenter, comp,
+        exponents[a], values, subtractCenter, comp, sector, numSectors, unitWeights,
     )
 
 
@@ -345,7 +392,10 @@ _POLY_RHS_SPEC = OperatorSpec(
     extras=(ExtraSpec("exponents", ExtraKind.TENSOR),
             ExtraSpec("values", ExtraKind.TENSOR),
             ExtraSpec("subtractCenter", ExtraKind.SCALAR),
-            ExtraSpec("numComponents", ExtraKind.SCALAR)),
+            ExtraSpec("numComponents", ExtraKind.SCALAR),
+            ExtraSpec("sector", ExtraKind.SCALAR),
+            ExtraSpec("numSectors", ExtraKind.SCALAR),
+            ExtraSpec("unitWeights", ExtraKind.SCALAR)),
     numThreads=lambda ctx, extras: (ctx.query.positions.shape[0]
                                     * extras["exponents"].shape[0] * int(extras["numComponents"])),
 )
@@ -361,6 +411,7 @@ def _computePolyRHS_stateBackend(
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     adjacency=None,
     referenceParticles: Optional[ParticleState] = None,
+    sector: int = -1, numSectors: int = 8, unitWeights: bool = False,
 ):
     """``b_i`` of shape ``(N, n * D)`` (entry ``a * D + c``) for a field of
     shape ``(N, D)``. ``values`` must already be 2-D."""
@@ -373,4 +424,5 @@ def _computePolyRHS_stateBackend(
         return launchOperator(
             _POLY_RHS_SPEC, ctx, exponents=exponents, values=values,
             subtractCenter=int(subtractCenter), numComponents=int(values.shape[1]),
+            sector=int(sector), numSectors=int(numSectors), unitWeights=int(unitWeights),
         )

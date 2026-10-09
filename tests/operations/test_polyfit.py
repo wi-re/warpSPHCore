@@ -217,3 +217,62 @@ def test_backward_does_not_modify_the_incoming_gradient(case2d):
     b = torch.autograd.grad(out, f, g, retain_graph=True)[0].clone()
     assert torch.equal(g, g0)
     assert a.abs().max() > 0 and torch.allclose(a, b)
+
+
+def _pairs(c, radius_factor=1.6):
+    pos = c["positions"]
+    d = pos[None, :, :] - pos[:, None, :]
+    r = torch.linalg.norm(d, dim=-1)
+    i, j = torch.nonzero((r < radius_factor * c["dx"]) & (r > 0), as_tuple=True)
+    return i, j, (pos[j] - pos[i])
+
+
+@pytest.mark.parametrize("constant", [True, False])
+def test_interface_states_exact_with_variable_support(device, constant):
+    """Polynomials of degree <= p are reproduced exactly at the Eq. 25 interface
+    points, with a smoothly varying support (so h_i != h_j and the interface
+    is not the arithmetic midpoint)."""
+    c = _case(device)
+    P = c["particles"]
+    x = c["positions"]
+    P.supports = P.supports * (1.0 + 0.25 * torch.sin(3 * x[:, 0]) * torch.cos(2 * x[:, 1]))
+    adjacency = radiusSearchCompactHashMap(P, c["domain"], mode=SupportScheme.SuperSymmetric)
+    p = 2
+    pf = PolyFit.build(P, c["domain"], KERNEL, p, constant=constant, adjacency=adjacency)
+    i, j, d = _pairs(c)
+    f = _poly2(x, p)["f"]
+    fl, fr = pf.interfaceStates(f, i, j, d)
+    oi, _ = PolyFit.interfaceOffsets(d, P.supports[i], P.supports[j])
+    rij = x[i] + oi
+    X, Y = rij[:, 0], rij[:, 1]
+    expect = X ** p + 0.7 * X * Y ** (p - 1) + 0.3 * Y ** p
+    ok = ~pf.deficient[i] & ~pf.deficient[j] & (pf.cond[i] < 100) & (pf.cond[j] < 100)
+    tol = 5e-3 if x.dtype == torch.float32 else 1e-8
+    assert ok.sum() > 100
+    assert (fl - expect).abs()[ok].max() < tol * 5
+    assert (fr - expect).abs()[ok].max() < tol * 5
+    # the interface differs from the arithmetic midpoint when supports differ
+    mid = x[i] + 0.5 * d
+    assert (rij - mid).abs().max() > 1e-4
+
+
+def test_interface_offsets_equal_supports_is_the_midpoint():
+    d = torch.randn(7, 2)
+    h = torch.full((7,), 0.3)
+    oi, oj = PolyFit.interfaceOffsets(d, h, h)
+    assert torch.allclose(oi, 0.5 * d) and torch.allclose(oj, -0.5 * d)
+
+
+def test_arbitrary_derivative(case2d):
+    c = case2d
+    pf = PolyFit.build(c["particles"], c["domain"], KERNEL, 3, adjacency=c["adjacency"])
+    X, Y = c["positions"][:, 0], c["positions"][:, 1]
+    f = X ** 3 + 0.5 * X * X * Y + Y ** 3                  # f_xxx = 6, f_xxy = 1, f_yyy = 6, f_xy = x
+    m = pf.cond < 100
+    tol = 0.5 if X.dtype == torch.float32 else 1e-5
+    assert (pf.derivative(f, (3, 0)) - 6.0).abs()[m].max() < tol
+    assert (pf.derivative(f, (2, 1)) - 1.0).abs()[m].max() < tol
+    assert (pf.derivative(f, (0, 3)) - 6.0).abs()[m].max() < tol
+    assert (pf.derivative(f, (1, 1)) - X).abs()[m].max() < tol
+    with pytest.raises(ValueError):
+        pf.derivative(f, (4, 0))

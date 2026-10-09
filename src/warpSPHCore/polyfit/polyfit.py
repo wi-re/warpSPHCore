@@ -84,7 +84,8 @@ class PolyFit:
               referenceVolumes: Optional[torch.Tensor] = None,
               operationMode: OperationDirection = OperationDirection.AllToAll,
               equilibrate: bool = True, rtol: float = 1e-12,
-              cond_max: float = 1e10) -> "PolyFit":
+              cond_max: float = 1e10, sector: int = -1, numSectors: int = 8,
+              unitWeights: bool = False, minNeighbors: Optional[int] = None) -> "PolyFit":
         pos = queryParticles.positions
         N, dim = pos.shape
         exps_all = monomialExponents(dim, order)
@@ -92,12 +93,15 @@ class PolyFit:
         exps = torch.tensor(exps_list, dtype=torch.int32, device=pos.device)
         n = exps.shape[0]
 
+        if sector >= 0 and dim == 3:
+            raise NotImplementedError("sector stencils are defined for 1-D and 2-D")
         props = OperationProperties(kernel=kernel, supportMode=SupportScheme.Gather,
                                     operationMode=operationMode)
+        stencil = dict(sector=sector, numSectors=numSectors, unitWeights=unitWeights)
         Mp, nnb = _computePolyMoments_stateBackend(
             queryParticles, props, domain, exps,
             queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
-            adjacency=adjacency, referenceParticles=referenceParticles)
+            adjacency=adjacency, referenceParticles=referenceParticles, **stencil)
 
         rows, cols = torch.tril_indices(n, n, device=pos.device)
         M = torch.zeros(N, n, n, dtype=Mp.dtype, device=pos.device)
@@ -116,11 +120,13 @@ class PolyFit:
         S = torch.linalg.eigvalsh(Me).abs()
         cond = S.max(1).values / S.min(1).values.clamp_min(1e-300)
         Minv = torch.linalg.pinv(Me, rtol=rtol, hermitian=True) / dd
-        deficient = (nnb < n) | (cond > cond_max) | ~torch.isfinite(cond)
+        deficient = (nnb < (n if minNeighbors is None else minNeighbors)) \
+            | (cond > cond_max) | ~torch.isfinite(cond)
 
         args = dict(queryParticles=queryParticles, props=props, domain=domain,
                     queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
-                    adjacency=adjacency, referenceParticles=referenceParticles)
+                    adjacency=adjacency, referenceParticles=referenceParticles,
+                    stencil=stencil)
         return cls(dim=dim, order=order, constant=constant, exps=exps,
                    h=queryParticles.supports, M=M, Minv=Minv, cond=cond,
                    num_nbrs=nnb, deficient=deficient, _args=args)
@@ -136,7 +142,8 @@ class PolyFit:
             a["queryParticles"], a["props"], a["domain"], self.exps, F,
             subtractCenter=not self.constant,
             queryVolumes=a["queryVolumes"], referenceVolumes=a["referenceVolumes"],
-            adjacency=a["adjacency"], referenceParticles=a["referenceParticles"])
+            adjacency=a["adjacency"], referenceParticles=a["referenceParticles"],
+            **a["stencil"])
         b = b.reshape(F.shape[0], self.n_basis, F.shape[1])
         c = torch.einsum("nab,nbd->nad", self.Minv, b)
         return c[:, :, 0] if scalar else c
@@ -188,3 +195,53 @@ class PolyFit:
     def laplacian(self, f: torch.Tensor) -> Optional[torch.Tensor]:
         H = self.hessian(f)
         return None if H is None else torch.diagonal(H, dim1=1, dim2=2).sum(-1)
+
+    def derivative(self, f: torch.Tensor, alpha: tuple[int, ...]) -> torch.Tensor:
+        """The partial derivative ``d^alpha f`` (``alpha`` a multi-index of
+        total degree 1..order; e.g. ``(2, 0)`` is ``d^2 f / dx^2``). This is
+        the operator hyperviscosity needs: the highest-order derivatives the
+        fit carries (``order`` itself), e.g. ``(order, 0)`` -- whose
+        coefficient, ``h**order`` scaling and time-step limit belong to the
+        caller (King et al. 2020 Sec. 4.3)."""
+        alpha = tuple(int(a) for a in alpha)
+        if len(alpha) != self.dim or not (1 <= sum(alpha) <= self.order):
+            raise ValueError(f"alpha must have {self.dim} entries and total degree in [1, {self.order}]")
+        c = self.coefficients(f)
+        fact = math.prod(math.factorial(a) for a in alpha)
+        col = self._col(c, alpha)
+        return fact * col / self._scale(sum(alpha), col)
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def interfaceOffsets(d: torch.Tensor, hi: torch.Tensor, hj: torch.Tensor):
+        """Offsets of the pair interface point
+        ``r_ij = (h_j r_i + h_i r_j) / (h_i + h_j)`` (Gao et al. 2023 Eq. 25;
+        Avesani et al. 2014 use the arithmetic midpoint, which is the same
+        point for equal supports) from each particle: ``(r_ij - r_i,
+        r_ij - r_j)`` given the pair vector ``d = r_j - r_i`` (minimum image).
+        With unequal supports the interface sits closer to the particle with
+        the *smaller* support, where the two kernels' influence balances; the
+        arithmetic midpoint is a position error of O(h_i - h_j) there."""
+        w = (hi + hj).unsqueeze(-1)
+        return d * (hi.unsqueeze(-1) / w), -d * (hj.unsqueeze(-1) / w)
+
+    def evaluate(self, f: torch.Tensor, idx: torch.Tensor, offset: torch.Tensor,
+                 coefficients: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """Particle ``idx``'s fit of the scalar field ``f`` evaluated at
+        ``x_idx + offset`` (``offset`` of shape ``(P, dim)``)."""
+        c = self.coefficients(f) if coefficients is None else coefficients
+        xi = offset / self.h[idx].unsqueeze(-1).to(offset.dtype)
+        e = self.exps.to(offset.dtype)
+        P = torch.prod(xi.unsqueeze(1) ** e.unsqueeze(0), dim=-1)          # (P, n)
+        v = (c[idx] * P).sum(-1)
+        return v if self.constant else v + f[idx]
+
+    def interfaceStates(self, f: torch.Tensor, i: torch.Tensor, j: torch.Tensor,
+                        d: torch.Tensor):
+        """Left / right states of a scalar field at the interface points of
+        the pairs ``(i, j)`` (``d = r_j - r_i``, minimum image): ``f_L`` is
+        ``i``'s fit and ``f_R`` is ``j``'s fit, both evaluated at the Eq. 25
+        point. In a smooth region both equal ``f(r_ij)`` to O(h^(order+1))."""
+        c = self.coefficients(f)
+        oi, oj = self.interfaceOffsets(d, self.h[i].to(d.dtype), self.h[j].to(d.dtype))
+        return (self.evaluate(f, i, oi, c), self.evaluate(f, j, oj, c))
