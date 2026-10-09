@@ -25,6 +25,27 @@
 > machine-exact again, the static `crk` gradient column was re-baselined).
 > Every CRKSPH PDE row produced before the fix is being re-run.
 >
+> **Frontend sync (2026-10-09).** Three things in warpSPH moved after the
+> 09-26 text below was written:
+> (1) **CRKSPH limiter default changed** — `(eta_crit, eta_fold) = (1/n_h,
+> 0.2/n_h)`, derived per step (warpSPH `aa40291`, user-decided 2026-10-01; the
+> "wrong units" finding below is *fixed*); CRK run-to-run nondeterminism was
+> also fixed (`cfb03a6`, `segment_sum` instead of atomic scatter). Every
+> CRKSPH PDE row dated 09-26 or earlier used the old (1/3, 0.2) limiter —
+> re-run 2026-10-09 (done; see the Phase 1 table; the 09-26 CSV/report are
+> kept as `results/pde_rows_pre-limiter-default_2026-09-26.csv` and
+> `REPORT_pde_pre-limiter-default_2026-09-26.md`). Net effect: linearWave
+> order 1.05 → 1.91 and KE loss ~10³× smaller; Sod / Sedov / KH essentially
+> unchanged; Gresho spin-up reduced (~35 %) but not removed. (2) **The Gresho spin-up is closed
+> as intrinsic, not open** (`c9a5133`, warpSPH `CRKSPH_LIMITER_PLAN.md`): a
+> slowly converging pressure pump the viscosity cancels; cusps, pair weights
+> and support consistency were ruled out; no fix. `ke_rebound` stays as the
+> detector and a frontend regression guard. (3) **The frontend now has
+> pairwise Riemann solvers** (`modules/riemann`: Acoustic / PVRS / TRRS / TSRS
+> / Adaptive / HLLC; `modules/godunov`: simplified GSPH + Inutsuka 2002, per
+> warpSPH `GODUNOV_SPH_PLAN.md`) — the Phase 6 premise below is partly
+> obsolete. Phases 4–7 are still not started.
+>
 > **Where the numbers live:** `harness/REPORT.md` + `FINDINGS.md` (frozen
 > static "before column"), `harness/pde/REPORT_pde.md` (PDE orders +
 > conservation; local, git-ignored), `harness/pde/TGV_NOTES.md` (TGV floor +
@@ -124,7 +145,9 @@ reference columns but block Phases 4/5 — see the pre-Phase-4 checklist.
   dissipative dip and the later gain partly cancel. Full ladders
   (2026-09-26): TGV, tgv-wc and CompSPH-Gresho rebound exactly 0 at every
   rung; CRKSPH-Gresho is flagged at nx = 48 / 64 / 96 (4.7 / 11.2 /
-  15.1 %) — including nx=48, whose final drift (−3.9 %) looks healthy.
+  15.1 % at the old limiter; **3.2 / 8.7 / 11.7 %** at the n_h-derived default,
+  re-run 2026-10-09) — including nx=48, whose final drift (−3.9 % / −5.8 %)
+  looks healthy.
 - [x] **Partial runs merge into the results CSV** (2026-09-26) —
   `run_pde.py --cases X` used to overwrite `pde_rows.csv` with case X
   only; it now replaces just those cases' rows (`report_pde.merge_rows`).
@@ -193,11 +216,11 @@ metrics where they exist; KH has only the finest-run reference.
 
 | case | metric | standard (CompSPH) | CRKSPH | reading |
 |---|---|---|---|---|
-| linearWave | L2 vs analytic | 0.85 (err 5.3e-8 → 9.4e-9) | 1.05 (1.6e-8 → 1.8e-9) | CRKSPH 3–5× more accurate |
-| sod | L1 / L2 vs exact Riemann | **0.98 / 0.53** | **0.96 / 0.56** (symmetric support; errors ~1.3× CompSPH's) | both first-order shock capturing |
-| sedov | L1 / L2 vs exact self-similar | 0.43 / sat. (L1 9.6e-2 → 4.0e-2) | **1.03 / 0.59** (1.1e-1 → 1.3e-2) | CRKSPH converges, CompSPH barely |
-| gresho | L1 vs exact (steady v_φ) | 0.44 (2.2e-1 → 1.3e-1; below the saturation flag's 2× range); KE −90 … −62 % | **non-monotone** 9.1e-2 → 2.9e-2 → 2.9e-2 → **3.4e-2**; KE **+7.3 / +13 %** at nx 64 / 96 | CompSPH over-dissipates; CRKSPH spins up (anomaly below) |
-| kelvinHelmholtz | L2 vs finest run | 1.69 | sat. (7.6e-2 → 4.4e-2) | reference metric only; KE loss at nx=96: CompSPH −36 %, CRKSPH −3.6 % |
+| linearWave | L2 vs analytic | 0.85 (err 5.3e-8 → 9.4e-9) | **1.91** (1.1e-8 → 2.1e-10; was 1.05 at the old limiter) | CRKSPH 5× (nx=100) … **44×** (nx=800) more accurate; KE loss −2.6e-3 → −4.5e-6 (was −2.9e-2 → −3.4e-3) |
+| sod | L1 / L2 vs exact Riemann | **0.98 / 0.53** | **0.97 / 0.58** (symmetric support; errors ~1.3× CompSPH's; unchanged by the limiter default) | both first-order shock capturing |
+| sedov | L1 / L2 vs exact self-similar | 0.43 / sat. (L1 9.6e-2 → 4.0e-2) | **1.10 / 0.71** (1.1e-1 → 1.1e-2; was 1.03 / 0.59) | CRKSPH converges, CompSPH barely |
+| gresho | L1 vs exact (steady v_φ) | 0.44 (2.2e-1 → 1.3e-1; below the saturation flag's 2× range); KE −90 … −62 % | **non-monotone** 8.5e-2 → 3.0e-2 → 2.8e-2 → **3.6e-2** (fit 0.75, r² 0.46); KE **+4.5 / +9.6 %** at nx 64 / 96 (old limiter +7.3 / +13 %); `ke_rebound` 3.2 / 8.7 / 11.7 % at nx 48 / 64 / 96, still flagged | CompSPH over-dissipates; CRKSPH spins up, reduced but **not** cured (intrinsic — anomaly below) |
+| kelvinHelmholtz | L2 vs finest run | 1.69 | sat. (8.0e-2 → 5.7e-2; was 7.6e-2 → 4.4e-2) | reference metric only; KE loss at nx=96: CompSPH −36 %, CRKSPH −3.5 % |
 | tgv | L2 vs analytic | — | — | DFSPH: 0.68 (r² 0.96), floor-limited (TGV_NOTES) |
 | tgv-wc | L2 vs analytic | — | — | δ⁺-SPH: 1.89 (r² 0.99), pre-floor |
 
@@ -213,8 +236,9 @@ error, so in their current form they do not make shifting more
 conservative — a conservative (pairwise-antisymmetric) δr·∇v form would
 be needed; |ΔL| is not an invariant on the periodic TGV box and positions
 are never re-wrapped, so ignore it there); angular momentum (open
-question only for Gresho): CRKSPH 4.5e-3 → 3.9e-5, CompSPH 2.4e-2 →
-4.0e-3 over the ladder — both converge, CRKSPH faster. Consistency check
+question only for Gresho): CRKSPH 4.0e-3 → 1.8e-5 (n_h-derived limiter;
+4.5e-3 → 3.9e-5 at the old one), CompSPH 2.4e-2 → 4.0e-3 over the ladder —
+both converge, CRKSPH faster. Consistency check
 on the CRK fix: the 1D rows (linearWave, Sedov) are **bit-identical**
 before and after it (`gradB` is 1×1 in 1D, the transpose a no-op).
 
@@ -252,7 +276,13 @@ profile shows inner-core and r≈0.26 bands too fast, r≈0.2/0.36 too
 slow). The viscosity removes most of the injected energy; the residue is
 the spin-up, and it grows with resolution. **Open question** — inherent to
 CRKSPH (the paper shows no spin-up at 64², t=5, but also used Cullen-type
-limiting), or an implementation deviation. **Follow-up (same day)**, every
+limiting), or an implementation deviation. **RESOLVED 2026-10-01 (frontend,
+`c9a5133`): closed as intrinsic** — a slowly converging pressure pump that the
+viscosity cancels; cusps, pair weights and support consistency ruled out; the
+limiter constants were changed to the n_h-derived default (below) but
+modulate, not cure, it. The text from here to "Check that now catches it"
+is the 09-26 investigation record, kept as history; the numbers in its
+tables are at the old (1/3, 0.2) limiter. **Follow-up (same day)**, every
 change measured on Gresho *and* on the CRK-Sod ripple probe
 (`pde/run_sod_ripple.py`, the paper's Sod: (400, 100) per tube, t = 0.15 —
 per guidance, any CRK limiter / AV change must be checked for Sod ripple
@@ -396,7 +426,7 @@ counterpart (Phase 1 task) and a CRKSPH run of Sod / TGV-like cases.
   byte-identical); `REPORT.md` / `FINDINGS.md` updated (versioning event
   #5). Lesson recorded in `docs/lessons_learned.md`. **Every CRKSPH
   frontend result produced 2026-08-11 → 09-26 used the buggy gradient.**
-- [~] Verify exact conservation of mass/momentum/energy to machine
+- [x] Verify exact conservation of mass/momentum/energy to machine
   precision; measure angular momentum drift — **total energy is already
   demonstrated** in the existing CRKSPH rows (drift 1e-16 … 3e-14 on
   Gresho / KH / linearWave / Sedov); momentum / angular momentum need the
@@ -404,19 +434,24 @@ counterpart (Phase 1 task) and a CRKSPH run of Sod / TGV-like cases.
   Lowest-rung check 2026-09-26 (Verification pass, finding 2): linear
   momentum conserved to round-off (KH |Δp| 6e-17, Gresho 9e-17);
   Gresho angular momentum drifts +7.8% at nx=32, converging with
-  resolution (~0.3% at nx=96 by the old columns). Full-ladder re-run
-  still needed for the table.
+  resolution (~0.3% at nx=96 by the old columns). **Full ladder done
+  2026-10-09** (n_h-derived limiter): |ΔL| = 4.0e-3 / 7.4e-4 / 1.8e-4 /
+  1.8e-5 at nx 32 / 48 / 64 / 96 (resolution-convergent); |Δp| ≤ 1e-16 and
+  total energy ≤ 1e-13 in every CRKSPH row.
 - [x] Run PDE benchmark suite, compare dissipation/order against Phase 1 —
-  done 2026-09-26 with matched legs (Phase 1 table): CRKSPH is 3–5× more
-  accurate on linearWave, converges on Sedov where CompSPH barely does
-  (L1 1.03 vs 0.43), dissipates ~10× less on KH, matches CompSPH on Sod —
-  but **spins up the Gresho vortex** (open anomaly, Phase 1).
+  done 2026-09-26 with matched legs, CRKSPH rows re-run 2026-10-09 at the
+  n_h-derived limiter (Phase 1 table): CRKSPH is 5–44× more accurate on
+  linearWave (order 1.91), converges on Sedov where CompSPH barely does
+  (L1 1.10 vs 0.43), dissipates ~10× less on KH, matches CompSPH on Sod —
+  but **spins up the Gresho vortex** (+4.5 / +9.6 % KE at nx 64 / 96, down
+  from +7.3 / +13 %; intrinsic per the frontend close-out).
 - [x] Document gaps between harness results and paper-reported behavior —
   `FINDINGS.md` (static); the delta+ leg's floor analysis is the
   de-facto "what does a corrected scheme still fail at" study.
 
-**Deliverable:** ✅ static reference column (values); ⬜ gradient
-exactness question; ⬜ matched-scheme PDE comparison.
+**Deliverable:** ✅ static reference column (values); ✅ gradient
+exactness question (core bug, fixed); ✅ matched-scheme PDE comparison.
+⬜ Full-ladder angular-momentum table (the `[~]` conservation task).
 
 **References:** `frontiere_2017_crksph`.
 
@@ -551,8 +586,13 @@ Do these, then re-run Phases 1–3 (static + PDE) before Phase 4 starts:
 - [x] **Re-run** (2026-09-26): full PDE ladders for the four CRKSPH cases
   (post-fix), the five matched-scheme legs, TGV / tgv-wc (drift columns,
   sampler fix); static sweep for the additive Hessian rows (320 rows, no
-  existing row changed; grad-of-grad Hessian does not converge in any mode
-  — Hessian of x² is off by ~2 against a true value of 2).
+  existing row changed; *the grad-of-grad Hessian "does not converge in
+  any mode — off by ~2 against a true value of 2" reading was wrong:*
+  `analytic_hessian` returned zeros under the drivers'
+  `torch.set_grad_enabled(False)`, so the "error" was the full Hessian
+  magnitude. Fixed 2026-10-09, see versioning event #7: the corrected
+  grad-of-grad Hessian converges at ~1.5 (crk / renorm, smooth fields) and
+  ~1.3 (standard).)
 - [x] `sod-crk` total-energy drift −7.3e-6 — **root-caused**: CRKSPH's
   compatible-energy update needs symmetric pair interactions, and Sod's
   default `supportMode='Gather'` is asymmetric (CRKSPH+Gather −7.3e-6;
@@ -590,14 +630,24 @@ Do these, then re-run Phases 1–3 (static + PDE) before Phase 4 starts:
 
 **Goal:** Generalize Phase 3's single-order correction into an arbitrary-polynomial-order reproducing-kernel operator generator — this becomes the shared moment-matrix machinery reused in Phase 5 (LABFM).
 
-**Status: NOT STARTED.** (Explicit non-goal of the first pass, `harness/PLAN.md`.) Blocked on the pre-Phase-4 checklist above.
+**Status: FIRST PASS DONE (2026-10-09) — pure-torch reference operator, static evidence complete; warp kernel, frozen-leg and conservative reformulation open.**
+Delivered in `higherOrderSPH/harness/`: `rkpm.py` (order-p moment system + local polynomial fit; pure torch, float64, CPU-testable), `rkpm_modes.py` (registers `rkpm1/2/3` through `register_mode`), `run_rkpm.py` → `REPORT_rkpm.md` (own driver; the frozen baseline outputs are untouched), `tests/convergence/test_rkpm.py` (20 CPU unit tests + a harness smoke). Static results, 2-D jittered 0.3, Wendland2, 40 target neighbours:
+
+| | patch (interior and boundary band) | interpolate order | gradient order | Laplacian / Hessian order |
+|---|---|---|---|---|
+| crk | value+grad exact to degree 1 | 1.84–1.95 | 1.4–1.7 | Brookshaw: saturated / negative |
+| rkpm1 | exact to degree 1 (**values identical to crk, 8e-15**) | 1.84–1.97 | 1.65–1.77 | n/a |
+| rkpm2 | exact to degree 2 (value, grad, Laplacian, Hessian ~1e-11) | **2.7–3.1** | **1.86–1.97** | **1.6–1.7** |
+| rkpm3 | exact to degree 3 | **3.8–3.96** | **2.9–3.3** | **1.8–1.96** |
+
+Orders read from the periodic and open resolution ladders at fixed h/Δx (interior). Interpolation converges at p+1 and the gradient at p (the Laplacian / Hessian at p−1 as expected: ≥ 1.6 for p = 2, ≈ 1.9 for p = 3), so the generator hits the textbook orders; the Brookshaw Laplacian, which does not converge pointwise, is replaced by one that does. Conditioning (equilibrated moment matrix, `results/cond_rkpm.csv`): interior κ ≈ 1.0–2 (p=1), 5–7 (p=2), 15–30 (p=3) at ≥ 20 neighbours; **12 neighbours is not enough for p = 3** (interior κ median 2.6e3, boundary rows 38–64 % rank-deficient); in the wall band the 95th-percentile κ is ~55–80 (p = 2) and ~1.3e3–3e3 (p = 3) at ≥ 35 neighbours, and 3 % of the p = 3 band rows are rank-deficient at 20 neighbours (0 % at ≥ 35). The `smoothing` suite (N fixed, h varied) is uninformative for p ≥ 2 (order vs h at a fixed discretisation reads negative: more neighbours dominate).
 
 **Tasks:**
-- [ ] Implement generic moment-matrix builder for a chosen monomial basis (parametrized consistency order $p$), following MLS/RKPM formalism. **New code** — `computeRenormalizationMatrices` is d×d-only (Verification pass, finding 5). Needs a batched small dense solve (n = 3…20) with explicit regularisation / rank handling, float64-capable, and its own reverse-mode story (see the pinv2x2 adjoint history in `warpier_core.md`).
-- [ ] Implement kernel correction function $C(x; x-x_j)$ so the kernel itself (not just gradient) reproduces polynomials to order $p$.
-- [ ] Derivative operators from the corrected kernel: gradient **and Laplacian / Hessian** (p ≥ 2), measured through `register_mode` against the `hessian` (grad-of-grad) and Brookshaw baselines. The Brookshaw Laplacian does not converge in the *static* probes (`FINDINGS.md` §3), but does at ~2 in the frozen diffusion leg for CRK (1.72 renorm) — settle which error component matters (Phase 0 frozen-leg note) before making "a converging Laplacian" the headline target; the static pointwise norm and the PDE-level error disagree.
+- [x] *(torch reference done; warp kernel + adjoint not started)* Implement generic moment-matrix builder for a chosen monomial basis (parametrized consistency order $p$), following MLS/RKPM formalism. **New code** — `computeRenormalizationMatrices` is d×d-only (Verification pass, finding 5). Needs a batched small dense solve (n = 3…20) with explicit regularisation / rank handling, float64-capable, and its own reverse-mode story (see the pinv2x2 adjoint history in `warpier_core.md`).
+- [x] Implement kernel correction function $C(x; x-x_j)$ so the kernel itself (not just gradient) reproduces polynomials to order $p$. *(Value: $c_0 = e_0^T M^{-1} b$, reproduces degree p exactly; at p = 1 identical to CRK. The full RKPM kernel-gradient — differentiating $M^{-1}$ as well — is **not** implemented; the shipped derivatives are the local-fit (diffuse) ones, exact to degree p. Obtainable by autodiff w.r.t. the query point if wanted.)*
+- [x] Derivative operators from the corrected kernel: gradient **and Laplacian / Hessian** (p ≥ 2), measured through `register_mode` against the `hessian` (grad-of-grad) and Brookshaw baselines *(done as diffuse derivatives of the local fit, see the table; the frozen-diffusion cross-check below is still open)*. The Brookshaw Laplacian does not converge in the *static* probes (`FINDINGS.md` §3), but does at ~2 in the frozen diffusion leg for CRK (1.72 renorm) — settle which error component matters (Phase 0 frozen-leg note) before making "a converging Laplacian" the headline target; the static pointwise norm and the PDE-level error disagree.
 - [ ] Note non-symmetry of resulting kernel ($W_{ij} \neq W_{ji}$) — decide whether to carry forward a naive (non-conservative) MLS operator as a standalone mode, or route straight into a CRKSPH-style conservative reformulation reusing this moment matrix. *(Phase 2 settled: the CRK linear-gradient residual was a bug, not a cost of the CRK form — the corrected-kernel derivative is exact to degree 1. Note that CRKSPH's* momentum equation *uses an antisymmetrised pair form for conservation, which is a separate question from the operator's exactness and should be evaluated the same way here.)*
-- [ ] Run Phase 0 harness at multiple orders $p = 1, 2, 3$: patch tests to degree $p$, convergence-rate tests, condition-number tracking vs. $p$ and neighbor count (expect conditioning to worsen with $p$ on disordered particles). Include free-surface / corner / thin-support sets, which Phase 3 did not probe. Cross-check p=1 against the `crk` column (should match CRK values exactly).
+- [~] *(static done; free-surface / corner / thin-support sets beyond the wall band not yet)* Run Phase 0 harness at multiple orders $p = 1, 2, 3$: patch tests to degree $p$, convergence-rate tests, condition-number tracking vs. $p$ and neighbor count (expect conditioning to worsen with $p$ on disordered particles). Include free-surface / corner / thin-support sets, which Phase 3 did not probe. Cross-check p=1 against the `crk` column (should match CRK values exactly).
 - [ ] Run the frozen-particle PDE leg (primary order evidence). Full PDE suite only if a frontend scheme uses the operator; if non-conservative, explicitly report conservation-diagnostic failures (expected) as a documented tradeoff vs. Phase 2.
 
 **Deliverable:** Order-parametrized reproducing-kernel operator generator, validated across $p=1..3$, with conservation-vs-accuracy tradeoff documented.
@@ -610,15 +660,27 @@ Do these, then re-run Phases 1–3 (static + PDE) before Phase 4 starts:
 
 **Goal:** Push the moment-matching idea from Phase 4 to arbitrary order using anisotropic basis functions and compact stencils, decoupled from kernel-summation framing.
 
-**Status: NOT STARTED.**
+**Status: STATIC + FROZEN-LEG EVIDENCE DONE (2026-10-09, pure-torch reference); hyperviscosity, boundary-stencil work and strong-disorder tests open.**
+LABFM is the same weighted-LS moment system as Phase 4 with the constant dropped and the data taken as differences (`build_system(constant=False)`, harness modes `labfm<k>`, k = the paper's order = the polynomial degree); `run_labfm.py` → `REPORT_labfm.md`. Weights are exactly the ABF weights (kernel × polynomial, coefficients solving the moment equations), so no separate ABF construction is needed. 2-D periodic, jitter 0.3, observed order of the interior L∞ gradient error on a 5-rung ladder at fixed N (neighbours):
+
+| k | N=25 | N=40 | N=60 | N=80 | N=150 | paper (King et al. 2020) | smallest N reaching k−0.5 here |
+|---|---|---|---|---|---|---|---|
+| 2 | 1.95 | 1.95 | 1.94 | 1.93 | 1.88 | — | 25 |
+| 4 | **3.94** | 3.91 | 3.92 | 3.93 | 3.86 | 4th order at N ≈ 25 | **25** |
+| 6 | sat. (singular) | 5.90 | 5.91 | 5.92 | 5.86 | k ≤ 6 at h/δr = 2 (N ≈ 50) | 40 |
+| 8 | sat. (singular) | sat. (singular) | **7.88** | 7.88 | 7.88 | 8th order at N ≈ 60 (shown at N ≈ 78) | **60** |
+
+The paper's headline pairs reproduce: 4th order at ~25 neighbours, 8th at ~60. Below the critical stencil the moment matrix is singular (cond ~1e17, flagged `deficient`) and the gradient does not converge, matching the paper's critical sizes (N_crit ≈ {8, 21, 37, 57} for k = {2, 4, 6, 8}, vs N_poly = {6, 15, 28, 45} for plain polynomial reconstruction — here k = 6 is already fine at N = 40 and k = 4 at N = 25, consistent with both). Moment-matrix κ (median, equilibrated): 2 / 42 / 8e2 / 1.7e4 for k = 2 / 4 / 6 / 8 — float64 is enough through k = 8 (finest-rung gradient error 6e-10 at k = 8, N = 60, well above the floor). The Laplacian converges at about k−1…k (k = 4: 2.8 → 3.9 for N = 25 → 150; k = 8: 6.8 → 7.3). The gradient error constant grows with N at fixed h/Δx (a larger h), as expected.
 
 **Tasks:**
-- [ ] Implement anisotropic basis function (ABF) construction and the local linear system solved per stencil (reuse Phase 4's moment-matrix infrastructure — the *new* n×n builder, not the d×d renorm path).
-- [ ] Implement one-sided/boundary stencil handling for incomplete support.
-- [ ] Harness prerequisites specific to this phase: monomial fields to degree ~10; ladder design that stays above the float64 floor at 8th–10th order (few, coarse rungs; smooth fields with O(1) high derivatives); Laplacian probe on the LABFM operator itself.
-- [ ] Run Phase 0 harness at increasing order (target: reproduce paper's reported 4th order at ~25 neighbors in 2D, up to 8th–10th order at larger stencils) — this is the most discriminating test of harness correctness, since the paper gives concrete stencil-size/order pairs to match.
-- [ ] Stability check: add hyperviscosity option and confirm it stabilizes hyperbolic test PDEs per `king_lind_2020_labfm`.
-- [ ] Run the frozen-particle PDE leg at matched order vs Phase 4; compare compute cost vs. order against Phase 4's correction-matrix approaches. (The current PDE suite cannot show orders > ~2 — Verification pass, finding 6.)
+- [x] Implement anisotropic basis function (ABF) construction and the local linear system solved per stencil (reuse Phase 4's moment-matrix infrastructure — the *new* n×n builder, not the d×d renorm path). *(Done as the `constant=False` variant; chunked pair accumulation keeps k = 8's 44-function system in memory.)*
+- [ ] Implement one-sided/boundary stencil handling for incomplete support. *(Not measured separately. The wall-band patch tests in `REPORT_rkpm.md` show the underlying fit is exact there wherever the moment matrix is full rank; the LABFM paper's claim — one-sided stencils of the same order up to 4th — is not yet checked, and the open-domain `labfm` patch/order suites have not been run.)*
+- [~] Harness prerequisites specific to this phase: monomial fields to degree ~10 *(no cap in code; `--degree-max 10` not run)*; ladder design that stays above the float64 floor at 8th–10th order *(done: five rungs, coarse; 10th order not attempted)*; Laplacian probe on the LABFM operator itself *(done: `labfm<k>` provides its own Laplacian/Hessian)*.
+- [x] Run Phase 0 harness at increasing order (target: reproduce paper's reported 4th order at ~25 neighbors in 2D, up to 8th–10th order at larger stencils) — *(done to k = 8, table above; 10th not run)*.
+- [ ] Stability check: add hyperviscosity option and confirm it stabilizes hyperbolic test PDEs per `king_lind_2020_labfm`. *(Not implemented. **No run diverged** in the frozen leg (26 of 26, jitter 0.3, periodic), so nothing here needs stabilising yet; the paper's instability is for noisy distributions at large k (ε/δr ≳ 0.5) and for incomplete support, neither of which this leg exercises. Next test: jitter ≥ 0.5 and the saved TGV distributions in `data/`, then Dirichlet walls.)*
+- [x] Run the frozen-particle PDE leg at matched order vs Phase 4 *(done, below)*; compare compute cost vs. order against Phase 4's correction-matrix approaches *(done for the pure-torch reference only: setup 7 / 40 / 47 ms and apply 0.14 / 0.15 / 0.18 ms for k = 4 / 6 / 8 at N = 2200, ~1e5–2e5 pairs — cost is not a constraint here, and says nothing about a warp implementation)*.
+
+**Frozen-particle leg** (`run_frozen_hi.py` → `REPORT_frozen_hiorder.md`; RK4, cfl 0.05 advection / 0.02 diffusion, 288 → 2304 particles, jitter 0.3, periodic): LABFM converges in time at its design order, **advection 1.95 / 3.93 / 5.90 / 7.87 and diffusion 2.02 / 3.95 / 5.91 / 7.88 for k = 2 / 4 / 6 / 8** (k = 8 advection L2: 5.6e-5 → 1.8e-8). MLS (Phase 4) is far less efficient: advection rkpm1 **1.94** and rkpm2 **1.94 with an identical error** (3.5e-1 → 4.9e-2: on near-symmetric stencils the quadratic term does not enter a first derivative), rkpm3 3.91; diffusion rkpm2 2.05 and rkpm3 2.06 (the cubic does not enter the Laplacian). I.e. odd-degree MLS behaves like the even degree below it, and the even-k LABFM schemes are the efficient ones: k = 4 (14 coefficients) gives ~3.9 for both operators where rkpm3 (10 coefficients) gives 3.9 / 2.1. The gradient order k does not rely on that symmetry: it holds at jitter 0.5 (3.87–3.88 for k = 4, 5.85–5.92 for k = 6; Laplacian 2.9–3.3 and 4.7–4.8, i.e. ~k−1); strong disorder (the saved TGV distributions) is untested.
 
 **Deliverable:** Arbitrary-order LABFM operator, cross-validated against the paper's specific stencil-size/order table.
 
@@ -637,13 +699,39 @@ delivered the *prerequisite* shock-capturing validation (C&D 2010 switch
 frontend has no pairwise Riemann solver (CRKSPH uses a "Riemann-like"
 pseudo-viscosity; the only Riemann solver is the exact Sod solution used
 for validation), so a Riemann-SPH base scheme must be built first.
+**Superseded 2026-10-09:** the frontend built one outside this plan —
+`modules/riemann` (Acoustic, PVRS, TRRS, TSRS, Adaptive, HLLC) plus
+`modules/godunov` (simplified Cha–Whitworth GSPH, `InutsukaGSPH`), with
+state reconstruction + limiters (warpSPH `GODUNOV_SPH_PLAN.md`, layers 1–3
+built and validated 2026-10-08, committed in `abdaf11`; remaining: blob /
+Wengen KH, solver ablation). The first Phase 6 task is therefore largely
+done; what is left is the MLS/TENO reconstruction on top of it. Reference
+numbers for the like-for-like comparison: Gresho 0.076–0.091 and Sod
+velocity 0.0030 with no AV (warpSPH `docs/av/godunov_l3_2026-10-08/`).
+
+**Status (2026-10-09): reconstruction layer built and tested standalone; NOT coupled to a Riemann solver.** `reconstruct.py` (pure torch, 2-D and 1-D; nine candidate stencils per particle on the Phase 4 moment systems), `run_reconstruct.py` → `REPORT_reconstruct.md`, `run_interface.py` → `REPORT_interface.md`, `tests/convergence/test_reconstruct.py`. The Riemann coupling waits on the base-scheme decision (Phase 8 / MFM note) and a frontend integration choice.
+
+Static results (2-D hex lattice, jitter 0.3, periodic; particle counts 288 / 1152 / 4608; TENO per Gao et al. 2023, central radius 2.5 / 3.2 / 4.0 √V for O4 / O5 / O6):
+
+| scheme | smooth-region order | step overshoot | jump capture ¹ | false jump ² |
+|---|---|---|---|---|
+| plain MLS p = 3 / 4 / 5 (unlimited) | 4.08 / 4.94 / 5.94 | **0.40 / 0.26 / 0.21** | 0.17 / 0.15 / 0.04 | 0.38 / 0.19 / 0.10 |
+| TENO O4 / O5 / O6 | **4.08 / 4.94 / 5.94** | 1.5e-10 / 2.6e-8 / 2.4e-8 | 1.000 | ≤ 7e-8 |
+| WENO M = 3 / 4 / 5 | 4.01 / 4.85 / 5.93 | 2e-16 | 1.000 | 4e-16 |
+
+¹ mean |f_L − f_R| over pairs straddling a unit step (1 = fully resolved). ² max |f_L − f_R| over same-side pairs (any value is a spurious Riemann problem). In smooth data TENO reproduces plain MLS **exactly** (it keeps the central stencil everywhere), whereas matched-order WENO is 5–12× less accurate (O4/M=3: 7.7e-6 vs 6.2e-5 at the finest rung; O5/M=4: 6.5e-7 vs 7.7e-6; O6/M=5: 4.7e-8 vs 2.2e-7) — the WENO weighting (λ₀ = 1e5, unit-weight fits) mixes the sectors in even where the data are smooth. Interface states themselves converge at order p+1 (`run_interface.py`: MLS p = 1/2/3: 1.8 / 2.9 / 3.9; LABFM k = 2/4: 2.9 / 4.8). **Caveat:** a perfectly sharp step is the easy case for both; they differ near the jump: a smooth background (amplitude 0.5) superposed on the step, evaluated ≥ 2 spacings from it, keeps max errors of 6.6e-3 – 8.6e-3 for TENO O4/O5/O6 (identical to plain MLS at O4, 3× / 4× below it at O5 / O6) and 2.6e-2 / 7.5e-3 / 1.4e-4 for WENO M = 3 / 4 / 5 (the no-jump errors are ~1e-5 – 1e-7): TENO's cutoff keeps the central stencil where it only marginally touches the jump, so its error there does not improve with order, while the WENO sectors do. The real head-to-head dissipation comparison (the Phase 6/7 deliverable) needs the solver.
+
+**Findings from building it** (flagged in the module docstring):
+- **The paper's sector-stencil numbers are inconsistent on a uniform lattice.** Gao et al. choose directional stencils of radius 4.5 √V with "at least 10 particles", but a 45° sector of that radius holds π·4.5²/8 ≈ 8. With a minimum of 10, five of the eight sectors were deactivated near a discontinuity, the scheme fell back to the central fit and **overshot by 0.24** (plain MLS: 0.41). Using the smallest solvable degree-2 fit (nc+1 = 7) as the minimum removes the overshoot (1e-8). `dir_radius` / `dir_min` are exposed.
+- 1-D is not in either paper; a central radius of 2.5 √V holds ~5 points, below any sensible minimum, so TENO O4 silently stayed at 3rd order (the sectors) until the central radius was widened for 1-D.
+- Where the papers are not explicit (flagged `(a)–(d)` in `reconstruct.py`): the TENO β sums all partial derivatives of order 1..p with unit weight on a common square; stencils use a hard radius around √V; the interface point is the arithmetic midpoint (equal supports); a deactivated stencil gets weight 0.
 
 **Tasks:**
-- [ ] **Implement a first-order Riemann-SPH (Godunov-SPH) base scheme** in the compressible frontend (pairwise interface states, approximate Riemann solver — e.g. HLLC or an exact solver generalised from `sodSolution.py`). This is the zero-reconstruction baseline TENO/WENO are compared against.
-- [ ] Implement MLS-based local polynomial reconstruction at particle-pair interfaces, interface position $\overline{r}_{ij} = (h_j r_i + h_i r_j)/(h_i + h_j)$ (reuse Phase 4's n×n moment builder).
-- [ ] Implement TENO smoothness indicators / stencil selection and blending weights.
+- [x] *(done in the frontend, 2026-10-08, warpSPH `abdaf11` — see the scope note above)* **Implement a first-order Riemann-SPH (Godunov-SPH) base scheme** in the compressible frontend (pairwise interface states, approximate Riemann solver — e.g. HLLC or an exact solver generalised from `sodSolution.py`). This is the zero-reconstruction baseline TENO/WENO are compared against.
+- [x] Implement MLS-based local polynomial reconstruction at particle-pair interfaces (`RKPMOperator.interface_states`), interface position $\overline{r}_{ij} = (h_j r_i + h_i r_j)/(h_i + h_j)$ *(arithmetic midpoint for the uniform-support harness lattices; the h-weighted form is not yet implemented)* (reuse Phase 4's n×n moment builder).
+- [x] Implement TENO smoothness indicators / stencil selection and blending weights. *(Exact Gram-matrix β, γ = 1/(β+ε)⁶, cutoff C_T; see findings above.)*
 - [ ] Couple reconstruction to the Riemann-SPH scheme for left/right state resolution.
-- [ ] Run Phase 0 smooth-region convergence tests (target: 4th-order-class reconstruction accuracy) and shock-tube/Sedov/KH tests for non-oscillatory behavior and reduced dissipation vs. WENO of matched order. *Use the exact-solution metrics (Sod, Sedov); compare within the Riemann-SPH family (the current Sod baseline is CompSPH and Sedov is CRKSPH — not like-for-like).*
+- [~] Run Phase 0 smooth-region convergence tests (target: 4th-order-class reconstruction accuracy) *(done: 4.08 / 4.94 / 5.94)* and shock-tube/Sedov/KH tests for non-oscillatory behavior and reduced dissipation vs. WENO of matched order *(non-oscillatory step test done; the shock-tube / Sedov / KH runs need the solver coupling)*. *Use the exact-solution metrics (Sod, Sedov); compare within the Riemann-SPH family (the current Sod baseline is CompSPH and Sedov is CRKSPH — not like-for-like).*
 
 **Deliverable:** TENO-SPH reconstruction module, validated for both smooth-region order and shock robustness.
 
@@ -655,16 +743,63 @@ for validation), so a Riemann-SPH base scheme must be built first.
 
 **Goal:** Implement WENO as the baseline shock-capturing comparison point against Phase 6's TENO.
 
-**Status: NOT STARTED.**
+**Status (2026-10-09): reconstruction built (shares `reconstruct.py` with Phase 6); solver-level comparison not done.**
 
 **Tasks:**
-- [ ] Implement MLS-WENO reconstruction (same interface-reconstruction structure as Phase 6, swap smoothness-indicator/weighting scheme).
-- [ ] Run identical Phase 0 test set used for TENO — smooth-region order, shock-tube/Sedov/KH dissipation comparison.
-- [ ] Direct head-to-head report: WENO vs. TENO dissipation at matched formal order (this is the comparison the TENO papers themselves make).
+- [x] Implement MLS-WENO reconstruction (same interface-reconstruction structure as Phase 6, swap smoothness-indicator/weighting scheme). *(Avesani et al. 2014: nine unweighted no-constant fits, central r ≤ h_mls, sectors r ≤ 2 h_mls, σ = Σ w², ω ∝ λ/(ε+σ)⁴ with λ₀ = 1e5; `weno_reconstructor`.)*
+- [~] Run identical Phase 0 test set used for TENO — smooth-region order *(done, Phase 6 table)*, shock-tube/Sedov/KH dissipation comparison *(needs the solver)*.
+- [~] Direct head-to-head report: WENO vs. TENO dissipation at matched formal order. *(Static reconstruction-only proxy in the Phase 6 table: same non-oscillatory behaviour; TENO 5–12× more accurate in smooth data; near a jump the picture is mixed (WENO M = 5 is far better 2 spacings from the jump). The solver-level comparison is open.)*
 
 **Deliverable:** WENO-SPH reconstruction module; final comparison table across all phases (Standard SPH / CRKSPH / Bonet-Lok / MLS / LABFM / WENO-SPH / TENO-SPH) on the same harness — **with the scheme stated per row** (the Pass-2 suite showed that "per-case default scheme" is not a column).
 
 **References:** `avesani_dumbser_bertaux_2014_mlswenosph`, follow-up "Investigations on a high order SPH scheme using WENO reconstruction" paper in your literature folder.
+
+---
+
+## Phase 8 — MFM column (outlook, not scheduled)
+
+**Goal:** Add Hopkins (2015) meshless finite mass (MFM) as one more scheme
+row in the final comparison table. Added 2026-10-09; the frontend side is
+tracked in warpSPH `PESPH_PLAN.md` §7 (MFM is its stated longer-term goal).
+
+**Status: NOT STARTED, no commitment.** It needs core work (MFM is nearly a
+second core: per-face quantities with a Riemann solve inside the pair loop).
+
+**Why it is not an operator phase.** MFM is a *solver*, not an operator. Its
+formal order is that of CRKSPH (a first-order-consistent matrix gradient,
+limited linear reconstruction, Riemann flux: ~2 on smooth flow, ~1 at
+shocks), so it is not "higher order" in the sense of Phases 4–5. It fits the
+harness as follows:
+- **Static operator probes:** only the matrix gradient applies, and that is
+  the existing `renorm` (Bonet–Lok) column. The face-flux sum has no
+  standalone operator to probe.
+- **Frozen-particle leg:** does not exercise the Riemann machinery.
+- **Compressible PDE cases:** apply directly (Sod, Sedov, Gresho, KH,
+  linearWave with the exact-solution metrics). Gresho is the one to watch: if
+  MFM does not spin up the vortex, that isolates the CRK pair pressure force
+  as the cause (Phase 1 anomaly).
+
+**Relationship to other phases:**
+- **Phase 6–7:** TENO / WENO produce left/right interface states for a
+  Riemann solver; MFM is another consumer of that interface, with Hopkins'
+  limited linear reconstruction as its baseline. PESPH_PLAN §7.2: MFM is
+  CRKSPH's conservative differencing with the averaged flux replaced by a
+  Riemann flux, i.e. a Riemann-SPH base scheme on the CRK substrate. **If the
+  MFM core work is going to happen, build Phase 6–7 reconstruction against its
+  face-state interface instead of the SPH pair interface** — decide this
+  before starting Phase 6.
+- **Phase 4:** independent. MFM needs only the existing d×d p=1 machinery
+  (`computeRenormalizationMatrices` / CRK), not Phase 4's new n×n builder, so
+  Phase 4 does not wait on it.
+
+**Tasks (when scheduled):**
+- [ ] Decide whether the core grows an MFM face-flux path (user).
+- [ ] Register MFM as a scheme in the compressible frontend; add it to the PDE
+  registry as `<case>-mfm` legs (same case / ladder / metric / IC).
+- [ ] Report it as one more row of the Phase 7 final table, scheme stated.
+
+**References:** `hopkins2015_new-class-meshfree-hydrodynamic-methods`,
+`hopkins2013_general-class-lagrangian-sph`.
 
 ---
 
@@ -733,7 +868,20 @@ phase list above:
   (6) additive 2026-09-26: `hessian` probe rows, exact-solution and
   bias-corrected PDE columns, matched-scheme PDE legs, frozen-particle leg
   (`REPORT_frozen.md`) — no existing number changes.
-  **Pending:** the pre-Phase-4 event (checklist under Verification pass).
+  (7) **2026-10-09, `analytic_hessian` under `no_grad`**: it silently
+  returned zeros when the caller had grad disabled, as both drivers do, so
+  every `hessian` row of `baseline_rows.csv` / `REPORT.md` since 2026-09-26
+  was scored against a zero target. Fixed (`torch.enable_grad()` inside), a
+  `no_grad` regression test added, the static sweep re-run: **only the 320
+  `hessian` rows changed**; every other row agrees to ≤ 1.2e-15 absolute
+  (GPU atomic-ordering noise at the round-off floor, rows that are machine
+  exact). The old `REPORT.md` is in git history; the old CSV is kept locally as
+  `results/baseline_rows_pre-hessian-fix_2026-10-09.csv`. The regenerated
+  `REPORT.md` also shows round-off-floor churn in rows that are machine
+  exact (≤ 1.2e-15), not a change in any result. Also (additive):
+  `run_baseline.measure` now skips a probe an external mode returns `None`
+  for (the `register_mode` contract; unused until Phase 4).
+  The pre-Phase-4 event is done.
 - Phases 3–5 share moment-matrix infrastructure; implement that shared
   layer once in Phase 4 rather than duplicating in Phase 5.
   *(Corrected 2026-09-26: the shipped `computeRenormalizationMatrices` is a

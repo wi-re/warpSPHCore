@@ -58,6 +58,24 @@ The 2D incompressible cases (TGV/Gresho/KH) cost ~nx³ under adaptive dt and
 dominate the runtime; the 1D cases finish in minutes and are the fast
 dev/test path.
 
+## Phases 4-7: high-order operators and reconstruction (`rkpm.py`, `reconstruct.py`)
+
+Added 2026-10-09 (parent plan `../../higher_order.md`, Phases 4-7). These are
+**pure-torch reference implementations** (CPU-testable, float64-native); they
+do not touch `src/warpSPHCore` and do not change any frozen baseline output.
+
+| file | role |
+|---|---|
+| `rkpm.py` | order-p moment system + local polynomial fit: MLS/RKPM (Phase 4) and the LABFM variant `constant=False` (Phase 5); value / gradient / Hessian / Laplacian, `interface_states` |
+| `rkpm_modes.py` | registers `rkpm1..3` and `labfm<k>` through `operators.register_mode` |
+| `run_rkpm.py` -> `REPORT_rkpm.md` | Phase 4: the unchanged static suites with the new modes + p=1 vs CRK cross-check + conditioning vs order (`--smoke` is the CI gate) |
+| `run_labfm.py` -> `REPORT_labfm.md` | Phase 5: observed order vs scheme order k and stencil size (King et al. 2020) |
+| `run_frozen_hi.py` -> `REPORT_frozen_hiorder.md` | frozen-particle PDE leg for the new modes (own report; `REPORT_frozen.md` untouched) |
+| `reconstruct.py` | Phases 6-7: nine-stencil TENO (Gao 2023) / WENO (Avesani 2014) interface-state reconstruction |
+| `run_reconstruct.py` -> `REPORT_reconstruct.md`, `run_interface.py` -> `REPORT_interface.md` | reconstruction-only evidence (smooth order, step overshoot, jump capture); **no Riemann solver** |
+
+CI: `tests/convergence/test_rkpm.py`, `tests/convergence/test_reconstruct.py`.
+
 ## Conventions
 
 - float64 (`warpSPHCore_PRECISION=float64`, set by the driver before
