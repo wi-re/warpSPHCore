@@ -103,7 +103,9 @@ def main(argv=None):
     ap.add_argument("--orders", type=int, nargs="+", default=[2])
     ap.add_argument("--jitter", type=float, default=0.0)
     ap.add_argument("--nngb", type=float, default=None)
+    ap.add_argument("--backend", default="torch", choices=["torch", "warp"])
     a = ap.parse_args(argv)
+    drv.BACKEND = a.backend
     nngb = a.nngb if a.nngb is not None else (7.0 if a.dim == 1 else 28.0)
     wp.init()
     torch.set_grad_enabled(False)

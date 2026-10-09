@@ -69,7 +69,9 @@ def main(argv=None):
     ap.add_argument("--tend", type=float, default=0.12)
     ap.add_argument("--nngb", type=float, default=7.0)
     ap.add_argument("--modes", nargs="+", default=["MFM", "MFV"])
+    ap.add_argument("--backend", default="torch", choices=["torch", "warp"])
     a = ap.parse_args(argv)
+    drv.BACKEND = a.backend
     wp.init()
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"

@@ -61,6 +61,25 @@ def _scatter(n: int, idx: torch.Tensor, val: torch.Tensor) -> torch.Tensor:
     return out.index_add(0, idx, val)
 
 
+def invertMoments(Es: torch.Tensor, rtol: float = 1.0e-12, pinv_above: float = 1.0e8):
+    """``(Es^-1, N_cond)`` for a batch of small symmetric ``dim x dim`` matrices (Hopkins' condition number,
+    Eq. C1: ``||E|| ||E^-1|| / dim`` in the Frobenius norm). A plain LU inverse for the well-conditioned rows;
+    the pseudo-inverse only for the (few) singular or ill-conditioned ones. (``torch.linalg.pinv`` on a batch
+    of 10^6 2x2 matrices allocates ~8 GiB of eigensolver workspace on the GPU.)"""
+    dim = Es.shape[-1]
+    inv, info = torch.linalg.inv_ex(Es)
+    cond = torch.linalg.matrix_norm(Es) * torch.linalg.matrix_norm(inv) / dim
+    bad = (info != 0) | ~torch.isfinite(cond) | (cond > pinv_above)
+    if bool(bad.any()):
+        idx = torch.nonzero(bad).flatten()
+        pi = torch.linalg.pinv(Es[idx], rtol=rtol, hermitian=True)
+        inv = inv.clone()
+        inv[idx] = pi
+        cond = cond.clone()
+        cond[idx] = torch.linalg.matrix_norm(Es[idx]) * torch.linalg.matrix_norm(pi) / dim
+    return inv, cond
+
+
 def _closeFaces(N: int, i: torch.Tensor, j: torch.Tensor, A: torch.Tensor,
                 iters: int = 200, tol: Optional[float] = None, power: float = 1.0) -> torch.Tensor:
     """Antisymmetric correction ``C_ij = kappa_ij (lambda_j - lambda_i)``,
@@ -163,9 +182,8 @@ class MeshlessGeometry:
         # the dimensionless, scale-free matrix E = Ehat / (omega h^2)
         scale = (omega * h ** 2)[:, None, None]
         Es = Ehat / scale
-        Es_inv = torch.linalg.pinv(Es, rtol=rtol, hermitian=True)
+        Es_inv, cond = invertMoments(Es, rtol)
         Einv = Es_inv / scale
-        cond = torch.linalg.matrix_norm(Es) * torch.linalg.matrix_norm(Es_inv) / dim
         deficient = (nnb < dim + 1) | (cond > cond_max) | ~torch.isfinite(cond)
 
         volume = 1.0 / omega

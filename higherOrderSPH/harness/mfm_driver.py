@@ -16,7 +16,7 @@ from dataclasses import dataclass
 import torch
 
 from warpSPHCore import ParticleState
-from warpSPHCore.mfm import (MeshlessGeometry, conserved, mfmRates, primitives,
+from warpSPHCore.mfm import (MeshlessGeometry, MeshlessWarp, conserved, mfmRates, primitives,
                              signalTimestep)
 
 BALL = {1: 2.0, 2: math.pi, 3: 4.0 * math.pi / 3.0}
@@ -29,6 +29,7 @@ class MFMState:
     Q: torch.Tensor
     h: torch.Tensor
     t: float = 0.0
+    lam: object = None        # warp backend: the previous closure potential (warm start)
 
 
 def supports_from_volume(V, nngb, dim):
@@ -36,9 +37,15 @@ def supports_from_volume(V, nngb, dim):
 
 
 CLOSURE_POWER = 1.0
+BACKEND = "torch"          # "torch" (pair list, differentiable) or "warp" (CSR kernels, O(N) memory)
 
 
 def geometry(state: MFMState, domain, kernel, closure="project"):
+    if BACKEND == "warp":
+        w = MeshlessWarp.build(state.pos, state.h, domain, kernel, closure=closure, closure_power=CLOSURE_POWER,
+                               lam0=state.lam)
+        state.lam = w.lam
+        return w
     P = ParticleState(positions=state.pos, supports=state.h, masses=state.mass,
                       densities=None, kinds=torch.zeros(state.pos.shape[0], dtype=torch.int32,
                                                         device=state.pos.device))
@@ -61,12 +68,16 @@ def step(state: MFMState, domain, kernel, gamma, nngb, cfl=0.2, mode="MFM", dt=N
     g = geometry(state, domain, kernel, closure)
     rho, vel, P = primitives(state.Q, g.volume, gamma)
     if dt is None:
-        dt = float(signalTimestep(g, rho, vel, P, gamma, cfl).min())
+        dts = g.timestep(rho, vel, P, gamma, cfl) if BACKEND == "warp" else signalTimestep(g, rho, vel, P, gamma, cfl)
+        dt = float(dts.min())
     if tmax is not None:
         dt = min(dt, tmax - state.t)
-    rates, diag = mfmRates(g, rho, vel, P, gamma, dt=dt, mode=mode, order=order, **kw)
+    if BACKEND == "warp":
+        rates = g.rates(rho, vel, P, gamma, dt=dt, mode=mode, order=order, **kw)
+    else:
+        rates, diag = mfmRates(g, rho, vel, P, gamma, dt=dt, mode=mode, order=order, **kw)
     Qn = state.Q + dt * rates
     vel_n = Qn[:, 1:-1] / Qn[:, :1]
     pos = wrap(state.pos + 0.5 * dt * (vel + vel_n), domain)
     h = supports_from_volume(g.volume, nngb, dim)
-    return MFMState(pos=pos, mass=state.mass, Q=Qn, h=h, t=state.t + dt), g, dt
+    return MFMState(pos=pos, mass=state.mass, Q=Qn, h=h, t=state.t + dt, lam=state.lam), g, dt
