@@ -216,7 +216,10 @@ def test_backward_does_not_modify_the_incoming_gradient(case2d):
     a = torch.autograd.grad(out, f, g, retain_graph=True)[0].clone()
     b = torch.autograd.grad(out, f, g, retain_graph=True)[0].clone()
     assert torch.equal(g, g0)
-    assert a.abs().max() > 0 and torch.allclose(a, b)
+    # the pre-fix failure was an all-zero second result; float32 atomic scatter
+    # order on CUDA still differs from run to run in the last bits
+    scale = a.abs().max()
+    assert scale > 0 and (a - b).abs().max() <= 1e-4 * scale
 
 
 def _pairs(c, radius_factor=1.6):
