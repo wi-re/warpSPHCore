@@ -792,8 +792,41 @@ Static results (2-D hex lattice, jitter 0.3, periodic; particle counts 288 / 115
 row in the final comparison table. Added 2026-10-09; the frontend side is
 tracked in warpSPH `PESPH_PLAN.md` §7 (MFM is its stated longer-term goal).
 
-**Status: NOT STARTED, no commitment.** It needs core work (MFM is nearly a
-second core: per-face quantities with a Riemann solve inside the pair loop).
+**Status (2026-10-09): CORE BACKEND BUILT (`warpSPHCore.mfm`), reference stepper and evidence in the harness; the solver, its warp pair-loop kernels and boundary handling are the frontend's.** (Earlier status: not started.) Built on request ("start setting up the backend for MFM style operations so the frontend can build the solver"), from Hopkins (2015) Sec. 2 and App. A-C, G.
+
+**Core backend (`src/warpSPHCore/mfm/`, pure torch on a symmetric pair list, so reverse mode and `torch.autograd.forward_ad` work through it; 55 tests in `tests/operations/test_mfm.py`, CPU + CUDA).**
+
+| module | what it provides |
+|---|---|
+| `kernels.py` | differentiable `kernelWeight(r, h, dim, kernel)` (Wendland 2/4/6, cubic and quintic spline; checked against the warp `Density` operator) |
+| `geometry.py` | `MeshlessGeometry.build(particles, domain, kernel, adjacency=None, closure="project")`: `omega` / effective volumes `V = 1/omega`, `Ehat^-1`, Hopkins' `N_cond` (Eq. C1) and a `deficient` flag, the pair list `(i, j, d)`, matrix least-squares `gradient(f)` (exact for linear fields), the effective **face vectors `A_ij`** (Eq. 18-19, antisymmetric, `A0` = the paper's), `closure()`, `divergence(flux)` = `-sum_j |A_ij| F_ij` |
+| `limiters.py` | `slopeLimiter` (App. B1-B3, condition-number-dependent `beta`, exact or "conservative" variant), `pairLimit` (B4, `psi1 = 1/2`, `psi2 = 1/4`) |
+| `riemann.py` | `starState` (HLLC; Roe -> PVRS -> Rusanov wave-speed fallback chain) and `faceFlux(..., mode="MFM" or "MFV", starFn=None)`: boost, rotate, flux, de-boost (Eq. A1-A8); `starFn` replaces the star state for MFM (any solver / EOS) |
+| `scheme.py` | `mfmRates(geom, rho, v, P, gamma, dt, mode, order)`: limited gradients, face reconstruction, half-step MUSCL-Hancock prediction (A2-A4), Riemann flux, conservative assembly -> `dQ/dt` for `Q = (m, m v, m e_tot)`; `primitives`, `conserved`, `signalTimestep` (Eq. 24-25) |
+
+`interfacePairs(particles, domain, adjacency)` (Phase 4-7 helper) supplies the pair list; a frontend Verlet list works if it is symmetric. 1-D, 2-D and 3-D (3-D only smoke-tested). Ideal gas in `mfmRates`; a different EOS needs `starFn` (MFM) plus its own `mfmRates` front half.
+
+**Findings from building it** (all measured, driver and scripts in the harness):
+- **The paper's face vector does not close on disordered particles, and that breaks the scheme.** `sum_j A_ij` vanishes only for the exact (Lanson-Vila) partition; with the second-order quadrature of Eq. 10-11 the residual on a 0.3-jittered 2-D lattice is 1.3 times a typical single `|A_ij|`, and it acts on a uniform pressure as a force `-P sum_j A_ij` that does not decrease with resolution. Measured with the paper's `A` (`closure="none"`): smooth sound wave on the 0.3-jittered lattice has a relative error of ~10^2 (garbage) at every resolution, and even on the *regular* hex lattice the error stalls (7.9e-2 at N = 4608 vs 7.6e-3 closed); Gresho vortex L1(v) 0.241. `closure="project"` (default) adds the smallest antisymmetric correction `kappa_ij (lambda_j - lambda_i)`, `kappa_ij = |A_ij|`, with `L lambda = -sum_j A_ij` solved by conjugate gradients on the pair graph: conservation is untouched, the divergence of a linear flux field is unchanged to the measured digit (`test_linear_flux_divergence_keeps_its_consistency_after_closure`), and a set that is already closed (regular lattice) returns immediately. Two traps found on the way: an unweighted correction (`kappa = 1`) flips the orientation of the tiny faces at the kernel edge (23-31 % of the pairs of the Gresho run had `A . d < 0`) and the vortex blew up (KE x 4e5); and the closure has to be reduced relative to *itself* (1e-6), not to the face size -- a looser tolerance cost a factor 3 in the smooth-wave error because the residual then competes with an `eps = 1e-4` signal. This is a deviation from the paper's scheme, stated per row; the paper's `A` is kept (`closure="none"`, `geom.A0`).
+- **MFV needs the time-centred frame velocity to be second order.** The face velocity of Eq. 21 evaluated with the start-of-step particle velocities gave first-order MFV (error scaling with the CFL number); using the half-step predicted velocities (`timeCentredFrame=True`, the same `dv/dt` as the Hancock predictor) restored 1.9. MFM is insensitive (no mass flux).
+- **HLLC's star state is not the exact one for strong waves** (Sod: P* = 0.198, S* = 0.68 with Roe speeds vs 0.303 / 0.927 exact; the frontend saw the same 0.61 contact speed with PVRS speeds). It is HLLC's collapsed wave model, not a bug; the scheme still converges to the exact solution (below). A different `starFn` for MFM is the lever.
+- A conserved-variable update with the pairwise-antisymmetric `A` conserves mass, momentum and energy to round-off at any resolution and particle disorder (~1e-15 in float64 in every run above).
+
+**Evidence** (`mfm_driver.py` = a deliberately minimal global-step reference stepper: single-stage MUSCL-Hancock, time-centred drift, supports from `h = (N_ngb V / C)^(1/dim)` lagged one step; `run_mfm_sod.py`, `run_mfm_smooth.py`, `run_mfm_gresho.py`; float64; closure = project unless stated):
+
+| test | MFM | MFV |
+|---|---|---|
+| 1-D sound wave, one period, order of the L2 error (N = 50 -> 400) | 2.07 / 2.02 / 1.57 | 1.86 / 1.93 / 1.81 |
+| 2-D sound wave, regular hex lattice, order (N = 288 -> 4608) | 2.00 / 2.03 | 1.68 / 1.82 |
+| 2-D sound wave, 0.3-jittered lattice, order (relative error at N = 4608) | 0.73 / 0.47 (6.1e-2 rho, 2.4e-2 v) | 1.37 / 0.88 (3.0e-2, 2.3e-2) |
+| periodic double Sod, L1 density at N = 200 / 400 / 800 | 1.4e-2 / 8.0e-3 / 3.9e-3 | 1.2e-2 / 5.9e-3 / 3.0e-3 |
+| Gresho vortex, `t = 3`, hex lattice, Wendland4, 30 neighbours: L1(v), max KE/KE0 at N = 4096 | **0.0649**, 1.0024 | **0.0507**, 0.9985 |
+| same, N = 16384 | **0.0354**, 1.0245 | **0.0761**, 1.0026 |
+
+- **Gresho answers the Phase 1 question:** neither variant shows CRKSPH's secular spin-up (+13 % kinetic energy at nx = 96, Phase 1): the kinetic energy peaks at 0.2-2.4 % above its initial value early on and ends at 0.80-0.92 of it. The L1 error is 0.035-0.076, i.e. at or below the frontend's Godunov-SPH (0.076-0.091) and CRKSPH (0.109) numbers. **Not like-for-like** (different kernel -- B7 there, Wendland4 here -- neighbour count, resolution definition and stepper), so this is evidence for the mechanism (a Riemann flux through a closed face has no spurious pair pressure force), not a ranking. **The resolution trend is not clean:** MFM improves 0.0649 -> 0.0354 (N = 4096 -> 16384, order ~0.9), MFV *worsens* 0.0507 -> 0.0761 (noise, not yet understood). Remaining Gresho: a jittered start, the frontend's kernel / neighbour count, and the MFV trend.
+- **Disorder is the weak point.** With a 0.3-jittered start the smooth-wave error stops converging cleanly (orders 0.5-1.4 vs 2.0 on the regular lattice): the face vector is exactly consistent for the *matrix gradient* but the divergence of a linear flux field retains a 1.5 % (jitter 0.3; 0.5 % at 0.1, 3 % at 0.6) error that does not shrink with resolution, an O(disorder^2) zeroth-order floor. Removing it needs a first-moment-consistent face vector (an additional `sum_j C_ij (x_ij - x_i) = V_i I - sum_j A_ij (x_ij - x_i)` constraint on the same antisymmetric correction); not done.
+
+**Not done / open for the frontend:** warp pair-loop kernels (the backend materialises the pair list (memory ~ pairs x state; not benchmarked beyond N = 16384), a fused per-particle kernel would avoid that and is where the frontend's own Riemann solvers plug in); boundaries (open domains give one-sided kernels, rows flagged `deficient` fall back to zero gradient, not Hopkins' SPH gradient of Eq. C4; no ghost / wall treatment); individual (hierarchical) time steps and the Saitoh-Makino limiter; the smoothing-length iteration (`supports_from_volume` in the driver is a lagged one-step update); energy-entropy switches for high Mach (App. D); gravity; the exact-solver fallback; first-moment-consistent faces; characteristic-wise limiting. The TENO / WENO reconstructions of Phases 6-7 plug into the same faces (Eq. 25 is exactly Hopkins' quadrature point), as a replacement for the linear-limited states.
 
 **Why it is not an operator phase.** MFM is a *solver*, not an operator. Its
 formal order is that of CRKSPH (a first-order-consistent matrix gradient,
@@ -823,7 +856,7 @@ harness as follows:
   Phase 4 does not wait on it.
 
 **Tasks (when scheduled):**
-- [ ] Decide whether the core grows an MFM face-flux path (user).
+- [x] Decide whether the core grows an MFM face-flux path (user, 2026-10-09: yes; backend built, see Status).
 - [ ] Register MFM as a scheme in the compressible frontend; add it to the PDE
   registry as `<case>-mfm` legs (same case / ladder / metric / IC).
 - [ ] Report it as one more row of the Phase 7 final table, scheme stated.

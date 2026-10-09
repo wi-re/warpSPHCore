@@ -73,6 +73,7 @@ do not touch `src/warpSPHCore` and do not change any frozen baseline output.
 | `run_frozen_hi.py` -> `REPORT_frozen_hiorder.md` | frozen-particle PDE leg for the new modes (own report; `REPORT_frozen.md` untouched) |
 | `reconstruct.py` | Phases 6-7: nine-stencil TENO (Gao 2023) / WENO (Avesani 2014) interface-state reconstruction |
 | `run_reconstruct.py` -> `REPORT_reconstruct.md`, `run_interface.py` -> `REPORT_interface.md` | reconstruction-only evidence (smooth order, step overshoot, jump capture); **no Riemann solver** |
+| `mfm_driver.py`, `run_mfm_sod.py`, `run_mfm_smooth.py`, `run_mfm_gresho.py` | reference stepper + evidence for the core MFM / MFV backend (`warpSPHCore.mfm`): shock tube vs the exact solution (`exact_riemann.py`), sound-wave order, Gresho vortex; scheme variants `--closure none|project`, `--modes MFM MFV` |
 | `run_advection.py` -> `REPORT_advection.md` | the core `Reconstructor` (MLS / TENO / WENO) inside a time loop: linear advection on frozen jittered particles, upwind flux, smooth waves + top hat; **solver-light** (the exact Riemann solution of advection is the upwind state) |
 
 CI: `tests/convergence/test_rkpm.py`, `tests/convergence/test_reconstruct.py`.
