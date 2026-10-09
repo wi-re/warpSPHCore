@@ -38,12 +38,17 @@ def supports_from_volume(V, nngb, dim):
 
 CLOSURE_POWER = 1.0
 BACKEND = "torch"          # "torch" (pair list, differentiable) or "warp" (CSR kernels, O(N) memory)
+CG_TOL = None              # warp closure solve tolerance (None: the backend default, 1e-6 fp64 / 1e-4 fp32)
+CG_STATS = dict(solves=0, iterations=0)
+H_ITERS = 0                # fixed-point iterations of h <-> V on the *moved* particles (0: h from the pre-move volumes, one step stale)
 
 
 def geometry(state: MFMState, domain, kernel, closure="project"):
     if BACKEND == "warp":
         w = MeshlessWarp.build(state.pos, state.h, domain, kernel, closure=closure, closure_power=CLOSURE_POWER,
-                               lam0=state.lam)
+                               lam0=state.lam, cg_tol=CG_TOL)
+        CG_STATS["solves"] += 1
+        CG_STATS["iterations"] += w.closureIterations
         state.lam = w.lam
         return w
     P = ParticleState(positions=state.pos, supports=state.h, masses=state.mass,
@@ -80,4 +85,7 @@ def step(state: MFMState, domain, kernel, gamma, nngb, cfl=0.2, mode="MFM", dt=N
     vel_n = Qn[:, 1:-1] / Qn[:, :1]
     pos = wrap(state.pos + 0.5 * dt * (vel + vel_n), domain)
     h = supports_from_volume(g.volume, nngb, dim)
+    for _ in range(H_ITERS):
+        gm = geometry(MFMState(pos=pos, mass=state.mass, Q=Qn, h=h), domain, kernel, "none")
+        h = supports_from_volume(gm.volume, nngb, dim)
     return MFMState(pos=pos, mass=state.mass, Q=Qn, h=h, t=state.t + dt, lam=state.lam), g, dt

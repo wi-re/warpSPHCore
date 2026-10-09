@@ -104,6 +104,7 @@ def main(argv=None):
     ap.add_argument("--jitter", type=float, default=0.0)
     ap.add_argument("--nngb", type=float, default=None)
     ap.add_argument("--backend", default="torch", choices=["torch", "warp"])
+    ap.add_argument("--cg-tol", type=float, nargs="+", default=[None], help="warp closure tolerance(s) to sweep")
     a = ap.parse_args(argv)
     drv.BACKEND = a.backend
     nngb = a.nngb if a.nngb is not None else (7.0 if a.dim == 1 else 28.0)
@@ -112,16 +113,19 @@ def main(argv=None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     for mode in a.modes:
         for closure in a.closure:
-            for order in a.orders:
+            for order, tol in [(o, t) for o in a.orders for t in a.cg_tol]:
                 prev = None
+                drv.CG_TOL = tol
                 for n in a.n:
                     t0 = time.time()
+                    drv.CG_STATS.update(solves=0, iterations=0)
                     er, ev, steps, cons = run(a.dim, n, mode, closure, order, a.jitter, nngb, device)
+                    it = drv.CG_STATS["iterations"] / max(drv.CG_STATS["solves"], 1)
                     rate = "" if prev is None else (
                         f"  order rho {math.log(prev[0] / er) / math.log(math.sqrt(n / prev[1]) if a.dim == 2 else n / prev[1]):.2f}")
                     prev = (er, n)
                     print(f"{mode} {closure:7s} order {order} jitter {a.jitter} n={n:5d}: err rho {er:.3e} v {ev:.3e}"
-                          f"  |dQ| {cons:.1e} steps {steps}{rate} ({time.time()-t0:.1f}s)", flush=True)
+                          f"  |dQ| {cons:.1e} steps {steps} cg_tol {tol} cg/solve {it:.1f}{rate} ({time.time()-t0:.1f}s)", flush=True)
 
 
 if __name__ == "__main__":

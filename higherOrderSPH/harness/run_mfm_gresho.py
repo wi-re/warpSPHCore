@@ -107,6 +107,7 @@ def main(argv=None):
     ap.add_argument("--cfl", type=float, default=0.2)
     ap.add_argument("--log", action="store_true")
     ap.add_argument("--backend", default="torch", choices=["torch", "warp"])
+    ap.add_argument("--cg-tol", type=float, nargs="+", default=[None], help="warp closure tolerance(s) to sweep")
     a = ap.parse_args(argv)
     drv.BACKEND = a.backend
     wp.init()
@@ -117,11 +118,15 @@ def main(argv=None):
         for mode in a.modes:
             for closure in a.closure:
                 for order in a.orders:
-                    l1, ke1, kemax, steps, cons, sec = run(n, mode, closure, order, a.jitter, a.nngb, kernel, a.tend,
-                                                          device, a.cfl, a.log)
-                    print(f"{mode} {closure:7s} order {order} N={n} jitter {a.jitter} {a.kernel} nngb {a.nngb}: "
-                          f"L1(v) {l1:.4f}  KE/KE0 final {ke1:.4f} max {kemax:.4f}  |dQ| {cons:.1e} steps {steps} ({sec:.0f}s)",
-                          flush=True)
+                    for tol in a.cg_tol:
+                        drv.CG_TOL = tol
+                        drv.CG_STATS.update(solves=0, iterations=0)
+                        l1, ke1, kemax, steps, cons, sec = run(n, mode, closure, order, a.jitter, a.nngb, kernel, a.tend,
+                                                              device, a.cfl, a.log)
+                        it = drv.CG_STATS["iterations"] / max(drv.CG_STATS["solves"], 1)
+                        print(f"{mode} {closure:7s} order {order} N={n} jitter {a.jitter} {a.kernel} nngb {a.nngb} cg_tol {tol}: "
+                              f"L1(v) {l1:.4f}  KE/KE0 final {ke1:.4f} max {kemax:.4f}  |dQ| {cons:.1e} steps {steps} "
+                              f"cg/solve {it:.1f} ({sec:.0f}s)", flush=True)
 
 
 if __name__ == "__main__":
