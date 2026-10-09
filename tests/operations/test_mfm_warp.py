@@ -217,3 +217,20 @@ def test_single_precision_thresholds_and_coincident_particles_in_the_warp_backen
     rho, vel, pres = _random_state(P2)
     for mode in ("MFM", "MFV"):
         assert torch.isfinite(w2.rates(rho, vel, pres, GAMMA, dt=1e-3, mode=mode)).all()
+
+
+@pytest.mark.parametrize("solver", ["cg", "mg"])
+def test_builds_and_rates_are_bitwise_reproducible(device, solver):
+    # a stable cell sort (a fixed CSR order) and deterministic coarse-level sums: repeated runs give the same bits,
+    # which is what lets chaotic flows (Gresho at N >= 16k) be compared run to run
+    P, dom = _lattice(device, 20, jitter=0.3)
+    rho, vel, pres = _random_state(P)
+    build = lambda: MeshlessWarp.build(P.positions, P.supports, dom, KERNEL, closure_solver=solver, mg_min_particles=0)
+    build()                                              # warm up (the first launch of a process compiles the kernels)
+    outs = []
+    for _ in range(3):
+        w = build()
+        outs.append((w.omega.clone(), w.lam.clone(), w.rates(rho, vel, pres, GAMMA, dt=1e-3, mode="MFV")))
+    for o in outs[1:]:
+        for a, b in zip(outs[0], o):
+            assert torch.equal(a, b)

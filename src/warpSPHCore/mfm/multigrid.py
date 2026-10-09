@@ -26,6 +26,7 @@ cell count; the weights are re-assembled each solve.
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import math
 from typing import Callable, List, Optional
@@ -41,6 +42,23 @@ def _slots(dim: int):
 
 class _Level:
     pass
+
+
+@contextlib.contextmanager
+def _deterministic():
+    prev = torch.are_deterministic_algorithms_enabled()
+    torch.use_deterministic_algorithms(True)
+    try:
+        yield
+    finally:
+        torch.use_deterministic_algorithms(prev)
+
+
+def _sumInto(out: torch.Tensor, index: torch.Tensor, src: torch.Tensor) -> torch.Tensor:
+    """``out.index_add_(0, index, src)`` with a fixed summation order (CUDA ``index_add_`` uses float atomics,
+    whose order -- and so the last bits of the closure potential -- changes from run to run)."""
+    with _deterministic():
+        return out.index_add_(0, index, src)
 
 
 class CellMultigrid:
@@ -150,12 +168,12 @@ class CellMultigrid:
         (:func:`mfmCoarseStencilWarp`)."""
         dim = self.dim
         W0 = torch.zeros(self.levels[0].size, 3 ** dim, dtype=S.dtype, device=S.device)
-        W0.index_add_(0, self.cellId64, S)
+        _sumInto(W0, self.cellId64, S)
         Ws = [W0]
         for lev in self.levels[:-1]:
             W = Ws[-1]
             flat = torch.zeros(math.prod([s // 2 for s in lev.shape]) * 3 ** dim, dtype=W.dtype, device=W.device)
-            flat.index_add_(0, lev.target[lev.keep], W[lev.keep])
+            _sumInto(flat, lev.target[lev.keep], W[lev.keep])
             Ws.append(flat.view(-1, 3 ** dim))
         self.W = Ws
         self.diag = [w.sum(1) for w in Ws]
@@ -164,7 +182,8 @@ class CellMultigrid:
         W, n = Ws[-1], Lc.size
         M = torch.zeros(n, n, dtype=W.dtype, device=W.device)
         rows = torch.arange(n, device=W.device)[:, None].expand(-1, 3 ** dim)
-        M.index_put_((rows.reshape(-1), Lc.nb.reshape(-1)), -W.reshape(-1), accumulate=True)
+        with _deterministic():
+            M.index_put_((rows.reshape(-1), Lc.nb.reshape(-1)), -W.reshape(-1), accumulate=True)
         M += torch.diag(self.diag[-1])
         reg = max(1e-10, 30.0 * torch.finfo(W.dtype).eps) * float(self.diag[-1].abs().max().clamp_min(1e-30))
         M += reg * torch.eye(n, dtype=W.dtype, device=W.device)
@@ -190,7 +209,7 @@ class CellMultigrid:
             x = x + self.omega * dinv * (b - self._stencilApply(level, x))
         r = b - self._stencilApply(level, x)
         rc = torch.zeros(self.levels[level + 1].size, b.shape[1], dtype=b.dtype, device=b.device)
-        rc.index_add_(0, lev.toCoarse, r)
+        _sumInto(rc, lev.toCoarse, r)
         x = x + self._cycle(level + 1, rc)[lev.toCoarse]
         for _ in range(self.smooth):
             x = x + self.omega * dinv * (b - self._stencilApply(level, x))
@@ -205,7 +224,7 @@ class CellMultigrid:
             x = x + dinv * (r - matvec(x))
         res = r - matvec(x)
         rc = torch.zeros(self.levels[0].size, r.shape[1], dtype=r.dtype, device=r.device)
-        rc.index_add_(0, self.cellId64, res)
+        _sumInto(rc, self.cellId64, res)
         x = x + self._cycle(0, rc)[self.cellId64]
         for _ in range(self.smooth):
             x = x + dinv * (r - matvec(x))

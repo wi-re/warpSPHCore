@@ -71,7 +71,7 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     )
     # linearIndices = linearIndexing(indices, cellCount)
     # with record_function("neighborSearch - sortReferenceParticles[argsort]"): 
-    sortingIndices = torch.argsort(linearIndices)
+    sortingIndices = torch.argsort(linearIndices, stable=True)   # ties keep particle order: a reproducible CSR order
     # with record_function("neighborSearch - sortReferenceParticles[resort]"): 
     sortedLinearIndices = linearIndices[sortingIndices]
     # hCell stays a device tensor: the caller reads it back together with
