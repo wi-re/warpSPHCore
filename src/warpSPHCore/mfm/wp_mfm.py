@@ -47,11 +47,12 @@ from ..radiusSearch.grid_util import getIndexRangeLane
 from ..math import *
 from ..kernels import *
 from ..kernels.kernel import sphKernel_
+from ..kernels.eval_kernel import eval_dkdq, eval_C_d
 from ..util import *
 from ..enumTypes import *
 
 __all__ = ["mfmMomentsWarp", "mfmGradientsWarp", "mfmLimiterWarp", "mfmClosureResidualWarp",
-           "mfmClosureMatvecWarp", "mfmFluxWarp", "mfmTimestepWarp"]
+           "mfmClosureMatvecWarp", "mfmClosureWeightsWarp", "mfmFluxWarp", "mfmTimestepWarp", "mfmCoarseStencilWarp"]
 
 _TINY = 1.0e-300
 
@@ -64,6 +65,59 @@ _TINY = 1.0e-300
 def faceVector(d: Any, Wi: scalar_t, Wj: scalar_t, Vi: scalar_t, Vj: scalar_t, EinvI: Any, EinvJ: Any):
     """``A_ij = V_i W_ij(h_i) Ehat_i^-1 d + V_j W_ij(h_j) Ehat_j^-1 d`` with ``d = x_j - x_i``."""
     return (Vi * Wi) * matmul(EinvI, d) + (Vj * Wj) * matmul(EinvJ, d)
+
+
+@wp.func
+def kernelDerivativeValue(r: scalar_t, h: scalar_t, kernel: wp.int32, dim: wp.int32):
+    """``dW/dr (r, h) = C_d k'(q) / h^(dim + 1)``."""
+    q = r / h
+    if q > scalar_t(1.0):
+        return scalar_t(0.0)
+    return eval_dkdq(q, dim, kernel) * eval_C_d(dim, kernel) / wp.pow(h, scalar_t(dim + 1))
+
+
+@wp.func
+def guardedFace(d: Any, Vi: scalar_t, Vj: scalar_t, EinvI: Any, EinvJ: Any, hi: scalar_t, hj: scalar_t,
+                badI: wp.int32, badJ: wp.int32, kernel: wp.int32, dim: wp.int32, centred: wp.int32, areaCap: wp.int32):
+    """The face vector of the pair (``d = x_j - x_i``) with GIZMO's guards (see ``geometry.py``): centred volume
+    weights for large volume jumps, SPH-style fallback face where either matrix is ill-conditioned or
+    ``A . d < 0``, optional geometric area cap."""
+    tiny = scalar_t(_TINY)
+    r = wp.length(d)
+    Wi = sphKernel_(d, hi, kernel)
+    Wj = sphKernel_(d, hj, kernel)
+    wti = Vi
+    wtj = Vj
+    if centred != 0:
+        if wp.abs(Vi - Vj) / wp.min(Vi, Vj) / scalar_t(dim) > scalar_t(1.25):
+            den = Vi * Wi + Vj * Wj
+            if den > scalar_t(0.0):
+                wc = Vi * Vj * (Wi + Wj) / den
+                wti = wc
+                wtj = wc
+    A = faceVector(d, Wi, Wj, wti, wtj, EinvI, EinvJ)
+    bad = badI != 0 or badJ != 0 or wp.dot(A, d) < scalar_t(0.0)
+    if not wp.isfinite(wp.length(A)):
+        bad = True
+    if bad:
+        dWi = kernelDerivativeValue(r, hi, kernel, dim)
+        dWj = kernelDerivativeValue(r, hj, kernel, dim)
+        A = (-(wti * Vi * dWi + wtj * Vj * dWj) / wp.max(r, tiny)) * d
+    if areaCap != 0:
+        pi = scalar_t(3.141592653589793)
+        ai = scalar_t(2.0)
+        aj = scalar_t(2.0)
+        if dim == 2:
+            ai = scalar_t(2.0) * pi * wp.sqrt(Vi)
+            aj = scalar_t(2.0) * pi * wp.sqrt(Vj)
+        if dim == 3:
+            ai = scalar_t(4.0) * pi * wp.pow(Vi, scalar_t(2.0 / 3.0))
+            aj = scalar_t(4.0) * pi * wp.pow(Vj, scalar_t(2.0 / 3.0))
+        Amax = wp.min(ai, aj)
+        mag = wp.length(A)
+        if mag > Amax:
+            A = A * (Amax / mag)
+    return A
 
 
 @wp.func
@@ -208,7 +262,7 @@ def faceFluxPair(rhoL: scalar_t, uL: scalar_t, vtL: Any, PL: scalar_t,
     SL, SR, Ss, Ps = hllcStar(rhoL, uL, vtL, PL, rhoR, uR, vtR, PR, gamma)
     vn = wp.dot(vframe, normal)
     if mode == 0:  # MFM: the face moves with the contact -> no mass flux
-        return scalar_t(0.0), Ps * normal, Ps * (Ss + vn)
+        return scalar_t(0.0), Ps * normal, Ps * (Ss + vn), Ss, Ps
     # MFV: full HLLC in the frame of the quadrature point, then de-boost (Eq. A8)
     Fm = scalar_t(0.0)
     Fn = scalar_t(0.0)
@@ -225,7 +279,7 @@ def faceFluxPair(rhoL: scalar_t, uL: scalar_t, vtL: Any, PL: scalar_t,
     mom = Fn * normal + Ft
     momLab = mom + Fm * vframe
     eLab = Fe + wp.dot(vframe, mom) + scalar_t(0.5) * wp.dot(vframe, vframe) * Fm
-    return Fm, momLab, eLab
+    return Fm, momLab, eLab, Ss, Ps
 
 
 # ---------------------------------------------------------------------------------------
@@ -512,12 +566,12 @@ _LIMITER_SPEC = OperatorSpec(
 
 @wp.func
 def pairFace(i: wp.int32, j: wp.int32, iPtcl: Any, jPtcl: Any, domainState: domainData, kernelProperties: kernelState,
-             vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any)):  # type: ignore
-    """``A_ij`` from the point of view of ``i`` (``d = x_j - x_i``)."""
+             vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), condBad: wp.array(dtype=wp.int32),  # type: ignore
+             centred: wp.int32, areaCap: wp.int32):
+    """Guarded ``A_ij`` from the point of view of ``i`` (``d = x_j - x_i``)."""
     d = -computeDistanceVec(iPtcl.position, jPtcl.position, domainState)
-    Wi = sphKernel_(d, iPtcl.support, kernelProperties.kernelFunction)
-    Wj = sphKernel_(d, jPtcl.support, kernelProperties.kernelFunction)
-    return faceVector(d, Wi, Wj, vol[i], vol[j], Einv[i], Einv[j])
+    return guardedFace(d, vol[i], vol[j], Einv[i], Einv[j], iPtcl.support, jPtcl.support, condBad[i], condBad[j],
+                       kernelProperties.kernelFunction, domainState.dim, centred, areaCap)
 
 
 @wp.kernel
@@ -527,7 +581,8 @@ def mfmClosureResidual_Kernel(
     correctionData: Any, kernelProperties: kernelState,
     # canonical ABI prefix -- do not change
 
-    vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any),  # type: ignore
+    vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), condBad: wp.array(dtype=wp.int32),  # type: ignore
+    centred: wp.int32, areaCap: wp.int32,
 
     output_a: wp.array(dtype=Any), output_a2: wp.array(dtype=scalar_t),  # type: ignore
 ):
@@ -550,11 +605,43 @@ def mfmClosureResidual_Kernel(
             jPtcl = getParticleData(referenceState, j)
             if wp.length(computeDistanceVec(iPtcl.position, jPtcl.position, domainState)) > wp.max(iPtcl.support, jPtcl.support):
                 continue
-            Aij = pairFace(i, j, iPtcl, jPtcl, domainState, kernelProperties, vol, Einv)
+            Aij = pairFace(i, j, iPtcl, jPtcl, domainState, kernelProperties, vol, Einv, condBad, centred, areaCap)
             acc += Aij
             acc2 += wp.dot(Aij, Aij)
     output_a[i] = acc
     output_a2[i] = acc2
+
+
+@wp.kernel
+def mfmClosureWeights_Kernel(
+    queryState: Any, referenceState: Any, domainState: domainData,
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any, kernelProperties: kernelState,
+    # canonical ABI prefix -- do not change
+
+    vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), condBad: wp.array(dtype=wp.int32),  # type: ignore
+    centred: wp.int32, areaCap: wp.int32, power: scalar_t,
+
+    output_kappa: wp.array(dtype=scalar_t),  # type: ignore
+):
+    """``kappa = |A_ij|^power`` for every entry of the CSR neighbour list (zero for self and out-of-face pairs).
+    One float per directed pair: the closure solve applies the graph Laplacian dozens of times and the face
+    algebra is too expensive to redo each time. Adjacency traversal only."""
+    i = wp.tid()
+    if i >= queryState.positions.shape[0]:
+        return
+    iPtcl = getParticleData(queryState, i)
+    beginIndex = adjacencyState.neighborOffsets[i]
+    numIndices = adjacencyState.numNeighbors[i]
+    for n in range(numIndices):
+        j = wp.int32(adjacencyState.neighborList[beginIndex + n])
+        k = scalar_t(0.0)
+        if j != i:
+            jPtcl = getParticleData(referenceState, j)
+            if wp.length(computeDistanceVec(iPtcl.position, jPtcl.position, domainState)) <= wp.max(iPtcl.support, jPtcl.support):
+                A = pairFace(i, j, iPtcl, jPtcl, domainState, kernelProperties, vol, Einv, condBad, centred, areaCap)
+                k = wp.pow(wp.length(A), power)
+        output_kappa[beginIndex + n] = k
 
 
 @wp.kernel
@@ -564,48 +651,45 @@ def mfmClosureMatvec_Kernel(
     correctionData: Any, kernelProperties: kernelState,
     # canonical ABI prefix -- do not change
 
-    vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), p: wp.array(dtype=Any),  # type: ignore
-    power: scalar_t,
+    kappa: wp.array(dtype=scalar_t), p: wp.array(dtype=Any),  # type: ignore
 
     output_y: wp.array(dtype=Any), output_diag: wp.array(dtype=scalar_t),  # type: ignore
 ):
-    """``y_i = sum_j kappa_ij (p_i - p_j)``, ``kappa_ij = |A_ij|^power``; also the diagonal
-    ``sum_j kappa_ij`` (the Jacobi preconditioner of the conjugate-gradient closure solve)."""
+    """``y_i = sum_j kappa_ij (p_i - p_j)`` from the cached weights; also the diagonal ``sum_j kappa_ij``
+    (the Jacobi preconditioner / multigrid smoother of the closure solve)."""
     i = wp.tid()
     if i >= queryState.positions.shape[0]:
         return
-    iPtcl = getParticleData(queryState, i)
+    beginIndex = adjacencyState.neighborOffsets[i]
+    numIndices = adjacencyState.numNeighbors[i]
     acc = zero_like_warp(output_y[i])
     diag = scalar_t(0.0)
-    numOffsets = gridState.numOffsets if not useAdjacency else 1
-    for o in range(numOffsets):
-        beginIndex, numIndices = getIndexRangeLane(i, o, 0, 1, useAdjacency, adjacencyState, gridState, queryState, domainState)
-        if beginIndex < 0:
-            continue
-        offsetArray = adjacencyState.neighborList if useAdjacency else gridState.sortIndex
-        for n in range(numIndices):
-            j = wp.int32(offsetArray[beginIndex + n])
-            if j == i:
-                continue
-            jPtcl = getParticleData(referenceState, j)
-            if wp.length(computeDistanceVec(iPtcl.position, jPtcl.position, domainState)) > wp.max(iPtcl.support, jPtcl.support):
-                continue
-            A = pairFace(i, j, iPtcl, jPtcl, domainState, kernelProperties, vol, Einv)
-            kappa = wp.pow(wp.length(A), power)
-            acc += kappa * (p[i] - p[j])
-            diag += kappa
+    pi = p[i]
+    for n in range(numIndices):
+        k = kappa[beginIndex + n]
+        if k > scalar_t(0.0):
+            j = wp.int32(adjacencyState.neighborList[beginIndex + n])
+            acc += k * (pi - p[j])
+            diag += k
     output_y[i] = acc
     output_diag[i] = diag
 
 
 _CLOSURE_RES_SPEC = OperatorSpec(
     kernel=mfmClosureResidual_Kernel, outputs=(OutputSpec(dtype=_vecDtype), OutputSpec(dtype=scalar_t)),
-    extras=(ExtraSpec("vol", ExtraKind.TENSOR), ExtraSpec("Einv", ExtraKind.TENSOR)),
+    extras=(ExtraSpec("vol", ExtraKind.TENSOR), ExtraSpec("Einv", ExtraKind.TENSOR), ExtraSpec("condBad", ExtraKind.TENSOR),
+            ExtraSpec("centred", ExtraKind.SCALAR), ExtraSpec("areaCap", ExtraKind.SCALAR)),
 )
 _CLOSURE_MV_SPEC = OperatorSpec(
     kernel=mfmClosureMatvec_Kernel, outputs=(OutputSpec(dtype=_vecDtype), OutputSpec(dtype=scalar_t)),
-    extras=(ExtraSpec("vol", ExtraKind.TENSOR), ExtraSpec("Einv", ExtraKind.TENSOR), ExtraSpec("p", ExtraKind.TENSOR),
-            ExtraSpec("power", ExtraKind.SCALAR)),
+    extras=(ExtraSpec("kappa", ExtraKind.TENSOR), ExtraSpec("p", ExtraKind.TENSOR)),
+)
+_CLOSURE_W_SPEC = OperatorSpec(
+    kernel=mfmClosureWeights_Kernel,
+    outputs=(OutputSpec(dtype=scalar_t, shape=lambda ctx, extras: ctx.adjacency.j.shape[0]),),
+    extras=(ExtraSpec("vol", ExtraKind.TENSOR), ExtraSpec("Einv", ExtraKind.TENSOR), ExtraSpec("condBad", ExtraKind.TENSOR),
+            ExtraSpec("centred", ExtraKind.SCALAR), ExtraSpec("areaCap", ExtraKind.SCALAR), ExtraSpec("power", ExtraKind.SCALAR)),
+    numThreads=lambda ctx, extras: ctx.query.positions.shape[0],
 )
 
 
@@ -668,9 +752,9 @@ def mfmFlux_Func_i(
     rho: wp.array(dtype=scalar_t), vel: wp.array(dtype=Any), pres: wp.array(dtype=scalar_t),  # type: ignore
     gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
     aRho: wp.array(dtype=scalar_t), aVel: wp.array(dtype=Any), aP: wp.array(dtype=scalar_t),  # type: ignore
-    vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), lam: wp.array(dtype=Any),  # type: ignore
+    vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), lam: wp.array(dtype=Any), condBad: wp.array(dtype=wp.int32),  # type: ignore
     gamma: scalar_t, dt: scalar_t, mode: wp.int32, order: wp.int32, psi1: scalar_t, psi2: scalar_t,
-    power: scalar_t, timeCentred: wp.int32,
+    power: scalar_t, timeCentred: wp.int32, centred: wp.int32, areaCap: wp.int32, retry: wp.int32, massLimit: scalar_t,
     dmIn: scalar_t, dpIn: Any, deIn: scalar_t,
 ):
     dm = dmIn
@@ -689,9 +773,8 @@ def mfmFlux_Func_i(
         r = wp.length(d)
         if r > wp.max(aPtcl.support, bPtcl.support):
             continue
-        Wa = sphKernel_(d, aPtcl.support, kernelProperties.kernelFunction)
-        Wb = sphKernel_(d, bPtcl.support, kernelProperties.kernelFunction)
-        A0 = faceVector(d, Wa, Wb, vol[a], vol[b], Einv[a], Einv[b])
+        A0 = guardedFace(d, vol[a], vol[b], Einv[a], Einv[b], aPtcl.support, bPtcl.support, condBad[a], condBad[b],
+                         kernelProperties.kernelFunction, domainState.dim, centred, areaCap)
         kappa = wp.pow(wp.length(A0), power)
         A = A0 + kappa * (lam[b] - lam[a])
         Amag = wp.length(A)
@@ -732,7 +815,40 @@ def mfmFlux_Func_i(
         uR = wp.dot(vR, nrm)
         vtL = vL - uL * nrm
         vtR = vR - uR * nrm
-        Fm, Fp, Fe = faceFluxPair(rL, uL, vtL, pL, rR, uR, vtR, pR, gamma, mode, nrm, vframe)
+        Fm, Fp, Fe, Ss, Ps = faceFluxPair(rL, uL, vtL, pL, rR, uR, vtR, pR, gamma, mode, nrm, vframe)
+        if retry != 0:
+            # GIZMO's failure handling: invalid star pressure -> first-order states -> zero velocity jump
+            s1 = wp.max(scalar_t(0.0), -wp.dot(vb - va, d) / wp.max(r, scalar_t(_TINY)))
+            s2 = wp.max(scalar_t(0.0), wp.dot(va - vb, nrm))
+            v2 = wp.max(s1, s2)
+            v2 = v2 * v2
+            limit = scalar_t(1.1) * wp.max(pres[a] + rho[a] * v2, pres[b] + rho[b] * v2)
+            if mode == 1:
+                limit = limit * scalar_t(2.0)
+            ok = Ps > scalar_t(0.0) and wp.isfinite(Ps) and wp.isfinite(Ss) and Ps <= scalar_t(1.4) * limit and wp.isfinite(Fm) and wp.isfinite(Fe)
+            if not ok:
+                vL1 = va - vframe
+                vR1 = vb - vframe
+                uL1 = wp.dot(vL1, nrm)
+                uR1 = wp.dot(vR1, nrm)
+                r1L = wp.max(rho[a], scalar_t(_TINY))
+                r1R = wp.max(rho[b], scalar_t(_TINY))
+                p1L = wp.max(pres[a], scalar_t(_TINY))
+                p1R = wp.max(pres[b], scalar_t(_TINY))
+                Fm, Fp, Fe, Ss, Ps = faceFluxPair(r1L, uL1, vL1 - uL1 * nrm, p1L, r1R, uR1, vR1 - uR1 * nrm, p1R,
+                                                  gamma, mode, nrm, vframe)
+                ok2 = Ps > scalar_t(0.0) and wp.isfinite(Ps) and wp.isfinite(Ss) and wp.isfinite(Fm) and wp.isfinite(Fe)
+                if not ok2:
+                    zero = scalar_t(0.0)
+                    Fm, Fp, Fe, Ss, Ps = faceFluxPair(r1L, zero, vL1 * zero, p1L, r1R, zero, vR1 * zero, p1R,
+                                                      gamma, mode, nrm, vframe)
+        if mode == 1 and massLimit > scalar_t(0.0) and dt > scalar_t(0.0):
+            # GIZMO: a pair moves at most massLimit of the donor's mass per step (mass update only)
+            dmass = Amag * Fm * dt
+            cap = massLimit * rho[a] * vol[a]
+            if dmass < scalar_t(0.0):
+                cap = massLimit * rho[b] * vol[b]
+            Fm = wp.max(wp.min(dmass, cap), -cap) / (Amag * dt)
         # dQ_a -= |A| F, dQ_b += |A| F
         sgn = scalar_t(1.0)
         if i == a:
@@ -753,9 +869,9 @@ def mfmFlux_Kernel(
     rho: wp.array(dtype=scalar_t), vel: wp.array(dtype=Any), pres: wp.array(dtype=scalar_t),  # type: ignore
     gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
     aRho: wp.array(dtype=scalar_t), aVel: wp.array(dtype=Any), aP: wp.array(dtype=scalar_t),  # type: ignore
-    vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), lam: wp.array(dtype=Any),  # type: ignore
+    vol: wp.array(dtype=scalar_t), Einv: wp.array(dtype=Any), lam: wp.array(dtype=Any), condBad: wp.array(dtype=wp.int32),  # type: ignore
     gamma: scalar_t, dt: scalar_t, mode: wp.int32, order: wp.int32, psi1: scalar_t, psi2: scalar_t,
-    power: scalar_t, timeCentred: wp.int32,
+    power: scalar_t, timeCentred: wp.int32, centred: wp.int32, areaCap: wp.int32, retry: wp.int32, massLimit: scalar_t,
 
     output_dm: wp.array(dtype=scalar_t), output_dp: wp.array(dtype=Any), output_de: wp.array(dtype=scalar_t),  # type: ignore
 ):
@@ -774,8 +890,8 @@ def mfmFlux_Kernel(
         dm, dp, de = mfmFlux_Func_i(
             i, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
             adjacencyState.neighborList if useAdjacency else gridState.sortIndex,
-            rho, vel, pres, gRho, gVel, gP, aRho, aVel, aP, vol, Einv, lam,
-            gamma, dt, mode, order, psi1, psi2, power, timeCentred, dm, dp, de)
+            rho, vel, pres, gRho, gVel, gP, aRho, aVel, aP, vol, Einv, lam, condBad,
+            gamma, dt, mode, order, psi1, psi2, power, timeCentred, centred, areaCap, retry, massLimit, dm, dp, de)
     # rates dQ/dt = -sum_j |A| F with the sign convention folded into the accumulation above
     output_dm[i] = dm
     output_dp[i] = dp
@@ -789,11 +905,97 @@ _FLUX_SPEC = OperatorSpec(
             ExtraSpec("gRho", ExtraKind.TENSOR), ExtraSpec("gVel", ExtraKind.TENSOR), ExtraSpec("gP", ExtraKind.TENSOR),
             ExtraSpec("aRho", ExtraKind.TENSOR), ExtraSpec("aVel", ExtraKind.TENSOR), ExtraSpec("aP", ExtraKind.TENSOR),
             ExtraSpec("vol", ExtraKind.TENSOR), ExtraSpec("Einv", ExtraKind.TENSOR), ExtraSpec("lam", ExtraKind.TENSOR),
+            ExtraSpec("condBad", ExtraKind.TENSOR),
             ExtraSpec("gamma", ExtraKind.SCALAR), ExtraSpec("dt", ExtraKind.SCALAR), ExtraSpec("mode", ExtraKind.SCALAR),
             ExtraSpec("order", ExtraKind.SCALAR), ExtraSpec("psi1", ExtraKind.SCALAR), ExtraSpec("psi2", ExtraKind.SCALAR),
-            ExtraSpec("power", ExtraKind.SCALAR), ExtraSpec("timeCentred", ExtraKind.SCALAR)),
+            ExtraSpec("power", ExtraKind.SCALAR), ExtraSpec("timeCentred", ExtraKind.SCALAR),
+            ExtraSpec("centred", ExtraKind.SCALAR), ExtraSpec("areaCap", ExtraKind.SCALAR), ExtraSpec("retry", ExtraKind.SCALAR),
+            ExtraSpec("massLimit", ExtraKind.SCALAR)),
 )
 
+
+
+# ---------------------------------------------------------------------------------------
+# 5b. per-particle coarse-stencil sums for the cell multigrid of the closure solve
+# ---------------------------------------------------------------------------------------
+
+@wp.func
+def _wrapDiff(diff: wp.int32, n: wp.int32, periodic: wp.int32):
+    if periodic != 0:
+        if diff > 1:
+            diff = diff - n
+        if diff < -1:
+            diff = diff + n
+    return diff
+
+
+@wp.kernel
+def mfmCoarseStencil_Kernel(
+    queryState: Any, referenceState: Any, domainState: domainData,
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any, kernelProperties: kernelState,
+    # canonical ABI prefix -- do not change
+
+    kappa: wp.array(dtype=scalar_t), cellId: wp.array(dtype=wp.int32),
+    n0: wp.int32, n1: wp.int32, n2: wp.int32, p0: wp.int32, p1: wp.int32, p2: wp.int32,
+
+    output_S: wp.array(dtype=Any),  # type: ignore
+):
+    """``S[i, slot(delta)] = sum_j kappa_ij`` over the neighbours ``j`` whose cell is ``delta`` away from ``i``'s
+    (``delta != 0``): the particle's share of the Galerkin coarse operator ``P^T L P`` of the cell aggregation."""
+    i = wp.tid()
+    if i >= queryState.positions.shape[0]:
+        return
+    iPtcl = getParticleData(queryState, i)
+    S = zero_like_warp(output_S[i])
+    dim = domainState.dim
+    ci = cellId[i]
+    cz = ci % n2
+    cy = (ci // n2) % n1
+    cx = ci // (n2 * n1)
+    numOffsets = gridState.numOffsets if not useAdjacency else 1
+    for o in range(numOffsets):
+        beginIndex, numIndices = getIndexRangeLane(i, o, 0, 1, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        if beginIndex < 0:
+            continue
+        offsetArray = adjacencyState.neighborList if useAdjacency else gridState.sortIndex
+        for n in range(numIndices):
+            j = wp.int32(offsetArray[beginIndex + n])
+            if j == i:
+                continue
+            jPtcl = getParticleData(referenceState, j)
+            if wp.length(computeDistanceVec(iPtcl.position, jPtcl.position, domainState)) > wp.max(iPtcl.support, jPtcl.support):
+                continue
+            cj = cellId[j]
+            jz = cj % n2
+            jy = (cj // n2) % n1
+            jx = cj // (n2 * n1)
+            dx = _wrapDiff(jx - cx, n0, p0)
+            dy = _wrapDiff(jy - cy, n1, p1)
+            dz = _wrapDiff(jz - cz, n2, p2)
+            if dx == 0 and dy == 0 and dz == 0:
+                continue
+            if dx < -1 or dx > 1 or dy < -1 or dy > 1 or dz < -1 or dz > 1:
+                continue
+            slot = (dx + 1) * 9 + (dy + 1) * 3 + (dz + 1)
+            if dim == 2:
+                slot = (dx + 1) * 3 + (dy + 1)
+            if dim == 1:
+                slot = dx + 1
+            S[slot] += kappa[beginIndex + n]
+    output_S[i] = S
+
+
+def _stencilDtype(ctx, extras):
+    return vector(length=3 ** _dimOf(ctx, extras), dtype=scalar_t)
+
+
+_COARSE_STENCIL_SPEC = OperatorSpec(
+    kernel=mfmCoarseStencil_Kernel, outputs=(OutputSpec(dtype=_stencilDtype),),
+    extras=(ExtraSpec("kappa", ExtraKind.TENSOR), ExtraSpec("cellId", ExtraKind.TENSOR),
+            ExtraSpec("n0", ExtraKind.SCALAR), ExtraSpec("n1", ExtraKind.SCALAR), ExtraSpec("n2", ExtraKind.SCALAR),
+            ExtraSpec("p0", ExtraKind.SCALAR), ExtraSpec("p1", ExtraKind.SCALAR), ExtraSpec("p2", ExtraKind.SCALAR)),
+)
 
 # ---------------------------------------------------------------------------------------
 # 6. signal-velocity time step
@@ -871,28 +1073,42 @@ def mfmLimiterWarp(particles, props, domain, adjacency, rho, vel, pres, gRho, gV
                               gRho=gRho, gVel=gVel, gP=gP, beta=beta)
 
 
-def mfmClosureResidualWarp(particles, props, domain, adjacency, vol, Einv):
+def mfmClosureResidualWarp(particles, props, domain, adjacency, vol, Einv, condBad, centred=1, areaCap=0):
     with record_function("warpSPH[MFMClosureResidual]"):
-        return launchOperator(_CLOSURE_RES_SPEC, _ctx(particles, props, domain, adjacency), vol=vol, Einv=Einv)
+        return launchOperator(_CLOSURE_RES_SPEC, _ctx(particles, props, domain, adjacency), vol=vol, Einv=Einv,
+                              condBad=condBad, centred=int(centred), areaCap=int(areaCap))
 
 
-def mfmClosureMatvecWarp(particles, props, domain, adjacency, vol, Einv, p, power):
+def mfmClosureWeightsWarp(particles, props, domain, adjacency, vol, Einv, condBad, power, centred=1, areaCap=0):
+    with record_function("warpSPH[MFMClosureWeights]"):
+        return launchOperator(_CLOSURE_W_SPEC, _ctx(particles, props, domain, adjacency), vol=vol, Einv=Einv,
+                              condBad=condBad, centred=int(centred), areaCap=int(areaCap), power=scalar_t(power))
+
+
+def mfmClosureMatvecWarp(particles, props, domain, adjacency, kappa, p):
     with record_function("warpSPH[MFMClosureMatvec]"):
-        return launchOperator(_CLOSURE_MV_SPEC, _ctx(particles, props, domain, adjacency), vol=vol, Einv=Einv, p=p,
-                              power=scalar_t(power))
+        return launchOperator(_CLOSURE_MV_SPEC, _ctx(particles, props, domain, adjacency), kappa=kappa, p=p)
 
 
 def mfmFluxWarp(particles, props, domain, adjacency, rho, vel, pres, gRho, gVel, gP, aRho, aVel, aP, vol, Einv, lam,
-                gamma, dt, mode, order, psi1, psi2, power, timeCentred):
+                condBad, gamma, dt, mode, order, psi1, psi2, power, timeCentred, centred=1, areaCap=0, retry=1,
+                massLimit=0.1):
     with record_function("warpSPH[MFMFlux]"):
         return launchOperator(
             _FLUX_SPEC, _ctx(particles, props, domain, adjacency), rho=rho, vel=vel, pres=pres, gRho=gRho, gVel=gVel,
-            gP=gP, aRho=aRho, aVel=aVel, aP=aP, vol=vol, Einv=Einv, lam=lam, gamma=scalar_t(gamma), dt=scalar_t(dt),
+            gP=gP, aRho=aRho, aVel=aVel, aP=aP, vol=vol, Einv=Einv, lam=lam, condBad=condBad, gamma=scalar_t(gamma), dt=scalar_t(dt),
             mode=int(mode), order=int(order), psi1=scalar_t(psi1), psi2=scalar_t(psi2), power=scalar_t(power),
-            timeCentred=int(timeCentred))
+            timeCentred=int(timeCentred), centred=int(centred), areaCap=int(areaCap), retry=int(retry), massLimit=scalar_t(massLimit))
 
 
 def mfmTimestepWarp(particles, props, domain, adjacency, rho, vel, pres, gamma, cfl):
     with record_function("warpSPH[MFMTimestep]"):
         return launchOperator(_TIMESTEP_SPEC, _ctx(particles, props, domain, adjacency), rho=rho, vel=vel, pres=pres,
                               gamma=scalar_t(gamma), cfl=scalar_t(cfl))
+
+
+def mfmCoarseStencilWarp(particles, props, domain, adjacency, kappa, cellId, n, periodic):
+    with record_function("warpSPH[MFMCoarseStencil]"):
+        return launchOperator(
+            _COARSE_STENCIL_SPEC, _ctx(particles, props, domain, adjacency), kappa=kappa, cellId=cellId,
+            n0=int(n[0]), n1=int(n[1]), n2=int(n[2]), p0=int(periodic[0]), p1=int(periodic[1]), p2=int(periodic[2]))

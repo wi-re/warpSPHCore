@@ -377,3 +377,79 @@ def test_forward_mode_through_the_geometry(device):
         g = MeshlessGeometry.build(P2, dom, KERNEL)
         t = fwAD.unpack_dual(g.gradient(f)).tangent
     assert t is not None and torch.isfinite(t).all() and t.abs().max() > 0
+
+
+# --- GIZMO guards ------------------------------------------------------------------
+
+def test_kernel_derivative_matches_autograd():
+    from warpSPHCore.mfm import kernelDerivative
+    r = torch.linspace(0.02, 0.98, 40, dtype=torch.float64, requires_grad=True)
+    h = torch.tensor(1.0, dtype=torch.float64)
+    for kernel in SUPPORTED_KERNELS:
+        for dim in (1, 2, 3):
+            g, = torch.autograd.grad(kernelWeight(r, h, dim, kernel).sum(), r)
+            d = kernelDerivative(r.detach(), h, dim, kernel)
+            assert torch.allclose(g, d, rtol=1e-9, atol=1e-12), (kernel, dim)
+
+
+def test_fallback_face_is_used_where_the_matrix_is_ill_conditioned_or_the_face_points_backwards(device):
+    P, dom = _lattice(device, 14, jitter=0.3)
+    plain = MeshlessGeometry.build(P, dom, KERNEL, guards=False, closure="none")
+    forced = MeshlessGeometry.build(P, dom, KERNEL, face_cond_max=0.5, closure="none")      # every row "ill-conditioned"
+    assert not plain.fallback.any() and forced.fallback.all()
+    # SPH-style face: along the pair axis, positive, antisymmetric by construction
+    cosd = (forced.A * forced.d).sum(-1) / (forced.A.norm(dim=-1) * forced.d.norm(dim=-1)).clamp_min(1e-30)
+    assert (cosd > 0.999999).all()
+    # the unguarded sums keep working: a faked negative A.d is replaced
+    g = MeshlessGeometry.build(P, dom, KERNEL, closure="none")
+    assert (((g.A * g.d).sum(-1)) >= 0).all()
+
+
+def test_guards_leave_well_conditioned_faces_untouched(device):
+    P, dom = _lattice(device, 14, jitter=0.2)
+    a = MeshlessGeometry.build(P, dom, KERNEL, guards=False)
+    b = MeshlessGeometry.build(P, dom, KERNEL)
+    assert not b.fallback.any()
+    assert torch.allclose(a.A, b.A, atol=1e-7)
+
+
+def test_centred_weights_and_area_cap(device):
+    P, dom = _lattice(device, 14, jitter=0.0)
+    P.supports = P.supports * (1 + 0.6 * torch.rand_like(P.supports, generator=None))        # strongly varying support
+    g = MeshlessGeometry.build(P, dom, KERNEL, closure="none")
+    g_plain = MeshlessGeometry.build(P, dom, KERNEL, closure="none", centred_weights=False)
+    assert torch.isfinite(g.A).all() and torch.isfinite(g_plain.A).all()
+    capped = MeshlessGeometry.build(P, dom, KERNEL, closure="none", area_cap=True)
+    expected = 2 * 3.141592653589793 * (capped.volume ** 0.5)
+    assert (capped.A.norm(dim=-1) <= torch.minimum(expected[capped.i], expected[capped.j]) * 1.0001).all()
+
+
+def test_riemann_retry_falls_back_to_first_order_states_and_then_to_zero_jump():
+    from warpSPHCore.mfm import robustFaceFlux
+    f = lambda v: torch.tensor([v], dtype=torch.float64)
+    z = torch.zeros(1, 1, dtype=torch.float64)
+    n, vf = torch.ones(1, 1, dtype=torch.float64), torch.zeros(1, 1, dtype=torch.float64)
+    good = (f(1.0), f(0.1), z, f(1.0), f(1.0), f(-0.1), z, f(1.0))
+    # primary states with a wild (but positive) pressure far above the limit trigger the first-order states
+    wild = (f(1.0), f(0.1), z, f(1.0e6), f(1.0), f(-0.1), z, f(1.0e6))
+    flux, Ss, Ps, stage = robustFaceFlux(wild, good, GAMMA, "MFM", n, vf, f(2.0))
+    assert stage.item() == 1 and 1.0 < Ps.item() < 1.5          # the compressive first-order star pressure, not 1e6
+    # a star-pressure function that is invalid for the first-order states too -> zero velocity jump
+    calls = []
+
+    def star(rL, uL, vtL, PL, rR, uR, vtR, PR):
+        calls.append(uL.clone())
+        bad = (uL.abs() > 0) | (uR.abs() > 0)
+        return torch.zeros_like(PL), torch.where(bad, torch.full_like(PL, float("nan")), PL)
+
+    flux, Ss, Ps, stage = robustFaceFlux(wild, good, GAMMA, "MFM", n, vf, f(2.0), starFn=star)
+    assert stage.item() == 2 and torch.isfinite(Ps).all() and Ps.item() == pytest.approx(1.0)
+    # valid states never retry
+    assert robustFaceFlux(good, good, GAMMA, "MFV", n, vf, f(2.0))[3].item() == 0
+
+
+def test_rates_report_which_pairs_needed_the_retry(device):
+    P, dom = _lattice(device, 12, jitter=0.3)
+    g, r, v, p = _state(P, dom)
+    _, d = mfmRates(g, r, v, p, GAMMA, dt=1e-3, mode="MFM")
+    assert (d["stage"] == 0).all()                                    # a smooth uniform state never retries

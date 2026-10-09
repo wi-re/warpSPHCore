@@ -31,7 +31,7 @@ from typing import Tuple
 
 import torch
 
-__all__ = ["starState", "faceFlux"]
+__all__ = ["starState", "faceFlux", "robustFaceFlux"]
 
 
 def _energy(rho, u, vt, P, gamma):
@@ -148,3 +148,36 @@ def faceFlux(rhoL, uL, vtL, PL, rhoR, uR, vtR, PR, gamma: float, mode: str,
     mom_lab = mom + vframe * Fm[:, None]
     e_lab = Fe + (vframe * mom).sum(-1) + 0.5 * (vframe * vframe).sum(-1) * Fm
     return torch.cat([Fm[:, None], mom_lab, e_lab[:, None]], dim=-1), Ss, Ps
+
+
+def robustFaceFlux(primary, firstOrder, gamma: float, mode: str, normal: torch.Tensor, vframe: torch.Tensor,
+                   pressureLimit: torch.Tensor, starFn=None, retry: bool = True):
+    """:func:`faceFlux` with GIZMO's failure handling (``hydro_core_meshless.h``): if the star pressure of the
+    reconstructed states ``primary`` is not positive, not finite or exceeds ``1.4 * pressureLimit``, the pair
+    is re-solved with the first-order (particle) states ``firstOrder``; if that is still invalid, with a zero
+    velocity jump (both sides at rest in the face frame, the particles' densities and pressures). States are
+    tuples ``(rhoL, uL, vtL, PL, rhoR, uR, vtR, PR)``; returns ``(flux, Sstar, Pstar, stage)`` with ``stage`` 0,
+    1 or 2 the stage that was used."""
+    flux, Ss, Ps = faceFlux(*primary, gamma, mode, normal, vframe, starFn)
+    stage = torch.zeros(Ps.shape, dtype=torch.int8, device=Ps.device)
+    if not retry:
+        return flux, Ss, Ps, stage
+    bad = ~((Ps > 0) & torch.isfinite(Ps) & torch.isfinite(Ss) & (Ps <= 1.4 * pressureLimit)) | ~torch.isfinite(flux).all(-1)
+    if not bool(bad.any()):
+        return flux, Ss, Ps, stage
+    idx = torch.nonzero(bad).flatten()
+    sub = lambda t: t[idx]
+    f2, S2, P2 = faceFlux(*[sub(t) for t in firstOrder], gamma, mode, sub(normal), sub(vframe), starFn)
+    bad2 = ~((P2 > 0) & torch.isfinite(P2) & torch.isfinite(S2)) | ~torch.isfinite(f2).all(-1)
+    rL, uL, vtL, pL, rR, uR, vtR, pR = [sub(t) for t in firstOrder]
+    zero = torch.zeros_like(uL)
+    f3, S3, P3 = faceFlux(rL, zero, torch.zeros_like(vtL), pL, rR, zero, torch.zeros_like(vtR), pR, gamma, mode,
+                          sub(normal), sub(vframe), starFn)
+    pick3 = bad2[:, None]
+    f2 = torch.where(pick3, f3, f2)
+    S2 = torch.where(bad2, S3, S2)
+    P2 = torch.where(bad2, P3, P2)
+    flux = flux.clone(); Ss = Ss.clone(); Ps = Ps.clone()
+    flux[idx], Ss[idx], Ps[idx] = f2, S2, P2
+    stage[idx] = torch.where(bad2, 2, 1).to(torch.int8)
+    return flux, Ss, Ps, stage

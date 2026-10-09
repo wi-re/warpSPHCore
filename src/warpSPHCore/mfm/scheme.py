@@ -29,7 +29,7 @@ import torch
 
 from .geometry import MeshlessGeometry
 from .limiters import conditionBeta, pairLimit, slopeLimiter
-from .riemann import faceFlux
+from .riemann import faceFlux, robustFaceFlux
 
 __all__ = ["mfmRates", "primitives", "conserved", "signalTimestep"]
 
@@ -67,7 +67,8 @@ def mfmRates(geom: MeshlessGeometry, rho: torch.Tensor, vel: torch.Tensor, P: to
              gamma: float, dt: float = 0.0, mode: str = "MFM", order: int = 2,
              beta_min: float = 1.0, beta_max: float = 2.0, cond_crit: float = 100.0,
              psi1: float = 0.5, psi2: float = 0.25, conservativeLimiter: bool = False,
-             timeCentredFrame: bool = True, starFn=None):
+             timeCentredFrame: bool = True, starFn=None, retry: bool = True,
+             massFluxLimit: float = 0.1):
     """Rates ``dQ/dt`` of shape ``(N, 2 + dim)`` and a dict of diagnostics
     (``flux``, ``Sstar``, ``Pstar``, ``alpha``)."""
     N, dim = vel.shape
@@ -116,9 +117,31 @@ def mfmRates(geom: MeshlessGeometry, rho: torch.Tensor, vel: torch.Tensor, P: to
     vL, vR = WL[:, 1:1 + dim] - vframe, WR[:, 1:1 + dim] - vframe
     uL, uR = (vL * n).sum(-1), (vR * n).sum(-1)
     vtL, vtR = vL - uL[:, None] * n, vR - uR[:, None] * n
-    flux, Ss, Ps = faceFlux(rL, uL, vtL, pL, rR, uR, vtR, pR, gamma, mode, n, vframe, starFn)
+    primary = (rL, uL, vtL, pL, rR, uR, vtR, pR)
+    # first-order (particle) states in the face frame, for the retry
+    ia, ib = i, j
+    v1L, v1R = vel[ia] - vframe, vel[ib] - vframe
+    u1L, u1R = (v1L * n).sum(-1), (v1R * n).sum(-1)
+    first = (rho[ia].clamp_min(1e-30), u1L, v1L - u1L[:, None] * n, P[ia].clamp_min(1e-30),
+             rho[ib].clamp_min(1e-30), u1R, v1R - u1R[:, None] * n, P[ib].clamp_min(1e-30))
+    # GIZMO's upper bound on a sane star pressure: 1.1 max(P + rho v_approach^2) (x2 for MFV)
+    r_ij = torch.linalg.norm(d, dim=-1).clamp_min(torch.finfo(d.dtype).tiny)
+    s1 = torch.clamp(-((vel[j] - vel[i]) * d).sum(-1) / r_ij, min=0.0)
+    s2 = torch.clamp(((vel[i] - vel[j]) * n).sum(-1), min=0.0)
+    v2app = torch.maximum(s1, s2) ** 2
+    limit = 1.1 * torch.maximum(P[i] + rho[i] * v2app, P[j] + rho[j] * v2app) * (2.0 if mode.upper() == "MFV" else 1.0)
+    flux, Ss, Ps, stage = robustFaceFlux(primary, first, gamma, mode, n, vframe, limit, starFn, retry)
+    if mode.upper() == "MFV" and dt > 0.0 and massFluxLimit > 0.0:
+        # GIZMO (hydro_evaluate.h): a pair may move at most `massFluxLimit` of the donor's mass per step;
+        # only the mass update is limited (momentum and energy keep the full flux)
+        mass = rho * geom.volume
+        amag = torch.linalg.norm(geom.A, dim=-1).clamp_min(torch.finfo(d.dtype).tiny)
+        dmass = amag * flux[:, 0] * dt                              # > 0: i loses mass to j
+        cap = massFluxLimit * torch.where(dmass > 0, mass[i], mass[j])
+        limited = torch.maximum(torch.minimum(dmass, cap), -cap)
+        flux = torch.cat([(limited / (amag * dt))[:, None], flux[:, 1:]], dim=-1)
     rates = geom.divergence(flux)
-    return rates, dict(flux=flux, Sstar=Ss, Pstar=Ps, alpha=alpha)
+    return rates, dict(flux=flux, Sstar=Ss, Pstar=Ps, alpha=alpha, stage=stage)
 
 
 def _timeDerivative_pair(rho, v_b, P, glim, gamma):

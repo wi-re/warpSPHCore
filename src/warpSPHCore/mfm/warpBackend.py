@@ -22,7 +22,8 @@ from ..dataTypes import DomainDescription, OperationProperties, ParticleState
 from ..enumTypes import KernelFunctions, OperationDirection, SupportScheme
 from .geometry import invertMoments
 from .limiters import conditionBeta
-from .wp_mfm import (mfmClosureMatvecWarp, mfmClosureResidualWarp, mfmFluxWarp, mfmGradientsWarp,
+from .multigrid import CellMultigrid
+from .wp_mfm import (mfmClosureMatvecWarp, mfmClosureWeightsWarp, mfmCoarseStencilWarp, mfmClosureResidualWarp, mfmFluxWarp, mfmGradientsWarp,
                      mfmLimiterWarp, mfmMomentsWarp, mfmTimestepWarp)
 
 __all__ = ["MeshlessWarp"]
@@ -44,7 +45,10 @@ class MeshlessWarp:
     def build(cls, positions: torch.Tensor, supports: torch.Tensor, domain: DomainDescription,
               kernel: KernelFunctions, adjacency=None, cond_max: float = 1.0e3, closure: str = "project",
               closure_power: float = 1.0, rtol: float = 1.0e-12, cg_tol: Optional[float] = None,
-              cg_iters: int = 200, lam0: Optional[torch.Tensor] = None) -> "MeshlessWarp":
+              cg_iters: int = 200, lam0: Optional[torch.Tensor] = None, guards: bool = True,
+              face_cond_max: float = 1.0e6, centred_weights: bool = True, area_cap: bool = False,
+              closure_solver: str = "auto", mg_min_particles: int = 2048,
+              mg_max_coarse: int = 512) -> "MeshlessWarp":
         if closure not in ("project", "none"):
             raise ValueError("closure must be 'project' or 'none'")
         N, dim = positions.shape
@@ -69,21 +73,26 @@ class MeshlessWarp:
         self.deficient = (cnt < dim + 1) | (self.cond > cond_max) | ~torch.isfinite(self.cond)
         self.volume = 1.0 / omega
         self.closure_power = closure_power
+        self.guards, self.centred, self.areaCap = bool(guards), int(bool(guards and centred_weights)), int(bool(guards and area_cap))
+        self.condBad = ((self.cond > face_cond_max) | ~torch.isfinite(self.cond)).to(torch.int32) if guards else torch.zeros_like(cnt)
         self.lam = torch.zeros(N, dim, dtype=positions.dtype, device=positions.device)
         self.closureResidualRatio = 0.0
         self.closureIterations = 0
         if closure == "project":
-            self.lam = self._solveClosure(cg_tol, cg_iters, lam0)
+            useMg = closure_solver == "mg" or (closure_solver == "auto" and N >= mg_min_particles)
+            self.lam = self._solveClosure(cg_tol, cg_iters, lam0, useMg, mg_max_coarse)
         return self
 
     # ------------------------------------------------------------------
     def residual(self):
         """``(sum_j A_ij, face norm)`` of the paper's face vector: the ``(N, dim)`` closure residual and the global
         norm ``sqrt(sum_pairs |A|^2)`` it is measured against."""
-        a, a2 = mfmClosureResidualWarp(self.particles, self.props, self.domain, self.adjacency, self.volume, self.Einv)
+        a, a2 = mfmClosureResidualWarp(self.particles, self.props, self.domain, self.adjacency, self.volume, self.Einv,
+                                           self.condBad, self.centred, self.areaCap)
         return a, torch.sqrt(a2.sum() / 2.0)
 
-    def _solveClosure(self, tol: Optional[float], iters: int, lam0: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def _solveClosure(self, tol: Optional[float], iters: int, lam0: Optional[torch.Tensor] = None,
+                      multigrid: bool = False, mgMaxCoarse: int = 512) -> torch.Tensor:
         """CG for ``sum_j kappa_ij (lam_i - lam_j) = sum_j A_ij`` (the torch reference's graph-Laplacian problem)."""
         a, faceNorm = self.residual()
         if tol is None:
@@ -94,18 +103,52 @@ class MeshlessWarp:
         if not bool(bnorm > floor * faceNorm):
             return torch.zeros_like(a)
         target = tol * bnorm
-        mv = lambda p: mfmClosureMatvecWarp(self.particles, self.props, self.domain, self.adjacency, self.volume,
-                                            self.Einv, p.contiguous(), self.closure_power)
-        # Jacobi-preconditioned CG; the diagonal sum_j kappa_ij comes out of the first matvec
-        # (a warm start `lam0`, e.g. the previous step's potential, removes most of the work in a time loop)
+        kappa = mfmClosureWeightsWarp(self.particles, self.props, self.domain, self.adjacency, self.volume, self.Einv,
+                                      self.condBad, self.closure_power, self.centred, self.areaCap)
+        mv = lambda p: mfmClosureMatvecWarp(self.particles, self.props, self.domain, self.adjacency, kappa,
+                                            p.contiguous())
+        # preconditioned CG; the diagonal sum_j kappa_ij comes out of the first matvec. The preconditioner is
+        # Jacobi, or one V-cycle of the cell-aggregation multigrid (multigrid.py) for large N
+        # (a warm start `lam0`, e.g. the previous step's potential, removes part of the work in a time loop)
         x0 = torch.zeros_like(a) if lam0 is None else lam0.clone()
         Ax0, diag = mv(x0)
-        minv = 1.0 / torch.where(diag > 0, diag, torch.ones_like(diag))[:, None]
+        if multigrid:
+            mg = CellMultigrid(self.particles.positions, float(self.particles.supports.max()), self.domain, self.dim,
+                               maxCoarse=mgMaxCoarse)
+            S = mfmCoarseStencilWarp(self.particles, self.props, self.domain, self.adjacency, kappa, mg.cellId,
+                                     mg.ncells, mg.periodic)
+            mg.setWeights(S)
+            precond = lambda r: mg.vcycle(r, lambda v: mv(v)[0], diag)
+            self.multigridLevels = mg.nLevels
+        else:
+            minv = 1.0 / torch.where(diag > 0, diag, torch.ones_like(diag))[:, None]
+            precond = lambda r: minv * r
         x = x0
         r = a - Ax0
         self.closureResidualRatio = float(r.norm() / bnorm)
         if bool(r.norm() <= target):
             return x
+        z = precond(r)
+        p = z.clone()
+        rz = (r * z).sum()
+        self.closureIterations = 0
+        for _ in range(iters):
+            Ap, _ = mv(p)
+            pAp = (p * Ap).sum()
+            if not bool(pAp > 1e-30 * rz):
+                break
+            al = rz / pAp
+            x = x + al * p
+            r = r - al * Ap
+            self.closureIterations += 1
+            if bool(r.norm() <= target):
+                break
+            z = precond(r)
+            rzn = (r * z).sum()
+            p = z + rzn / rz * p
+            rz = rzn
+        self.closureResidualRatio = float(r.norm() / bnorm)
+        return x
         z = minv * r
         p = z.clone()
         rz = (r * z).sum()
@@ -136,7 +179,8 @@ class MeshlessWarp:
 
     def rates(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor, gamma: float, dt: float = 0.0,
               mode: str = "MFM", order: int = 2, beta_min: float = 1.0, beta_max: float = 2.0,
-              cond_crit: float = 100.0, psi1: float = 0.5, psi2: float = 0.25, timeCentredFrame: bool = True):
+              cond_crit: float = 100.0, psi1: float = 0.5, psi2: float = 0.25, timeCentredFrame: bool = True,
+              retry: bool = True, massFluxLimit: float = 0.1):
         """``dQ/dt`` of shape ``(N, 2 + dim)`` for ``Q = (m, m v, m e_tot)``, as ``scheme.mfmRates``."""
         N, dim = vel.shape
         rho, vel, pres = rho.contiguous(), vel.contiguous(), pres.contiguous()
@@ -152,9 +196,9 @@ class MeshlessWarp:
             aRho, aP = torch.ones_like(rho), torch.ones_like(rho)
             aVel = torch.ones_like(vel)
         dm, dp, de = mfmFluxWarp(self.particles, self.props, self.domain, self.adjacency, rho, vel, pres,
-                                 gRho, gVel, gP, aRho, aVel, aP, self.volume, self.Einv, self.lam,
+                                 gRho, gVel, gP, aRho, aVel, aP, self.volume, self.Einv, self.lam, self.condBad,
                                  gamma, dt, 0 if mode.upper() == "MFM" else 1, order, psi1, psi2,
-                                 self.closure_power, int(timeCentredFrame))
+                                 self.closure_power, int(timeCentredFrame), self.centred, self.areaCap, int(retry), massFluxLimit)
         return torch.cat([dm[:, None], dp, de[:, None]], dim=-1)
 
     def timestep(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor, gamma: float, cfl: float = 0.2):
