@@ -104,6 +104,10 @@ def measure(case, cache, field, probe, mode, region) -> dict | None:
         analytic = analytic_hessian(field, case.positions)
     else:
         raise ValueError(probe)
+    if out is None:
+        # an external mode that does not provide this probe (register_mode's
+        # contract: e.g. a p = 1 operator has no Hessian) -- skip the row
+        return None
     norms = error_norms(out, analytic, mask)
     return {"row": Row(
         dim=case.dim,

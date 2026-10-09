@@ -339,15 +339,20 @@ def analytic_hessian(field: Field, x: torch.Tensor) -> torch.Tensor:
     grad-of-grad probe compares index-for-index."""
     if field.is_vector:
         raise ValueError("analytic_hessian is defined for scalar fields")
-    xg = x.detach().clone().requires_grad_(True)
-    g = field.grad(xg)                               # (N, dim)
-    rows = []
-    for a in range(g.shape[1]):
-        ga = g[:, a]
-        # a gradient component built as a constant (e.g. d(x^2)/dy = 0) has
-        # no graph at all -- its derivative row is identically zero
-        r = (torch.autograd.grad(ga.sum(), xg, retain_graph=True,
-                                 allow_unused=True)[0]
-             if ga.requires_grad else None)
-        rows.append(torch.zeros_like(xg) if r is None else r)
+    # The drivers run under torch.set_grad_enabled(False); without this the
+    # autodiff graph is never built and every Hessian silently comes out as
+    # zero (found 2026-10-09 -- it made the grad-of-grad Hessian rows look
+    # non-convergent: the "error" was the full Hessian magnitude).
+    with torch.enable_grad():
+        xg = x.detach().clone().requires_grad_(True)
+        g = field.grad(xg)                           # (N, dim)
+        rows = []
+        for a in range(g.shape[1]):
+            ga = g[:, a]
+            # a gradient component built as a constant (e.g. d(x^2)/dy = 0)
+            # has no graph at all -- its derivative row is identically zero
+            r = (torch.autograd.grad(ga.sum(), xg, retain_graph=True,
+                                     allow_unused=True)[0]
+                 if ga.requires_grad else None)
+            rows.append(torch.zeros_like(xg) if r is None else r)
     return torch.stack(rows, dim=1).detach()          # (N, a, b)

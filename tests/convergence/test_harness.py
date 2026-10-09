@@ -192,6 +192,18 @@ def test_monomial_fields_no_duplicates(dim):
                 f.name
 
 
+def test_analytic_hessian_under_no_grad():
+    """The drivers run under torch.set_grad_enabled(False); the analytic
+    Hessian must not depend on the caller's grad mode (it silently returned
+    zeros there until 2026-10-09)."""
+    from harness.test_fields import analytic_hessian
+    x = torch.rand(20, 2, dtype=torch.float64)
+    f = {fl.name: fl for fl in test_fields.monomial_fields(2, 2)}["x^2"]
+    with torch.no_grad():
+        H = analytic_hessian(f, x)
+    assert torch.allclose(H[:, 0, 0], torch.full_like(x[:, 0], 2.0))
+
+
 def test_analytic_hessian_monomial_and_smooth():
     from harness.test_fields import analytic_hessian, smooth_open_fields
     x = torch.rand(50, 2, dtype=torch.float64)
