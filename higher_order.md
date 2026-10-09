@@ -676,7 +676,15 @@ The paper's headline pairs reproduce: 4th order at ~25 neighbours, 8th at ~60. B
 
 **Tasks:**
 - [x] Implement anisotropic basis function (ABF) construction and the local linear system solved per stencil (reuse Phase 4's moment-matrix infrastructure — the *new* n×n builder, not the d×d renorm path). *(Done as the `constant=False` variant; chunked pair accumulation keeps k = 8's 44-function system in memory.)*
-- [ ] Implement one-sided/boundary stencil handling for incomplete support. *(Not measured separately. The wall-band patch tests in `REPORT_rkpm.md` show the underlying fit is exact there wherever the moment matrix is full rank; the LABFM paper's claim — one-sided stencils of the same order up to 4th — is not yet checked, and the open-domain `labfm` patch/order suites have not been run.)*
+- [x] Implement one-sided/boundary stencil handling for incomplete support. *(Nothing to implement: the least-squares fit is one-sided automatically when the support is incomplete. Measured 2026-10-09 on the open-domain ladder, jitter 0.3, gradient order in the wall band vs interior (smooth field, 288 → 2304 particles):*
+
+  | k | N=40 | N=60 | N=100 |
+  |---|---|---|---|
+  | 2 | 1.92 / 1.95 | 1.96 / 1.89 | 2.01 / 1.83 |
+  | 4 | **0.76** / 3.89 | 3.65 / 3.83 | **4.03** / 3.78 |
+  | 6 | sat. / 5.85 | sat. / 5.80 | 5.20 / 5.77 |
+
+  *(band / interior.) The paper's claim — one-sided stencils keep the interior order, up to 4th, provided the stencil is large enough at the boundary, where the critical size is larger than for full support — reproduces, and k = 6 gets there at N = 100. Corners and free surfaces beyond the wall band are not probed.)*
 - [~] Harness prerequisites specific to this phase: monomial fields to degree ~10 *(no cap in code; `--degree-max 10` not run)*; ladder design that stays above the float64 floor at 8th–10th order *(done: five rungs, coarse; 10th order not attempted)*; Laplacian probe on the LABFM operator itself *(done: `labfm<k>` provides its own Laplacian/Hessian)*.
 - [x] Run Phase 0 harness at increasing order (target: reproduce paper's reported 4th order at ~25 neighbors in 2D, up to 8th–10th order at larger stencils) — *(done to k = 8, table above; 10th not run)*.
 - [~] Stability check: add hyperviscosity option and confirm it stabilizes hyperbolic test PDEs per `king_lind_2020_labfm`. *(Split decided 2026-10-09: the core provides the operator — `PolyFit.derivative(f, alpha)` returns any `d^alpha f` of total degree ≤ order, i.e. the highest-order derivative hyperviscosity needs; the coefficient α h^m, its scaling and the time-step limit belong to the frontend. Not exercised yet, and not needed so far: **No run diverged** in the frozen leg (26 of 26, jitter 0.3, periodic), so nothing here needs stabilising yet; the paper's instability is for noisy distributions at large k (ε/δr ≳ 0.5) and for incomplete support, neither of which this leg exercises. Next test: jitter ≥ 0.5 and the saved TGV distributions in `data/`, then Dirichlet walls.)*
