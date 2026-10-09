@@ -453,3 +453,54 @@ def test_rates_report_which_pairs_needed_the_retry(device):
     g, r, v, p = _state(P, dom)
     _, d = mfmRates(g, r, v, p, GAMMA, dt=1e-3, mode="MFM")
     assert (d["stage"] == 0).all()                                    # a smooth uniform state never retries
+
+
+# --- precision-aware thresholds ------------------------------------------------------
+
+def test_precision_defaults():
+    from warpSPHCore.mfm.precision import faceCondMax, pinvAbove, pinvRtol
+    assert faceCondMax(torch.float64) == 1.0e6                       # GIZMO's cutoff, tuned for double
+    assert 1.0e4 < faceCondMax(torch.float32) < 4.0e4                # ~ 1e-3 / (0.4 eps): the measured error law
+    assert pinvRtol(torch.float64) == 1.0e-12 and pinvRtol(torch.float32) > 1.0e-6
+    assert pinvAbove(torch.float32) < pinvAbove(torch.float64)
+
+
+def _strip(device, squeeze, dtype=torch.float32):
+    """A thin, rotated strip of particles: N_cond ~ 0.4 / squeeze^2."""
+    import math
+    n = 40
+    ax, ay = torch.arange(n, dtype=torch.float64), torch.arange(7, dtype=torch.float64)
+    pts = torch.stack(torch.meshgrid(ax, ay, indexing="ij"), -1).reshape(-1, 2) / n
+    gen = torch.Generator().manual_seed(1)
+    pts = pts + (torch.rand(pts.shape, generator=gen, dtype=torch.float64) - 0.5) * 0.3 / n
+    pts[:, 1] *= squeeze
+    th = 0.5
+    R = torch.tensor([[math.cos(th), -math.sin(th)], [math.sin(th), math.cos(th)]], dtype=torch.float64)
+    pts = pts @ R.T
+    N = pts.shape[0]
+    dom = DomainDescription(torch.full((2,), -3.0, dtype=dtype, device=device), torch.full((2,), 3.0, dtype=dtype, device=device),
+                            torch.zeros(2, dtype=torch.bool, device=device), 2)
+    P = ParticleState(positions=pts.to(dtype).to(device), supports=torch.full((N,), 3.5 / n, dtype=dtype, device=device),
+                      masses=torch.ones(N, dtype=dtype, device=device), densities=torch.ones(N, dtype=dtype, device=device),
+                      kinds=torch.zeros(N, dtype=torch.int32, device=device))
+    return P, dom
+
+
+def test_the_face_fallback_threshold_follows_the_precision(device):
+    P, dom = _strip(device, 1.0e-3)                                  # N_cond ~ 4e4 (rotated): fine for GIZMO's 1e6, not in float32
+    g32 = MeshlessGeometry.build(P, dom, KERNEL, closure="none", cond_max=1e30)
+    assert g32.cond.median() > 2.1e4
+    assert g32.fallback.any()                                        # float32 default cutoff 2e4
+    gold = MeshlessGeometry.build(P, dom, KERNEL, closure="none", cond_max=1e30, face_cond_max=1.0e6)
+    assert not gold.fallback.any()                                   # the double-precision value would have trusted it
+
+
+def test_coincident_particles_do_not_produce_nan_in_single_precision(device):
+    P, dom = _lattice(device, 10, jitter=0.0)
+    pos = P.positions.clone()
+    pos[1] = pos[0]                                                  # r = 0 pair
+    P2 = ParticleState(positions=pos, supports=P.supports, masses=P.masses, densities=P.densities, kinds=P.kinds)
+    g = MeshlessGeometry.build(P2, dom, KERNEL)
+    r, v, p = _state(P2, dom)[1:]
+    rates, _ = mfmRates(g, r, v, p, GAMMA, dt=1e-3, mode="MFV")
+    assert torch.isfinite(g.A).all() and torch.isfinite(rates).all()

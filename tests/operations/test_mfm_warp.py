@@ -201,3 +201,19 @@ def test_mfv_mass_flux_limiter_agrees_between_backends_and_limits_only_the_mass(
     mass = rho * w.volume
     assert (lim[:, 0].abs() * dt <= 0.01 * mass * 60).all()
     assert lim[:, 0].sum().abs() < 1e-4 * lim[:, 0].abs().max()     # still conservative
+
+
+def test_single_precision_thresholds_and_coincident_particles_in_the_warp_backend(device):
+    from test_mfm import _strip
+    P, dom = _strip(device, 1.0e-3)
+    w = MeshlessWarp.build(P.positions, P.supports, dom, KERNEL, closure="none", cond_max=1e30)
+    assert w.condBad.any()                                            # float32: cutoff ~2e4, this strip has N_cond ~ 4e4
+    wd = MeshlessWarp.build(P.positions, P.supports, dom, KERNEL, closure="none", cond_max=1e30, face_cond_max=1.0e6)
+    assert not wd.condBad.any()
+    P2, dom2 = _lattice(device, 10, jitter=0.0)
+    pos = P2.positions.clone()
+    pos[1] = pos[0]
+    w2 = MeshlessWarp.build(pos, P2.supports, dom2, KERNEL)
+    rho, vel, pres = _random_state(P2)
+    for mode in ("MFM", "MFV"):
+        assert torch.isfinite(w2.rates(rho, vel, pres, GAMMA, dt=1e-3, mode=mode)).all()

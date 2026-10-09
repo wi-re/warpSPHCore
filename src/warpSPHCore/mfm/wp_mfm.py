@@ -54,7 +54,7 @@ from ..enumTypes import *
 __all__ = ["mfmMomentsWarp", "mfmGradientsWarp", "mfmLimiterWarp", "mfmClosureResidualWarp",
            "mfmClosureMatvecWarp", "mfmClosureWeightsWarp", "mfmFluxWarp", "mfmTimestepWarp", "mfmCoarseStencilWarp"]
 
-_TINY = 1.0e-300
+_TINY = 1.0e-30            # (1e-300 underflows to 0 in float32)
 
 
 # ---------------------------------------------------------------------------------------

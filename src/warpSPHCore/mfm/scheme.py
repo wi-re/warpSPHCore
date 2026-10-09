@@ -111,7 +111,7 @@ def mfmRates(geom: MeshlessGeometry, rho: torch.Tensor, vel: torch.Tensor, P: to
             else:
                 WR = Wface
 
-    n = geom.A / torch.linalg.norm(geom.A, dim=-1, keepdim=True).clamp_min(torch.finfo(geom.A.dtype).tiny)   # pairs with A = 0 (kernel edge) carry no flux
+    n = geom.A / torch.linalg.norm(geom.A, dim=-1, keepdim=True).clamp_min(1e-30)   # pairs with A = 0 (kernel edge) carry no flux
     rL, rR = WL[:, 0].clamp_min(1e-30), WR[:, 0].clamp_min(1e-30)
     pL, pR = WL[:, -1].clamp_min(1e-30), WR[:, -1].clamp_min(1e-30)
     vL, vR = WL[:, 1:1 + dim] - vframe, WR[:, 1:1 + dim] - vframe
@@ -125,7 +125,7 @@ def mfmRates(geom: MeshlessGeometry, rho: torch.Tensor, vel: torch.Tensor, P: to
     first = (rho[ia].clamp_min(1e-30), u1L, v1L - u1L[:, None] * n, P[ia].clamp_min(1e-30),
              rho[ib].clamp_min(1e-30), u1R, v1R - u1R[:, None] * n, P[ib].clamp_min(1e-30))
     # GIZMO's upper bound on a sane star pressure: 1.1 max(P + rho v_approach^2) (x2 for MFV)
-    r_ij = torch.linalg.norm(d, dim=-1).clamp_min(torch.finfo(d.dtype).tiny)
+    r_ij = torch.linalg.norm(d, dim=-1).clamp_min(1e-30)
     s1 = torch.clamp(-((vel[j] - vel[i]) * d).sum(-1) / r_ij, min=0.0)
     s2 = torch.clamp(((vel[i] - vel[j]) * n).sum(-1), min=0.0)
     v2app = torch.maximum(s1, s2) ** 2
@@ -135,7 +135,7 @@ def mfmRates(geom: MeshlessGeometry, rho: torch.Tensor, vel: torch.Tensor, P: to
         # GIZMO (hydro_evaluate.h): a pair may move at most `massFluxLimit` of the donor's mass per step;
         # only the mass update is limited (momentum and energy keep the full flux)
         mass = rho * geom.volume
-        amag = torch.linalg.norm(geom.A, dim=-1).clamp_min(torch.finfo(d.dtype).tiny)
+        amag = torch.linalg.norm(geom.A, dim=-1).clamp_min(1e-30)
         dmass = amag * flux[:, 0] * dt                              # > 0: i loses mass to j
         cap = massFluxLimit * torch.where(dmass > 0, mass[i], mass[j])
         limited = torch.maximum(torch.minimum(dmass, cap), -cap)
@@ -154,7 +154,7 @@ def signalTimestep(geom: MeshlessGeometry, rho, vel, P, gamma: float, cfl: float
     minimum for a global step."""
     i, j, d = geom.i, geom.j, geom.d
     c = torch.sqrt(gamma * P / rho)
-    r = torch.linalg.norm(d, dim=-1).clamp_min(1e-300)
+    r = torch.linalg.norm(d, dim=-1).clamp_min(1e-30)
     # (v_i - v_j) . (x_i - x_j) / |x_ij| = (v_j - v_i) . d / |d|
     approach = torch.clamp(((vel[j] - vel[i]) * d).sum(-1) / r, max=0.0)
     vsig = c[i] + c[j] - approach

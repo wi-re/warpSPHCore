@@ -21,6 +21,7 @@ import torch
 from ..dataTypes import DomainDescription, OperationProperties, ParticleState
 from ..enumTypes import KernelFunctions, OperationDirection, SupportScheme
 from .geometry import invertMoments
+from .precision import faceCondMax
 from .limiters import conditionBeta
 from .multigrid import CellMultigrid
 from .wp_mfm import (mfmClosureMatvecWarp, mfmClosureWeightsWarp, mfmCoarseStencilWarp, mfmClosureResidualWarp, mfmFluxWarp, mfmGradientsWarp,
@@ -44,9 +45,9 @@ class MeshlessWarp:
     @classmethod
     def build(cls, positions: torch.Tensor, supports: torch.Tensor, domain: DomainDescription,
               kernel: KernelFunctions, adjacency=None, cond_max: float = 1.0e3, closure: str = "project",
-              closure_power: float = 1.0, rtol: float = 1.0e-12, cg_tol: Optional[float] = None,
+              closure_power: float = 1.0, rtol: Optional[float] = None, cg_tol: Optional[float] = None,
               cg_iters: int = 200, lam0: Optional[torch.Tensor] = None, guards: bool = True,
-              face_cond_max: float = 1.0e6, centred_weights: bool = True, area_cap: bool = False,
+              face_cond_max: Optional[float] = None, centred_weights: bool = True, area_cap: bool = False,
               closure_solver: str = "auto", mg_min_particles: int = 2048,
               mg_max_coarse: int = 512) -> "MeshlessWarp":
         if closure not in ("project", "none"):
@@ -74,6 +75,8 @@ class MeshlessWarp:
         self.volume = 1.0 / omega
         self.closure_power = closure_power
         self.guards, self.centred, self.areaCap = bool(guards), int(bool(guards and centred_weights)), int(bool(guards and area_cap))
+        if face_cond_max is None:
+            face_cond_max = faceCondMax(positions.dtype)
         self.condBad = ((self.cond > face_cond_max) | ~torch.isfinite(self.cond)).to(torch.int32) if guards else torch.zeros_like(cnt)
         self.lam = torch.zeros(N, dim, dtype=positions.dtype, device=positions.device)
         self.closureResidualRatio = 0.0

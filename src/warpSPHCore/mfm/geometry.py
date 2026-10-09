@@ -20,7 +20,7 @@ through the *effective face*. ``A_ij`` points from ``i`` towards ``j``: the left
 state of the face Riemann problem is ``i``'s, the right state ``j``'s.
 
 **Guards (GIZMO, `hydro/compute_finitevol_faces.h`).** Where the face vector cannot be trusted --
-either particle's gradient matrix is ill-conditioned (`N_cond > face_cond_max`, GIZMO: 1e6) or the
+either particle's gradient matrix is ill-conditioned (`N_cond > face_cond_max`; GIZMO: 1e6, which is tuned for double precision -- the default is `precision.faceCondMax(dtype)`: 1e6 in float64, 2.1e4 in float32) or the
 face points away from the pair axis (`A . d < 0`, which happens for non-positive-definite matrices
 and flips the left/right states of the Riemann problem) -- the pair falls back to the SPH-style face
 `A_ij = -(w_i V_i W'_i + w_j V_j W'_j) d_ij / r_ij`; with `centred_weights` the volume weights
@@ -64,6 +64,7 @@ from ..dataTypes import DomainDescription, ParticleState
 from ..enumTypes import KernelFunctions
 from ..polyfit.polyfit import interfacePairs
 from .kernels import kernelDerivative, kernelWeight
+from .precision import faceCondMax, pinvAbove, pinvRtol, tiny as _tiny
 
 __all__ = ["MeshlessGeometry"]
 
@@ -75,7 +76,7 @@ def _scatter(n: int, idx: torch.Tensor, val: torch.Tensor) -> torch.Tensor:
 
 def guardFaces(A0, d, r, Vi, Vj, wti, wtj, hi, hj, condi, condj, dim, kernel, face_cond_max, area_cap):
     """GIZMO's face guards: ``(A, fallback)``, see the module docstring."""
-    tiny = torch.finfo(A0.dtype).tiny
+    tiny = _tiny(A0.dtype)
     bad = (condi > face_cond_max) | (condj > face_cond_max) | ((A0 * d).sum(-1) < 0) | ~torch.isfinite(A0).all(-1)
     dWi = kernelDerivative(r, hi, dim, kernel)
     dWj = kernelDerivative(r, hj, dim, kernel)
@@ -92,12 +93,14 @@ def guardFaces(A0, d, r, Vi, Vj, wti, wtj, hi, hj, condi, condj, dim, kernel, fa
     return A, bad
 
 
-def invertMoments(Es: torch.Tensor, rtol: float = 1.0e-12, pinv_above: float = 1.0e8):
+def invertMoments(Es: torch.Tensor, rtol: Optional[float] = None, pinv_above: Optional[float] = None):
     """``(Es^-1, N_cond)`` for a batch of small symmetric ``dim x dim`` matrices (Hopkins' condition number,
     Eq. C1: ``||E|| ||E^-1|| / dim`` in the Frobenius norm). A plain LU inverse for the well-conditioned rows;
     the pseudo-inverse only for the (few) singular or ill-conditioned ones. (``torch.linalg.pinv`` on a batch
     of 10^6 2x2 matrices allocates ~8 GiB of eigensolver workspace on the GPU.)"""
     dim = Es.shape[-1]
+    rtol = pinvRtol(Es.dtype) if rtol is None else rtol
+    pinv_above = pinvAbove(Es.dtype) if pinv_above is None else pinv_above
     inv, info = torch.linalg.inv_ex(Es)
     cond = torch.linalg.matrix_norm(Es) * torch.linalg.matrix_norm(inv) / dim
     bad = (info != 0) | ~torch.isfinite(cond) | (cond > pinv_above)
@@ -188,9 +191,9 @@ class MeshlessGeometry:
     # ------------------------------------------------------------------
     @classmethod
     def build(cls, particles: ParticleState, domain: DomainDescription, kernel: KernelFunctions,
-              adjacency=None, cond_max: float = 1.0e3, rtol: float = 1.0e-12,
+              adjacency=None, cond_max: float = 1.0e3, rtol: Optional[float] = None,
               closure: str = "project", closure_power: float = 1.0, guards: bool = True,
-              face_cond_max: float = 1.0e6, centred_weights: bool = True,
+              face_cond_max: Optional[float] = None, centred_weights: bool = True,
               area_cap: bool = False) -> "MeshlessGeometry":
         """``particles.positions`` / ``particles.supports`` are used; masses and
         densities are not (the volumes come from the kernel sums). Without
@@ -223,8 +226,10 @@ class MeshlessGeometry:
         volume = 1.0 / omega
         Vi, Vj = volume[i], volume[j]
         wti, wtj = Vi, Vj
+        if face_cond_max is None:
+            face_cond_max = faceCondMax(x.dtype)
         if guards and centred_weights:
-            tiny = torch.finfo(x.dtype).tiny
+            tiny = _tiny(x.dtype)
             big = (Vi - Vj).abs() / torch.minimum(Vi, Vj) / dim > 1.25
             wc = Vi * Vj * (Wi + Wj) / (Vi * Wi + Vj * Wj).clamp_min(tiny)
             wti, wtj = torch.where(big, wc, Vi), torch.where(big, wc, Vj)

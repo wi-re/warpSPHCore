@@ -166,7 +166,7 @@ class CellMultigrid:
         rows = torch.arange(n, device=W.device)[:, None].expand(-1, 3 ** dim)
         M.index_put_((rows.reshape(-1), Lc.nb.reshape(-1)), -W.reshape(-1), accumulate=True)
         M += torch.diag(self.diag[-1])
-        reg = 1e-10 * float(self.diag[-1].abs().max().clamp_min(1e-300))
+        reg = max(1e-10, 30.0 * torch.finfo(W.dtype).eps) * float(self.diag[-1].abs().max().clamp_min(1e-30))
         M += reg * torch.eye(n, dtype=W.dtype, device=W.device)
         self.chol, info = torch.linalg.cholesky_ex(M)
         self.cholOk = bool((info == 0).all())
@@ -183,8 +183,8 @@ class CellMultigrid:
             b0 = b - b.mean(0, keepdim=True)
             if self.cholOk:
                 return torch.cholesky_solve(b0, self.chol)
-            return b0 / self.diag[level].clamp_min(1e-300)[:, None]
-        dinv = 1.0 / self.diag[level].clamp_min(1e-300)[:, None]
+            return b0 / self.diag[level].clamp_min(1e-30)[:, None]
+        dinv = 1.0 / self.diag[level].clamp_min(1e-30)[:, None]
         x = self.omega * dinv * b
         for _ in range(self.smooth - 1):
             x = x + self.omega * dinv * (b - self._stencilApply(level, x))
@@ -199,7 +199,7 @@ class CellMultigrid:
     def vcycle(self, r: torch.Tensor, matvec: Callable[[torch.Tensor], torch.Tensor], diag: torch.Tensor) -> torch.Tensor:
         """One symmetric V-cycle for ``L x = r`` on the particles (zero initial guess); ``matvec`` is the fine
         operator (warp kernel), ``diag`` its diagonal."""
-        dinv = (self.omega / diag.clamp_min(1e-300))[:, None]
+        dinv = (self.omega / diag.clamp_min(1e-30))[:, None]
         x = dinv * r
         for _ in range(self.smooth - 1):
             x = x + dinv * (r - matvec(x))
