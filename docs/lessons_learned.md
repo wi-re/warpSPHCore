@@ -29,6 +29,34 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   a float32-only test pass will not catch it — see the "always sweep
   precision" testing lesson below.
 
+* **A variable that a *dynamic* loop updates multiplicatively
+  (`r = r * x` inside `for k in range(n)` with a runtime `n`) gives a wrong
+  adjoint — silently, and only for the quantities that feed `x`.**
+  Found 2026-10-09 in the `polyfit` monomial helper (a product over the
+  components / over the integer power): the position and support adjoints
+  were off by a *non-constant* factor (analytic 4x numeric on one probe)
+  while the mass and density adjoints, which only multiply the result from
+  outside the loop, were exact to every digit — that split is the
+  fingerprint. Same family as the loop-accumulator entry below. Fix: straight-line
+  code (branches over the at most three components, a closed-form integer
+  power with an explicit `n == 0 -> 1` branch because `wp.pow`'s adjoint
+  evaluates `0 * x**-1`, NaN at `x = 0`), not a loop. Additive accumulation
+  (`s += ...`) over neighbours in a loop is fine.
+
+* **Never read-modify-write a kernel's *output* array (`out[i, k] += x`) if
+  the output is differentiated.** Warp's reverse mode replays the forward
+  body inside the adjoint kernel, so the `+=` re-executes and re-adds to the
+  saved forward output on every backward pass: gradients that grow linearly
+  with the number of backward calls, and a corrupted forward value that the
+  torch ops downstream saved for their own backward. Accumulate into a local
+  scalar and store once. When the output has many entries per particle (the
+  `polyfit` moment matrix has up to ~1000), use **one thread per output entry**
+  (`OperatorSpec.numThreads`) instead of a per-thread output vector: a
+  `vector(length=~1000)` per-thread type made the generated code take many
+  minutes and several GB to compile. The price is L-fold redundant pair-weight
+  evaluations, which was the cheap part at these sizes (k=8, 2-D: 122 ms
+  build, 4 ms apply for 2,200 particles).
+
 * **A ternary expression assigned to a local variable, where each branch
   indexes the same Warp array, can compile fine, run the correct branch at
   runtime, and still produce a silently-zero adjoint for that array read.**
@@ -229,6 +257,28 @@ around 2026-08-05 to 2026-08-06 instead — it has been trimmed out of
   `scripts/spikes/spike_forward_mode_tier2_crk_extension.py`'s module docstring.
 
 ## AD-bridge / autograd gotchas
+
+* **The AD bridge used to zero the caller's `grad_output` in place.**
+  `StateAwareWarpFunction.backward` seeded the tape with `wp.from_torch(grad)`
+  (an alias) and `ctx.tape.zero()` then zeroed that memory, so a gradient
+  tensor passed to a second `torch.autograd.grad(..., retain_graph=True)`
+  came back all zeros and the second backward silently returned zeros.
+  Existing gradchecks never saw it because the gradient reaching a kernel is
+  normally a fresh tensor produced by upstream torch ops. Fixed 2026-10-09:
+  the seed is a clone (one small memcpy). Symptom when debugging a new
+  operator: "run 1 differs from run 0 by exactly the scale of run 0".
+
+* **Seed output gradients with the forward output's own Warp dtype, not one
+  inferred from the gradient's rank.** `castTorchToWarpAsBuiltins(grad)`
+  turns a `(N, L)` gradient into a length-`L` vector array, which is right
+  for per-particle vector outputs but trips Warp's dtype check for a plain
+  2-D scalar output (the `polyfit` moment/RHS arrays). Fixed 2026-10-09 in
+  `StateAwareWarpFunction.backward`.
+
+* **`torch.linalg.svdvals` on a batch of >32x32 matrices on CUDA falls off
+  its fast path** (19 s vs 0.02 s for 2,200 matrices of size 44). For the
+  symmetric PSD moment matrices use `eigvalsh` (the singular values are the
+  eigenvalues). `pinv(..., hermitian=True)` is fine.
 
 * **`warpSPHCore_PRECISION` is baked into every compiled kernel at first
   `warpSPHCore` import, per-process, and cannot change afterward.** Any

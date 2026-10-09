@@ -211,13 +211,24 @@ class StateAwareWarpFunction(torch.autograd.Function):
         # array.grad directly.
         output_warp = ctx.output_warp
         grads = {}
+        # The seed is a CLONE of the incoming gradient: wp.from_torch aliases the
+        # tensor, and ctx.tape.zero() below zeroes the seed's memory in place, i.e.
+        # the caller's own grad_output (observed 2026-10-09: a gradient tensor
+        # reused for a second torch.autograd.grad call came back all zeros, so the
+        # second backward silently returned zeros). One small memcpy per backward.
+        # The seed must carry the forward output's own Warp dtype. Inferring it
+        # from the gradient's rank (castTorchToWarpAsBuiltins) gives the same
+        # answer for the usual vector/matrix-per-particle outputs, but turns a
+        # plain 2-D scalar output (N, L) -- the polyfit moment/RHS arrays, which
+        # avoid per-thread vector types of length ~1000 -- into a length-L vector
+        # array and trips Warp's dtype check.
         if isinstance(output_warp, (list, tuple)):
             for out, grad in zip(output_warp, grad_outputs):
                 if grad is not None:
-                    grads[out] = castTorchToWarpAsBuiltins(grad.contiguous())
+                    grads[out] = wp.from_torch(grad.contiguous().clone(), dtype=out.dtype)
         else:
             if grad_outputs[0] is not None:
-                grads[output_warp] = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous())
+                grads[output_warp] = wp.from_torch(grad_outputs[0].contiguous().clone(), dtype=output_warp.dtype)
 
         ctx.tape.backward(grads=grads)
 

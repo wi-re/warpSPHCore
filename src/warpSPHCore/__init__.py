@@ -61,6 +61,8 @@ from .crk import *
 submodules.append(crk)
 from .renorm import *
 submodules.append(renorm)
+from .polyfit import *
+submodules.append(polyfit)
 
 # Specific math operations
 from .pinv import *
