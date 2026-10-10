@@ -8,9 +8,9 @@ For every pair ``(i, j)`` of the :class:`~warpSPHCore.mfm.geometry.MeshlessGeome
    per particle (:func:`~warpSPHCore.mfm.limiters.slopeLimiter`);
 2. reconstruction to the quadrature point ``x_ij = x_i + h_i/(h_i + h_j) d_ij`` (Eq. 20)
    from both sides, then the pairwise limiter (Eq. B4);
-3. boost to the face frame ``v_frame = v_i + (v_j - v_i) h_i/(h_i + h_j)`` (Eq. 21),
-   half-step MUSCL-Hancock prediction with the primitive Euler equations
-   (Eq. A2-A4) using the particle's own limited gradients;
+3. half-step MUSCL-Hancock prediction of the lab-frame state (Eq. A2-A4) with the
+   particle's own limited gradients, then the boost to the face frame
+   ``v_frame = v_i + (v_j - v_i) h_i/(h_i + h_j)`` (Eq. 21);
 4. HLLC Riemann problem along the face normal ``A_ij / |A_ij|``
    (:mod:`~warpSPHCore.mfm.riemann`), MFM or MFV flux;
 5. ``dQ_i/dt = - sum_j |A_ij| F_ij`` with ``Q = (m, m v, m e_tot)`` per particle
@@ -52,7 +52,7 @@ def primitives(Q, volume, gamma, floor: float = 1e-30):
 
 def _timeDerivative(rho, vel, P, grad, gamma):
     """Primitive-variable time derivatives (Eq. A4) from the (limited) gradients
-    ``grad`` ``(N, 2 + dim, dim)`` of ``(rho, v, P)`` and the (boosted) velocity ``vel``."""
+    ``grad`` ``(N, 2 + dim, dim)`` of ``(rho, v, P)`` and the lab-frame velocity ``vel``."""
     dim = vel.shape[-1]
     g_rho, g_v, g_P = grad[:, 0], grad[:, 1:1 + dim], grad[:, -1]          # (N,d), (N,d,d), (N,d)
     div_v = torch.diagonal(g_v, dim1=-2, dim2=-1).sum(-1)
@@ -96,12 +96,20 @@ def mfmRates(geom: MeshlessGeometry, rho: torch.Tensor, vel: torch.Tensor, P: to
     if order >= 2 and dt > 0.0 and timeCentredFrame:
         _, dv_p, _ = _timeDerivative(rho, vel, P, glim, gamma)
         vel_h = vel + 0.5 * dt * dv_p
+    # GIZMO's MFV face frame is per-direction (the local side at its start-of-step velocity, the
+    # neighbour at its predicted one); in the equal-timestep limit its mass exchange averages the
+    # two directions (0.5 + 0.5), and the opposite biases cancel to the time-centred frame of Eq. 21
+    # that both modes use here (a shared biased frame is only first order, measured 1.0-1.2 vs 1.9
+    # on the 1-D sound wave). MFM and MFV therefore share the frame.
     vframe = vel_h[i] + frac[:, None] * (vel_h[j] - vel_h[i])                # Eq. 21
     if order >= 2 and dt > 0.0:
-        # half-step prediction with each particle's own gradients, in the boosted frame
+        # half-step prediction with each particle's own gradients. GIZMO (hydro_evaluate.h) predicts
+        # the lab-frame particle state with the fixed-point time derivative and only boosts the
+        # predicted state to the face frame for the Riemann solve; the face-frame PDE used before
+        # adds the face-advection term v_frame . grad W, an O(h) difference in the face state that
+        # measurably changes the Gresho error. The lab-frame prediction matches GIZMO.
         for side, idx, Wface in (("L", i, WL), ("R", j, WR)):
-            v_b = vel[idx] - vframe
-            dr, dv, dp = _timeDerivative_pair(rho[idx], v_b, P[idx], glim[idx], gamma)
+            dr, dv, dp = _timeDerivative_pair(rho[idx], vel[idx], P[idx], glim[idx], gamma)
             pred = torch.cat([dr[:, None], dv, dp[:, None]], dim=-1) * (0.5 * dt)
             Wp = Wface + pred
             ok = (Wp[:, 0] > 0) & (Wp[:, -1] > 0)                           # keep the unpredicted state otherwise
@@ -144,9 +152,9 @@ def mfmRates(geom: MeshlessGeometry, rho: torch.Tensor, vel: torch.Tensor, P: to
     return rates, dict(flux=flux, Sstar=Ss, Pstar=Ps, alpha=alpha, stage=stage)
 
 
-def _timeDerivative_pair(rho, v_b, P, glim, gamma):
+def _timeDerivative_pair(rho, vel, P, glim, gamma):
     """Eq. A4 for per-pair copies of a particle's data (``glim`` is its limited gradient)."""
-    return _timeDerivative(rho, v_b, P, glim, gamma)
+    return _timeDerivative(rho, vel, P, glim, gamma)
 
 
 def signalTimestep(geom: MeshlessGeometry, rho, vel, P, gamma: float, cfl: float = 0.2) -> torch.Tensor:

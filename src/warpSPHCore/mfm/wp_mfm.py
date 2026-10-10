@@ -169,6 +169,12 @@ def pairLimit(phiI: scalar_t, phiJ: scalar_t, phi0: scalar_t, frac: scalar_t, ps
 
 
 @wp.func
+def _speedsGaburov(uL: scalar_t, uR: scalar_t, aL: scalar_t, aR: scalar_t):
+    # GIZMO's primary estimator (reimann.h): extremal wave speeds
+    return wp.min(uL, uR) - wp.max(aL, aR), wp.max(uL, uR) + wp.max(aL, aR)
+
+
+@wp.func
 def _speedsRoe(rhoL: scalar_t, uL: scalar_t, vtL: Any, PL: scalar_t, aL: scalar_t,
                rhoR: scalar_t, uR: scalar_t, vtR: Any, PR: scalar_t, aR: scalar_t, gamma: scalar_t):
     R = wp.sqrt(rhoR / rhoL)
@@ -217,19 +223,22 @@ def _okStar(Ss: scalar_t, Ps: scalar_t):
 @wp.func
 def hllcStar(rhoL: scalar_t, uL: scalar_t, vtL: Any, PL: scalar_t,
              rhoR: scalar_t, uR: scalar_t, vtR: Any, PR: scalar_t, gamma: scalar_t):
-    """``(S_L, S_R, S*, P*)`` with the Roe -> PVRS -> Rusanov fallback chain."""
+    """``(S_L, S_R, S*, P*)`` with the Gaburov -> Roe -> PVRS -> Rusanov fallback chain (GIZMO)."""
     aL = wp.sqrt(gamma * PL / rhoL)
     aR = wp.sqrt(gamma * PR / rhoR)
-    SL, SR = _speedsRoe(rhoL, uL, vtL, PL, aL, rhoR, uR, vtR, PR, aR, gamma)
+    SL, SR = _speedsGaburov(uL, uR, aL, aR)
     Ss, Ps = _starFromSpeeds(SL, SR, rhoL, uL, PL, rhoR, uR, PR)
     if not _okStar(Ss, Ps):
-        SL, SR = _speedsPvrs(rhoL, uL, PL, aL, rhoR, uR, PR, aR, gamma)
+        SL, SR = _speedsRoe(rhoL, uL, vtL, PL, aL, rhoR, uR, vtR, PR, aR, gamma)
         Ss, Ps = _starFromSpeeds(SL, SR, rhoL, uL, PL, rhoR, uR, PR)
         if not _okStar(Ss, Ps):
-            s = wp.max(wp.abs(uL) + aL, wp.abs(uR) + aR)
-            SL = -s
-            SR = s
+            SL, SR = _speedsPvrs(rhoL, uL, PL, aL, rhoR, uR, PR, aR, gamma)
             Ss, Ps = _starFromSpeeds(SL, SR, rhoL, uL, PL, rhoR, uR, PR)
+            if not _okStar(Ss, Ps):
+                s = wp.max(wp.abs(uL) + aL, wp.abs(uR) + aR)
+                SL = -s
+                SR = s
+                Ss, Ps = _starFromSpeeds(SL, SR, rhoL, uL, PL, rhoR, uR, PR)
     return SL, SR, Ss, Ps
 
 
@@ -699,7 +708,8 @@ _CLOSURE_W_SPEC = OperatorSpec(
 
 @wp.func
 def sideTimeDerivative(rho: scalar_t, vBoost: Any, pres: scalar_t, gRho: Any, gVel: Any, gP: Any, gamma: scalar_t):
-    """Eq. A4 for one particle's (limited) gradients; ``vBoost`` the velocity in the face frame."""
+    """Eq. A4 for one particle's (limited) gradients; ``vBoost`` the lab-frame velocity (the
+    half-step prediction is lab-frame, as in GIZMO)."""
     divV = scalar_t(0.0)
     for c in range(vBoost.length):
         divV += gVel[c, c]
@@ -717,7 +727,8 @@ def reconstructSide(
     psi1: scalar_t, psi2: scalar_t, vdt: wp.int32,
 ):
     """Face state of one side: limited linear reconstruction (lab frame), pairwise limiter,
-    boost, half-step prediction. Returns the boosted ``(rho, v, P)``."""
+    half-step prediction (lab frame, as in GIZMO), then the boost. Returns the boosted
+    ``(rho, v, P)``."""
     rhoF = rhoS
     vF = vS
     pF = pS
@@ -729,12 +740,14 @@ def reconstructSide(
             vF[c] = pairLimit(vS[c], vO[c], vS[c] + aVel[c] * lin[c], frac, psi1, psi2)
     vF = vF - vframe
     if order >= 2 and dt > scalar_t(0.0):
-        vB = vS - vframe
+        # GIZMO predicts the lab-frame particle state with the fixed-point time derivative and
+        # boosts the predicted state to the face frame (the face-frame PDE would add the
+        # face-advection term vframe . grad W, an O(h) difference in the face state)
         gVelL = gVel * scalar_t(0.0)
         for c in range(vS.length):
             for k in range(vS.length):
                 gVelL[c, k] = aVel[c] * gVel[c, k]
-        dR, dV, dPp = sideTimeDerivative(rhoS, vB, pS, aRho * gRho, gVelL, aP * gP, gamma)
+        dR, dV, dPp = sideTimeDerivative(rhoS, vS, pS, aRho * gRho, gVelL, aP * gP, gamma)
         half = scalar_t(0.5) * dt
         rP = rhoF + half * dR
         pP = pF + half * dPp
@@ -799,6 +812,9 @@ def mfmFlux_Func_i(
             _r2, dvb, _p2 = sideTimeDerivative(rho[b], vb, pres[b], aRho[b] * gRho[b], gvl_b, aP[b] * gP[b], gamma)
             vha = va + scalar_t(0.5) * dt * dva
             vhb = vb + scalar_t(0.5) * dt * dvb
+        # the face frame is time-centred in both modes (GIZMO's per-direction MFV bias averages
+        # over the two directions to this frame in the equal-timestep limit; a shared biased
+        # frame is only first order)
         vframe = vha + frac * (vhb - vha)
 
         rL, vL, pL = reconstructSide(

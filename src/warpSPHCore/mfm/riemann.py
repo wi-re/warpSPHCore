@@ -7,11 +7,13 @@ velocity *vector* (it is passive: advected with the contact), already boosted
 to the rest frame of the quadrature point (Eq. A1). Everything is torch and
 vectorised over pairs.
 
-Wave speeds follow the paper's fallback chain: Roe-averaged (Einfeldt)
-estimates first; where the resulting star pressure is not positive, the Toro
-PVRS-based estimates; where that fails too, Rusanov's single speed. (The paper
-adds an exact solver as the last resort; it is not implemented here -- a pair
-that fails all three is a vacuum-adjacent state.)
+Wave speeds follow GIZMO's fallback chain (``hydro/reimann.h``
+``get_wavespeeds_and_pressure_star``): the Gaburov "simplest" HLLC (extremal
+``S_L = min(u) - max(a)``, ``S_R = max(u) + max(a)``) first; where the resulting
+star pressure is not positive, the Roe-averaged (Einfeldt) estimates; where that
+fails too, the Toro PVRS-based estimates; and finally Rusanov's single speed.
+(The paper adds an exact solver as the last resort; it is not implemented here
+-- a pair that fails all four is a vacuum-adjacent state.)
 
 * **MFV** keeps the face at rest in that frame, so the full HLLC flux
   (including the mass flux) is used.
@@ -40,6 +42,9 @@ def _energy(rho, u, vt, P, gamma):
 
 
 def _speeds(kind: str, rhoL, uL, vtL, PL, aL, rhoR, uR, vtR, PR, aR, gamma):
+    if kind == "gaburov":
+        # GIZMO's primary estimator (reimann.h): extremal wave speeds
+        return torch.minimum(uL, uR) - torch.maximum(aL, aR), torch.maximum(uL, uR) + torch.maximum(aL, aR)
     if kind == "roe":
         R = torch.sqrt(rhoR / rhoL)
         HL = (_energy(rhoL, uL, vtL, PL, gamma) + PL) / rhoL
@@ -76,7 +81,7 @@ def starState(rhoL, uL, vtL, PL, rhoR, uR, vtR, PR, gamma) -> Tuple[torch.Tensor
     aL = torch.sqrt(gamma * PL / rhoL)
     aR = torch.sqrt(gamma * PR / rhoR)
     best = None
-    for kind in ("roe", "pvrs", "rusanov"):
+    for kind in ("gaburov", "roe", "pvrs", "rusanov"):
         SL, SR = _speeds(kind, rhoL, uL, vtL, PL, aL, rhoR, uR, vtR, PR, aR, gamma)
         Ss, Ps = _starSpeedPressure(SL, SR, rhoL, uL, PL, rhoR, uR, PR)
         cand = (SL, SR, Ss, Ps)
