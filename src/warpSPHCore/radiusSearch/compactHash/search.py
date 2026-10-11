@@ -49,6 +49,14 @@ def radiusSearchOnCompactHashMap(
     offsets = datastructure.cellOffsets
 
     warpDevice = castTorchToWarp(queryPositions).device
+    # Pin the warp count/collect kernels to torch's current stream (matching
+    # buildHashmap.hashCells). Without this they run on warp's default stream and
+    # can read the datastructure tensors (hashTable, sortedCellTable,
+    # sortedPositions) before the torch build ops in buildCompactHashMap finish
+    # writing them -- an unsynchronised cross-stream race that intermittently
+    # yields a degenerate (~N^2) neighbour count and an OOM on edge allocation.
+    _torchStream = (wp.stream_from_torch(torch.cuda.current_stream(queryPositions.device))
+                    if queryPositions.device.type == 'cuda' else None)
 
     with record_function("neighborSearch - count neighbors"):
         N = queryPositions.shape[0]
@@ -71,7 +79,7 @@ def radiusSearchOnCompactHashMap(
             castTorchToWarp(periodicity),
             wp.uint32(mode_uint),
             edge_count
-        ], device=warpDevice)
+        ], device=warpDevice, stream=_torchStream)
     with record_function("neighborSearch - allocate neighbors"):
 
 
@@ -112,7 +120,7 @@ def radiusSearchOnCompactHashMap(
             castTorchToWarp(sortIndex),
             edge_i,
             edge_j
-        ], device=warpDevice)
+        ], device=warpDevice, stream=_torchStream)
 
 
     with record_function("neighborSearch - build adjacency"):

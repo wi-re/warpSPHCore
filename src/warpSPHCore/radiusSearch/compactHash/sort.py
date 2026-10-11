@@ -63,11 +63,17 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
 
     linearIndices, out = allocateTorchWarp((indices.shape[0],), wp.int64, warp_indices.device)
     warp_cell_count = castTorchToWarp(cellCount)
+    # Pin to torch's current stream (matching buildHashmap.hashCells) so the warp
+    # write of linearIndices is ordered after the torch ops that wrote `indices`
+    # and before the torch argsort below. On warp's default stream this is an
+    # unsynchronised cross-stream read/write race.
+    torchDevice = indices.device
     wp.launch(
         indexCells,
         dim=indices.shape[0],
         inputs=[warp_indices, warp_cell_count, out],
         device=warp_indices.device,
+        stream=wp.stream_from_torch(torch.cuda.current_stream(torchDevice)) if torchDevice.type == 'cuda' else None,
     )
     # linearIndices = linearIndexing(indices, cellCount)
     # with record_function("neighborSearch - sortReferenceParticles[argsort]"): 
