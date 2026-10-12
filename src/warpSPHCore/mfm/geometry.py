@@ -115,7 +115,8 @@ def invertMoments(Es: torch.Tensor, rtol: Optional[float] = None, pinv_above: Op
 
 
 def _closeFaces(N: int, i: torch.Tensor, j: torch.Tensor, A: torch.Tensor,
-                iters: int = 200, tol: Optional[float] = None, power: float = 1.0) -> torch.Tensor:
+                iters: int = 200, tol: Optional[float] = None, power: float = 1.0,
+                lam_cap: float = 1e3) -> torch.Tensor:
     """Antisymmetric correction ``C_ij = kappa_ij (lambda_j - lambda_i)``,
     ``kappa_ij = |A_ij|``, with
     ``sum_j (A_ij + C_ij) = 0`` for every particle (graph-Laplacian Poisson
@@ -125,7 +126,24 @@ def _closeFaces(N: int, i: torch.Tensor, j: torch.Tensor, A: torch.Tensor,
     one (default 1e-6 in float64, 1e-4 in float32) -- the closure error acts as
     ``P sum_j A_ij`` and must stay far below the physical signal, so it is
     reduced relative to itself, not to the face size; a set closed to round-off
-    (``1e-12`` of the face norm in float64, 1e-5 in float32) returns immediately."""
+    (``1e-12`` of the face norm in float64, 1e-5 in float32) returns immediately.
+
+    **Divergence guard.** On a degenerate graph the Laplacian is near-singular
+    (a coalesced pair or a kernel-edge bridge edge has ``kappa ~ 0``): in the
+    working precision the CG can then break down -- the residual *grows* and
+    the potential reaches ``1e14`` and up (measured on the KH 256 MFM run,
+    COMPRESSIBLE_SPH_PLAN wave 2 D), and the correction ``kappa (lambda_j -
+    lambda_i)`` replaces the physical face with a spurious force of the same
+    magnitude. The projection is a *correction*, never a replacement, so:
+
+    * the iterate with the smallest residual is tracked; if the solve breaks
+      down without ever improving on the initial residual, no correction is
+      applied at all (a non-finite residual is treated the same);
+    * the potential is capped at ``lam_cap`` (mean-free gauge): the correction
+      of a pair is then bounded by ``2 lam_cap |A_ij|``. The cap is far above
+      the potential of a healthy solve (measured max ~ 30 on the KH 256
+      lattice) and far below a broken one (1e14+), so it is inactive on every
+      well-posed configuration."""
     if tol is None:
         tol = 1e-6 if A.dtype == torch.float64 else 1e-4
     floor = 1e-12 if A.dtype == torch.float64 else 1e-5
@@ -144,10 +162,13 @@ def _closeFaces(N: int, i: torch.Tensor, j: torch.Tensor, A: torch.Tensor,
         t = kappa * (l[j] - l[i])
         return -(_scatter(N, i, t) - _scatter(N, j, t))
 
-    x = torch.zeros_like(a)
+    x0 = torch.zeros_like(a)
+    x = x0
     r = a.clone()
     p = r.clone()
-    rs = (r * r).sum()
+    rs0 = (r * r).sum()
+    rs = rs0
+    best_x, best_rn = x0, rs0
     for _ in range(iters):
         Ap = neg_lap(p)
         pAp = (p * Ap).sum()
@@ -157,11 +178,18 @@ def _closeFaces(N: int, i: torch.Tensor, j: torch.Tensor, A: torch.Tensor,
         x = x + al * p
         r = r - al * Ap
         rn = (r * r).sum()
+        if bool(rn < best_rn):
+            best_x, best_rn = x, rn
         if bool(rn.sqrt() <= target):
-            break
+            return A + kappa * (x.clamp(-lam_cap, lam_cap)[j] - x.clamp(-lam_cap, lam_cap)[i])
         p = r + rn / rs * p
         rs = rn
-    return A + kappa * (x[j] - x[i])
+    # not converged: the guard -- a solve that never improved on its start (or went
+    # non-finite) applies no correction at all; the cap keeps the correction a correction
+    if not bool(torch.isfinite(best_rn)) or not bool(best_rn < rs0):
+        return A
+    xc = best_x.clamp(-lam_cap, lam_cap)
+    return A + kappa * (xc[j] - xc[i])
 
 
 @dataclass
@@ -194,7 +222,7 @@ class MeshlessGeometry:
               adjacency=None, cond_max: float = 1.0e3, rtol: Optional[float] = None,
               closure: str = "project", closure_power: float = 1.0, guards: bool = True,
               face_cond_max: Optional[float] = None, centred_weights: bool = True,
-              area_cap: bool = False) -> "MeshlessGeometry":
+              area_cap: bool = False, lam_cap: float = 1e3) -> "MeshlessGeometry":
         """``particles.positions`` / ``particles.supports`` are used; masses and
         densities are not (the volumes come from the kernel sums). Without
         ``adjacency`` the pair list is a symmetric radius search at the
@@ -241,7 +269,7 @@ class MeshlessGeometry:
         if guards:
             Ag, fallback = guardFaces(A0, d, r, Vi, Vj, wti, wtj, h[i], h[j], cond[i], cond[j], dim, kernel,
                                       face_cond_max, area_cap)
-        A = _closeFaces(N, i, j, Ag, power=closure_power) if closure == "project" else Ag
+        A = _closeFaces(N, i, j, Ag, power=closure_power, lam_cap=lam_cap) if closure == "project" else Ag
         return cls(dim=dim, N=N, positions=x, supports=h, i=i, j=j, d=d, Wi=Wi, Wj=Wj,
                    omega=omega, volume=volume, Einv=Einv, cond=cond, num_nbrs=nnb,
                    deficient=deficient, A=A, A0=A0, domain=domain, kernel=kernel, fallback=fallback)

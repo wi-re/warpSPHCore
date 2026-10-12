@@ -17,6 +17,7 @@ from warpSPHCore.enumTypes import (KernelFunctions, OperationDirection,
 from warpSPHCore.mfm import (MeshlessGeometry, SUPPORTED_KERNELS, conserved, faceFlux,
                              kernelWeight, mfmRates, pairLimit, primitives, signalTimestep,
                              slopeLimiter, starState, conditionBeta)
+from warpSPHCore.mfm.geometry import _closeFaces, _scatter
 
 KERNEL = KernelFunctions.Wendland2
 GAMMA = 1.4
@@ -119,6 +120,68 @@ def test_linear_flux_divergence_keeps_its_consistency_after_closure(device):
             + torch.zeros(g.N, dtype=g.d.dtype, device=device).index_add(0, g.j, (g.A * Fj).sum(-1))
         exact = -g.volume * torch.trace(Gm)
         assert ((out - exact).pow(2).mean().sqrt() / exact.abs().mean()) < tol
+
+
+def _chaotic_grid(device, nx, ny, lo_exp, hi_exp, seed=0):
+    """A connected nx*ny grid (4-neighbor half list) with antisymmetric face
+    vectors whose magnitudes are log-uniform in 10**[lo_exp, hi_exp]: the
+    synthetic analog of the KH 256 primed state, where deficient particles
+    (E^-1 ~ cond ~ 1e6) and coalesced pairs make |A| span many log orders and
+    the closure CG's condition number huge. Returns N, i, j, A (half list)."""
+    N = nx * ny
+    g = torch.Generator().manual_seed(seed)
+    i, j, A = [], [], []
+    for y in range(ny):
+        for x in range(nx):
+            n = y * nx + x
+            for (dx, dy) in ((1, 0), (0, 1)):
+                xx, yy = x + dx, y + dy
+                if xx < nx and yy < ny:
+                    m = yy * nx + xx
+                    d = (torch.rand(2, generator=g) - 0.5)
+                    d = d / d.norm()
+                    mag = 10.0 ** float(torch.rand(1, generator=g).uniform_(lo_exp, hi_exp).item())
+                    i.append(n); j.append(m); A.append(d * mag)
+    return N, torch.tensor(i, device=device), torch.tensor(j, device=device), torch.stack(A).to(device)
+
+
+def test_closure_lam_cap_bounds_the_correction(device):
+    """The closure potential is capped at +/-lam_cap, so a pair's correction
+    kappa*(lambda_j - lambda_i) is bounded by 2*lam_cap*|A_ij|: the projection
+    stays a correction, never a replacement (the KH 256 trigger, where an
+    uncapped diverged lambda ~ 1e16 rewrote the faces with spurious forces).
+    With a tiny lam_cap the cap is provably active (the uncapped solve exceeds
+    the bound); the physical lam_cap (1e3, far above the measured healthy
+    potential max ~ 30) is inactive and the closure is unchanged."""
+    P, dom = _lattice(device, 24, jitter=0.3)
+    paper = MeshlessGeometry.build(P, dom, KERNEL, closure="none")
+    kappa = paper.A.norm(dim=-1)
+    cap = 1e-3
+    uncapped = MeshlessGeometry.build(P, dom, KERNEL, closure="project", lam_cap=1e3)
+    capped = MeshlessGeometry.build(P, dom, KERNEL, closure="project", lam_cap=cap)
+    uncapped_corr = (uncapped.A - paper.A).abs().max()
+    capped_corr = (capped.A - paper.A).abs().max()
+    bound = 2 * cap * kappa.max()
+    assert bool(uncapped_corr > bound)                  # the cap is active (the uncapped solve exceeds it)
+    assert bool(capped_corr <= bound * (1 + 1e-4))      # the capped correction is bounded
+    assert bool(capped_corr < uncapped_corr)            # the cap reduced the correction
+    assert torch.isfinite(capped.A).all()
+
+
+def test_closure_guard_never_worsens_on_a_stress_graph(device):
+    """On a chaotic face-magnitude spread (the S_6679 KH 256 primed-state
+    analog) the closure CG stagnates/breaks down in float32; the guard's
+    best-iterate / no-improvement logic must keep the result a correction:
+    finite, bounded by 2*lam_cap*|A|, and never making the divergence worse
+    than the unprojected faces (a solve that did not improve applies no
+    correction at all)."""
+    N, i, j, A = _chaotic_grid(device, 32, 32, -12, 12, seed=0)
+    Ac = _closeFaces(N, i, j, A, iters=200, lam_cap=1e3)
+    assert torch.isfinite(Ac).all()
+    kappa = A.norm(dim=-1)
+    assert bool((Ac - A).abs().max() <= 2 * 1e3 * kappa.max() * (1 + 1e-4))
+    div = lambda F: (_scatter(N, i, F) - _scatter(N, j, F)).norm()
+    assert bool(div(Ac) <= div(A) * (1 + 1e-4))         # never worse than the unprojected faces
 
 
 def test_geometry_is_differentiable_in_positions(device):

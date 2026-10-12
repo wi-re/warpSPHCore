@@ -49,7 +49,7 @@ class MeshlessWarp:
               cg_iters: int = 200, lam0: Optional[torch.Tensor] = None, guards: bool = True,
               face_cond_max: Optional[float] = None, centred_weights: bool = True, area_cap: bool = False,
               closure_solver: str = "auto", mg_min_particles: int = 2048,
-              mg_max_coarse: int = 512) -> "MeshlessWarp":
+              mg_max_coarse: int = 512, lam_cap: float = 1e3) -> "MeshlessWarp":
         if closure not in ("project", "none"):
             raise ValueError("closure must be 'project' or 'none'")
         N, dim = positions.shape
@@ -83,7 +83,7 @@ class MeshlessWarp:
         self.closureIterations = 0
         if closure == "project":
             useMg = closure_solver == "mg" or (closure_solver == "auto" and N >= mg_min_particles)
-            self.lam = self._solveClosure(cg_tol, cg_iters, lam0, useMg, mg_max_coarse)
+            self.lam = self._solveClosure(cg_tol, cg_iters, lam0, useMg, mg_max_coarse, lam_cap=lam_cap)
         return self
 
     # ------------------------------------------------------------------
@@ -95,8 +95,18 @@ class MeshlessWarp:
         return a, torch.sqrt(a2.sum() / 2.0)
 
     def _solveClosure(self, tol: Optional[float], iters: int, lam0: Optional[torch.Tensor] = None,
-                      multigrid: bool = False, mgMaxCoarse: int = 512) -> torch.Tensor:
-        """CG for ``sum_j kappa_ij (lam_i - lam_j) = sum_j A_ij`` (the torch reference's graph-Laplacian problem)."""
+                      multigrid: bool = False, mgMaxCoarse: int = 512, lam_cap: float = 1e3) -> torch.Tensor:
+        """CG for ``sum_j kappa_ij (lam_i - lam_j) = sum_j A_ij`` (the torch reference's graph-Laplacian problem).
+
+        Divergence guard (mirrors the torch reference's ``_closeFaces``): on a degenerate graph the
+        Laplacian is near-singular (a coalesced pair or a kernel-edge bridge edge has ``kappa ~ 0``),
+        and the CG can break down in the working precision -- the residual *grows* and the potential
+        reaches ``1e14`` and up (measured on the KH 256 MFM run, COMPRESSIBLE_SPH_PLAN wave 2 D) -- in
+        which case the correction ``kappa (lam_j - lam_i)`` replaces the physical face with a spurious
+        force of the same magnitude. The minimum-residual iterate is tracked; a solve that never
+        improved on the initial residual (or went non-finite) applies no correction beyond the warm
+        start, and the potential is capped at ``lam_cap`` so the correction of a pair stays bounded by
+        ``2 lam_cap |A_ij|`` (a correction, never a replacement of the face)."""
         a, faceNorm = self.residual()
         if tol is None:
             tol = 1e-6 if a.dtype == torch.float64 else 1e-4
@@ -130,10 +140,12 @@ class MeshlessWarp:
         r = a - Ax0
         self.closureResidualRatio = float(r.norm() / bnorm)
         if bool(r.norm() <= target):
-            return x
+            return x.clamp(-lam_cap, lam_cap)
         z = precond(r)
         p = z.clone()
         rz = (r * z).sum()
+        rs0 = (r * r).sum()
+        best_x, best_rn = x0, rs0
         self.closureIterations = 0
         for _ in range(iters):
             Ap, _ = mv(p)
@@ -144,35 +156,24 @@ class MeshlessWarp:
             x = x + al * p
             r = r - al * Ap
             self.closureIterations += 1
-            if bool(r.norm() <= target):
-                break
+            rn = (r * r).sum()
+            if bool(rn < best_rn):
+                best_x, best_rn = x, rn
+            if bool(rn.sqrt() <= target):
+                self.closureResidualRatio = float(rn.sqrt() / bnorm)
+                return x.clamp(-lam_cap, lam_cap)
             z = precond(r)
             rzn = (r * z).sum()
             p = z + rzn / rz * p
             rz = rzn
-        self.closureResidualRatio = float(r.norm() / bnorm)
-        return x
-        z = minv * r
-        p = z.clone()
-        rz = (r * z).sum()
-        self.closureIterations = 0
-        for _ in range(iters):
-            Ap, _ = mv(p)
-            pAp = (p * Ap).sum()
-            if not bool(pAp > 1e-30 * rz):
-                break
-            al = rz / pAp
-            x = x + al * p
-            r = r - al * Ap
-            self.closureIterations += 1
-            if bool(r.norm() <= target):
-                break
-            z = minv * r
-            rzn = (r * z).sum()
-            p = z + rzn / rz * p
-            rz = rzn
-        self.closureResidualRatio = float(r.norm() / bnorm)
-        return x
+        # not converged: a solve that never improved on the initial residual (or went
+        # non-finite) applies no correction beyond the warm start, and the cap keeps
+        # the correction a correction
+        if not bool(torch.isfinite(best_rn)) or not bool(best_rn < rs0):
+            self.closureResidualRatio = float(r.norm() / bnorm)
+            return x0.clamp(-lam_cap, lam_cap)
+        self.closureResidualRatio = float(best_rn.sqrt() / bnorm)
+        return best_x.clamp(-lam_cap, lam_cap)
 
     # ------------------------------------------------------------------
     def gradients(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor):
