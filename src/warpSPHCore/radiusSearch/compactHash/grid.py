@@ -70,12 +70,12 @@ def compute_h(qMin, qMax, referenceSupport):
     numCells = torch.clamp(qfCells, min=1)
     h = qExtent / (numCells)
 
-    if torch.any(qExtent / h - numCells > 0):
-        numCells -= 1
-        numCells = torch.clamp(numCells, min=1)
-        h = qExtent / numCells
+    # the two corrections as selects instead of host branches (same arithmetic, no device read)
+    shrink = torch.any(qExtent / h - numCells > 0)
+    numCellsShrunk = torch.clamp(numCells - 1, min=1)
+    numCells = torch.where(shrink, numCellsShrunk, numCells)
+    h = torch.where(shrink, qExtent / numCellsShrunk, h)
 
-    if torch.any(torch.ceil(qExtent / h) > qExtent / h):
-        h = h * (1e-4 + 1)
+    h = torch.where(torch.any(torch.ceil(qExtent / h) > qExtent / h), h * (1e-4 + 1), h)
 
     return torch.max(h)

@@ -43,7 +43,7 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     rawCellCount = qExtent / hCell
     # Periodic axes should not create an extra trailing cell from ceil();
     # that inserts an empty ghost cell and breaks wrap-around adjacency.
-    eps = torch.tensor(1e-6, dtype=rawCellCount.dtype, device=rawCellCount.device)
+    eps = 1e-6      # a Python scalar (in the tensor's dtype in the ops below): no host-to-device copy
     ceilCounts = torch.ceil(rawCellCount - eps)
     floorCounts = torch.floor(rawCellCount + eps)
     if periodicity is not None:

@@ -42,8 +42,10 @@ def buildCompactHashMap(
 
         with record_function("neighborSearch - sortParticles"):
             # print(f'Periodicity: {periodicity}')
-            x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))]).mT
-            y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
+            # the periodic flags read to the host once (iterating the device tensor synced per axis)
+            periodicHost = periodicity.tolist() if isinstance(periodicity, torch.Tensor) else list(periodicity)
+            x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicHost))]).mT
+            y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicHost))]).mT
 
             sortedLinear, sortIndex, numCells, qMin, qMax, hCell = sortReferenceParticles(x, hMax, minD, maxD, periodicity)
             # The grid scalars the host needs (search radius, cell counts,

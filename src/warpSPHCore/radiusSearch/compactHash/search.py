@@ -33,8 +33,10 @@ def radiusSearchOnCompactHashMap(
     minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
     # periodicity = domainDescription.periodicity if domainDescription.periodicity is not None else [False] * referencePositions.shape[1]
 
-    x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicity))]).mT
-    y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicity))]).mT
+    # the periodic flags read to the host once (iterating the device tensor synced per axis)
+    periodicHost = periodicity.tolist() if isinstance(periodicity, torch.Tensor) else list(periodicity)
+    x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicHost))]).mT
+    y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicHost))]).mT
     
     sortedPositions = datastructure.sortedPositions
     sortedSupports = datastructure.sortedSupports
@@ -83,16 +85,14 @@ def radiusSearchOnCompactHashMap(
     with record_function("neighborSearch - allocate neighbors"):
 
 
-        # Synchronize so PyTorch reads the fully-written count results from Warp's stream
-        wp.synchronize()
+        # the count kernel ran on torch's current stream, so the read below is ordered after it
+        # (the device-wide wp.synchronize() this used to need predates pinning the launches)
         total_edges = torch.sum(edge_count_t).cpu().item()
 
         # Compute cumulative offsets
         edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
         edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
-        # Synchronize so the Warp collect kernel reads the fully-written cumsum results from PyTorch's stream
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        # the collect kernel runs on torch's current stream, after the cumsum (no device-wide sync needed)
         edge_offsets_warp = wp.from_torch(edge_offsets)
 
         # Allocate output arrays on GPU

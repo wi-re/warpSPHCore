@@ -32,6 +32,9 @@ import math
 from typing import Callable, List, Optional
 
 import torch
+import warp as wp
+
+from ..type_config import scalar_t
 
 __all__ = ["CellMultigrid"]
 
@@ -61,9 +64,67 @@ def _sumInto(out: torch.Tensor, index: torch.Tensor, src: torch.Tensor) -> torch
         return out.index_add_(0, index, src)
 
 
+@wp.kernel
+def _segmentSum_Kernel(perm: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64), ends: wp.array(dtype=wp.int64),  # type: ignore
+                       src: wp.array2d(dtype=scalar_t), out: wp.array2d(dtype=scalar_t)):  # type: ignore
+    o, c = wp.tid()
+    acc = out[o, c]
+    for k in range(wp.int32(starts[o]), wp.int32(ends[o])):
+        acc += src[perm[k], c]
+    out[o, c] = acc
+
+
+class _SegmentSum:
+    """``_sumInto(out, index, src)`` for a fixed ``index`` into ``nrows`` target rows: the stable sort of the index
+    is done once, and each call sums every target row's sources sequentially in the original order -- the order
+    (and so the bits) of torch's deterministic ``index_add_`` on CUDA, which re-sorts the index on every call (most
+    of the V-cycle's cost). Verified bitwise against it for row widths >= 2 (2-, 3-component potentials, 3^dim
+    stencil rows) up to hundreds of duplicates per row; torch's width-1 kernel splits long runs, so width 1 (and
+    CPU) stays on ``_sumInto``. Every target row has a (possibly empty) range, so the buffers have a fixed size and
+    :meth:`update` refills them in place (the closure workspace's CUDA graph reads them at fixed addresses)."""
+
+    def __init__(self, index: torch.Tensor, nrows: int):
+        self.nrows = int(nrows)
+        self.cuda = index.is_cuda
+        self.index = index.clone() if self.cuda else index
+        if self.cuda:
+            dev = index.device
+            self.perm = torch.empty_like(index)
+            self.starts = torch.empty(self.nrows, dtype=torch.int64, device=dev)
+            self.ends = torch.empty(self.nrows, dtype=torch.int64, device=dev)
+            self._rows = torch.arange(self.nrows, dtype=index.dtype, device=dev)
+            self._wa = (wp.from_torch(self.perm), wp.from_torch(self.starts), wp.from_torch(self.ends))
+            self._fill(index)
+
+    def _fill(self, index):
+        perm = torch.argsort(index, stable=True)
+        srt = index[perm]
+        self.perm.copy_(perm)
+        self.starts.copy_(torch.searchsorted(srt, self._rows))
+        self.ends.copy_(torch.searchsorted(srt, self._rows, right=True))
+
+    def update(self, index: torch.Tensor):
+        """Re-point at a new index of the same length and row count, in place."""
+        self.index.copy_(index)
+        if self.cuda:
+            self._fill(index)
+
+    def __call__(self, out: torch.Tensor, src: torch.Tensor) -> torch.Tensor:
+        if not self.cuda or src.dim() != 2 or src.shape[1] < 2 or src.dtype != out.dtype:
+            return _sumInto(out, self.index, src)
+        src = src.contiguous()
+        wp.launch(_segmentSum_Kernel, dim=(self.nrows, src.shape[1]),
+                  inputs=[*self._wa, wp.from_torch(src)], outputs=[wp.from_torch(out)],
+                  device=wp.device_from_torch(out.device), stream=wp.stream_from_torch(torch.cuda.current_stream(out.device)))
+        return out
+
+
 class CellMultigrid:
     """Multigrid hierarchy for one particle configuration. Build with :meth:`__init__`, set the face
     weights with :meth:`setWeights`, apply with :meth:`vcycle`."""
+
+    #: level maps per (cell counts, periodicity, dim, maxCoarse, device); read-only once built
+    _levelCache: dict = {}
 
     def __init__(self, positions: torch.Tensor, hmax: float, domain, dim: int, maxCoarse: int = 512,
                  smooth: int = 1, omega: float = 0.8):
@@ -76,25 +137,46 @@ class CellMultigrid:
         plo = torch.where(per, lo, positions.amin(0))
         phi = torch.where(per, hi, positions.amax(0) + 1e-9 * (hi - lo).abs().clamp_min(1.0))
         ext = (phi - plo)
-        n = torch.clamp((ext / hmax).floor().to(torch.int64), min=1)
+        # one device read for the grid shape (and the periodicity): every later integer is host-side, so
+        # building the hierarchy does not stall the stream several times per closure solve
+        hm = hmax if isinstance(hmax, torch.Tensor) else torch.as_tensor(hmax, dtype=dt, device=dev)
+        host = torch.cat([torch.clamp((ext / hm).floor(), min=1), per.to(dt)]).tolist()
+        nh = [int(x) for x in host[:dim]]
+        perh = [bool(x) for x in host[dim:]]
         # divisible by 2^k so that block coarsening stays aligned (and periodic)
         k = 0
-        while all(int(x) >= 2 ** (k + 2) for x in n) and math.prod(int(x) // 2 ** k for x in n) > maxCoarse:
+        while all(x >= 2 ** (k + 2) for x in nh) and math.prod(x // 2 ** k for x in nh) > maxCoarse:
             k += 1
-        n = torch.tensor([max(1, (int(x) // 2 ** k) * 2 ** k) for x in n], dtype=torch.int64, device=dev)
-        self.ncells = [int(x) for x in n] + [1] * (3 - dim)
-        self.periodic = [int(bool(p)) for p in per.tolist()] + [0] * (3 - dim)
-        cs = ext / n
-        c = torch.clamp(((positions - plo) / cs).floor().to(torch.int64), min=0)
-        c = torch.minimum(c, n - 1)
+        nh = [max(1, (x // 2 ** k) * 2 ** k) for x in nh]
+        self.ncells = nh + [1] * (3 - dim)
+        self.periodic = [int(p) for p in perh] + [0] * (3 - dim)
+        cs = torch.stack([ext[a] / float(nh[a]) for a in range(dim)])
         cid = torch.zeros(positions.shape[0], dtype=torch.int64, device=dev)
         for a in range(dim):
-            cid = cid * n[a] + c[:, a]
+            ca = torch.clamp(((positions[:, a] - plo[a]) / cs[a]).floor().to(torch.int64), min=0, max=nh[a] - 1)
+            cid = cid * nh[a] + ca
         self.cellId = cid.to(torch.int32)
         self.cellId64 = cid
+        self._toCells = None                      # built below, once the level-0 cell count is known
         self.cellSize = cs
-        self.n0 = [int(x) for x in n]
-        self._buildLevels(dev, maxCoarse)
+        self.n0 = list(nh)
+        # the level maps depend only on the cell counts (not on the particles), so they are shared by every
+        # hierarchy with the same grid -- in a time loop the grid rarely changes and the maps (~7 ms of small
+        # torch ops at 4096 cells) are built once
+        key = (tuple(self.n0), tuple(self.periodic), dim, int(maxCoarse), str(dev))
+        cached = CellMultigrid._levelCache.get(key)
+        if cached is None:
+            self._buildLevels(dev, maxCoarse)
+            if len(CellMultigrid._levelCache) >= 8:
+                CellMultigrid._levelCache.pop(next(iter(CellMultigrid._levelCache)))
+            CellMultigrid._levelCache[key] = self.levels
+        else:
+            self.levels = cached
+            self.nLevels = len(cached)
+        self._toCells = _SegmentSum(cid, self.levels[0].size)
+        for l, lev in enumerate(self.levels[:-1]):     # the restrictions are fixed maps: built once, with the levels
+            if getattr(lev, 'restrict', None) is None:
+                lev.restrict = _SegmentSum(lev.toCoarse, self.levels[l + 1].size)
         self.W = None
 
     # ------------------------------------------------------------------
@@ -163,12 +245,31 @@ class CellMultigrid:
         self.nLevels = len(levels)
 
     # ------------------------------------------------------------------
+    def sameGrid(self, other: "CellMultigrid") -> bool:
+        return (self.n0 == other.n0 and self.periodic == other.periodic and self.levels is other.levels
+                and self.cellId64.shape == other.cellId64.shape)
+
+    def assign(self, other: "CellMultigrid") -> None:
+        """Take ``other``'s particle-to-cell map and operators (same grid, same particle count, weights set),
+        copied into this hierarchy's tensors in place -- so a CUDA graph captured on this hierarchy replays the
+        V-cycle of ``other``. Bitwise the same V-cycle."""
+        self.cellId.copy_(other.cellId)
+        self.cellId64.copy_(other.cellId64)
+        self.cellSize = other.cellSize
+        self._toCells.update(other.cellId64)
+        for mine, theirs in zip(self.W, other.W):
+            mine.copy_(theirs)
+        for mine, theirs in zip(self.diag, other.diag):
+            mine.copy_(theirs)
+        self.chol.copy_(other.chol)
+        self.cholOk = other.cholOk
+
     def setWeights(self, S: torch.Tensor):
         """Assemble the coarse operators from the per-particle stencil sums ``S`` ``(N, 3^dim)``
         (:func:`mfmCoarseStencilWarp`)."""
         dim = self.dim
         W0 = torch.zeros(self.levels[0].size, 3 ** dim, dtype=S.dtype, device=S.device)
-        _sumInto(W0, self.cellId64, S)
+        self._toCells(W0, S)
         Ws = [W0]
         for lev in self.levels[:-1]:
             W = Ws[-1]
@@ -209,7 +310,7 @@ class CellMultigrid:
             x = x + self.omega * dinv * (b - self._stencilApply(level, x))
         r = b - self._stencilApply(level, x)
         rc = torch.zeros(self.levels[level + 1].size, b.shape[1], dtype=b.dtype, device=b.device)
-        _sumInto(rc, lev.toCoarse, r)
+        lev.restrict(rc, r)
         x = x + self._cycle(level + 1, rc)[lev.toCoarse]
         for _ in range(self.smooth):
             x = x + self.omega * dinv * (b - self._stencilApply(level, x))
@@ -224,7 +325,7 @@ class CellMultigrid:
             x = x + dinv * (r - matvec(x))
         res = r - matvec(x)
         rc = torch.zeros(self.levels[0].size, r.shape[1], dtype=r.dtype, device=r.device)
-        _sumInto(rc, self.cellId64, res)
+        self._toCells(rc, res)
         x = x + self._cycle(0, rc)[self.cellId64]
         for _ in range(self.smooth):
             x = x + dinv * (r - matvec(x))
