@@ -94,31 +94,28 @@ stage copies into (an `N x dim` copy, the `GraphedTensorFunction` pattern alread
 cover the whole step so only the step's initial state is an input. Outputs are the build's own buffers, written
 in place (the `inPlace` mode above).
 
-### Shape of the graphable version (user, 2026-10-13)
+### Simplification (user, 2026-10-13): the rebuild stays eager, outside the graph
 
-A **separate entry point** next to the existing ones, not a mode of them (`radiusSearchCompactHashMapGraphed` and a
-`buildVerletListGraphed` around it; the eager functions stay untouched and become the oracle the new ones are
-tested against):
+Only the *final write* of the neighbour list changes shape, and with capacity padding even that is a write into
+fixed buffers. The count kernel and the offsets are per-particle (N-sized), the hash-map build is N-bounded. A
+rebuild happens once every ~10-20 steps, between replays, so it does not have to be captured: an eager rebuild
+(several syncs, ~100 torch ops, a few ms) costs well under a percent per step when amortised. That replaces the
+"graphed build" idea above (no `radiusSearchCompactHashMapGraphed`, no captured conditional rebuild, no overflow
+flag, no static *input* slots):
 
-* one object owns the **static slots**: the position / support inputs (the stage copies into them), the prior
-  (reference) positions / supports the validity check compares against, the hash-map buffers, the padded edge
-  arrays and `numNeighbors` / `edgeOffsets`, and the device scalars (`numCells`, `hCell`, edge count, overflow flag);
-* **validity check and rebuild are one captured unit**: the check writes a device flag, the rebuild sits behind
-  it (warp's `capture_if` / conditional graph nodes, CUDA 12.4+; this machine has 12.9), so a valid list costs only
-  the check and a stale one rebuilds *in place* into the same buffers, the replay never changes shape or address;
-* the radius search (count -> offsets -> collect) runs on that output inside the same unit, so
-  the consumers of `AdjacencyList` see the same padded arrays whether or not it rebuilt;
-* the one host decision left is **overflow** (the count exceeds the edge capacity, or hash entries exceed
-  `hashMapLength`): the flag is read at the existing step-end sync, the buffers are re-allocated larger and the
-  graph is recaptured (case 2 of the graph contract above);
-* **why a separate name and an explicit object, not a flag or a cache behind the eager function**: plotting,
-  post-processing, samplers and tests call the eager search on arbitrary one-off particle sets (any N, any
-  domain, CPU or CUDA, inside or outside a captured region). Static slots, a fixed N, in-place buffers and
-  recapture-on-overflow are properties of one simulation's lifetime; hidden behind the same function they would
-  hand a one-off caller buffers that a later call overwrites, or a graph captured for another N. The graphed
-  version is created, owned and closed by the run (no module-level state, no identity-keyed caches).
-* **row order must equal the eager build's** (stable sort on the linear cell index, same CSR traversal), or the
-  downstream float sums change; the equivalence test compares per-row neighbour order, not just the sets.
+1. **`inPlace` capacity policy** (opt-in, per run): a rebuild counts the edges on the host as today (it is
+   eager, the total is free), and if they fit it writes `paddedI` / `paddedJ` / `numNeighbors` / `edgeOffsets`
+   *into the existing buffers*; otherwise it reallocates (case 2). One-off callers never ask for `inPlace`, so
+   plotting / post-processing keep getting fresh, independent lists.
+2. **The validity flag stays in the step** (already the `deferVerletChecks` flag): the step, or a persistent
+   `capture_while` loop condition, reads it on the device; the host sees it at the step-end sync, rebuilds eagerly
+   and re-runs the step.
+3. **Fixed-shape hash map only where a graphed consumer reads it.** `adjacency.hashMap` is read by the grid-based
+   consumers (`mdbc/density2025`, `incompressible/wallPressure`, ...), whose kernels see the hash-map arrays'
+   shapes. A graph that contains one of them needs the N-bounded fixed-shape build of the section above;
+   a graph that only reads the pair / CSR arrays (ACSPH's wall closure, the compSPH kernels) does not.
+4. Static *input* slots are not needed for the rebuild (it runs eagerly on the current state); they only matter
+   for the validity check inside a graph, where the stage inputs are already the graph's own inputs.
 
 ## Consumer rule (independent of the core change; can land first)
 
