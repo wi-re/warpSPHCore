@@ -47,7 +47,7 @@ _lock = threading.RLock()
 class _Agg:
     """Counts of one section name over the run."""
     __slots__ = ('calls', 'ops', 'launches', 'syncs', 'replays', 'selfOps', 'selfLaunches',
-                 'selfSyncs', 'opNames', 'kernelNames', 'syncSites')
+                 'selfSyncs', 'opNames', 'kernelNames', 'syncSites', 'parents')
 
     def __init__(self):
         self.calls = self.ops = self.launches = self.syncs = self.replays = 0
@@ -55,6 +55,7 @@ class _Agg:
         self.opNames = collections.Counter()
         self.kernelNames = collections.Counter()
         self.syncSites = collections.Counter()
+        self.parents = collections.Counter()    # enclosing section name (None at top level) -> entries
 
 
 _sections = collections.OrderedDict()           # name -> _Agg
@@ -63,15 +64,28 @@ _stepNow = collections.defaultdict(lambda: [0, 0, 0])   # name -> [ops, launches
 _stepHistory = collections.deque(maxlen=400)    # [(stepIndex, {name: (ops, launches, syncs)})]
 _stepIndex = 0
 _outside = _Agg()                               # events with no open section
+_total = _Agg()                                 # every event, in or out of a section
 _options = {}
 _patched = []                                   # (obj, attr, original) to undo
 _dispatchMode = None
 _origShowWarning = None
 
 
+def _addTo(agg, kind, name, site):
+    if kind == 'op':
+        agg.ops += 1
+    elif kind == 'launch':
+        agg.launches += 1
+    elif kind == 'sync':
+        agg.syncs += 1
+    elif kind == 'replay':
+        agg.replays += 1
+
+
 def _record(kind, name, site=None):
     """Add one event to every open section (once per distinct name) and to the innermost."""
     with _lock:
+        _addTo(_total, kind, name, site)
         if not _open:
             targets = [(None, _outside)]
         else:
@@ -127,6 +141,7 @@ def section(name, inner=None):
         if agg is None:
             agg = _sections[name] = _Agg()
         agg.calls += 1
+        agg.parents[_open[-1][0] if _open else None] += 1
         _open.append((name, agg))
     try:
         if inner is None:
@@ -160,6 +175,7 @@ def reset():
         _stepHistory.clear()
         _stepIndex = 0
         _outside.__init__()
+        _total.__init__()
 
 
 # -- the hooks ---------------------------------------------------------------------
@@ -306,6 +322,46 @@ def report(top=20, detail=3, minOps=1):
         return '\n'.join(out)
 
 
+def treeReport(minEvents=1):
+    """Every section as a tree (each under its most frequent parent), with the same columns as
+    `report`: inclusive ops / launches / syncs per call, `self` ops (excluding children) and
+    syncs per step. The last lines say how much of the run happened outside any section."""
+    with _lock:
+        steps = max(_stepIndex, 1)
+        primary = {n: (a.parents.most_common(1)[0][0] if a.parents else None) for n, a in _sections.items()}
+        kids = collections.defaultdict(list)
+        for n in _sections:
+            kids[primary[n]].append(n)
+        weight = lambda n: -(_sections[n].ops + 50 * _sections[n].launches + 1000 * _sections[n].syncs)
+        out = [f"{'section (tree, inclusive unless "self")':<72} {'calls':>6} {'ops/call':>9} {'self ops':>9} "
+               f"{'launch/call':>11} {'sync/call':>9} {'self sync':>9} {'sync/step':>9}"]
+
+        def emit(n, depth):
+            a = _sections[n]
+            if a.ops + a.launches + a.syncs >= minEvents:
+                label = ('  ' * depth + n)[:72]
+                out.append(f"{label:<72} {a.calls:>6} {_per(a.ops, a.calls):>9.1f} {_per(a.selfOps, a.calls):>9.1f} "
+                           f"{_per(a.launches, a.calls):>11.1f} {_per(a.syncs, a.calls):>9.2f} "
+                           f"{_per(a.selfSyncs, a.calls):>9.2f} {a.syncs / steps:>9.2f}")
+            for c in sorted(kids.get(n, ()), key=weight):
+                emit(c, depth + 1)
+        for root in sorted(kids.get(None, ()), key=weight):
+            emit(root, 0)
+        tot = _total
+        pct = lambda part, whole: 100.0 * part / whole if whole else 100.0
+        out.append(f"coverage: {pct(tot.ops - _outside.ops, tot.ops):.1f} % of {tot.ops} ops, "
+                   f"{pct(tot.launches - _outside.launches, tot.launches):.1f} % of {tot.launches} launches, "
+                   f"{pct(tot.syncs - _outside.syncs, tot.syncs):.1f} % of {tot.syncs} syncs inside a section "
+                   f"({_stepIndex} marked steps)")
+        if _outside.ops or _outside.launches or _outside.syncs:
+            out.append(f"  OUTSIDE any section: ops {_outside.ops}, launches {_outside.launches}, syncs {_outside.syncs}")
+            if _outside.syncSites:
+                out.append("    sync sites  : " + ', '.join(f"{k} x{v}" for k, v in _outside.syncSites.most_common(6)))
+            if _outside.opNames:
+                out.append("    top ops     : " + ', '.join(f"{k} x{v}" for k, v in _outside.opNames.most_common(6)))
+        return '\n'.join(out)
+
+
 def stepReport(n=5):
     """The `n` marked steps with the most syncs (ties: most ops) and, for each, the
     sections that issued them: which steps spike and where."""
@@ -326,7 +382,8 @@ def stepReport(n=5):
 
 def printReport(file=None):
     file = file or sys.stderr
-    print(report(), file=file)
+    print(treeReport(), file=file)
+    print(report(top=12, detail=6), file=file)
     print(stepReport(), file=file)
 
 
