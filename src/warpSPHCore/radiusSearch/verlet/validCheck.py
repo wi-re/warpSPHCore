@@ -27,7 +27,8 @@ def _verlet_validity_metrics(
     domainMin: torch.Tensor,
     domainMax: torch.Tensor,
         verletScale: float,
-        support_case: int):
+        support_case: int,
+        rebuildSlack: float = 0.0):
     # Stored supports in the Verlet adjacency were scaled by `verletScale` during build.
     priorQuerySupports = supports_a / verletScale
     priorReferenceSupports = supports_b / verletScale
@@ -69,5 +70,7 @@ def _verlet_validity_metrics(
     supportBuffer = (verletScale - 1.0) * minSupport
     # Motion and support drift both consume the same Verlet buffer budget.
     budgetUse = maxDistance + supportFactor
-    shouldRebuild = budgetUse > supportBuffer
+    # rebuildSlack > 0 rebuilds early, once that fraction of the buffer is used (a caller that must not
+    # see a rebuild half way through a Runge-Kutta step asks for it at the first stage)
+    shouldRebuild = budgetUse > supportBuffer * (1.0 - rebuildSlack)
     return shouldRebuild, maxDistance, supportFactor, minSupport, supportBuffer

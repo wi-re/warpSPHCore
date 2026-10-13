@@ -139,3 +139,17 @@ def test_defaultPolicyNeverSharesBuffers(device):
     second = buildVerletList(_moved(state, 10.0 * state.supports[0]), domain, verletScale=1.4,
                              supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=first)
     assert second.paddedI.data_ptr() != first.paddedI.data_ptr()
+
+
+def test_rebuildSlackRebuildsEarly(device):
+    state, domain = _particles(device)
+    first = buildVerletList(state, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric)
+    # all particles move: the check sums the query and the reference maximum, so this uses 60 % of the buffer
+    buffer = 0.4 * float(state.supports.min())
+    drifted = _moved(state, torch.tensor([0.3 * buffer, 0.0], device=device))
+    kept = buildVerletList(drifted, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric,
+                           priorNeighborhood=first)
+    assert kept is first                                           # 60 % of the buffer: still valid
+    early = buildVerletList(drifted, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric,
+                            priorNeighborhood=first, rebuildSlack=0.5)
+    assert early is not first                                      # but past half of it: rebuilt early

@@ -48,7 +48,8 @@ def buildVerletList_(
         mode : SupportScheme = SupportScheme.SuperSymmetric,
         priorNeighborhood : Optional[AdjacencyList] = None, 
         verbose : bool = False,
-        capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY):
+        capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY,
+        rebuildSlack : float = 0.0):
     with record_function(f"[Verlet] {mode}"):
         if priorNeighborhood is None or (priorNeighborhood is not None and priorNeighborhood.queryPositions is None) or (priorNeighborhood is not None and priorNeighborhood.referencePositions is None):
             if verbose:
@@ -97,6 +98,7 @@ def buildVerletList_(
                         domain.max,
                         verletScale,
                         support_case,
+                        rebuildSlack,
                     )
                     if _DEFERRED_CHECKS[0] is not None:
                         # deferVerletChecks(): record the device flag and keep
@@ -174,6 +176,7 @@ def buildVerletList(
         verbose : bool = False,
         referenceParticles: Optional[ParticleState] = None,
         capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY,
+        rebuildSlack : float = 0.0,
 ):
     with record_function(f"[warpSPH] - buildVerletList"):
         if referenceParticles is None:
@@ -183,5 +186,5 @@ def buildVerletList(
             queryParticles.positions, referenceParticles.positions,
             queryParticles.supports, referenceParticles.supports,
             domain, verletScale, supportMode, 
-            priorNeighborhood, verbose, capacity
+            priorNeighborhood, verbose, capacity, rebuildSlack
         )
