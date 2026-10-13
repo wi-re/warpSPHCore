@@ -33,9 +33,10 @@ def radiusSearchCompactHashMap_(
     returnCompactHashMap: bool = False,
     capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
     reuse: Optional[AdjacencyList] = None,
+    datastructure: Optional[CompactHashMap] = None,
 ):
     with record_function("warpNeighborSearch - radiusSearchCompactHashMap"):
-        datastructure = buildCompactHashMap(
+        datastructure = datastructure if datastructure is not None else buildCompactHashMap(
             queryPositions,
             referencePositions,
             querySupports,

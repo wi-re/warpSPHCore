@@ -50,7 +50,8 @@ def buildVerletList_(
         priorNeighborhood : Optional[AdjacencyList] = None, 
         verbose : bool = False,
         capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY,
-        rebuildSlack : float = 0.0):
+        rebuildSlack : float = 0.0,
+        gridFactory = None):
     with record_function(f"[Verlet] {mode}"):
         if priorNeighborhood is None or (priorNeighborhood is not None and priorNeighborhood.queryPositions is None) or (priorNeighborhood is not None and priorNeighborhood.referencePositions is None):
             if verbose:
@@ -60,6 +61,7 @@ def buildVerletList_(
                     queryPositions, referencePositions,
                     querySupports * verletScale, referenceSupports * verletScale,
                     domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                    datastructure=gridFactory() if gridFactory is not None else None,
                     capacity=capacity,
                 )
         else:
@@ -71,6 +73,7 @@ def buildVerletList_(
                         queryPositions, referencePositions,
                         querySupports * verletScale, referenceSupports * verletScale,
                         domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                    datastructure=gridFactory() if gridFactory is not None else None,
                         capacity=capacity,
                     )
             else:
@@ -158,6 +161,7 @@ def buildVerletList_(
                                 queryPositions, referencePositions,
                                 querySupports * verletScale, referenceSupports * verletScale,
                                 domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                    datastructure=gridFactory() if gridFactory is not None else None,
                                 capacity=capacity, reuse=priorNeighborhood,
                             )
                             
@@ -165,9 +169,22 @@ def buildVerletList_(
                         if verbose:
                             print('Reusing neighborhood')
                         adjacency = priorNeighborhood
+        if gridFactory is not None and adjacency is not priorNeighborhood:
+            adjacency.hashMap = None     # the factory's grid lives in static buffers the next build overwrites
         return adjacency
 
     
+def verletStaleFlag(positions, supports, adjacency, domain, verletScale, supportMode=SupportScheme.SuperSymmetric,
+                    rebuildSlack=0.0):
+    """Is `adjacency` too short for these positions and supports? A 0-d bool DEVICE tensor: no host read, no rebuild,
+    two warp launches; the caller decides when to read it (`buildVerletList` reads it right away)."""
+    case = 0 if supportMode == SupportScheme.Gather else 1 if supportMode == SupportScheme.Scatter else 2
+    return verletValidityMetrics(
+        positions, positions, adjacency.queryPositions, adjacency.referencePositions, supports, supports,
+        adjacency.querySupports, adjacency.referenceSupports, domain.periodic, domain.min, domain.max,
+        verletScale, case, rebuildSlack)[0]
+
+
 def buildVerletList(
         queryParticles: ParticleState, 
         domain: DomainDescription, 
@@ -178,6 +195,7 @@ def buildVerletList(
         referenceParticles: Optional[ParticleState] = None,
         capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY,
         rebuildSlack : float = 0.0,
+        gridFactory = None,
 ):
     with record_function(f"[warpSPH] - buildVerletList"):
         if referenceParticles is None:
@@ -187,5 +205,5 @@ def buildVerletList(
             queryParticles.positions, referenceParticles.positions,
             queryParticles.supports, referenceParticles.supports,
             domain, verletScale, supportMode, 
-            priorNeighborhood, verbose, capacity, rebuildSlack
+            priorNeighborhood, verbose, capacity, rebuildSlack, gridFactory
         )
