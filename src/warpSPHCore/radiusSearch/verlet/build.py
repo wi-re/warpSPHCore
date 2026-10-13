@@ -197,6 +197,17 @@ def verletStaleFlag(positions, supports, adjacency, domain, verletScale, support
         verletScale, case, rebuildSlack)[0]
 
 
+def verletUsage(positions, supports, adjacency, domain, verletScale, supportMode=SupportScheme.SuperSymmetric):
+    """How much of the Verlet buffer the particles have used since `adjacency` was built: ``(motion + support change) /
+    buffer`` as a 0-d DEVICE tensor (1.0 is the point where `buildVerletList` rebuilds). No host read."""
+    case = 0 if supportMode == SupportScheme.Gather else 1 if supportMode == SupportScheme.Scatter else 2
+    _, maxDistance, supportFactor, _, buffer = verletValidityMetrics(
+        positions, positions, adjacency.queryPositions, adjacency.referencePositions, supports, supports,
+        adjacency.querySupports, adjacency.referenceSupports, domain.periodic, domain.min, domain.max,
+        verletScale, case, 0.0)
+    return (maxDistance + supportFactor) / buffer
+
+
 def buildVerletList(
         queryParticles: ParticleState, 
         domain: DomainDescription, 
