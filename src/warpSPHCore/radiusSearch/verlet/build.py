@@ -51,7 +51,8 @@ def buildVerletList_(
         verbose : bool = False,
         capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY,
         rebuildSlack : float = 0.0,
-        gridFactory = None):
+        gridFactory = None,
+        forceRebuild : bool = False):
     with record_function(f"[Verlet] {mode}"):
         if priorNeighborhood is None or (priorNeighborhood is not None and priorNeighborhood.queryPositions is None) or (priorNeighborhood is not None and priorNeighborhood.referencePositions is None):
             if verbose:
@@ -75,6 +76,17 @@ def buildVerletList_(
                         domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                     datastructure=gridFactory() if gridFactory is not None else None,
                         capacity=capacity,
+                    )
+            elif forceRebuild:
+                # the caller already knows the prior list is stale (e.g. a `verletStaleFlag` it read): no second check; the
+                # prior list still gives the new one its capacity (stable shapes, `CapacityPolicy.inPlace` buffers)
+                with record_function(f"[Verlet] Forced rebuild"):
+                    adjacency = radiusSearchCompactHashMap_(
+                        queryPositions, referencePositions,
+                        querySupports * verletScale, referenceSupports * verletScale,
+                        domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                        datastructure=gridFactory() if gridFactory is not None else None,
+                        capacity=capacity, reuse=priorNeighborhood,
                     )
             else:
                 with record_function(f"[Verlet] Checking validity of prior neighborhood"):
@@ -196,6 +208,7 @@ def buildVerletList(
         capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY,
         rebuildSlack : float = 0.0,
         gridFactory = None,
+        forceRebuild : bool = False,
 ):
     with record_function(f"[warpSPH] - buildVerletList"):
         if referenceParticles is None:
@@ -205,5 +218,5 @@ def buildVerletList(
             queryParticles.positions, referenceParticles.positions,
             queryParticles.supports, referenceParticles.supports,
             domain, verletScale, supportMode, 
-            priorNeighborhood, verbose, capacity, rebuildSlack, gridFactory
+            priorNeighborhood, verbose, capacity, rebuildSlack, gridFactory, forceRebuild
         )
