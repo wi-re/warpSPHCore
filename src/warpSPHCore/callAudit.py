@@ -41,13 +41,15 @@ from contextlib import contextmanager
 enabled = False
 
 _SYNC_MESSAGE = 'called a synchronizing CUDA operation'
+#: WARPSPHCORE_AUDIT_OPSITES=N records, for every torch op, the N innermost python frames that issued it (slow; off by default)
+_OP_SITE_DEPTH = int(os.environ.get('WARPSPHCORE_AUDIT_OPSITES', 0))
 _lock = threading.RLock()
 
 
 class _Agg:
     """Counts of one section name over the run."""
     __slots__ = ('calls', 'ops', 'launches', 'syncs', 'replays', 'selfOps', 'selfLaunches',
-                 'selfSyncs', 'opNames', 'kernelNames', 'syncSites', 'parents')
+                 'selfSyncs', 'opNames', 'kernelNames', 'syncSites', 'selfOpSites', 'parents')
 
     def __init__(self):
         self.calls = self.ops = self.launches = self.syncs = self.replays = 0
@@ -55,6 +57,7 @@ class _Agg:
         self.opNames = collections.Counter()
         self.kernelNames = collections.Counter()
         self.syncSites = collections.Counter()
+        self.selfOpSites = collections.Counter()  # only with WARPSPHCORE_AUDIT_OPSITES=1: python site -> ops this section issued itself
         self.parents = collections.Counter()    # enclosing section name (None at top level) -> entries
 
 
@@ -117,20 +120,26 @@ def _record(kind, name, site=None):
             inner = _open[-1][1]
             if kind == 'op':
                 inner.selfOps += 1
+                if site is not None:
+                    inner.selfOpSites[site] += 1
             elif kind == 'launch':
                 inner.selfLaunches += 1
             elif kind == 'sync':
                 inner.selfSyncs += 1
 
 
-def _callSite():
-    """First frame outside torch / warp / this module: where the sync was asked for."""
+def _callSite(depth=1):
+    """First frame outside torch / warp / this module: where the sync was asked for
+    (`depth` > 1: that many frames, innermost first, joined with '<-')."""
+    sites = []
     for fr in reversed(traceback.extract_stack(limit=25)):
         fn = fr.filename
         if fn == __file__ or '/torch/' in fn or '/warp/' in fn or '/contextlib' in fn:
             continue
-        return f"{os.path.basename(fn)}:{fr.lineno} {fr.name}"
-    return '?'
+        sites.append(f"{os.path.basename(fn)}:{fr.lineno} {fr.name}")
+        if len(sites) >= depth:
+            break
+    return ' <- '.join(sites) or '?'
 
 
 @contextmanager
@@ -201,7 +210,7 @@ def enable(torchOps=True, syncs=True, launches=True, warmupSteps=None):
 
         class _OpCounter(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                _record('op', func.overloadpacket.__name__)
+                _record('op', func.overloadpacket.__name__, _callSite(_OP_SITE_DEPTH) if _OP_SITE_DEPTH else None)
                 return func(*args, **(kwargs or {}))
 
         _dispatchMode = _OpCounter()
@@ -321,6 +330,8 @@ def report(top=20, detail=3, minOps=1):
                 out.append("    top kernels : " + ', '.join(f"{k} x{v / a.calls:.1f}" for k, v in a.kernelNames.most_common(5)))
             if a.syncSites:
                 out.append("    sync sites  : " + ', '.join(f"{k} x{v}" for k, v in a.syncSites.most_common(5)))
+            if a.selfOpSites:
+                out.append("    self op sites (per call): " + '; '.join(f"{k} x{v / a.calls:.1f}" for k, v in a.selfOpSites.most_common(12)))
         if _outside.ops or _outside.launches or _outside.syncs:
             out.append(f"{'(outside any section)':<46} {'':>7} ops {_outside.ops}, launches {_outside.launches}, "
                        f"syncs {_outside.syncs}")

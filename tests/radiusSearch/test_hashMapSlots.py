@@ -97,3 +97,40 @@ def test_graphedReplayMatchesEagerAfterTheParticlesMove():
         ref = radiusSearchOnCompactHashMap(buildFixed(slots2), moved, moved, supports, supports, domain.periodic, domain, mode, H)
         assert _rows(got, n) == _rows(ref, n), step
     assert graphed.graph is not None
+
+
+def test_graphedBuildRecordsInlineInsideAnOuterCapture():
+    """A graph cannot replay inside another capture: `GraphedBuild.replay` records the body inline instead,
+    and the outer graph's replays follow the particles like the eager build does."""
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    device = torch.device("cuda")
+    positions, supports, n, domain = _case(device, True)
+    mode = SupportScheme.SuperSymmetric
+    H = n + 1
+    radius = 1.2 * float(supports.max())
+    slots = makeHashMapSlots(n, domain, radius, device=device, mode=mode, hashMapLength=H)
+    graphed = GraphedBuild(slots)
+    slots.positions.copy_(positions)
+    slots.supports.copy_(supports)
+    graphed.replay()                                          # warm-up (kernels compiled before the outer capture)
+    graphed.replay()                                          # the build's own graph exists: the nested case
+    outer = torch.cuda.CUDAGraph()
+    side = torch.cuda.Stream()
+    side.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(side):
+        graphed.replay()
+    torch.cuda.current_stream().wait_stream(side)
+    with torch.cuda.graph(outer):
+        graphed.replay()
+    for step in range(3):
+        moved = positions + 0.01 * (step + 1) * torch.sin(7.0 * positions.flip(-1) + step)
+        slots.positions.copy_(moved)
+        slots.supports.copy_(supports)
+        outer.replay()
+        got = radiusSearchOnCompactHashMap(slots.hashMap, moved, moved, supports, supports, domain.periodic, domain, mode, H)
+        slots2 = makeHashMapSlots(n, domain, radius, device=device, mode=mode, hashMapLength=H)
+        slots2.positions.copy_(moved)
+        slots2.supports.copy_(supports)
+        ref = radiusSearchOnCompactHashMap(buildFixed(slots2), moved, moved, supports, supports, domain.periodic, domain, mode, H)
+        assert _rows(got, n) == _rows(ref, n), step

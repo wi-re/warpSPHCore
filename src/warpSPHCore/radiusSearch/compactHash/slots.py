@@ -184,8 +184,8 @@ class GraphedBuild:
 
     def replay(self) -> CompactHashMap:
         s = self.slots
-        if s.positions.device.type != 'cuda':
-            return buildFixed(s)
+        if s.positions.device.type != 'cuda' or torch.cuda.is_current_stream_capturing():
+            return buildFixed(s)               # (inside an outer capture the body is recorded inline: a graph cannot replay inside a capture)
         if self.graph is None:
             if self.calls == 0:
                 self.calls = 1
