@@ -123,7 +123,7 @@ def measure(name: str, device: str = "cuda:0") -> dict:
             H = st.supports
             adj = adj_out
             if adj is not None:
-                i, j = adj.i.long(), adj.j.long()
+                i, j = adj.livePairs()[0].long(), adj.livePairs()[1].long()
                 keep = i != j
                 i, j = i[keep], j[keep]
                 d = st.positions[i] - st.positions[j]

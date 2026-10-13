@@ -58,7 +58,7 @@ class _ClosureWorkspace:
     ~1 ms. Same ops on the same values, so bitwise the eager result."""
 
     def __init__(self, adjacency, kappa, mg, like):
-        self.mv = mfmClosureMatvecCSR(adjacency, kappa, capacity=int(adjacency.j.shape[0] * _WS_CAPACITY) + 1024)
+        self.mv = mfmClosureMatvecCSR(adjacency, kappa, capacity=int(adjacency.paddedJ.shape[0] * _WS_CAPACITY) + 1024)
         self.mg = mg                                     # the first hierarchy's tensors are the static ones
         self.diag = torch.empty(like.shape[0], dtype=like.dtype, device=like.device)
         self.target = torch.empty((), dtype=like.dtype, device=like.device)
@@ -216,7 +216,7 @@ class MeshlessWarp:
         adj = self.adjacency
         N = lam.shape[0]
         i = torch.repeat_interleave(torch.arange(N, device=lam.device), adj.numNeighbors.long())
-        mag = (lam[adj.j.long()] - lam[i]).norm(dim=-1)
+        mag = (lam[adj.livePairs()[1].long()] - lam[i]).norm(dim=-1)
         scale = torch.clamp(cap / mag.clamp_min(1e-30), max=1.0).to(lam.dtype)
         return scale, (mag > cap).to(lam.dtype).mean()
 

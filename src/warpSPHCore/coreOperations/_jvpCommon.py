@@ -242,7 +242,7 @@ def buildAdjacencyOrGridState(
     domain: 'DomainDescription',
 ):
     """Convert a torch-facing `AdjacencyList` (CSR-capable already --
-    `.j`/`.edgeOffsets`/`.numNeighbors`, see `dataTypes/adjacency_t.py`'s own
+    `.paddedJ`/`.edgeOffsets`/`.numNeighbors`, see `dataTypes/adjacency_t.py`'s own
     docstring) or `CompactHashMap` into the warp-side `(adjacencyData,
     gridData)` struct pair `getIndexRange` consumes, plus the `useAdjacency`/
     `numOffsets` pair driving `_Func_Adjacency`'s dispatch -- the same
@@ -279,7 +279,7 @@ def buildAdjacencyOrGridState(
         numOffsets = adjacency.numOffsets
     elif isinstance(adjacency, AdjacencyList):
         useAdjacency = True
-        adjState.neighborList = castTorchToWarp(adjacency.j)
+        adjState.neighborList = castTorchToWarp(adjacency.paddedJ)
         adjState.neighborOffsets = castTorchToWarp(adjacency.edgeOffsets)
         adjState.numNeighbors = castTorchToWarp(adjacency.numNeighbors)
 

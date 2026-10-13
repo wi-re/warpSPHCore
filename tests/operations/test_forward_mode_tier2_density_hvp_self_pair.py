@@ -67,15 +67,16 @@ def _raw_hvp(positions, supports, masses, domain, adjacency, tangentQuery, tange
     domainState = _buildDomainState(domain)
     kernelProperties = _buildKernelState(KERNEL, SupportScheme.Gather)
 
-    edgeI = castTorchToWarp(adjacency.i)
-    edgeJ = castTorchToWarp(adjacency.j)
-    numPairs = adjacency.i.shape[0]
+    liveI, liveJ = adjacency.livePairs()
+    edgeI = castTorchToWarp(liveI)
+    edgeJ = castTorchToWarp(liveJ)
+    numPairs = liveI.shape[0]
     H_t, H_w = allocateTorchWarp(numPairs, matrix(shape=(dim, dim), dtype=scalar_t), edgeI.device)
     wp.launch(_computeSPHDensityHVP_PairKernel, dim=numPairs,
               inputs=[queryState, referenceState, domainState, kernelProperties, edgeI, edgeJ, H_w],
               device=edgeI.device)
 
-    ii, jj = adjacency.i.long(), adjacency.j.long()
+    ii, jj = liveI.long(), liveJ.long()
     if dropSelf:
         mask = ii != jj
         ii, jj, H_use = ii[mask], jj[mask], H_t[mask]

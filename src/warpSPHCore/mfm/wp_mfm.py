@@ -698,7 +698,7 @@ _CLOSURE_MV_SPEC = OperatorSpec(
 )
 _CLOSURE_W_SPEC = OperatorSpec(
     kernel=mfmClosureWeights_Kernel,
-    outputs=(OutputSpec(dtype=scalar_t, shape=lambda ctx, extras: ctx.adjacency.j.shape[0]),),
+    outputs=(OutputSpec(dtype=scalar_t, shape=lambda ctx, extras: ctx.adjacency.paddedJ.shape[0]),),
     extras=(ExtraSpec("vol", ExtraKind.TENSOR), ExtraSpec("Einv", ExtraKind.TENSOR), ExtraSpec("condBad", ExtraKind.TENSOR),
             ExtraSpec("centred", ExtraKind.SCALAR), ExtraSpec("areaCap", ExtraKind.SCALAR), ExtraSpec("power", ExtraKind.SCALAR)),
     numThreads=lambda ctx, extras: ctx.query.positions.shape[0],

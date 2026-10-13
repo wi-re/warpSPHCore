@@ -30,7 +30,9 @@ def radiusSearchCompactHashMap_(
     domainDescription: DomainDescription,
     mode: SupportScheme = SupportScheme.Gather,
     hashMapLength: int = 4096,
-    returnCompactHashMap: bool = False
+    returnCompactHashMap: bool = False,
+    capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
+    priorCapacity: Optional[int] = None,
 ):
     with record_function("warpNeighborSearch - radiusSearchCompactHashMap"):
         datastructure = buildCompactHashMap(
@@ -52,7 +54,9 @@ def radiusSearchCompactHashMap_(
             periodicity,
             domainDescription,
             mode,
-            hashMapLength
+            hashMapLength,
+            capacity=capacity,
+            priorCapacity=priorCapacity,
         )
         
         return adjacencyCH if not returnCompactHashMap else (adjacencyCH, datastructure)
@@ -66,7 +70,8 @@ def radiusSearchCompactHashMap(
     hashMapLengthMode: HashMapLengthMode = HashMapLengthMode.NextPrime,
     fixedHashMapLength: int = 4096,
     returnCompactHashMap: bool = False,
-    referenceParticles: Optional[ParticleState] = None
+    referenceParticles: Optional[ParticleState] = None,
+    capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
 ):
     referenceParticles = queryParticles if referenceParticles is None else referenceParticles
     queryPositions = queryParticles.positions
@@ -95,5 +100,6 @@ def radiusSearchCompactHashMap(
         domain,
         mode,
         hashMapLength,
-        returnCompactHashMap
+        returnCompactHashMap,
+        capacity=capacity,
     )

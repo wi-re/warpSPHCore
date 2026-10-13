@@ -177,7 +177,7 @@ def extractStateInfo(
             useAdjacency = not isinstance(adjacency, CompactHashMap)
 
             if useAdjacency:
-                adj_neighborList    = adjacency.j
+                adj_neighborList    = adjacency.paddedJ
                 adj_neighborOffsets = adjacency.edgeOffsets
                 adj_numNeighbors    = adjacency.numNeighbors
                 grid_sortIndex  = nullField(FieldKind.INT64, dim, device)

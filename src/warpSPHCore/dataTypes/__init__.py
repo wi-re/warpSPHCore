@@ -1,10 +1,12 @@
 __all__ = []
 
-from .adjacency_t import AdjacencyList, AdjacencyListWarp, adjacencyData, gridData
+from .adjacency_t import AdjacencyList, AdjacencyListWarp, CapacityPolicy, DEFAULT_CAPACITY, adjacencyData, gridData
 from .hashMap_t import CompactHashMap
 __all__.extend([
     'AdjacencyList',
     'AdjacencyListWarp',
+    'CapacityPolicy',
+    'DEFAULT_CAPACITY',
     'CompactHashMap',
     'adjacencyData',
     'gridData',

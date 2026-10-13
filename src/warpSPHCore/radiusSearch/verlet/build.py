@@ -47,7 +47,8 @@ def buildVerletList_(
         domain : DomainDescription, verletScale : float = 1.0, 
         mode : SupportScheme = SupportScheme.SuperSymmetric,
         priorNeighborhood : Optional[AdjacencyList] = None, 
-        verbose : bool = False):
+        verbose : bool = False,
+        capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY):
     with record_function(f"[Verlet] {mode}"):
         if priorNeighborhood is None or (priorNeighborhood is not None and priorNeighborhood.queryPositions is None) or (priorNeighborhood is not None and priorNeighborhood.referencePositions is None):
             if verbose:
@@ -57,6 +58,7 @@ def buildVerletList_(
                     queryPositions, referencePositions,
                     querySupports * verletScale, referenceSupports * verletScale,
                     domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                    capacity=capacity,
                 )
         else:
             if queryPositions.shape[0] != priorNeighborhood.queryPositions.shape[0] or referencePositions.shape[0] != priorNeighborhood.referencePositions.shape[0]:
@@ -67,6 +69,7 @@ def buildVerletList_(
                         queryPositions, referencePositions,
                         querySupports * verletScale, referenceSupports * verletScale,
                         domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                        capacity=capacity,
                     )
             else:
                 with record_function(f"[Verlet] Checking validity of prior neighborhood"):
@@ -152,6 +155,7 @@ def buildVerletList_(
                                 queryPositions, referencePositions,
                                 querySupports * verletScale, referenceSupports * verletScale,
                                 domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
+                                capacity=capacity, priorCapacity=priorNeighborhood.paddedI.shape[0],
                             )
                             
                     else:
@@ -168,7 +172,8 @@ def buildVerletList(
         supportMode: SupportScheme = SupportScheme.Gather,
         priorNeighborhood : Optional[AdjacencyList] = None,
         verbose : bool = False,
-        referenceParticles: Optional[ParticleState] = None
+        referenceParticles: Optional[ParticleState] = None,
+        capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY,
 ):
     with record_function(f"[warpSPH] - buildVerletList"):
         if referenceParticles is None:
@@ -178,5 +183,5 @@ def buildVerletList(
             queryParticles.positions, referenceParticles.positions,
             queryParticles.supports, referenceParticles.supports,
             domain, verletScale, supportMode, 
-            priorNeighborhood, verbose
+            priorNeighborhood, verbose, capacity
         )

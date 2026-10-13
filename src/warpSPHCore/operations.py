@@ -780,7 +780,7 @@ def warpOperationHVP(
     if not isinstance(adjacency, AdjacencyList):
         raise NotImplementedError(
             "warpOperationHVP: Density's Hessian-vector product needs the "
-            f"torch-facing AdjacencyList (.i/.j neighbor pairs, what "
+            f"torch-facing AdjacencyList (.paddedI/.paddedJ neighbor pairs, what "
             f"buildVerletList returns), not {type(adjacency)} -- grid/"
             "CompactHashMap traversal is not implemented here."
         )

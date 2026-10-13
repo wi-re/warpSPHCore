@@ -355,7 +355,7 @@ def interfacePairs(particles: ParticleState, domain: DomainDescription,
                           masses=prim(particles.masses), densities=prim(particles.densities),
                           kinds=particles.kinds),
             domain, mode=SupportScheme.SuperSymmetric)
-    i, j = adjacency.i.long(), adjacency.j.long()
+    i, j = (t.long() for t in adjacency.livePairs())   # real entries only: the -1 padding would wrap in a gather
     keep = (i < j) if halfList else (i != j)
     i, j = i[keep], j[keep]
     x = particles.positions

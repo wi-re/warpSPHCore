@@ -171,8 +171,9 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
     ], device=x_warp.device)  # Ensure kernel runs on the same device as input data
 
     return AdjacencyList(
-        i=i_torch.to(dtype=torch.int64),  # Ensure dtype is long for indexing
-        j=j_torch.to(dtype=torch.int64),
+        paddedI=i_torch.to(dtype=torch.int64),  # exactly sized (no padding): numEdges == length
+        paddedJ=j_torch.to(dtype=torch.int64),
+        numEdges=int(total_edges),
         numNeighbors=edge_count_t.to(dtype=torch.int64),
         edgeOffsets=wp.to_torch(edge_offsets_warp).to(dtype=torch.int64),
         numRows=N,

@@ -63,29 +63,29 @@ class mfmClosureMatvecCSR:
     def __init__(self, adjacency, kappa: torch.Tensor, capacity: int = 0):
         self.N = adjacency.numNeighbors.shape[0]
         self.device = wp.device_from_torch(kappa.device)
-        E = adjacency.j.shape[0]
+        E = adjacency.paddedJ.shape[0]
         if capacity > E:
             offsets, counts = adjacency.edgeOffsets.clone(), adjacency.numNeighbors.clone()
-            nbr = torch.empty(capacity, dtype=adjacency.j.dtype, device=kappa.device)
+            nbr = torch.empty(capacity, dtype=adjacency.paddedJ.dtype, device=kappa.device)
             kap = torch.empty(capacity, dtype=kappa.dtype, device=kappa.device)
-            nbr[:E].copy_(adjacency.j)
+            nbr[:E].copy_(adjacency.paddedJ)
             kap[:E].copy_(kappa)
             self._keep = (offsets, counts, nbr, kap)
         else:
             self._keep = (adjacency.edgeOffsets.contiguous(), adjacency.numNeighbors.contiguous(),
-                          adjacency.j.contiguous(), kappa.contiguous())
+                          adjacency.paddedJ.contiguous(), kappa.contiguous())
         self.capacity = self._keep[2].shape[0]
         self.offsets, self.counts, self.nbr, self.kappa = (wp.from_torch(t) for t in self._keep)
 
     def assign(self, adjacency, kappa: torch.Tensor) -> bool:
         """Refill in place from another adjacency over the same particles; False if it does not fit."""
-        E = adjacency.j.shape[0]
+        E = adjacency.paddedJ.shape[0]
         if E > self.capacity or adjacency.numNeighbors.shape[0] != self.N:
             return False
         offsets, counts, nbr, kap = self._keep
         offsets.copy_(adjacency.edgeOffsets)
         counts.copy_(adjacency.numNeighbors)
-        nbr[:E].copy_(adjacency.j)
+        nbr[:E].copy_(adjacency.paddedJ)
         kap[:E].copy_(kappa)
         return True
 

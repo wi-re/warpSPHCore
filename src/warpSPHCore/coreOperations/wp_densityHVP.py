@@ -136,6 +136,8 @@ def _computeSPHDensityHVP_PairKernel(
     e = wp.tid()
     if e >= edgeI.shape[0]:
         return
+    if edgeI[e] < 0:   # capacity padding (AdjacencyList.paddedI), not a pair
+        return
     i = wp.int32(edgeI[e])
     j = wp.int32(edgeJ[e])
 
@@ -183,9 +185,10 @@ def computeSPHDensityPositionHVP(
     domainState = _buildDomainState(domain)
     kernelProperties = _buildKernelState(kernel, supportMode)
 
-    edgeI = castTorchToWarp(adjacency.i)
-    edgeJ = castTorchToWarp(adjacency.j)
-    numPairs = adjacency.i.shape[0]
+    liveI, liveJ = adjacency.livePairs()   # real entries only (the padded tail is -1)
+    edgeI = castTorchToWarp(liveI)
+    edgeJ = castTorchToWarp(liveJ)
+    numPairs = liveI.shape[0]
 
     H_t, H_w = allocateTorchWarp(numPairs, matrix(shape=(dim, dim), dtype=scalar_t), edgeI.device)
 
@@ -196,7 +199,7 @@ def computeSPHDensityPositionHVP(
         device=edgeI.device,
     )
 
-    ii, jj = adjacency.i.long(), adjacency.j.long()
+    ii, jj = liveI.long(), liveJ.long()
     # Self-pairs (i == j) are excluded exactly, not as a numerical-safety
     # measure -- see this module's docstring for the translation-invariance
     # identity (H(0,h) - 2*H(0,h) + H(0,h) = 0) showing the self term's true

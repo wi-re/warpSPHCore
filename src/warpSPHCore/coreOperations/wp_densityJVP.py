@@ -170,7 +170,7 @@ def computeSPHDensityGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
 ) -> torch.Tensor:
     """`dDensity_i`, shape `[numParticles]`. `adjacency` is the torch-facing
-    `AdjacencyList` (`.i`/`.j` flat neighbor pairs -- what `buildVerletList`
+    `AdjacencyList` (`.paddedI`/`.paddedJ` flat neighbor pairs, padded with -1 -- what `buildVerletList`
     returns and what every `warpOperation` call in this codebase already
     threads through) or a `CompactHashMap`, not the warp-side struct
     `launchOperator` builds internally.

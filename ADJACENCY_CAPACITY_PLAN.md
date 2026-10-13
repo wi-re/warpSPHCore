@@ -1,8 +1,13 @@
 # Adjacency capacity padding (warpSPHCore) — plan / note
 
-Status: **not started** (written 2026-10-13, user decisions). Do it when ACSPH_REFACTOR_PLAN
-(warpSPH repo) reaches phase 5; nothing here blocks earlier phases. Opt-in, default off, so
-every existing caller is bitwise unchanged until it asks for it.
+Status (2026-10-13): **the contract is in** (user: "no time like the present"): `i`/`j` renamed
+`paddedI`/`paddedJ` (every old use fails loudly), `numEdges` host int, `livePairs()` exact views,
+`CapacityPolicy` (10 % headroom, keep while within [50 %, 100 %] of the prior capacity), padding on by
+default in `radiusSearchCompactHashMap` / `buildVerletList` / `filterVerletList` (`capacity=None` = exact),
+all consumers in both repos moved, tests in `tests/radiusSearch/test_adjacencyCapacity.py`.
+**Not done (phase 5 of ACSPH_REFACTOR_PLAN): in-place buffer reuse and the sync-free rebuild**, see
+"Graph contract" below. Rebuilds still allocate fresh buffers (so the address changes) and still read the
+edge total on the host once.
 
 ## Why
 
@@ -40,6 +45,28 @@ shapes static.
    kernels; the dense `i` tensor is a removal candidate once the remaining raw users are
    migrated. Padding must not push anyone to build more on it.
 6. Inlets/outlets (changing particle count) are out of scope.
+
+## Graph contract: two invalidation cases (user, 2026-10-13)
+
+A rebuild (outside any graph, between replays) ends in exactly one of:
+
+1. **Same padded size**: the new list is written *into the same buffers* (same shape and same device
+   addresses), so the captured graph stays valid and is simply replayed.
+2. **New padded size** (the count overflowed the capacity, or fell below `shrinkBelow`): new, larger
+   (or smaller) buffers; the graph is re-captured once and keeps working after. Growth is geometric
+   (headroom), shrink has hysteresis, so this is rare.
+
+What this needs beyond what is in now:
+* **In-place reuse** (`CapacityPolicy.inPlace`, off by default): a graph bakes in pointers, so "same shape"
+  alone is not enough. Today every rebuild allocates, which is case 2 every time.
+* In-place mutation breaks anything that keys on identity or holds an old list: the fluid-pair cache in
+  `cases/common/weaklyCompressible.py` (`cached[0] is adjacency.paddedI`) and compSPH's retained per-stage
+  adjacencies (COMPRESSIBLE_SPH_PLAN X6 removes the latter). Audit holders before switching it on.
+* Kernels inside a graph take the *padded* length and guard `if edgeI[tid] < 0: return`; they must not
+  slice with `livePairs()` or read `numEdges` (host ints change per rebuild, graphs freeze them). `livePairs()`
+  is for eager consumers only.
+* The fits-or-not decision stays on the host at the rebuild (one sync per rebuild, outside the graph); the
+  per-step sync-free path is the validity flag, already deferrable (`deferVerletChecks`).
 
 ## Consumer rule (independent of the core change; can land first)
 

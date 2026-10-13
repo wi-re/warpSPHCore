@@ -19,6 +19,7 @@ def filterVerletList_(
         querySupports: torch.Tensor, referenceSupports: torch.Tensor,
         domain: DomainDescription, adjacency: AdjacencyList, 
         mode : str = 'symmetric',
+        capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
 ):                   
     
     edge_count = torch.zeros_like(adjacency.numNeighbors)
@@ -30,7 +31,7 @@ def filterVerletList_(
         castTorchToWarp(domain.min), castTorchToWarp(domain.max), castTorchToWarp(domain.periodic),
 
         supportSchemeToUint(mode),
-        castTorchToWarp(adjacency.j), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
+        castTorchToWarp(adjacency.paddedJ), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
         castTorchToWarp(edge_count)]
 
     )
@@ -46,8 +47,13 @@ def filterVerletList_(
     edge_offsets_warp = wp.from_torch(edge_offsets)
 
     # Allocate output arrays on GPU
-    i_torch, edge_i = allocateTorchWarp(total_edges, wp.int64, warpDevice)
-    j_torch, edge_j = allocateTorchWarp(total_edges, wp.int64, warpDevice)
+    numEdges = int(total_edges)
+    capacityEdges = numEdges if capacity is None else capacity.capacityFor(numEdges)
+    i_torch, edge_i = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
+    j_torch, edge_j = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
+    if capacityEdges > numEdges:
+        i_torch.fill_(-1)
+        j_torch.fill_(-1)
 
     wp.launch(
         updateNeighborsVerlet, 
@@ -57,7 +63,7 @@ def filterVerletList_(
         castTorchToWarp(domain.min), castTorchToWarp(domain.max), castTorchToWarp(domain.periodic),
 
         supportSchemeToUint(mode),
-        castTorchToWarp(adjacency.j), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
+        castTorchToWarp(adjacency.paddedJ), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
         edge_offsets_warp, castTorchToWarp(edge_count),
 
         edge_i, edge_j
@@ -65,7 +71,7 @@ def filterVerletList_(
     )
 
     return AdjacencyList(
-        i = i_torch, j = j_torch,
+        paddedI = i_torch, paddedJ = j_torch, numEdges = numEdges,
         numNeighbors=edge_count_t, edgeOffsets=edge_offsets,
         numRows=queryPositions.shape[0], numCols=referencePositions.shape[0],
         queryPositions = queryPositions, referencePositions = referencePositions,
@@ -78,9 +84,10 @@ def filterVerletList(
         adjacency: AdjacencyList, 
         supportMode: SupportScheme = SupportScheme.Gather,
         referenceParticles: Optional[ParticleState] = None, 
+        capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
 ):
     return filterVerletList_(
         queryParticles.positions, referenceParticles.positions if referenceParticles is not None else queryParticles.positions, 
         queryParticles.supports, referenceParticles.supports if referenceParticles is not None else queryParticles.supports,
-        domain, adjacency, supportMode
+        domain, adjacency, supportMode, capacity
     )
