@@ -155,7 +155,7 @@ def buildVerletList_(
                                 queryPositions, referencePositions,
                                 querySupports * verletScale, referenceSupports * verletScale,
                                 domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
-                                capacity=capacity, priorCapacity=priorNeighborhood.paddedI.shape[0],
+                                capacity=capacity, reuse=priorNeighborhood,
                             )
                             
                     else:

@@ -26,10 +26,11 @@ def radiusSearchOnCompactHashMap(
     mode: SupportScheme = SupportScheme.Gather,
     hashMapLength: int = 4096,
     capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
-    priorCapacity: Optional[int] = None,
+    reuse: Optional[AdjacencyList] = None,
 ):                
     # `capacity`: spare room of the flat pair arrays (CapacityPolicy; None = exactly sized, no padding).
-    # `priorCapacity`: capacity of the list this rebuild replaces, kept while the new count still fits (stable shapes).
+    # `reuse`: the list this rebuild replaces: its capacity is kept while the new count still fits (stable shapes),
+    # and with `capacity.inPlace` its buffers are overwritten and shared by the result.
     mode_uint = datastructure.mode_uint
     minDomain = domainDescription.min if domainDescription.min is not None else None
     maxDomain = domainDescription.max if domainDescription.max is not None else None
@@ -101,10 +102,19 @@ def radiusSearchOnCompactHashMap(
 
         # Allocate output arrays on GPU, with spare capacity beyond the real count (padded with -1, see AdjacencyList)
         numEdges = int(total_edges)
-        capacityEdges = numEdges if capacity is None else capacity.capacityFor(numEdges, priorCapacity)
-        edge_i_t, edge_i = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
-        edge_j_t, edge_j = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
-        if capacityEdges > numEdges:
+        capacityEdges = numEdges if capacity is None else capacity.capacityFor(
+            numEdges, None if reuse is None else reuse.paddedI.shape[0])
+        inPlace = (capacity is not None and capacity.inPlace and reuse is not None
+                   and reuse.paddedI.shape[0] == capacityEdges and reuse.paddedJ.shape == reuse.paddedI.shape
+                   and reuse.paddedI.device == queryPositions.device
+                   and reuse.numNeighbors.shape == edge_count_t.shape and reuse.edgeOffsets.shape == edge_offsets.shape)
+        if inPlace:
+            edge_i_t, edge_j_t = reuse.paddedI, reuse.paddedJ
+            edge_i, edge_j = castTorchToWarp(edge_i_t), castTorchToWarp(edge_j_t)
+        else:
+            edge_i_t, edge_i = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
+            edge_j_t, edge_j = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
+        if capacityEdges > numEdges or inPlace:
             edge_i_t.fill_(-1)
             edge_j_t.fill_(-1)
     with record_function("neighborSearch - collect neighbors"):
@@ -130,6 +140,12 @@ def radiusSearchOnCompactHashMap(
             edge_i,
             edge_j
         ], device=warpDevice, stream=_torchStream)
+        if inPlace:
+            # the per-row arrays too: a graph reads them at fixed addresses. After the collect launch (it reads
+            # the new counts and offsets from the arrays it was given); same stream, so ordered.
+            reuse.numNeighbors.copy_(edge_count_t)
+            reuse.edgeOffsets.copy_(edge_offsets)
+            edge_count_t, edge_offsets = reuse.numNeighbors, reuse.edgeOffsets
 
 
     with record_function("neighborSearch - build adjacency"):

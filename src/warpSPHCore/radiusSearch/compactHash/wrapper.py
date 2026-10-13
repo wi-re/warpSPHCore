@@ -32,7 +32,7 @@ def radiusSearchCompactHashMap_(
     hashMapLength: int = 4096,
     returnCompactHashMap: bool = False,
     capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
-    priorCapacity: Optional[int] = None,
+    reuse: Optional[AdjacencyList] = None,
 ):
     with record_function("warpNeighborSearch - radiusSearchCompactHashMap"):
         datastructure = buildCompactHashMap(
@@ -56,7 +56,7 @@ def radiusSearchCompactHashMap_(
             mode,
             hashMapLength,
             capacity=capacity,
-            priorCapacity=priorCapacity,
+            reuse=reuse,
         )
         
         return adjacencyCH if not returnCompactHashMap else (adjacencyCH, datastructure)

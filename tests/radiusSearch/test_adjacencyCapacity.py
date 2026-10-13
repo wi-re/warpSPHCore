@@ -94,3 +94,48 @@ def test_verletRebuildKeepsTheCapacityWhileItFits(device):
     assert second is not first                                   # the check forced a rebuild
     if first.paddedI.shape[0] * 0.5 <= second.numEdges <= first.paddedI.shape[0]:
         assert second.paddedI.shape[0] == first.paddedI.shape[0]
+
+
+def _moved(state, shift):
+    return ParticleState(positions=state.positions + shift, supports=state.supports, masses=state.masses,
+                         densities=state.densities, kinds=state.kinds)
+
+
+def test_inPlaceRebuildKeepsTheBuffers(device):
+    state, domain = _particles(device)
+    policy = CapacityPolicy(headroom=0.5, inPlace=True)          # generous headroom: the new count fits
+    first = buildVerletList(state, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric, capacity=policy)
+    ptrs = [t.data_ptr() for t in (first.paddedI, first.paddedJ, first.numNeighbors, first.edgeOffsets)]
+    moved = _moved(state, 10.0 * state.supports[0])               # far beyond the Verlet margin: a rebuild
+    second = buildVerletList(moved, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric,
+                             priorNeighborhood=first, capacity=policy)
+    assert second is not first
+    assert [t.data_ptr() for t in (second.paddedI, second.paddedJ, second.numNeighbors, second.edgeOffsets)] == ptrs
+    # the contents are the rebuilt list: equal to a fresh, exactly sized build of the moved particles
+    exact = buildVerletList(moved, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric, capacity=None)
+    assert second.numEdges == exact.numEdges
+    for a, b in zip(second.livePairs(), exact.livePairs()):
+        assert torch.equal(a, b)
+    assert torch.equal(second.numNeighbors, exact.numNeighbors) and torch.equal(second.edgeOffsets, exact.edgeOffsets)
+    assert bool((second.paddedI[second.numEdges:] == -1).all())
+
+
+def test_inPlaceRebuildThatOutgrowsTheCapacityReallocates(device):
+    state, domain = _particles(device)
+    tight = CapacityPolicy(headroom=0.0, inPlace=True)
+    first = buildVerletList(state, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric, capacity=tight)
+    squeezed = ParticleState(positions=state.positions * 0.5, supports=state.supports, masses=state.masses,
+                             densities=state.densities, kinds=state.kinds)       # denser: more neighbours
+    second = buildVerletList(squeezed, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric,
+                             priorNeighborhood=first, capacity=tight)
+    assert second.numEdges > first.paddedI.shape[0]
+    assert second.paddedI.data_ptr() != first.paddedI.data_ptr()
+    assert second.paddedI.shape[0] >= second.numEdges
+
+
+def test_defaultPolicyNeverSharesBuffers(device):
+    state, domain = _particles(device)
+    first = buildVerletList(state, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric)
+    second = buildVerletList(_moved(state, 10.0 * state.supports[0]), domain, verletScale=1.4,
+                             supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=first)
+    assert second.paddedI.data_ptr() != first.paddedI.data_ptr()

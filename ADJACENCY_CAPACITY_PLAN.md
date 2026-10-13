@@ -5,9 +5,12 @@ Status (2026-10-13): **the contract is in** (user: "no time like the present"): 
 `CapacityPolicy` (10 % headroom, keep while within [50 %, 100 %] of the prior capacity), padding on by
 default in `radiusSearchCompactHashMap` / `buildVerletList` / `filterVerletList` (`capacity=None` = exact),
 all consumers in both repos moved, tests in `tests/radiusSearch/test_adjacencyCapacity.py`.
-**Not done (phase 5 of ACSPH_REFACTOR_PLAN): in-place buffer reuse and the sync-free rebuild**, see
-"Graph contract" below. Rebuilds still allocate fresh buffers (so the address changes) and still read the
-edge total on the host once.
+**`inPlace` is in too** (`CapacityPolicy(inPlace=True)`, opt-in: a rebuild that keeps the capacity writes the
+replaced list's `paddedI` / `paddedJ` / `numNeighbors` / `edgeOffsets` and shares them; outgrowing or underfilling
+the capacity reallocates; tests assert equal data pointers and equal contents against an exact build).
+**Not done**: a frontend switch to turn it on for a run (phase 5 of ACSPH_REFACTOR_PLAN, with the persistent
+graph; nothing in the frontend may keep an old list or tensors taken from it when it is on), the validity flag
+inside a graph, and the fixed-shape hash map for graphed `hashMap` consumers (see the sections below).
 
 ## Why
 

@@ -32,9 +32,16 @@ class CapacityPolicy:
     headroom     fractional extra capacity over the real edge count (0.1 = 10 %).
     shrinkBelow  with a prior capacity: keep that capacity (stable shapes) while the real count is within
                  [shrinkBelow * priorCapacity, priorCapacity]; reallocate when it overflows or falls below.
+    inPlace      a rebuild that keeps the capacity also keeps the BUFFERS: it writes `paddedI` / `paddedJ` /
+                 `numNeighbors` / `edgeOffsets` of the list it replaces (same shapes, same device addresses, so a
+                 captured CUDA graph that reads them stays valid) and returns a new `AdjacencyList` object that
+                 shares them. Off by default: the list that was replaced is then overwritten, so nothing may keep
+                 it (or tensors taken from it) for later; opt in per run (a persistent graph), never for one-off
+                 callers. A rebuild that outgrows or underfills the capacity allocates anew (the graph is recaptured).
     """
     headroom: float = 0.1
     shrinkBelow: float = 0.5
+    inPlace: bool = False
 
     def capacityFor(self, numEdges: int, priorCapacity: Optional[int] = None) -> int:
         if priorCapacity is not None and self.shrinkBelow * priorCapacity <= numEdges <= priorCapacity:
