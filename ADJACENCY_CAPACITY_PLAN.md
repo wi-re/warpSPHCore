@@ -120,6 +120,28 @@ flag, no static *input* slots):
 4. Static *input* slots are not needed for the rebuild (it runs eagerly on the current state); they only matter
    for the validity check inside a graph, where the stage inputs are already the graph's own inputs.
 
+### Target for the compressible step: a fresh grid per stage, no Verlet skin (user, 2026-10-13)
+
+Responsibilities, stated explicitly in the scheme instead of hidden in the support solver:
+
+1. **Stage start**: build the neighbour *grid* for the current positions (the datastructure has the same
+   size every stage; it is only too small when a particle's support exceeds the radius it was built for, one
+   device flag against `hCell`).
+2. **Support solver** (Psi / density iterations): runs on the *grid*, not on a list. Positions are current,
+   so there is no drift to cover and no validity question; only `h_max <= hCell`.
+3. **Pair list** (the CSR / padded pairs the force kernels read): count + collect from the grid with the *final*
+   supports, into the in-place padded buffers. The only check left is that the new supports fit the grid
+   radius and the edge count fits the capacity (one device flag).
+
+That removes the Verlet skin, the validity metrics and the rebuild-or-not decision altogether (a list that is
+derived fresh each stage is always valid), and with it the pair-list change between stages that X6's second
+pass exists for. It is only affordable once the grid build is the **fixed-shape, sync-free build** above
+(today a build is ~163 ops and 4 syncs; rebuilding it every stage with that would be a regression, which is why
+the Verlet list exists). Not before: (a) the fixed-shape build, (b) in-place padded count/collect without a host
+read of the total, (c) the Psi / density kernels reading a `CompactHashMap` (they already accept one).
+Until then the Verlet list stays, with the contract that `evaluateOptimalSupport(validateOnce=True)` returns a list
+valid for the returned supports and current positions for every support scheme.
+
 ## Consumer rule (independent of the core change; can land first)
 
 A raw-pair consumer must (a) test `0 <= i < n` (and `j`) before using a pair — a no-op on today's
