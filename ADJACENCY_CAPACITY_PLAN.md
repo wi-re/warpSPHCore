@@ -68,6 +68,32 @@ What this needs beyond what is in now:
 * The fits-or-not decision stays on the host at the rebuild (one sync per rebuild, outside the graph); the
   per-step sync-free path is the validity flag, already deferrable (`deferVerletChecks`).
 
+## Fixed-shape hash-map build (user, 2026-10-13)
+
+The same argument as for the edges applies to `buildCompactHashMap`: every intermediate is bounded by the
+particle count (at most N occupied cells, at most N hash entries, `hashMapLength` is given or N + 1 in the
+Verlet build), so the build could be captured once and replayed. What makes it data-dependent today
+(`compactHash/buildHashmap.py`, `sort.py`, `search.py`; these are most of the 12 syncs per build in the
+sod2d audit):
+
+* **Grid scalars read to the host**: `hMax`, `hCell` and `numCells` in one transfer (`sortParticles`), used for
+  kernel arguments and `delinearizeIndices(..., cellCountsHost=...)`. Fix: keep them on the device (the kernels
+  already take `numCells` as an array), or derive `hCell` from a run-constant upper bound of the support.
+* **`torch.unique_consecutive` twice** (`buildCells`, `buildHashMap`): the output length is the number of
+  occupied cells / hash entries, a sync and a data-dependent shape. Fix: flag boundaries, `cumsum`, scatter into
+  N-sized arrays with a device-side count (tail padded), consumers bounded by the count.
+* **`precomputeOffsets`**: the neighbour-cell offset list is sized by `hMax / hCell`. Fix: size it for the upper
+  bound and guard in the kernel.
+* **Edge allocation** (`allocate neighbors`): the capacity padding above.
+* `periodicity.tolist()` (run-constant: cache), `hashTable[hashMap64, 0] = ...` index-put (fine once the index
+  tensor has a fixed length).
+
+Pointers: a graph freezes the addresses of its inputs. The build reads the particle positions / supports, which
+are different tensors in every integrator stage (state copies), so the graph needs static input slots that the
+stage copies into (an `N x dim` copy, the `GraphedTensorFunction` pattern already in warpSPH), or it has to
+cover the whole step so only the step's initial state is an input. Outputs are the build's own buffers, written
+in place (the `inPlace` mode above).
+
 ## Consumer rule (independent of the core change; can land first)
 
 A raw-pair consumer must (a) test `0 <= i < n` (and `j`) before using a pair — a no-op on today's
