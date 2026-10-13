@@ -5,12 +5,15 @@ Status (2026-10-13): **the contract is in** (user: "no time like the present"): 
 `CapacityPolicy` (10 % headroom, keep while within [50 %, 100 %] of the prior capacity), padding on by
 default in `radiusSearchCompactHashMap` / `buildVerletList` / `filterVerletList` (`capacity=None` = exact),
 all consumers in both repos moved, tests in `tests/radiusSearch/test_adjacencyCapacity.py`.
-**`inPlace` is in too** (`CapacityPolicy(inPlace=True)`, opt-in: a rebuild that keeps the capacity writes the
-replaced list's `paddedI` / `paddedJ` / `numNeighbors` / `edgeOffsets` and shares them; outgrowing or underfilling
-the capacity reallocates; tests assert equal data pointers and equal contents against an exact build).
-**Not done**: a frontend switch to turn it on for a run (phase 5 of ACSPH_REFACTOR_PLAN, with the persistent
-graph; nothing in the frontend may keep an old list or tensors taken from it when it is on), the validity flag
-inside a graph, and the fixed-shape hash map for graphed `hashMap` consumers (see the sections below).
+**Done by 2026-10-13 (evidence: warpSPH `docs/compsph_step/README.md`)**: `CapacityPolicy(inPlace=True)` (d2cd60b: a rebuild that keeps the
+capacity overwrites and shares the replaced list's buffers; tests assert equal data pointers and contents); the Verlet validity check as two
+warp launches (07403b5); `rebuildSlack`, `forceRebuild`, `gridFactory` and the device-side `verletStaleFlag` / `verletUsage` on
+`buildVerletList` (09b34f0, f853f97, 958ec05, 8a67521); the fixed-shape sync-free hash-map build `HashMapSlots` / `buildFixed` /
+`GraphedBuild` (3ea04fc, details in the sections below). The frontend (CompSPH) uses all of them except `inPlace`.
+**Not done**: a frontend switch to turn `inPlace` on for a run, the kernels of a graphed step reading the PADDED arrays with the `-1` guard
+(never `livePairs()` / `numEdges`), the validity flags as a persistent-loop condition, the fixed-shape hash map for graphed `hashMap` consumers,
+in-place padded count/collect without a host read of the edge total (a rebuild still reads it once; decided: rebuilds stay eager and outside
+the graph), `radiusSearchOnCompactHashMap` on a grid with a smaller cell than the Verlet radius.
 
 ## Why
 
