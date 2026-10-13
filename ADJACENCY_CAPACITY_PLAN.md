@@ -111,6 +111,12 @@ tested against):
 * the one host decision left is **overflow** (the count exceeds the edge capacity, or hash entries exceed
   `hashMapLength`): the flag is read at the existing step-end sync, the buffers are re-allocated larger and the
   graph is recaptured (case 2 of the graph contract above);
+* **why a separate name and an explicit object, not a flag or a cache behind the eager function**: plotting,
+  post-processing, samplers and tests call the eager search on arbitrary one-off particle sets (any N, any
+  domain, CPU or CUDA, inside or outside a captured region). Static slots, a fixed N, in-place buffers and
+  recapture-on-overflow are properties of one simulation's lifetime; hidden behind the same function they would
+  hand a one-off caller buffers that a later call overwrites, or a graph captured for another N. The graphed
+  version is created, owned and closed by the run (no module-level state, no identity-keyed caches).
 * **row order must equal the eager build's** (stable sort on the linear cell index, same CSR traversal), or the
   downstream float sums change; the equivalence test compares per-row neighbour order, not just the sets.
 
