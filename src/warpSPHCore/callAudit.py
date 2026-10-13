@@ -66,6 +66,7 @@ _stepIndex = 0
 _outside = _Agg()                               # events with no open section
 _total = _Agg()                                 # every event, in or out of a section
 _options = {}
+_warmup = 0                                     # marked steps to discard before counting
 _patched = []                                   # (obj, attr, original) to undo
 _dispatchMode = None
 _origShowWarning = None
@@ -156,13 +157,16 @@ def section(name, inner=None):
 
 def markStep():
     """Close the current step's counts (call once per step; the runner does)."""
-    global _stepIndex
+    global _stepIndex, _warmup
     if not enabled:
         return
     with _lock:
         _stepHistory.append((_stepIndex, {k: tuple(v) for k, v in _stepNow.items()}))
         _stepNow.clear()
         _stepIndex += 1
+        if _warmup and _stepIndex >= _warmup:
+            _warmup = 0
+            reset()
 
 
 def reset():
@@ -180,10 +184,13 @@ def reset():
 
 # -- the hooks ---------------------------------------------------------------------
 
-def enable(torchOps=True, syncs=True, launches=True):
+def enable(torchOps=True, syncs=True, launches=True, warmupSteps=None):
     """Install the counters. Idempotent. `torchOps=False` drops the (slowest) aten-op
-    counter when only syncs and launches matter."""
-    global enabled, _dispatchMode, _origShowWarning
+    counter when only syncs and launches matter. `warmupSteps=k` (or env
+    `WARPSPHCORE_AUDIT_WARMUP=k`) discards everything counted before the k-th `markStep()`,
+    so first-step compilation, graph capture and cache fills do not pollute the table."""
+    global enabled, _dispatchMode, _origShowWarning, _warmup
+    _warmup = int(os.environ.get('WARPSPHCORE_AUDIT_WARMUP', 0)) if warmupSteps is None else int(warmupSteps)
     if enabled:
         return
     import torch
@@ -378,6 +385,15 @@ def stepReport(n=5):
             for name, (o, l, s) in sorted(tot.items(), key=lambda kv: -(kv[1][2] * 1000 + kv[1][0]))[:4]:
                 out.append(f"      {name[:50]:<50} ops {o:>6}  launches {l:>5}  syncs {s:>4}")
         return '\n'.join(out)
+
+
+def writeReport(path):
+    """The tree, the heaviest sections with their top ops / kernels / sync sites, and the
+    worst steps, written to `path` (and returned)."""
+    text = '\n'.join([treeReport(), '', report(top=25, detail=8), '', stepReport(8)])
+    with open(path, 'w') as f:
+        f.write(text + '\n')
+    return text
 
 
 def printReport(file=None):
