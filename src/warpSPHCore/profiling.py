@@ -33,10 +33,24 @@ it.
 import os
 from contextlib import nullcontext
 
+from . import callAudit
+
 PROFILING = os.environ.get("WARPSPHCORE_PROFILING", "0") == "1"
 
 if PROFILING:
-    from torch.profiler import record_function
+    from torch.profiler import record_function as _torchRecordFunction
 else:
-    def record_function(name):  # noqa: ARG001 -- name kept for call-site compatibility
-        return nullcontext()
+    _torchRecordFunction = None
+
+
+def record_function(name):
+    """A named section: the torch profiler's (`WARPSPHCORE_PROFILING=1`), the call audit's
+    (`WARPSPHCORE_AUDIT=1` or `callAudit.enable()`: ops, kernel launches and host syncs per
+    section, see `callAudit`), or a `nullcontext` (the default)."""
+    if callAudit.enabled:
+        return callAudit.section(name, _torchRecordFunction(name) if PROFILING else None)
+    if callAudit._autoEnable:
+        callAudit._autoEnable = False
+        callAudit.enable()
+        return callAudit.section(name, _torchRecordFunction(name) if PROFILING else None)
+    return _torchRecordFunction(name) if PROFILING else nullcontext()
