@@ -120,6 +120,54 @@ def test_inPlaceRebuildKeepsTheBuffers(device):
     assert bool((second.paddedI[second.numEdges:] == -1).all())
 
 
+def test_inPlaceRebuildWritesTheReferenceSnapshotInPlaceToo(device):
+    state, domain = _particles(device)
+    policy = CapacityPolicy(headroom=0.5, inPlace=True)
+    first = buildVerletList(state, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric, capacity=policy)
+    names = ('queryPositions', 'referencePositions', 'querySupports', 'referenceSupports')
+    ptrs = [getattr(first, n).data_ptr() for n in names]
+    moved = _moved(state, 10.0 * state.supports[0])
+    second = buildVerletList(moved, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric,
+                             priorNeighborhood=first, capacity=policy)
+    assert [getattr(second, n).data_ptr() for n in names] == ptrs        # same addresses ...
+    assert torch.equal(second.queryPositions, moved.positions)           # ... holding the new reference snapshot
+    assert torch.equal(second.referencePositions, moved.positions)
+    assert torch.allclose(second.querySupports, moved.supports * 1.4)
+
+
+def test_capturedValidityFollowsAnInPlaceRebuild():
+    if not torch.cuda.is_available():
+        pytest.skip("CUDA not available")
+    from warpSPHCore import verletUsage
+    device = torch.device("cuda")
+    state, domain = _particles(device)
+    policy = CapacityPolicy(headroom=0.5, inPlace=True)
+    held = buildVerletList(state, domain, verletScale=1.4, supportMode=SupportScheme.SuperSymmetric, capacity=policy)
+    probe = state.positions.clone()                                      # static input of the captured check
+    supports = state.supports.clone()
+    def usage():
+        return verletUsage(probe, supports, held, domain, 1.4)
+    usage()                                                              # warm-up
+    side = torch.cuda.Stream()
+    side.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(side):
+        usage()
+    torch.cuda.current_stream().wait_stream(side)
+    graph = torch.cuda.CUDAGraph()
+    with torch.cuda.graph(graph):
+        captured = usage()
+    probe.copy_(_moved(state, 0.3 * state.supports[0]).positions)
+    graph.replay()
+    before = float(captured)
+    assert before > 0.0                                                  # the particles moved against the list's snapshot
+    rebuilt = buildVerletList(_moved(state, 0.3 * state.supports[0]), domain, verletScale=1.4,
+                              supportMode=SupportScheme.SuperSymmetric, priorNeighborhood=held, capacity=policy,
+                              forceRebuild=True)
+    assert rebuilt.queryPositions.data_ptr() == held.queryPositions.data_ptr()
+    graph.replay()                                                       # the old graph, the new snapshot
+    assert float(captured) == pytest.approx(0.0, abs=1e-6)               # the list is now fresh for these particles
+
+
 def test_inPlaceRebuildThatOutgrowsTheCapacityReallocates(device):
     state, domain = _particles(device)
     tight = CapacityPolicy(headroom=0.0, inPlace=True)

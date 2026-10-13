@@ -146,6 +146,21 @@ def radiusSearchOnCompactHashMap(
             reuse.numNeighbors.copy_(edge_count_t)
             reuse.edgeOffsets.copy_(edge_offsets)
             edge_count_t, edge_offsets = reuse.numNeighbors, reuse.edgeOffsets
+            # the list's reference snapshot (what the validity check compares the particles with) is read by a graph
+            # at fixed addresses too: the new values go into the old tensors (one tensor where query and reference
+            # were one), unless a shape or dtype changed
+            snapshots = {}
+            for name, value in (('queryPositions', queryPositions), ('referencePositions', referencePositions),
+                                ('querySupports', querySupports), ('referenceSupports', referenceSupports)):
+                held = getattr(reuse, name)
+                if held is not None and held.shape == value.shape and held.dtype == value.dtype and held.device == value.device:
+                    if not any(held is done for done in snapshots.values()):
+                        held.copy_(value)
+                    snapshots[name] = held
+                else:
+                    snapshots[name] = value
+            queryPositions, referencePositions = snapshots['queryPositions'], snapshots['referencePositions']
+            querySupports, referenceSupports = snapshots['querySupports'], snapshots['referenceSupports']
 
 
     with record_function("neighborSearch - build adjacency"):
