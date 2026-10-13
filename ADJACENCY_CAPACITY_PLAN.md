@@ -139,6 +139,13 @@ pass exists for. It is only affordable once the grid build is the **fixed-shape,
 (today a build is ~163 ops and 4 syncs; rebuilding it every stage with that would be a regression, which is why
 the Verlet list exists). Not before: (a) the fixed-shape build, (b) in-place padded count/collect without a host
 read of the total, (c) the Psi / density kernels reading a `CompactHashMap` (they already accept one).
+**Step (a) is done (2026-10-13):** `radiusSearch/compactHash/slots.py` -- `HashMapSlots` (static input slots + output
+buffers, grid built for a fixed support *radius*, host-constant cell counts and a radius-1 stencil), `buildFixed`
+(108 torch ops, 0 host syncs, no data-dependent shapes: `unique_consecutive` replaced by flag + cumsum + scatter, padded to N)
+and `GraphedBuild` (captured once, replayed). Same grid as the eager build gives the same CSR order row by row; a larger
+radius gives the same neighbour sets. Measured (CUDA): N = 2.5k eager build 0.87 ms -> graphed replay 0.19 ms; N = 100k
+0.94 -> 0.37 ms; 163 ops + 4 syncs -> 0 syncs. `slots.fits` is the device flag "largest support within the radius".
+Tests: `tests/radiusSearch/test_hashMapSlots.py`. Next: (b) and (c).
 Until then the Verlet list stays, with the contract that `evaluateOptimalSupport(validateOnce=True)` returns a list
 valid for the returned supports and current positions for every support scheme.
 
