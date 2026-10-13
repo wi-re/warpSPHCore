@@ -94,6 +94,26 @@ stage copies into (an `N x dim` copy, the `GraphedTensorFunction` pattern alread
 cover the whole step so only the step's initial state is an input. Outputs are the build's own buffers, written
 in place (the `inPlace` mode above).
 
+### Shape of the graphable version (user, 2026-10-13)
+
+A **separate entry point** next to the existing ones, not a mode of them (`radiusSearchCompactHashMapGraphed` and a
+`buildVerletListGraphed` around it; the eager functions stay untouched and become the oracle the new ones are
+tested against):
+
+* one object owns the **static slots**: the position / support inputs (the stage copies into them), the prior
+  (reference) positions / supports the validity check compares against, the hash-map buffers, the padded edge
+  arrays and `numNeighbors` / `edgeOffsets`, and the device scalars (`numCells`, `hCell`, edge count, overflow flag);
+* **validity check and rebuild are one captured unit**: the check writes a device flag, the rebuild sits behind
+  it (warp's `capture_if` / conditional graph nodes, CUDA 12.4+; this machine has 12.9), so a valid list costs only
+  the check and a stale one rebuilds *in place* into the same buffers, the replay never changes shape or address;
+* the radius search (count -> offsets -> collect) runs on that output inside the same unit, so
+  the consumers of `AdjacencyList` see the same padded arrays whether or not it rebuilt;
+* the one host decision left is **overflow** (the count exceeds the edge capacity, or hash entries exceed
+  `hashMapLength`): the flag is read at the existing step-end sync, the buffers are re-allocated larger and the
+  graph is recaptured (case 2 of the graph contract above);
+* **row order must equal the eager build's** (stable sort on the linear cell index, same CSR traversal), or the
+  downstream float sums change; the equivalence test compares per-row neighbour order, not just the sets.
+
 ## Consumer rule (independent of the core change; can land first)
 
 A raw-pair consumer must (a) test `0 <= i < n` (and `j`) before using a pair — a no-op on today's
