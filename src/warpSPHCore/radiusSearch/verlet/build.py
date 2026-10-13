@@ -14,6 +14,7 @@ from ...profiling import record_function
 from ..compactHash import *
 
 from .validCheck import _verlet_validity_metrics
+from .wp_validity import verletValidityMetrics
 from .util import _minimum_image_delta
 
 # @torch.jit.script
@@ -84,7 +85,7 @@ def buildVerletList_(
                     else:
                         support_case = 2
 
-                    shouldRebuild_t, maxDistance, supportFactor, minSupport, supportBuffer = _verlet_validity_metrics(
+                    shouldRebuild_t, maxDistance, supportFactor, minSupport, supportBuffer = verletValidityMetrics(
                         queryPositions,
                         referencePositions,
                         priorNeighborhood.queryPositions,
