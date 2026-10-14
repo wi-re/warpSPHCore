@@ -1,5 +1,6 @@
 """The pre-2026-10-14 host-branching Krylov solvers, verbatim, as the bitwise reference of the device-predicated ones."""
 from typing import Callable, List, Optional, Tuple, Union
+import math
 import torch
 
 

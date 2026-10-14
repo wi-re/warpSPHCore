@@ -76,7 +76,8 @@ def thresholdExceeded(x: torch.Tensor, threshold: Optional[float], dim: int) -> 
 
 
 def absoluteTolerance(bnrm2: torch.Tensor, tol: float, rtol: float, atol: float) -> torch.Tensor:
-    """`max(atol, tol, rtol * ||b||)` as a 0-d float64 device tensor, with the same rounding as the host expression
-    `max(float(atol), float(tol), float(rtol) * float(bnrm2))` (compare it against a float32 residual and it is cast like the Python scalar)."""
+    """`max(atol, tol, rtol * ||b||)` as a 0-d device tensor of `bnrm2`'s dtype: evaluated in float64 like the host expression
+    `max(float(atol), float(tol), float(rtol) * float(bnrm2))` and rounded to the residual's dtype once, which is what comparing a float32 residual
+    with a Python float does."""
     floor = torch.full((), max(float(atol), float(tol)), dtype=torch.float64, device=bnrm2.device)
-    return torch.maximum(floor, float(rtol) * bnrm2.double())
+    return torch.maximum(floor, float(rtol) * bnrm2.double()).to(bnrm2.dtype)
