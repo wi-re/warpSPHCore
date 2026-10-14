@@ -67,6 +67,8 @@ submodules.append(polyfit)
 # Specific math operations
 from .pinv import *
 submodules.append(pinv)
+from .linalg import *
+submodules.append(linalg)
 
 # Set version
 __version__ = "0.6.0"
