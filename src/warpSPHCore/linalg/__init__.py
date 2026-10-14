@@ -4,6 +4,7 @@ same ops are built from so other kernels can call them inline; and (growing, see
 solvers the SPH schemes share.
 
 * `pinv.py` -- the symmetric pseudo-inverse (`pinvSymmetric`, `applyPinv`, and `symmetricPinv3` for use inside a kernel).
+* `stationary.py` -- relaxed-Jacobi style iterations with a device-resident stopping test (`runStationary`, `CheckSchedule`, `residualStatistic`).
 
 The rule for what goes in: batched or device-resident, no host read on the hot path, forward-checked against the float64 torch result, with the
 torch call as the fallback for inputs that need an autograd tape. `warpSPH.linalg` re-exports this package.
@@ -11,4 +12,7 @@ torch call as the fallback for inputs that need an autograd tape. `warpSPH.linal
 
 from .pinv import applyPinv, loadPadded3x3, pinvSymmetric, symmetricPinv3
 
-__all__ = ['applyPinv', 'pinvSymmetric', 'symmetricPinv3', 'loadPadded3x3']
+from .stationary import CheckSchedule, RESIDUAL_STATISTICS, StationaryResult, residualStatistic, runStationary
+
+__all__ = ['applyPinv', 'pinvSymmetric', 'symmetricPinv3', 'loadPadded3x3',
+           'CheckSchedule', 'RESIDUAL_STATISTICS', 'StationaryResult', 'residualStatistic', 'runStationary']
