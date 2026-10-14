@@ -13,8 +13,8 @@ torch call as the fallback for inputs that need an autograd tape. `warpSPH.linal
 
 from .pinv import applyPinv, loadPadded3x3, pinvSymmetric, symmetricPinv3
 
-from .krylov import SolveResult, Status, bicg, cg
+from .krylov import SolveResult, Status, bicg, bicgstab, cg
 from .stationary import CheckSchedule, RESIDUAL_STATISTICS, StationaryResult, residualStatistic, runStationary
 
 __all__ = ['applyPinv', 'pinvSymmetric', 'symmetricPinv3', 'loadPadded3x3',
-           'bicg', 'cg', 'SolveResult', 'Status', 'CheckSchedule', 'RESIDUAL_STATISTICS', 'StationaryResult', 'residualStatistic', 'runStationary']
+           'bicg', 'bicgstab', 'cg', 'SolveResult', 'Status', 'CheckSchedule', 'RESIDUAL_STATISTICS', 'StationaryResult', 'residualStatistic', 'runStationary']
