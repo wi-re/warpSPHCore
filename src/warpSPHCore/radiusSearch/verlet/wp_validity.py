@@ -9,6 +9,9 @@ same quantities -- with the reductions done by atomic max / min on a 6-slot devi
 
 (maxima are stored negated so one `atomic_min` initial value of +inf serves all slots). A one-thread kernel then
 combines them into the rebuild flag. The torch version stays as the reference the test compares against.
+
+`verletScale` is a float (a launch argument: the original path, bitwise unchanged) or a 0-d / 1-element DEVICE tensor (read by the kernels from
+device memory: a scale computed on the device, e.g. a reach that depends on the particles, needs no host read to be used).
 """
 
 import warp as wp
@@ -20,6 +23,7 @@ from ...type_config import *
 from ...math import *
 from ...util import *
 from ...dataTypes import *
+from ...autograd.cache import getCachedDummyTensor
 
 
 @wp.kernel
@@ -29,7 +33,7 @@ def _validityReduce(
         supports: wp.array(dtype=scalar_t), priorSupportsScaled: wp.array(dtype=scalar_t),   # type: ignore
         domainMin: wp.array(dtype=scalar_t), domainMax: wp.array(dtype=scalar_t),            # type: ignore
         periodicity: wp.array(dtype=wp.bool),                                                # type: ignore
-        verletScale: scalar_t, slot: wp.int32,
+        verletScale: scalar_t, scaleArr: wp.array(dtype=scalar_t), useArr: wp.int32, slot: wp.int32,
         acc: wp.array(dtype=scalar_t)):                                                      # type: ignore
     i = wp.tid()
     domainState = domainData()
@@ -39,7 +43,10 @@ def _validityReduce(
     domainState.dim = wp.int32(domainMin.shape[0])
     d = computeDistanceVec(positions[i], priorPositions[i], domainState)
     dist = wp.sqrt(wp.dot(d, d))
-    prior = priorSupportsScaled[i] / verletScale
+    scale = verletScale
+    if useArr == 1:
+        scale = scaleArr[0]
+    prior = priorSupportsScaled[i] / scale
     h = supports[i]
     wp.atomic_min(acc, slot, -dist)                                  # max distance, negated
     wp.atomic_min(acc, slot + 2, -wp.abs(prior - h))                 # max support change, negated
@@ -47,7 +54,8 @@ def _validityReduce(
 
 
 @wp.kernel
-def _validityDecide(acc: wp.array(dtype=scalar_t), verletScale: scalar_t, supportCase: wp.int32,   # type: ignore
+def _validityDecide(acc: wp.array(dtype=scalar_t), verletScale: scalar_t, scaleArr: wp.array(dtype=scalar_t), useArr: wp.int32,
+                    supportCase: wp.int32,   # type: ignore
                     rebuildSlack: scalar_t, sameSet: wp.int32,
                     out: wp.array(dtype=scalar_t), flag: wp.array(dtype=wp.bool)):                   # type: ignore
     distA = -acc[0]
@@ -70,7 +78,10 @@ def _validityDecide(acc: wp.array(dtype=scalar_t), verletScale: scalar_t, suppor
     elif supportCase == 2:
         supportFactor = wp.max(dSupA, dSupB)
         minSupport = wp.min(minA, minB)
-    buffer = (verletScale - scalar_t(1.0)) * minSupport
+    scale = verletScale
+    if useArr == 1:
+        scale = scaleArr[0]
+    buffer = (scale - scalar_t(1.0)) * minSupport
     out[0] = maxDistance
     out[1] = supportFactor
     out[2] = minSupport
@@ -92,6 +103,10 @@ def verletValidityMetrics(queryPositions, referencePositions, priorQueryPosition
     wpDevice = wp.device_from_torch(device)
     stream = wp.stream_from_torch(torch.cuda.current_stream(device)) if device.type == 'cuda' else None
     accW = wp.from_torch(acc)
+    if isinstance(verletScale, torch.Tensor):
+        scaleArr, useArr, scaleValue = wp.from_torch(verletScale.detach().reshape(1).to(querySupports.dtype).contiguous()), 1, 1.0
+    else:
+        scaleArr, useArr, scaleValue = wp.from_torch(getCachedDummyTensor((1,), dtype=querySupports.dtype, device=device)), 0, verletScale
     dom = (castTorchToWarp(domainMin), castTorchToWarp(domainMax), castTorchToWarp(periodicity))
     sets = [(queryPositions, priorQueryPositions, querySupports, supports_a, 0)]
     if not sameSet:
@@ -100,9 +115,9 @@ def verletValidityMetrics(queryPositions, referencePositions, priorQueryPosition
         wp.launch(_validityReduce, dim=pos.shape[0], device=wpDevice, stream=stream, inputs=[
             castTorchToWarpAsBuiltins(pos), castTorchToWarpAsBuiltins(prior),
             castTorchToWarp(sup), castTorchToWarp(supPrior), *dom,
-            scalar_t(verletScale), wp.int32(slot), accW])
+            scalar_t(scaleValue), scaleArr, wp.int32(useArr), wp.int32(slot), accW])
     wp.launch(_validityDecide, dim=1, device=wpDevice, stream=stream, inputs=[
-        accW, scalar_t(verletScale), wp.int32(support_case), scalar_t(rebuildSlack), wp.int32(1 if sameSet else 0),
+        accW, scalar_t(scaleValue), scaleArr, wp.int32(useArr), wp.int32(support_case), scalar_t(rebuildSlack), wp.int32(1 if sameSet else 0),
         wp.from_torch(out), wp.from_torch(flag)])
     maxDistance, supportFactor, minSupport, supportBuffer = out.unbind(0)
     return flag.reshape(()), maxDistance, supportFactor, minSupport, supportBuffer

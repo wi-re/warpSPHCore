@@ -53,3 +53,24 @@ def test_matchesTheTorchReference(device, periodic, supportCase, sameSet):
     # slack: rebuild earlier, never later
     slack = verletValidityMetrics(*args, rebuildSlack=0.9)[0]
     assert bool(slack) or not bool(ref[0])
+
+
+@pytest.mark.parametrize("supportCase", [0, 2])
+def test_aDeviceScaleDecidesLikeTheFloat(device, supportCase):
+    """`verletScale` as a 0-d device tensor gives exactly the float's answer, and needs no host read."""
+    positions, supports, n, domain, dx = generateNeighborTestData(10, 20, 2, False, device)
+    scale = 1.4
+    moved = positions + 0.4 * dx * torch.ones_like(positions)
+    args = lambda s: (moved, moved, positions, positions, supports, supports, supports * scale, supports * scale,
+                      domain.periodic, domain.min, domain.max, s, supportCase)
+    ref = verletValidityMetrics(*args(scale))
+    devScale = torch.tensor(scale, dtype=supports.dtype, device=device)
+    dev = verletValidityMetrics(*args(devScale))
+    for name, a, b in zip(("flag", "maxDistance", "supportFactor", "minSupport", "buffer"), ref, dev):
+        assert torch.equal(a.cpu(), b.cpu()), name
+    if device.type == "cuda":
+        torch.cuda.set_sync_debug_mode("error")
+        try:
+            verletValidityMetrics(*args(devScale))
+        finally:
+            torch.cuda.set_sync_debug_mode("default")

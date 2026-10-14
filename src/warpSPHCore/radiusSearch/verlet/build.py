@@ -45,7 +45,7 @@ def deferVerletChecks():
 def buildVerletList_(
         queryPositions: torch.Tensor, referencePositions: torch.Tensor,
         querySupports: torch.Tensor, referenceSupports: torch.Tensor,
-        domain : DomainDescription, verletScale : float = 1.0, 
+        domain : DomainDescription, verletScale : 'float | torch.Tensor' = 1.0, 
         mode : SupportScheme = SupportScheme.SuperSymmetric,
         priorNeighborhood : Optional[AdjacencyList] = None, 
         verbose : bool = False,
@@ -211,7 +211,7 @@ def verletUsage(positions, supports, adjacency, domain, verletScale, supportMode
 def buildVerletList(
         queryParticles: ParticleState, 
         domain: DomainDescription, 
-        verletScale : float = 1.0,
+        verletScale : 'float | torch.Tensor' = 1.0,
         supportMode: SupportScheme = SupportScheme.Gather,
         priorNeighborhood : Optional[AdjacencyList] = None,
         verbose : bool = False,
