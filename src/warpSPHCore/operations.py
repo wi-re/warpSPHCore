@@ -15,7 +15,8 @@ from .coreOperations import *
 from .enumTypes import *
 from .radiusSearch import buildCompactHashMap
 from typing import Optional, Tuple
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from .profiling import record_function            # the gated one (torch's would run its C++ RecordFunction on every call)
 
 
 # States are the primary path here: `warpOperation` takes semantic state objects and

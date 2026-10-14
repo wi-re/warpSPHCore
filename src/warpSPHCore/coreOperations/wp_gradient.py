@@ -14,7 +14,7 @@ from ..radiusSearch.grid_util import checkOffset, getIndexRange, getIndexRangeLa
 from ..math import *
 from ..kernels import *
 from ..util import *
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity     # (record_function: the gated one imported above)
 
 from ..enumTypes import *
 from ..autograd import *

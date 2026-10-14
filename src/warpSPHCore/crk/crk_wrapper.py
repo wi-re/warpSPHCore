@@ -18,7 +18,8 @@ from ..dataTypes import *
 from warpSPHCore.math import *
 from warpSPHCore.kernels import *
 from ..util import *
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import profile, ProfilerActivity
+from ..profiling import record_function
 from warpSPHCore.enumTypes import *
 from warpSPHCore.autograd.arg_check import *
 from typing import Optional
