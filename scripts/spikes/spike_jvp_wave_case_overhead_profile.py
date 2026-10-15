@@ -70,7 +70,7 @@ import warpSPHCore.operations as opsmod  # noqa: E402
 from common.runner import buildWaveCase  # noqa: E402
 from common.schemes import getScheme  # noqa: E402
 from warpSPHCore import OperationProperties, WarpOperation, warpOperation  # noqa: E402
-from warpSPHIntegrators import getIntegrator  # noqa: E402
+from warpSPHIntegrators import get_scheme  # noqa: E402
 
 DEVICE = "cuda:0"
 NX = 128
@@ -97,7 +97,7 @@ def part1_geometry_tangent_liveness(ctx, system) -> None:
     opsmod.warpOperationJVP = patched
     try:
         scheme = getScheme("sdirk2_jfnk_jvp_1e-6")
-        integrator = getIntegrator(scheme.integrationScheme)
+        integrator = get_scheme(scheme.integrationScheme)
         solver = scheme.makeSolver()
         state = system.initializeNewState()
         dt = ctx.config.dt
