@@ -57,7 +57,7 @@ def computeCovarianceJVP_Func_i(
     domainState: domainData,
     kernelProperties: kernelState,
 
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     correctionData: Any, correctionTangentData: Any,
 
@@ -65,7 +65,7 @@ def computeCovarianceJVP_Func_i(
 ):
     out = zero_like_warp(outputValue)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -186,6 +186,7 @@ def computeCovarianceGeometryJVP(
     referenceTangentState: Optional[ParticleTangentState] = None,
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ) -> torch.Tensor:
     """`dC_i`, the RAW (unmasked) covariance-matrix JVP, shape
     `[numParticles, dim, dim]` -- see module docstring. `queryParticles.densities`/
@@ -230,6 +231,8 @@ def computeCovarianceGeometryJVP(
         queryParticles.positions, queryParticles.supports, queryParticles.masses,
         referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
         queryTangentState, referenceTangentState,
+        queryKinds=queryParticles.kinds, referenceKinds=referenceParticles.kinds,
+        operationMode=operationMode,
         outputShape=nQuery,
         outputDtype=_get_warp_matrix_dtype(dim, dim, dtype),
         queryDensities=queryParticles.densities,

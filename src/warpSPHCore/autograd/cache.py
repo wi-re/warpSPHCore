@@ -8,6 +8,15 @@ from ..type_config import *
 _DUMMY_TENSOR_CACHE: dict[tuple, torch.Tensor] = {}
 
 
+def ownedBackwardSeed(grad: torch.Tensor) -> torch.Tensor:
+    """Own the seed storage and use canonical strides even for empty tensors."""
+    if grad.numel() == 0:
+        # contiguous()/clone() preserve expanded zero strides for empty tensors.
+        # Warp requires the adjoint's strides to match the forward output.
+        return torch.empty_like(grad, memory_format=torch.contiguous_format)
+    return grad.contiguous().clone()
+
+
 def clearDummyTensorCache() -> None:
     """Clear all cached dummy tensors.
 

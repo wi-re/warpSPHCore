@@ -30,6 +30,7 @@ import warp as wp
 from ...type_config import *
 from ...util import *
 from ...dataTypes import *
+from ..csr import validateParticleCounts
 from ...enumTypes import *
 from ...profiling import record_function
 from .grid import compute_h
@@ -71,6 +72,7 @@ class HashMapSlots:
 def makeHashMapSlots(n: int, domain: DomainDescription, radius: float, *, device, dtype=None,
                      mode: SupportScheme = SupportScheme.SuperSymmetric, hashMapLength: Optional[int] = None) -> HashMapSlots:
     """Slots for `n` particles in `domain`, with the grid built for supports up to `radius`."""
+    validateParticleCounts(n, n)
     device = torch.device(device)
     dtype = dtype or get_torch_precision()
     dim = domain.dim
@@ -97,7 +99,7 @@ def makeHashMapSlots(n: int, domain: DomainDescription, radius: float, *, device
         cellOffsets=padded,
         positions=torch.zeros((n, dim), **f), supports=torch.zeros((n,), **f),
         sortedPositions=torch.zeros((n, dim), **f), sortedSupports=torch.zeros((n,), **f),
-        sortIndex=torch.zeros((n,), dtype=torch.int64, device=device),
+        sortIndex=torch.zeros((n,), dtype=get_torch_index_dtype(), device=device),
         hashTableBuffer=torch.zeros((length + 1, 2), dtype=torch.int32, device=device),
         sortedCellTable=torch.zeros((n, 3), dtype=torch.int64, device=device),
         fits=torch.ones((), dtype=torch.bool, device=device))
@@ -120,7 +122,10 @@ def buildFixed(s: HashMapSlots) -> CompactHashMap:
     with record_function("neighborSearch - buildFixed"):
         x = torch.stack([torch.remainder(s.positions[:, d] - s.qMin[d], s.qMax[d] - s.qMin[d]) + s.qMin[d] if s.periodic[d]
                          else s.positions[:, d] for d in range(dim)], dim=1)
-        s.fits.copy_(s.supports.max() <= s.radius * (1.0 + 1e-6))
+        if n == 0:
+            s.fits.fill_(True)
+        else:
+            s.fits.copy_(s.supports.max() <= s.radius * (1.0 + 1e-6))
 
         indices = torch.floor((x - s.qMin) / s.hCell).to(torch.int32)
         indices = torch.minimum(torch.maximum(indices, torch.zeros_like(indices)), (s.numCellsT - 1).view(1, -1))

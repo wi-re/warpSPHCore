@@ -22,15 +22,17 @@ from warpSPHCore.enumTypes import (KernelFunctions, OperationDirection,
                                    SupportScheme, WarpOperation)
 from warpSPHCore.polyfit import PolyFit, monomialExponents
 from warpSPHCore.util import volumeToSupport
+from warpSPHCore.type_config import get_torch_precision
 
 KERNEL = KernelFunctions.Wendland2
+DTYPE = get_torch_precision()
 
 
 def _tol(dtype):
     return 2e-3 if dtype == torch.float32 else 1e-8
 
 
-def _case(device, dim=2, n=22, nbrs=40, jitter=0.3, seed=0, dtype=torch.float32):
+def _case(device, dim=2, n=22, nbrs=40, jitter=0.3, seed=0, dtype=DTYPE):
     g = torch.Generator().manual_seed(seed)
     axes = [torch.arange(n, dtype=torch.float64)] * dim
     pts = torch.stack(torch.meshgrid(*axes, indexing="ij"), -1).reshape(-1, dim)
@@ -170,6 +172,8 @@ def test_rank_deficiency_flagged(device):
 
 @pytest.mark.parametrize("dim, p, n, nbrs", [(1, 3, 200, 10), (3, 2, 9, 60)])
 def test_other_dimensions(device, dim, p, n, nbrs):
+    if dim == 3 and device.type == 'cpu':
+        pytest.skip('3D SPH qualification runs on CUDA')
     c = _case(device, dim=dim, n=n, nbrs=nbrs)
     pf = PolyFit.build(c["particles"], c["domain"], KERNEL, p, adjacency=c["adjacency"])
     ok = ~pf.deficient
@@ -190,7 +194,7 @@ def test_matches_pure_torch_reference(device):
         from rkpm import RKPMOperator, build_system
     except Exception as e:                    # pragma: no cover
         pytest.skip(f"harness reference not importable: {e}")
-    c = _case(device, dtype=torch.float32)
+    c = _case(device, dtype=DTYPE)
     pf = PolyFit.build(c["particles"], c["domain"], KERNEL, 2, adjacency=c["adjacency"])
     p = c["particles"]
     vol = (p.masses / p.densities).to(torch.float64)
@@ -307,7 +311,7 @@ def test_forward_mode_field_tangent(case2d, constant):
 
 
 def _periodic_lattice_case(device, n=10, nbrs=16, jitter=0.2, seed=3):
-    dtype = torch.float32
+    dtype = DTYPE
     g = torch.Generator().manual_seed(seed)
     ax = torch.arange(n, dtype=torch.float64)
     pts = torch.stack(torch.meshgrid(ax, ax, indexing="ij"), -1).reshape(-1, 2) / n

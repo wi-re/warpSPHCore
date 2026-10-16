@@ -158,30 +158,32 @@ def getIndexRange(
     if useAdjacency:
         beginIndex = adjacencyState.neighborOffsets[i]
         numIndices = adjacencyState.numNeighbors[i]
-        return beginIndex, numIndices
+        return offset_t(beginIndex), numIndices
     else:
-        beginIndex, numIndices = checkOffset(
+        gridBegin, gridCount = checkOffset(
             i, queryState.positions, gridState.numCells, gridState.D,
             o, gridState.cellOffsets, gridState.hashTable, gridState.cellTable,
             domainState.periodicity, gridState.qMin, gridState.qMax, gridState.hCell
         )
-        return beginIndex, numIndices
+        return offset_t(gridBegin), gridCount
 
 
 @wp.func
-def laneSubRange(beginIndex: wp.int32, numIndices: wp.int32, lane: wp.int32, lanes: wp.int32):
+def laneSubRange(beginIndex: offset_t, numIndices: wp.int32, lane: wp.int32, lanes: wp.int32):
     """The contiguous slice of ``[beginIndex, beginIndex + numIndices)`` that
     lane ``lane`` of ``lanes`` cooperating threads owns (possibly empty).
     ``lanes == 1`` returns the range unchanged. Used by the tiled
     (multi-lane-per-particle) operator kernels -- see ``autograd/lanes.py``."""
-    chunk = (numIndices + lanes - wp.int32(1)) // lanes
-    start = lane * chunk
-    count = wp.max(wp.int32(0), wp.min(chunk, numIndices - start))
-    return beginIndex + start, count
+    # Avoid both count+lanes-1 overflow and out-of-range addresses for empty
+    # lanes at the end of a nearly-full int32 CSR buffer.
+    chunk = numIndices // lanes + wp.int32(numIndices % lanes != 0)
+    start = wp.min(wp.int64(lane) * wp.int64(chunk), wp.int64(numIndices))
+    count = wp.min(chunk, numIndices - wp.int32(start))
+    return beginIndex + offset_t(start), count
 
 
 @wp.func
-def laneSlice(beginIndex: wp.int32, numIndices: wp.int32, lane: wp.int32, lanes: wp.int32,
+def laneSlice(beginIndex: offset_t, numIndices: wp.int32, lane: wp.int32, lanes: wp.int32,
               useAdjacency: wp.bool):
     """This lane's share of one traversal range: a contiguous slice of a
     neighbour list (`laneSubRange`), or -- grid traversal, where the caller
@@ -213,11 +215,11 @@ def getIndexRangeLane(
         # grid traversal: lanes take whole cells round-robin (a cell holds a
         # handful of particles -- splitting it 32 ways left most lanes idle
         # while every lane repeated the hash lookup for every cell)
-        return wp.int32(-1), wp.int32(-1)
+        return offset_t(-1), wp.int32(-1)
     beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
     if beginIndex < 0:
-        return wp.int32(beginIndex), wp.int32(numIndices)
-    return laneSlice(wp.int32(beginIndex), wp.int32(numIndices), lane, lanes, useAdjacency)
+        return offset_t(beginIndex), wp.int32(numIndices)
+    return laneSlice(offset_t(beginIndex), wp.int32(numIndices), lane, lanes, useAdjacency)
 
 @wp.func
 def laneSum(value: Any):

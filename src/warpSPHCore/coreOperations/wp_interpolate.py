@@ -39,7 +39,7 @@ def computeSPHInterpolation_Func_i(
 
     # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
     # neighbor list or the grid's sorted particle index, depending on the caller.
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Optional correction terms
     iCorrectionData: Any, # ParticleCorrectionData_1/2/3, picked by dimensionality
@@ -53,7 +53,7 @@ def computeSPHInterpolation_Func_i(
 ):
     out = zero_like_warp(outputValue)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -241,7 +241,9 @@ def _computeSPHInterpolant_stateBackend(
             field_shape = referenceValues.shape[1:]
             needs_flatten = referenceValues.dim() > 3
             if needs_flatten:
-                flat_len = referenceValues[0].numel()
+                flat_len = 1
+                for width in field_shape:
+                    flat_len *= width
                 referenceValues = referenceValues.reshape(referenceValues.shape[0], flat_len).contiguous()
 
             # `operation` is the only field the caller cannot have set correctly

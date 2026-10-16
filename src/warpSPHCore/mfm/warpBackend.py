@@ -17,6 +17,7 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
+import torch.autograd.forward_ad as fwAD
 
 from ..dataTypes import DomainDescription, OperationProperties, ParticleState
 from ..enumTypes import KernelFunctions, OperationDirection, SupportScheme
@@ -47,6 +48,15 @@ _WS_CAPACITY = 1.25
 _WS_MAX = 2
 #: outer passes of the bounded closure's lagged-secant iteration (`closure_cap` > 0)
 _CAP_OUTER = 8
+
+
+def _forwardOnly(*values):
+    """Reject partial gradients at the public forward-only backend boundary."""
+    for value in values:
+        if value is not None and ((torch.is_grad_enabled() and value.requires_grad)
+                                  or fwAD.unpack_dual(value).tangent is not None):
+            raise NotImplementedError(
+                'MeshlessWarp is forward-only; use MeshlessGeometry and mfmRates for differentiation.')
 
 
 class _ClosureWorkspace:
@@ -130,6 +140,13 @@ class MeshlessWarp:
         # built once (fastLaunch.py) instead of on every launch
         self._fast = PreparedLauncher(_ctx(particles, props, domain, adjacency))
 
+    def _checkForwardOnly(self, *values):
+        # Metadata can change after construction; inspect live inputs at each
+        # call rather than treating the prepared prefix as permanently inert.
+        _forwardOnly(self.particles.positions, self.particles.supports,
+                     self.domain.min, self.domain.max, self.volume, self.Einv,
+                     self.cond, self.lam, *values)
+
     @classmethod
     def build(cls, positions: torch.Tensor, supports: torch.Tensor, domain: DomainDescription,
               kernel: KernelFunctions, adjacency=None, cond_max: float = 1.0e3, closure: str = "project",
@@ -138,6 +155,7 @@ class MeshlessWarp:
               face_cond_max: Optional[float] = None, centred_weights: bool = True, area_cap: bool = False,
               closure_solver: str = "auto", mg_min_particles: int = 2048,
               mg_max_coarse: int = 512, lam_cap: float = 1e3, closure_cap: float = 0.0) -> "MeshlessWarp":
+        _forwardOnly(positions, supports, domain.min, domain.max, lam0)
         if closure not in ("project", "none"):
             raise ValueError("closure must be 'project' or 'none'")
         N, dim = positions.shape
@@ -184,6 +202,7 @@ class MeshlessWarp:
         """Solve the closure projection on this geometry (in place; what ``build(closure="project")`` does after
         the moments). Lets a geometry built with ``closure="none"`` -- e.g. for the timestep, which never reads
         ``lam`` -- be reused as the step's geometry at the same positions and supports instead of rebuilt."""
+        self._checkForwardOnly(lam0)
         self.closure_power = closure_power
         N = self.volume.shape[0]
         useMg = closure_solver == "mg" or (closure_solver == "auto" and N >= mg_min_particles)
@@ -407,6 +426,7 @@ class MeshlessWarp:
     # ------------------------------------------------------------------
     def gradients(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor):
         """Matrix least-squares gradients ``(grad rho (N,d), grad v (N,d,d), grad P (N,d))``."""
+        self._checkForwardOnly(rho, vel, pres)
         return self._fast.launch(_GRADIENTS_SPEC, rho=rho.contiguous(), vel=vel.contiguous(), pres=pres.contiguous(),
                                  Einv=self.Einv, deficient=self.deficient.to(torch.int32))
 
@@ -415,6 +435,10 @@ class MeshlessWarp:
               cond_crit: float = 100.0, psi1: float = 0.5, psi2: float = 0.25, timeCentredFrame: bool = True,
               retry: bool = True, massFluxLimit: float = 0.1, faceGuard: int = 0):
         """``dQ/dt`` of shape ``(N, 2 + dim)`` for ``Q = (m, m v, m e_tot)``, as ``scheme.mfmRates``."""
+        self._checkForwardOnly(rho, vel, pres)
+        mode = mode.upper()
+        if mode not in ("MFM", "MFV"):
+            raise ValueError("mode must be 'MFM' or 'MFV'")
         N, dim = vel.shape
         rho, vel, pres = rho.contiguous(), vel.contiguous(), pres.contiguous()
         if order >= 2:
@@ -439,5 +463,6 @@ class MeshlessWarp:
 
     def timestep(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor, gamma: float, cfl: float = 0.2):
         """Per-particle CFL time step ``2 C h_i / v_sig,i`` (Eq. 24-25)."""
+        self._checkForwardOnly(rho, vel, pres)
         return self._fast.launch(_TIMESTEP_SPEC, rho=rho.contiguous(), vel=vel.contiguous(), pres=pres.contiguous(),
                                  gamma=scalar_t(gamma), cfl=scalar_t(cfl))

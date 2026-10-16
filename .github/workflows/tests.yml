@@ -34,6 +34,14 @@ jobs:
       - name: Run pytest suite
         run: pytest tests/ -v
 
+      - name: Check integer widths independently of precision
+        run: python scripts/diagnostics/qualify_index_types.py --device cpu --output /tmp/index-types.json
+
+      - name: Check isolated wheel and public examples in both precisions
+        run: |
+          python -m build --wheel --outdir /tmp/warpsphcore-wheel
+          python scripts/packaging/check_wheel.py /tmp/warpsphcore-wheel/*.whl
+
       - name: Run operation matrix (2D, float32, non-jittered, CI gate)
         run: python scripts/diagnostics/operation_matrix.py --device cpu --ci --verbose
 

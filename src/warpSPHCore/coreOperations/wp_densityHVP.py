@@ -116,6 +116,8 @@ from ..type_config import *
 from ..dataTypes import *
 from ..enumTypes import *
 from ..util import castTorchToWarp, allocateTorchWarp
+from ..util.directionality import checkDirectionality_Func
+from ..math import zero_like_warp
 from ..kernels.hessian import sphKernelHessian
 from ..util.stateUtil import getParticle
 from ._jvpCommon import buildParticleSoA as _buildParticleSoA, buildDomainState as _buildDomainState, buildKernelState as _buildKernelState
@@ -129,8 +131,8 @@ def _computeSPHDensityHVP_PairKernel(
     referenceState: Any,
     domainState: domainData,
     kernelProperties: kernelState,
-    edgeI: wp.array(dtype=wp.int64),
-    edgeJ: wp.array(dtype=wp.int64),
+    edgeI: wp.array(dtype=index_t),
+    edgeJ: wp.array(dtype=index_t),
     outH: wp.array(dtype=Any),
 ):
     e = wp.tid()
@@ -144,6 +146,11 @@ def _computeSPHDensityHVP_PairKernel(
     xi, hi, _mi, _rhoi, _ki = getParticle(queryState, i)
     xj, hj, _mj, _rhoj, _kj = getParticle(referenceState, j)
 
+    if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
+        if not checkDirectionality_Func(_ki, _kj, kernelProperties.operationMode):
+            outH[e] = zero_like_warp(outH[e])
+            return
+
     outH[e] = sphKernelHessian(xi, xj, hi, hj, kernelProperties, domainState)
 
 
@@ -156,6 +163,7 @@ def computeSPHDensityPositionHVP(
     tangentQueryPositions: torch.Tensor,
     referenceParticles: Optional[ParticleState] = None,
     tangentReferencePositions: Optional[torch.Tensor] = None,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ) -> torch.Tensor:
     """`Hess(Density)_i @ v`, shape `[numQuery, dim]` -- the Hessian-vector
     product a Newton-Krylov matvec needs (Phase 4 Steps 3-4), with `v` =
@@ -180,10 +188,12 @@ def computeSPHDensityPositionHVP(
         else torch.zeros((nRef, dim), device=device, dtype=dtype)
     )
 
-    queryState = _buildParticleSoA(dim, queryParticles.positions, queryParticles.supports, queryParticles.masses)
-    referenceState = _buildParticleSoA(dim, referenceParticles.positions, referenceParticles.supports, referenceParticles.masses)
+    queryState = _buildParticleSoA(dim, queryParticles.positions, queryParticles.supports,
+                                  queryParticles.masses, kinds=queryParticles.kinds)
+    referenceState = _buildParticleSoA(dim, referenceParticles.positions, referenceParticles.supports,
+                                      referenceParticles.masses, kinds=referenceParticles.kinds)
     domainState = _buildDomainState(domain)
-    kernelProperties = _buildKernelState(kernel, supportMode)
+    kernelProperties = _buildKernelState(kernel, supportMode, operationMode=operationMode)
 
     liveI, liveJ = adjacency.livePairs()   # real entries only (the padded tail is -1)
     edgeI = castTorchToWarp(liveI)
@@ -197,6 +207,7 @@ def computeSPHDensityPositionHVP(
         dim=numPairs,
         inputs=[queryState, referenceState, domainState, kernelProperties, edgeI, edgeJ, H_w],
         device=edgeI.device,
+        stream=wp.stream_from_torch(torch.cuda.current_stream(device)) if device.type == 'cuda' else None,
     )
 
     ii, jj = liveI.long(), liveJ.long()

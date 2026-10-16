@@ -15,8 +15,10 @@ value, kappa = 0); ``constant=False`` is the LABFM form (no constant basis
 function, data taken as differences, kappa = 1, ``f_i`` reproduced exactly).
 Both reproduce polynomials through degree p exactly wherever ``M`` has full
 rank; rows with fewer neighbours than basis functions or condition number
-above ``cond_max`` are flagged in ``deficient`` (their coefficients are the
-minimum-norm solution -- callers decide whether to mask them).
+above ``cond_max`` or a truncated basis direction are flagged in ``deficient``.
+Deficient coefficients are minimum norm in the equilibrated coordinates;
+callers decide whether to use them. Reconstructor falls back to the particle
+state when it has no usable candidate.
 
 The pure-torch reference (and the full derivation / tests) is
 ``higherOrderSPH/harness/rkpm.py``; this module is validated against it in
@@ -65,7 +67,7 @@ class PolyFit:
     constant: bool
     exps: torch.Tensor             # (n, dim) int32 (device) -- what the kernels read
     h: torch.Tensor                # (N,) per-particle scale (the query support)
-    M: torch.Tensor                # (N, n, n)
+    M: torch.Tensor                # (N_query, n, n)
     Minv: torch.Tensor             # (N, n, n)
     cond: torch.Tensor             # (N,) of the Jacobi-equilibrated matrix
     num_nbrs: torch.Tensor         # (N,) neighbours counted by the kernel
@@ -89,12 +91,21 @@ class PolyFit:
               queryVolumes: Optional[torch.Tensor] = None,
               referenceVolumes: Optional[torch.Tensor] = None,
               operationMode: OperationDirection = OperationDirection.AllToAll,
-              equilibrate: bool = True, rtol: float = 1e-12,
+              equilibrate: bool = True, rtol: Optional[float] = None,
               cond_max: float = 1e10, sector: int = -1, numSectors: int = 8,
               unitWeights: bool = False, minNeighbors: Optional[int] = None) -> "PolyFit":
+        # Default rank resolution follows dtype; explicit rtol keeps the caller's
+        # policy. cond_max is a separate diagnostic/reconstruction acceptance cap.
         # forward mode: dual particle tensors carry geometry tangents. The kernels
         # run on the primals; the tangents are applied through the JVP kernels.
+        if not constant and referenceParticles is not None and referenceParticles is not queryParticles:
+            raise NotImplementedError('LABFM differences require one particle set; separate query field values are not provided.')
         supportsDual = queryParticles.supports
+        restricted = [queryVolumes, referenceVolumes]
+        if referenceParticles is not None:
+            restricted.extend(getattr(referenceParticles, name) for name in ('positions','supports','masses','densities'))
+        if any(t is not None and fwAD.unpack_dual(t).tangent is not None for t in restricted):
+            raise NotImplementedError('PolyFit geometry tangents require a single particle set and plain m/rho volumes.')
         tangents = None
         parts = []
         anyTangent = False
@@ -120,6 +131,8 @@ class PolyFit:
         N, dim = pos.shape
         exps_all = monomialExponents(dim, order)
         exps_list = exps_all if constant else exps_all[1:]
+        if not exps_list:
+            raise ValueError('LABFM requires order >= 1.')
         exps = torch.tensor(exps_list, dtype=torch.int32, device=pos.device)
         n = exps.shape[0]
 
@@ -139,7 +152,11 @@ class PolyFit:
         M = M + torch.tril(M, -1).transpose(1, 2)
 
         if equilibrate:
-            d = torch.sqrt(torch.diagonal(M, dim1=1, dim2=2).abs().clamp_min(1e-300))
+            diagonal = torch.diagonal(M, dim1=1, dim2=2).abs()
+            # A zero PSD diagonal identifies an absent basis direction. Use a
+            # neutral scale there; a tiny float64 literal underflows in FP32,
+            # and sqrt(0) can contaminate inactive adjoints too.
+            d = torch.sqrt(torch.where(diagonal > 0, diagonal, torch.ones_like(diagonal)))
         else:
             d = torch.ones(N, n, dtype=M.dtype, device=M.device)
         dd = d[:, :, None] * d[:, None, :]
@@ -148,10 +165,14 @@ class PolyFit:
         # svdvals -- torch's batched CUDA SVD falls off its fast path above
         # 32 x 32 (19 s vs 0.02 s for 2200 matrices of size 44).
         S = torch.linalg.eigvalsh(Me).abs()
-        cond = S.max(1).values / S.min(1).values.clamp_min(1e-300)
-        Minv = torch.linalg.pinv(Me, rtol=rtol, hermitian=True) / dd
+        largest, smallest = S.max(1).values, S.min(1).values
+        cond = largest / torch.where(smallest > 0, smallest, torch.ones_like(smallest))
+        cond = torch.where(smallest > 0, cond, torch.full_like(cond, float('inf')))
+        cutoff = max(1e-12, n * torch.finfo(M.dtype).eps) if rtol is None else rtol
+        rank = (S > cutoff * largest[:, None]).sum(1)
+        Minv = torch.linalg.pinv(Me, rtol=cutoff, hermitian=True) / dd
         deficient = (nnb < (n if minNeighbors is None else minNeighbors)) \
-            | (cond > cond_max) | ~torch.isfinite(cond)
+            | (rank < n) | (cond > cond_max) | ~torch.isfinite(cond)
 
         args = dict(queryParticles=queryParticles, props=props, domain=domain,
                     queryVolumes=queryVolumes, referenceVolumes=referenceVolumes,
@@ -161,7 +182,7 @@ class PolyFit:
         if tangents is not None:
             dMp = computePolyMomentsGeometryJVP(
                 queryParticles, domain, kernel, adjacency, tangents, exps,
-                supportMode=SupportScheme.Gather, **stencil)
+                supportMode=SupportScheme.Gather, operationMode=operationMode, **stencil)
             dM = torch.zeros(N, n, n, dtype=dMp.dtype, device=pos.device)
             dM[:, rows, cols] = dMp
             dM = dM + torch.tril(dM, -1).transpose(1, 2)
@@ -186,19 +207,29 @@ class PolyFit:
         ``dual_level`` the particle tensors were made dual in. Rank-deficient
         rows (pseudo-inverse at a rank change) have no meaningful tangent."""
         primal, tangent = fwAD.unpack_dual(f)
+        reference = self._args['referenceParticles']
+        reference = self._args['queryParticles'] if reference is None else reference
+        if primal.ndim not in (1, 2) or primal.shape[0] != reference.positions.shape[0]:
+            raise ValueError('Field must have shape (N_reference,) or (N_reference, components).')
         scalar = primal.dim() == 1
         F = (primal[:, None] if scalar else primal).contiguous()
         c = self._coefficients3(F)
         if tangent is None and self._tangent is None:
             return c[:, :, 0] if scalar else c
         dF = None if tangent is None else (tangent[:, None] if scalar else tangent).contiguous()
+        if self._tangent is None:
+            # Field linearity uses the same primal RHS, including distinct
+            # references, explicit volumes and categorical interaction rules.
+            dc = self._coefficients3(dF)
+            out = fwAD.make_dual(c, dc)
+            return out[:, :, 0] if scalar else out
         a = self._args
         db = computePolyRHSGeometryJVP(
             a["queryParticles"], a["domain"], a["kernel"], a["adjacency"], self._tangent,
             self.exps, F, dF, subtractCenter=not self.constant,
             sector=a["stencil"]["sector"], numSectors=a["stencil"]["numSectors"],
-            unitWeights=a["stencil"]["unitWeights"])
-        db = db.reshape(F.shape[0], self.n_basis, F.shape[1])
+            unitWeights=a["stencil"]["unitWeights"], operationMode=a['props'].operationMode)
+        db = db.reshape(self.M.shape[0], self.n_basis, F.shape[1])
         if self._dM is not None:
             db = db - torch.einsum("nab,nbd->nad", self._dM, c)
         dc = torch.einsum("nab,nbd->nad", self.Minv, db)
@@ -214,7 +245,7 @@ class PolyFit:
             queryVolumes=a["queryVolumes"], referenceVolumes=a["referenceVolumes"],
             adjacency=a["adjacency"], referenceParticles=a["referenceParticles"],
             **a["stencil"])
-        b = b.reshape(F.shape[0], self.n_basis, F.shape[1])
+        b = b.reshape(self.M.shape[0], self.n_basis, F.shape[1])
         return torch.einsum("nab,nbd->nad", self.Minv, b)
 
     def _col(self, c: torch.Tensor, e: tuple[int, ...]) -> torch.Tensor:
@@ -251,7 +282,7 @@ class PolyFit:
         if self.order < 2 or f.dim() != 1:
             return None
         c = self.coefficients(f)
-        H = torch.zeros(f.shape[0], self.dim, self.dim, dtype=c.dtype, device=c.device)
+        H = torch.zeros(c.shape[0], self.dim, self.dim, dtype=c.dtype, device=c.device)
         for a in range(self.dim):
             for b in range(self.dim):
                 e = [0] * self.dim

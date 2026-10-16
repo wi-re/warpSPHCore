@@ -116,7 +116,7 @@ def computePolyMomentsJVP_Func_i(
     i: wp.int32, dim: wp.int32,
     iPtcl: Any, iTan: Any, referenceState: Any, referenceTangentState: Any,
     domainState: domainData, kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     correctionData: Any, correctionTangentData: Any,
 
     ea: Any,  # type: ignore
@@ -125,7 +125,7 @@ def computePolyMomentsJVP_Func_i(
 ):
     s = scalar_t(0.0)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -194,19 +194,19 @@ def computePolyRHSJVP_Func_i(
     i: wp.int32, dim: wp.int32,
     iPtcl: Any, iTan: Any, referenceState: Any, referenceTangentState: Any,
     domainState: domainData, kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     correctionData: Any, correctionTangentData: Any,
 
     ea: Any,  # type: ignore
     values: wp.array(dtype=Any),  # type: ignore
     tangentValues: wp.array(dtype=Any),  # type: ignore
-    centerValue: Any, dCenterValue: Any,  # type: ignore
+    centerValue: scalar_t, dCenterValue: scalar_t,  # type: ignore
     comp: wp.int32,
     sector: wp.int32, numSectors: wp.int32, unitWeights: wp.int32,
 ):
     s = scalar_t(0.0)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -219,8 +219,8 @@ def computePolyRHSJVP_Func_i(
         pa, dpa = polyMonomialJVP(ea, xi, dxi, dim)
         fj = values[j]
         dfj = tangentValues[j]
-        s += (dw * pa + w * dpa) * (fj[comp] - centerValue[comp]) \
-            + w * pa * (dfj[comp] - dCenterValue[comp])
+        s += (dw * pa + w * dpa) * (fj[comp] - centerValue) \
+            + w * pa * (dfj[comp] - dCenterValue)
     return s
 
 
@@ -252,11 +252,11 @@ def computePolyRHSJVP_Kernel(
     dim = domainState.dim
     iPtcl = getParticleData(queryState, i)
     iTan = getParticleData(queryTangentState, i)
-    centerValue = values[i] * scalar_t(0.0)
-    dCenterValue = tangentValues[i] * scalar_t(0.0)
+    centerValue = scalar_t(0.0)
+    dCenterValue = scalar_t(0.0)
     if subtractCenter != 0:
-        centerValue = values[i]
-        dCenterValue = tangentValues[i]
+        centerValue = values[i][comp]
+        dCenterValue = tangentValues[i][comp]
     s = scalar_t(0.0)
     ok = True
     if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -299,6 +299,7 @@ def computePolyMomentsGeometryJVP(
     adjacency, queryTangentState: ParticleTangentState, exponents: torch.Tensor,
     supportMode: SupportScheme = SupportScheme.Gather,
     sector: int = -1, numSectors: int = 8, unitWeights: bool = False,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ) -> torch.Tensor:
     """Tangent of the packed moment matrices, ``(N, n(n+1)/2)`` (same packing
     as `_computePolyMoments_stateBackend`). Query and reference roles are the
@@ -314,6 +315,7 @@ def computePolyMomentsGeometryJVP(
         tan, tan,
         outputShape=(N, L), outputDtype=scalar_t,
         queryDensities=queryParticles.densities, referenceDensities=queryParticles.densities,
+        queryKinds=queryParticles.kinds, referenceKinds=queryParticles.kinds, operationMode=operationMode,
         extraTensors=(exponents, rowCol),
         extraScalars=(int(sector), int(numSectors), int(unitWeights)),
         numThreads=N * L,
@@ -326,6 +328,7 @@ def computePolyRHSGeometryJVP(
     values: torch.Tensor, tangentValues: Optional[torch.Tensor], subtractCenter: bool,
     supportMode: SupportScheme = SupportScheme.Gather,
     sector: int = -1, numSectors: int = 8, unitWeights: bool = False,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ) -> torch.Tensor:
     """Total tangent ``db`` of the right-hand sides, ``(N, n * D)``: geometry
     tangent plus the field tangent ``tangentValues`` (zeros if None).
@@ -343,6 +346,7 @@ def computePolyRHSGeometryJVP(
         tan, tan,
         outputShape=(N, n * D), outputDtype=scalar_t,
         queryDensities=queryParticles.densities, referenceDensities=queryParticles.densities,
+        queryKinds=queryParticles.kinds, referenceKinds=queryParticles.kinds, operationMode=operationMode,
         extraTensors=(exponents, values.contiguous(), tangentValues.contiguous()),
         extraScalars=(int(subtractCenter), D, int(sector), int(numSectors), int(unitWeights)),
         numThreads=N * n * D,

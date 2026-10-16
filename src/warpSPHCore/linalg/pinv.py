@@ -13,19 +13,25 @@ and many small launches. Here one kernel per batch:
 Only the symmetric part is used (`(S + S^T) / 2`): a clearly non-symmetric matrix is NOT inverted correctly -- use `torch.linalg.pinv` for those.
 Accuracy against a float64 pinv is the same as torch's own float32 pinv (rows with condition number below 1e3: 1.7e-5 / 3.1e-5 relative in
 2D / 3D float32, ~1e-13 in float64); rows that are ill-conditioned to within the cut-off (cond >~ 2e4 in float32) are noise in both and can
-differ. Forward only: with an input that requires grad the torch call is used instead. Not `warpSPHCore.pinv` (the renormalisation wrapper), which is a
-renormalisation policy (identity below four neighbours, rcond 1e-6) with no 3x3.
+differ. Native kernels use the process precision; inputs requiring reverse or forward AD use Torch instead.
+Not `warpSPHCore.pinv` (the renormalisation wrapper), which is a
+renormalisation policy with its own low-neighbor fallback, rcond 1e-6 and diagnostics.
 
 Inside a kernel: `A = loadPadded3x3(arr2d, i, dim)`, `P = symmetricPinv3(A, rtol)`.
 """
 
 from typing import Optional
+import math
+from numbers import Real
 
 import torch
+import torch.autograd.forward_ad as fwAD
 import warp as wp
 from warp.types import matrix
+from ..pinv.symmetric import selectedSymmetricInverse
 
-from ..type_config import scalar_t
+from ..type_config import get_torch_precision, scalar_t
+from ..autograd.stream import currentTorchWarpStream
 
 __all__ = ['pinvSymmetric', 'applyPinv', 'symmetricPinv3', 'loadPadded3x3']
 
@@ -115,23 +121,47 @@ def _applyPinvKernel(V: wp.array3d(dtype=scalar_t), M: wp.array2d(dtype=scalar_t
 
 
 def _check(M: torch.Tensor):
+    if not isinstance(M, torch.Tensor):
+        raise ValueError('M must be a torch.Tensor')
     if M.ndim != 3 or M.shape[1] != M.shape[2] or not 1 <= M.shape[1] <= 3:
         raise ValueError(f'expected a batch of symmetric 1x1..3x3 matrices, shape (n, d, d) with d <= 3, got {tuple(M.shape)}')
+    if M.dtype not in (torch.float32, torch.float64):
+        raise ValueError('M must have dtype float32 or float64')
+    if M.device.type not in ('cpu', 'cuda'):
+        raise ValueError('M must be on CPU or CUDA')
 
 
 def _rtol(rtol: Optional[float], dim: int, dtype: torch.dtype) -> float:
+    if rtol is not None and (isinstance(rtol, bool) or not isinstance(rtol, Real) or not math.isfinite(rtol) or rtol < 0):
+        raise ValueError('rtol must be a finite nonnegative number or None')
     return dim * torch.finfo(dtype).eps if rtol is None else rtol         # torch.linalg.pinv's default: max(m, n) * eps
 
 
+def _needsTorch(t):
+    return t.requires_grad or fwAD.unpack_dual(t).tangent is not None
+
+
+def _nativeStream(M):
+    if M.dtype != get_torch_precision():
+        raise ValueError(f'native pinv requires process precision {get_torch_precision()}; '
+                         'set warpSPHCore_PRECISION before importing, or use torch.linalg.pinv')
+    return currentTorchWarpStream(M.device)
+
+
 def pinvSymmetric(M: torch.Tensor, rtol: Optional[float] = None) -> torch.Tensor:
-    """`torch.linalg.pinv` of a batch `(n, d, d)` of symmetric matrices (d <= 3): one launch, no host read."""
+    """Symmetric pinv, d <= 3. Native: process precision, one launch on Torch's
+    current stream, no host read. Reverse/forward AD and empty batches use
+    Torch. Strided inputs are copied as needed; the native output is contiguous.
+    """
     _check(M)
-    if M.requires_grad or M.shape[0] == 0:
-        return torch.linalg.pinv(M, rtol=rtol)
+    cut = _rtol(rtol, M.shape[1], M.dtype)
+    if _needsTorch(M) or M.shape[0] == 0:
+        return selectedSymmetricInverse(M, cut)
     n, dim, _ = M.shape
-    out = torch.empty_like(M)
-    wp.launch(_pinvKernel, dim=n, device=wp.device_from_torch(M.device),
-              inputs=[wp.from_torch(M.reshape(n, dim * dim).contiguous()), dim, _rtol(rtol, dim, M.dtype),
+    stream = _nativeStream(M)
+    out = torch.empty(M.shape, dtype=M.dtype, device=M.device)
+    wp.launch(_pinvKernel, dim=n, device=wp.device_from_torch(M.device), stream=stream,
+              inputs=[wp.from_torch(M.reshape(n, dim * dim).contiguous()), dim, cut,
                       wp.from_torch(out.view(n, dim * dim))])
     return out
 
@@ -140,13 +170,19 @@ def applyPinv(V: torch.Tensor, M: torch.Tensor, rtol: Optional[float] = None) ->
     """`V @ pinv(M)` per batch entry, `V` of shape `(n, p, d)` and `M` of shape `(n, d, d)` symmetric: the
     `einsum('ipj,ijk->ipk', V, torch.linalg.pinv(M))` of a gradient corrected by its moment matrix, in one launch with no host read."""
     _check(M)
+    if not isinstance(V, torch.Tensor):
+        raise ValueError('V must be a torch.Tensor')
     if V.ndim != 3 or V.shape[0] != M.shape[0] or V.shape[2] != M.shape[1]:
         raise ValueError(f'V must be (n, p, d) for M (n, d, d); got {tuple(V.shape)} and {tuple(M.shape)}')
-    if V.requires_grad or M.requires_grad or M.shape[0] == 0:
-        return torch.einsum('ipj,ijk->ipk', V, torch.linalg.pinv(M, rtol=rtol))
+    if V.dtype != M.dtype or V.device != M.device:
+        raise ValueError('V and M must have the same dtype and device')
+    cut = _rtol(rtol, M.shape[1], M.dtype)
+    if _needsTorch(V) or _needsTorch(M) or M.shape[0] == 0:
+        return torch.einsum('ipj,ijk->ipk', V, selectedSymmetricInverse(M, cut))
     n, dim, _ = M.shape
-    out = torch.empty_like(V)
-    wp.launch(_applyPinvKernel, dim=n, device=wp.device_from_torch(M.device),
+    stream = _nativeStream(M)
+    out = torch.empty(V.shape, dtype=V.dtype, device=V.device)
+    wp.launch(_applyPinvKernel, dim=n, device=wp.device_from_torch(M.device), stream=stream,
               inputs=[wp.from_torch(V.contiguous()), wp.from_torch(M.reshape(n, dim * dim).contiguous()), dim,
-                      _rtol(rtol, dim, M.dtype), wp.from_torch(out)])
+                      cut, wp.from_torch(out)])
     return out

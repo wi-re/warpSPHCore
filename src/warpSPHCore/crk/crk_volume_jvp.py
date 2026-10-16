@@ -48,13 +48,13 @@ def computeCRKVolumeJVP_Func_i(
     domainState: domainData,
     kernelProperties: kernelState,
 
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
 ):
     dwsum = scalar_t(0.0)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -169,6 +169,7 @@ def computeCRKVolumeGeometryJVP(
     queryTangentState: ParticleTangentState,
     referenceParticles: Optional[ParticleState] = None,
     referenceTangentState: Optional[ParticleTangentState] = None,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ) -> torch.Tensor:
     """`dV_i`, shape `[numParticles]` -- the JVP counterpart to
     `_computeCRKVolume_stateBackend`. Always `SupportScheme.Gather`, matching
@@ -218,6 +219,8 @@ def computeCRKVolumeGeometryJVP(
         queryParticles.positions, queryParticles.supports, queryParticles.masses,
         referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
         queryTangentState, referenceTangentState,
+        queryKinds=queryParticles.kinds, referenceKinds=referenceParticles.kinds,
+        operationMode=operationMode,
         outputShape=nQuery,
         outputDtype=scalar_t,
         queryDensities=queryParticles.densities,

@@ -29,6 +29,13 @@ def _verlet_validity_metrics(
         verletScale: float,
         support_case: int,
         rebuildSlack: float = 0.0):
+    if (queryPositions.shape != priorQueryPositions.shape or
+            referencePositions.shape != priorReferencePositions.shape):
+        zero = querySupports.new_zeros(())
+        return torch.ones((), dtype=torch.bool, device=querySupports.device), zero, zero, zero, zero
+    if queryPositions.shape[0] == 0 or referencePositions.shape[0] == 0:
+        zero = querySupports.new_zeros(())
+        return torch.zeros((), dtype=torch.bool, device=querySupports.device), zero, zero, zero, zero
     # Stored supports in the Verlet adjacency were scaled by `verletScale` during build.
     priorQuerySupports = supports_a / verletScale
     priorReferenceSupports = supports_b / verletScale

@@ -107,10 +107,18 @@ def invertMoments(Es: torch.Tensor, rtol: Optional[float] = None, pinv_above: Op
     if bool(bad.any()):
         idx = torch.nonzero(bad).flatten()
         pi = torch.linalg.pinv(Es[idx], rtol=rtol, hermitian=True)
-        inv = inv.clone()
+        # Do not leave singular LU inverses on an inactive autograd branch:
+        # their backward can form 0 * NaN even after replacing their outputs.
+        safe = torch.where(bad[:, None, None], torch.eye(dim, dtype=Es.dtype, device=Es.device), Es)
+        inv = torch.linalg.inv(safe).clone()
         inv[idx] = pi
-        cond = cond.clone()
-        cond[idx] = torch.linalg.matrix_norm(Es[idx]) * torch.linalg.matrix_norm(pi) / dim
+        cond = torch.linalg.matrix_norm(Es) * torch.linalg.matrix_norm(inv) / dim
+        # ||E|| ||E+|| measures only the retained subspace. It is 1/d for a
+        # rank-one matrix and zero for a zero matrix, not a full-rank condition
+        # number. Missing/cutoff directions must trigger gradient/face guards.
+        eig = torch.linalg.eigvalsh(Es[idx])
+        resolved = (eig > rtol * eig.abs().amax(-1, keepdim=True)).all(-1)
+        cond[idx] = torch.where(resolved, cond[idx], torch.full_like(cond[idx], float('inf')))
     return inv, cond
 
 

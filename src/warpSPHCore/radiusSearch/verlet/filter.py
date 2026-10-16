@@ -12,6 +12,7 @@ from ...enumTypes import *
 from ...util import *
 from .wp_countVerlet import countNeighborsVerlet
 from .wp_updateVerlet import updateNeighborsVerlet
+from ..csr import buildCSROffsets, validateParticleCounts, validateEdgeCapacity
 
 # This function filters the Verlet list to produce the actual neighbor list for the current positions and supports, which may have changed since the Verlet list was built. 
 def filterVerletList_(
@@ -22,6 +23,8 @@ def filterVerletList_(
         capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
 ):                   
     
+    validateParticleCounts(queryPositions.shape[0], referencePositions.shape[0])
+    _torchStream = wp.stream_from_torch(torch.cuda.current_stream(queryPositions.device)) if queryPositions.is_cuda else None
     edge_count = torch.zeros_like(adjacency.numNeighbors)
     wp.launch(
         countNeighborsVerlet, 
@@ -32,25 +35,24 @@ def filterVerletList_(
 
         supportSchemeToUint(mode),
         castTorchToWarp(adjacency.paddedJ), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
-        castTorchToWarp(edge_count)]
+        castTorchToWarp(edge_count)], device=str(queryPositions.device), stream=_torchStream
 
     )
     warpDevice = castTorchToWarp(queryPositions).device
     # Convert counts to host (only the counts, not the main data)
     edge_count_t = edge_count
-    total_edges = torch.sum(edge_count_t).cpu().item()
+    edge_offsets, total_edges = buildCSROffsets(edge_count_t)
 
     N = queryPositions.shape[0]
     # Compute cumulative offsets
-    edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
-    edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
     edge_offsets_warp = wp.from_torch(edge_offsets)
 
     # Allocate output arrays on GPU
     numEdges = int(total_edges)
     capacityEdges = numEdges if capacity is None else capacity.capacityFor(numEdges)
-    i_torch, edge_i = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
-    j_torch, edge_j = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
+    validateEdgeCapacity(numEdges, capacityEdges)
+    i_torch, edge_i = allocateTorchWarp(capacityEdges, index_t, warpDevice)
+    j_torch, edge_j = allocateTorchWarp(capacityEdges, index_t, warpDevice)
     if capacityEdges > numEdges:
         i_torch.fill_(-1)
         j_torch.fill_(-1)
@@ -67,7 +69,7 @@ def filterVerletList_(
         edge_offsets_warp, castTorchToWarp(edge_count),
 
         edge_i, edge_j
-        ]
+        ], device=str(queryPositions.device), stream=_torchStream
     )
 
     return AdjacencyList(

@@ -238,7 +238,7 @@ def computeSPHLaplacianBrookshawJVP_Func_i(
     domainState: domainData,
     kernelProperties: kernelState,
 
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
     iCorrectionTangentData: Any, correctionTangentData: Any,
@@ -250,7 +250,7 @@ def computeSPHLaplacianBrookshawJVP_Func_i(
 ):
     out = zero_like_warp(outputValue)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -409,6 +409,7 @@ def computeSPHLaplacianBrookshawGeometryJVP(
     renormalizationState: Optional[RenormalizationState] = None,
     renormalizationTangentState: Optional[RenormalizationTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `queryValues.shape`, Brookshaw scheme specifically
     (see `computeSPHLaplacianNaiveGeometryJVP` for Naive; `computeSPHLaplacianGeometryJVP`
@@ -505,6 +506,8 @@ def computeSPHLaplacianBrookshawGeometryJVP(
         queryParticles.positions, queryParticles.supports, queryParticles.masses,
         referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
         queryTangentState, referenceTangentState,
+        queryKinds=queryParticles.kinds, referenceKinds=referenceParticles.kinds,
+        operationMode=operationMode,
         outputShape=nQuery,
         outputDtype=outputDtype,
         queryDensities=queryParticles.densities,
@@ -538,7 +541,7 @@ def computeSPHLaplacianNaiveJVP_Func_i(
     domainState: domainData,
     kernelProperties: kernelState,
 
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
     iCorrectionTangentData: Any, correctionTangentData: Any,
@@ -550,7 +553,7 @@ def computeSPHLaplacianNaiveJVP_Func_i(
 ):
     out = zero_like_warp(outputValue)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -695,6 +698,7 @@ def computeSPHLaplacianNaiveGeometryJVP(
     referenceVolumes: Optional[torch.Tensor] = None,
     tangentReferenceVolumes: Optional[torch.Tensor] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `queryValues.shape`, Naive scheme
     (`warpier_tier2_operators_plan.md` Step 8, `warpier_adjoint.md` Tier
@@ -768,6 +772,8 @@ def computeSPHLaplacianNaiveGeometryJVP(
         queryParticles.positions, queryParticles.supports, queryParticles.masses,
         referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
         queryTangentState, referenceTangentState,
+        queryKinds=queryParticles.kinds, referenceKinds=referenceParticles.kinds,
+        operationMode=operationMode,
         outputShape=nQuery,
         outputDtype=outputDtype,
         queryDensities=queryParticles.densities,
@@ -824,7 +830,7 @@ def computeSPHLaplacianDotJVP_Func_i(
     domainState: domainData,
     kernelProperties: kernelState,
 
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
     iCorrectionTangentData: Any, correctionTangentData: Any,
@@ -836,7 +842,7 @@ def computeSPHLaplacianDotJVP_Func_i(
 ):
     out = zero_like_warp(outputValue)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -1030,6 +1036,7 @@ def computeSPHLaplacianDotGeometryJVP(
     renormalizationState: Optional[RenormalizationState] = None,
     renormalizationTangentState: Optional[RenormalizationTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `queryValues.shape`, Dot scheme
     (`math/wp_laplaciandot.py`'s `computeLaplacianDot2`, DJ Price SPH/MHD eq
@@ -1146,6 +1153,8 @@ def computeSPHLaplacianDotGeometryJVP(
         queryParticles.positions, queryParticles.supports, queryParticles.masses,
         referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
         queryTangentState, referenceTangentState,
+        queryKinds=queryParticles.kinds, referenceKinds=referenceParticles.kinds,
+        operationMode=operationMode,
         outputShape=nQuery,
         outputDtype=outputDtype,
         queryDensities=queryParticles.densities,
@@ -1178,7 +1187,7 @@ def computeSPHLaplacianDefaultJVP_Func_i(
     domainState: domainData,
     kernelProperties: kernelState,
 
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
     iCorrectionTangentData: Any, correctionTangentData: Any,
@@ -1190,7 +1199,7 @@ def computeSPHLaplacianDefaultJVP_Func_i(
 ):
     out = zero_like_warp(outputValue)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -1363,6 +1372,7 @@ def computeSPHLaplacianDefaultGeometryJVP(
     renormalizationState: Optional[RenormalizationState] = None,
     renormalizationTangentState: Optional[RenormalizationTangentState] = None,
     gradientMode: GradientScheme = GradientScheme.Symmetric,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ) -> torch.Tensor:
     """`dLaplacian_i`, shape `queryValues.shape`, Default scheme
     (`computeDotLaplacian`, `math/wp_laplaciandot.py`): `q_ij = (fj-fi)*B_ij`
@@ -1447,6 +1457,8 @@ def computeSPHLaplacianDefaultGeometryJVP(
         queryParticles.positions, queryParticles.supports, queryParticles.masses,
         referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
         queryTangentState, referenceTangentState,
+        queryKinds=queryParticles.kinds, referenceKinds=referenceParticles.kinds,
+        operationMode=operationMode,
         outputShape=nQuery,
         outputDtype=outputDtype,
         queryDensities=queryParticles.densities,

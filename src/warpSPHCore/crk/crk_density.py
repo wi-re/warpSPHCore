@@ -40,7 +40,7 @@ def computeCRKDensity_Func_i(
 
     # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
     # neighbor list or the grid's sorted particle index, depending on the caller.
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Optional correction terms
     iCorrectionData: Any, # ParticleCorrectionData_1/2/3, picked by dimensionality
@@ -65,7 +65,7 @@ def computeCRKDensity_Func_i(
     crkKernelProperties.supportMode = wp.uint32(12)
 
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -171,7 +171,7 @@ def computeCRKDensity_Kernel(
     )
     # The ratio is applied here, outside computeCRKDensity_Func_Adjacency's dynamic
     # loop -- see that function's docstring comment for why.
-    if masked:
+    if masked or vol1 == scalar_t(0.0):
         outputValues[i] = scalar_t(0.0)
     else:
         outputValues[i] = mDensity / vol1
@@ -208,7 +208,7 @@ def computeCRKDensity_KernelTiled(
     mD = laneSum(mDensity)
     v1 = laneSum(vol1)
     if lane == 0:
-        if masked:
+        if masked or v1 == scalar_t(0.0):
             outputValues[i] = scalar_t(0.0)
         else:
             outputValues[i] = mD / v1

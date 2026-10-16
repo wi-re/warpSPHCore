@@ -2,6 +2,7 @@ import torch
 import warp as wp
 from ..util import *
 from .cache import *
+from .stream import torchWarpStream
 
 class WarpFunctionWrapper(torch.autograd.Function):
     """
@@ -10,6 +11,12 @@ class WarpFunctionWrapper(torch.autograd.Function):
     """
     @staticmethod
     def forward(ctx, function, *args):
+        device = next((arg.device for arg in args if isinstance(arg, (torch.Tensor, wp.array))), None)
+        with torchWarpStream(device):
+            return WarpFunctionWrapper._forward(ctx, function, *args)
+
+    @staticmethod
+    def _forward(ctx, function, *args):
         # with record_function(f"Warp Function Foward"):
         """
         Forward pass that executes the given Warp function and saves necessary context for backward.
@@ -87,6 +94,13 @@ class WarpFunctionWrapper(torch.autograd.Function):
         
     @staticmethod
     def backward(ctx, *grad_outputs):
+        outputs = ctx.outputs_warp
+        device = outputs[0].device if isinstance(outputs, (list, tuple)) else outputs.device
+        with torchWarpStream(device):
+            return WarpFunctionWrapper._backward(ctx, *grad_outputs)
+
+    @staticmethod
+    def _backward(ctx, *grad_outputs):
         """
         Backward pass that computes gradients using Warp's autodiff and converts them back to PyTorch tensors.
         
@@ -112,18 +126,17 @@ class WarpFunctionWrapper(torch.autograd.Function):
         # (e.g. a preallocated gradient-seed buffer) would see a correct
         # gradient on the first call and silently zero on every call after,
         # since the tensor was zeroed out from under it. Tape.backward(grads=...)
-        # instead copies values into each array's own persistent .grad buffer
-        # (array.grad.assign(seed)) rather than aliasing the seed itself, so
-        # the caller's tensor is never mutated. Confirmed upstream (warp-lang
-        # issue tracker) as the intended pattern; see warpier_core.md.
+        # copies into an existing .grad, but aliases the seed when .grad is
+        # absent. Clone the seed in either case so tape.zero() cannot mutate
+        # the caller's gradient; preserve the output's exact Warp dtype.
         grads = {}
         if isinstance(outputs_warp, (list, tuple)):
             for out_warp, grad_out in zip(outputs_warp, grad_outputs):
                 if grad_out is not None:
-                    grads[out_warp] = castTorchToWarpAsBuiltins(grad_out.contiguous())
+                    grads[out_warp] = wp.from_torch(ownedBackwardSeed(grad_out), dtype=out_warp.dtype)
         else:
             if grad_outputs[0] is not None:
-                grads[outputs_warp] = castTorchToWarpAsBuiltins(grad_outputs[0].contiguous())
+                grads[outputs_warp] = wp.from_torch(ownedBackwardSeed(grad_outputs[0]), dtype=outputs_warp.dtype)
 
         # Use the saved tape to compute gradients with respect to inputs
         ctx.tape.backward(grads=grads)

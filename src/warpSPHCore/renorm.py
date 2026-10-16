@@ -27,6 +27,9 @@ from .pinv import pinv2x2_warpBackend, pinv_warp
 from .coreOperations.wp_covarianceJVP import computeCovarianceGeometryJVP
 
 
+from .pinv.symmetric import _symmetric_pinv_jvp
+
+
 def computeRenormalizationMatrices_(
     queryParticles: ParticleState,
     operationProperties: OperationProperties,
@@ -92,7 +95,10 @@ def computeRenormalizationMatrices_(
         C = torch.where(lowNbrMask.view(-1, 1, 1), identity.unsqueeze(0), C)
 
     with record_function("[warpSPH] - Renorm - Pseudo Inverse"):
-        L, eigVals = pinv_warp(C, num_nbrs)
+        # Plain radial-kernel covariance is symmetric. Corrected gradients can
+        # produce a general matrix, so preserve their existing inverse path.
+        L, eigVals = pinv_warp(C, num_nbrs, symmetric=(
+            crkState is None and gradHState is None and renormalizationState is None))
         # if queryPositions.shape[1] == 2:
         #     L, eigVals = pinv2x2_warpBackend(C, num_nbrs)
         #     # L = torch.linalg.pinv(C)
@@ -165,9 +171,11 @@ def computeRenormalizationMatricesJVP(
     raw `dC_i` by the same two steps `computeRenormalizationMatrices_` itself
     applies to the primal `C_i` -- the low-neighbor-count identity fallback's
     exact-zero tangent (`dC = where(lowNbrMask, 0, dC_raw)`), then the
-    standard matrix-inverse-derivative identity `d(C^-1) = -C^-1(dC)C^-1`
-    (`scripts/spikes/spike_forward_mode_tier2_renorm.py`, already validated to
-    float64 round-off). `L` itself is consumed from this function's own
+    derivative of the selected symmetric spectral inverse. This reduces to
+    `dL = -L(dC)L` at full rank and includes retained/discarded subspace
+    rotation at partial rank, including nonzero truncated eigenvalues.
+    The retained set must remain fixed; cutoff crossings are nonsmooth.
+    `L` itself is consumed from this function's own
     primal `computeRenormalizationMatrices_` call rather than re-derived --
     same "consume an already-validated value" pattern the spike uses and
     `crk_wrapper.computeCRKFactorsJVP` uses for its own already-validated
@@ -179,8 +187,8 @@ def computeRenormalizationMatricesJVP(
     accepted here (unlike `computeRenormalizationMatrices`'s own signature):
     `wp_covarianceJVP.py`'s kernel is deliberately CRK/grad-h-free, matching
     `computeRenormalizationMatrices_`'s own internal covariance call under
-    the "renorm alone first" scoping this plan phase settled on (CRK+renorm
-    simultaneous is a fast follow-up, not required here).
+    the plain-covariance construction. A downstream operator can consume this
+    renorm state/tangent alongside an independently constructed CRK state/tangent.
 
     Returns `(C, eigVals, RenormalizationState, RenormalizationTangentState)`
     (or the two states only if `returnEigVals=False`), mirroring
@@ -212,6 +220,7 @@ def computeRenormalizationMatricesJVP(
         with record_function("[warpSPH] - RenormJVP - Covariance JVP"):
             dC_raw = computeCovarianceGeometryJVP(
                 queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+                operationMode=operationProperties.operationMode,
                 queryTangentState=queryTangentState,
                 referenceParticles=referenceParticles, referenceTangentState=referenceTangentState,
                 referenceVolumes=referenceVolumes, tangentReferenceVolumes=tangentReferenceVolumes,
@@ -221,7 +230,7 @@ def computeRenormalizationMatricesJVP(
             dim = queryParticles.positions.shape[1]
             lowNbrMask = (num_nbrs < dim + 2).view(-1, 1, 1)
             dC = torch.where(lowNbrMask, torch.zeros_like(dC_raw), dC_raw)
-            dL = -torch.matmul(L, torch.matmul(dC, L))
+            dL = _symmetric_pinv_jvp(C, L, dC)
 
         if returnEigVals:
             return C, eigVals, RenormalizationState(renormalizationMatrices=L), RenormalizationTangentState(renormalizationMatrices=dL)

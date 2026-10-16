@@ -3,6 +3,7 @@ import warp as wp
 from ..util import *
 from .cache import *
 from ..profiling import record_function
+from .stream import torchWarpStream
 
 
 def _dtype_is_float(dtype):
@@ -100,7 +101,8 @@ def launch_kernel(kernel, output_shape, output_dtype, *args, numThreads=None, la
 
 
 def _launchMaybeTiled(kernel, dim, inputs, device, lanes):
-    if lanes is not None and lanes > 1:
-        wp.launch(kernel, dim=[dim, lanes], inputs=inputs, device=device, block_dim=lanes)
-    else:
-        wp.launch(kernel, dim=dim, inputs=inputs, device=device)
+    with torchWarpStream(device):
+        if lanes is not None and lanes > 1:
+            wp.launch(kernel, dim=[dim, lanes], inputs=inputs, device=device, block_dim=lanes)
+        else:
+            wp.launch(kernel, dim=dim, inputs=inputs, device=device)

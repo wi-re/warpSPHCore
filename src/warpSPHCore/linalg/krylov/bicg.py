@@ -1,112 +1,101 @@
-"""Left-preconditioned bi-conjugate gradients, device-predicated (see `common.py`).
+"""Left-preconditioned BiCG with a verified original-system residual.
 
-Needs the adjoint operator `matvecT` (the dual residual lives in the `A^T`-Krylov space). The incompressible pressure dispatch supplies the
-placeholder `A^T := A`, exact for a symmetric operator. The solver iterates on `M^{-1} A x = M^{-1} b`, whose adjoint is `A^T M^{-T}`; the
-preconditioner is a symmetric (diagonal) one, so the adjoint matvec is `matvecT(M^{-1} q)`.
-
-This is a correction of the loop it replaces (`warpSPH.modules.shifting.bicgSolve`, kept as `tests/linalg/_legacyKrylov.py`'s reference of the
-*stopping logic*), which had three defects: `beta` carried the BiCGStab factor `alpha / alpha_prev` and was lagged by one iteration (textbook BiCG:
-`beta = rho_{k+1} / rho_k` with `rho = rhat . r` of the *updated* residuals), and the adjoint applied the preconditioner on the wrong side (`M^{-1} A^T q` instead of `A^T M^{-1} q`). With `A^T = A` and no preconditioner the iterates
-now coincide with CG's, which the tests check; the old loop needed 14 iterations where CG needs 9 on a 200-unknown SPD system. The `|denom| < eps |rho|`
-guard of the old loop was a double-precision comparison and stays one.
+For B = P A, B.T = A.T P.T: `precond` applies P (the inverse
+preconditioner), and `precondT` applies its transpose. Omitting precondT
+asserts that P is symmetric, as for a diagonal preconditioner. An independent
+unpreconditioned residual recurrence provides the stopping statistic; every
+successful candidate is verified against b - A x before return.
 """
 
 from typing import Callable, Optional, Union
 
 import torch
 
-from .common import SolveResult, Status, absoluteTolerance, makePsolve, thresholdExceeded
+from .common import (
+    PassResult, SolveResult, Status, checkedAction, checkedPreconditioner,
+    converged, runVerified, safeDivide, thresholdExceeded, validateSolve,
+)
 
 __all__ = ['bicg']
-
-#: relative breakdown margin (scale-free; fires only once the corresponding scalar is already ~1e6-scaled)
 _REL_BREAKDOWN_EPS = 1e-6
 
 
-def bicg(matvec: Callable[[torch.Tensor], torch.Tensor], matvecT: Callable[[torch.Tensor], torch.Tensor], b: torch.Tensor,
-         x0: Optional[torch.Tensor] = None, *, tol: float = 0.0, rtol: float = 1e-5, atol: float = 0.0, maxiter: Optional[int] = None,
-         precond: Union[torch.Tensor, Callable[[torch.Tensor], torch.Tensor], None] = None, threshold: Optional[float] = None,
-         dim: int = 1, checkEvery: int = 8, stamp: bool = True) -> SolveResult:
-    """Solve `matvec(x) == b`; `matvecT` is the adjoint operator. Status codes and arguments as `cg`; breakdowns: `RHO_BREAKDOWN` (the
-    dual-residual inner product vanished), `DENOMINATOR_BREAKDOWN` (the curvature or `beta` is unusable)."""
-    xk = x0.clone() if x0 is not None else torch.zeros_like(b)
-    n = b.shape[0]
-    if maxiter is None:
-        maxiter = n * 10
-
-    psolve = makePsolve(precond)
-    if precond is None:
-        Apre, ApreT, bpre = matvec, matvecT, b
-    else:
-        Apre = lambda p: psolve(matvec(p))
-        ApreT = lambda q: matvecT(psolve(q))                           # (M^{-1} A)^T = A^T M^{-T}, M diagonal
-        bpre = psolve(b)
-
-    bnrm2 = torch.linalg.norm(b)
-    atolT = absoluteTolerance(bnrm2, tol, rtol, atol)
-    trivial = bnrm2 == 0
-
-    dev = b.device
+def _run(matvec, matvecT, psolve, psolveT, xk, residual, target, budget, zeroRhs, threshold, dim, checkEvery):
+    dev = residual.device
     i32 = lambda v: torch.full((), int(v), dtype=torch.int32, device=dev)
-    ZERO, RHO, DEN, THR, BUDGET = i32(0), i32(Status.RHO_BREAKDOWN), i32(Status.DENOMINATOR_BREAKDOWN), i32(Status.THRESHOLD), i32(Status.BUDGET)
-    one = torch.ones((), dtype=torch.int32, device=dev)
-
-    r = bpre - Apre(xk)
-    rnrm = torch.linalg.norm(r)
-    conv0 = rnrm < atolT
+    zero, rhoStatus, denStatus, thrStatus, budgetStatus = (i32(v) for v in (0, Status.RHO_BREAKDOWN, Status.DENOMINATOR_BREAKDOWN, Status.THRESHOLD, Status.BUDGET))
+    rnrm = torch.linalg.norm(residual)
+    conv0 = converged(rnrm, target)
     thr0 = thresholdExceeded(xk, threshold, dim)
-    thr0 = torch.zeros_like(conv0) if thr0 is None else (~conv0 & thr0)
-    live = ~(trivial | conv0 | thr0)
-    status = torch.where(thr0, THR, torch.where(live, BUDGET, ZERO))
-    norms, valid = [rnrm], [~trivial]
+    thr0 = torch.zeros_like(conv0) if thr0 is None else thr0
+    live = ~(conv0 | thr0)
+    status = torch.where(thr0, thrStatus, torch.where(live, budgetStatus, zero))
+    norms, valid = [rnrm], [~(zeroRhs & conv0)]
+    r = psolve(residual)
+    rhat, p, pT = r.clone(), r.clone(), r.clone()
+    it, completed, used = zero, zero, 0
 
-    rhat = r.clone()
-    p = r.clone()
-    pT = rhat.clone()
-    it = ZERO
-
-    for k in range(maxiter if bool(live) else 0):
+    for k in range(budget if bool(live) else 0):
+        used = k + 1
         rho = torch.dot(rhat, r)
-        badRho = ~torch.isfinite(rho) | (rho.abs() < _REL_BREAKDOWN_EPS * torch.linalg.norm(rhat) * torch.linalg.norm(r))
-        ap = Apre(p)
+        badRho = ~torch.isfinite(rho) | (rho == 0) | (rho.abs() < _REL_BREAKDOWN_EPS * torch.linalg.norm(rhat) * torch.linalg.norm(r))
+        apOriginal = matvec(p)
+        ap = psolve(apOriginal)
         denom = torch.dot(rhat, ap)
-        badDen = ~torch.isfinite(denom) | (denom.abs().double() < _REL_BREAKDOWN_EPS * rho.abs().double())
-        stopRho = live & badRho
-        stopDen = live & ~badRho & badDen
-        go = live & ~badRho & ~badDen
-
-        alpha = rho / denom
+        badDen = ~torch.isfinite(denom) | (denom == 0) | (denom.abs() < _REL_BREAKDOWN_EPS * torch.linalg.norm(rhat) * torch.linalg.norm(ap))
+        alpha = safeDivide(rho, denom)
         xn = xk + alpha * p
         rn = r - alpha * ap
-        rnrm = torch.linalg.norm(rn)
-        conv = go & (rnrm < atolT)
+        residualNew = residual - alpha * apOriginal
+        rnrm = torch.linalg.norm(residualNew)
+        badDen = badDen | ~torch.isfinite(rnrm) | ~torch.isfinite(xn).all()
+        stopRho, stopDen = live & badRho, live & ~badRho & badDen
+        go = live & ~badRho & ~badDen
         thr = thresholdExceeded(xn, threshold, dim)
-        thr = torch.zeros_like(conv) if thr is None else (go & ~conv & thr)
+        thr = torch.zeros_like(go) if thr is None else (go & thr)
+        conv = go & ~thr & converged(rnrm, target)
         flowing = go & ~conv & ~thr
-
-        rhatn = rhat - alpha * ApreT(pT)                                 # the dual residual of the updated iterate: one adjoint matvec per iterate
-        beta = torch.dot(rhatn, rn) / rho                                # rho_{k+1} / rho_k
+        rhatn = rhat - alpha * matvecT(psolveT(pT))
+        beta = safeDivide(torch.dot(rhatn, rn), rho)
         badBeta = flowing & ~torch.isfinite(beta)
         cont = flowing & ~badBeta
 
         xk = torch.where(go, xn, xk)
         r = torch.where(go, rn, r)
+        residual = torch.where(go, residualNew, residual)
         norms.append(rnrm)
         valid.append(go)
-        status = torch.where(stopRho, RHO, torch.where(stopDen | badBeta, DEN, torch.where(conv, it, torch.where(thr, THR, status))))
-
-        pn = r + beta * p                                                # r is the updated residual here
-        pTn = rhatn + beta * pT
-        p = torch.where(cont, pn, p)
+        status = torch.where(stopRho, rhoStatus, torch.where(stopDen | badBeta, denStatus, torch.where(conv, it, torch.where(thr, thrStatus, status))))
+        completed = completed + go.to(torch.int32)
+        p = torch.where(cont, r + beta * p, p)
         rhat = torch.where(cont, rhatn, rhat)
-        pT = torch.where(cont, pTn, pT)
+        pT = torch.where(cont, rhatn + beta * pT, pT)
         live = cont
-        it = it + one
-
+        it = it + 1
         if (k + 1) % checkEvery == 0 and not bool(live):
             break
+    return PassResult(xk, status, norms, valid, completed, used)
 
-    result = SolveResult(x=xk, status=status, norms=torch.stack(norms), valid=torch.stack(valid))
-    if stamp and result.statusInt() < 0:
-        result.stampedResidual = torch.linalg.norm(matvec(xk) - b)
-    return result
+
+def bicg(matvec: Callable[[torch.Tensor], torch.Tensor], matvecT: Callable[[torch.Tensor], torch.Tensor], b: torch.Tensor,
+         x0: Optional[torch.Tensor] = None, *, tol: float = 0.0, rtol: float = 1e-5, atol: float = 0.0, maxiter: Optional[int] = None,
+         precond: Union[torch.Tensor, Callable[[torch.Tensor], torch.Tensor], None] = None, threshold: Optional[float] = None,
+         dim: int = 1, checkEvery: int = 8, stamp: bool = True, maxRestarts: int = 2,
+         precondT: Union[torch.Tensor, Callable[[torch.Tensor], torch.Tensor], None] = None) -> SolveResult:
+    """Solve A x = b using A.T. Tolerances/budgets/verification are as for cg.
+
+    History norms describe the original system, independent of preconditioner
+    scaling. A nonsymmetric preconditioner requires its transpose in precondT;
+    omitting it declares a symmetric inverse preconditioner.
+    """
+    maxiter = validateSolve(b, x0, tol, rtol, atol, maxiter, threshold, dim, checkEvery, maxRestarts)
+    if precond is None and precondT is not None:
+        raise ValueError('precondT requires precond')
+    counts = dict(matvecs=0, adjointMatvecs=0, preconditionerApplications=0)
+    apply = checkedAction(matvec, b, 'matvec', counts, 'matvecs')
+    applyT = checkedAction(matvecT, b, 'matvecT', counts, 'adjointMatvecs')
+    psolve = checkedPreconditioner(precond, b, counts)
+    psolveT = psolve if precondT is None else checkedPreconditioner(precondT, b, counts, 'precondT')
+    run = lambda x, r, target, budget, zero: _run(apply, applyT, psolve, psolveT, x, r, target, budget, zero, threshold, dim, checkEvery)
+    return runVerified(run, apply, b, x0, tol=tol, rtol=rtol, atol=atol, maxiter=maxiter,
+                       maxRestarts=maxRestarts, stamp=stamp, counts=counts)

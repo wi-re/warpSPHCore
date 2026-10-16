@@ -19,9 +19,10 @@ own docstring and warpier_core.md for when to re-run it by hand.
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
 
@@ -125,6 +126,9 @@ def test_gradcheck_script(script_name):
     assert script_path.exists(), f"{script_name} not found under {GRADCHECK_DIR} or {SPIKES_DIR}"
     result = subprocess.run(
         [sys.executable, str(script_path)],
+        # The scripts' setdefault(float64) must not inherit a float32 suite
+        # setting: their fixtures and finite-difference tolerances are float64.
+        env=dict(os.environ, warpSPHCore_PRECISION='float64'),
         capture_output=True,
         text=True,
         timeout=180,

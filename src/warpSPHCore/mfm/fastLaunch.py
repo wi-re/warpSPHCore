@@ -88,7 +88,7 @@ class PreparedLauncher:
             n = spec.numThreads(ctx, extras)
         kernel, lanes = spec.kernel, None
         if spec.tiledKernel is not None and self.cuda:
-            nLanes = neighborLanes()
+            nLanes = neighborLanes(default=spec.defaultNeighborLanes)
             if nLanes > 1:
                 kernel, lanes = spec.tiledKernel, nLanes
         _launchMaybeTiled(kernel, n, list(self.prefix) + args + outs_w, device, lanes)

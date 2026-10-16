@@ -39,7 +39,7 @@ from ..dataTypes import (
     RenormalizationTangentState,
 )
 from .launcher import launch_kernel
-from .lanes import neighborLanes
+from .lanes import DEFAULT_NEIGHBOR_LANES, neighborLanes
 from .stateAwareWarpFunction import _liveTangentMask
 from .wrapper import _launch
 
@@ -182,6 +182,9 @@ class OperatorSpec:
     #: ``lanes.neighborLanes() > 1`` -- see ``autograd/lanes.py``. It must
     #: produce ``kernel``'s outputs up to float summation order.
     tiledKernel: Any = None
+    #: Used only without an explicit process lane override. New tiled kernels
+    #: can retain scalar dispatch until numerical and consumer gates qualify.
+    defaultNeighborLanes: int = DEFAULT_NEIGHBOR_LANES
 
 
 @dataclass
@@ -524,7 +527,7 @@ def launchOperator(
     # CPU launches force block_dim=1, where a tiled kernel is correct (lane 0
     # takes the whole range) but pays for `lanes`x the threads -- CUDA only.
     if spec.tiledKernel is not None and ctx.query.positions.is_cuda:
-        nLanes = neighborLanes()
+        nLanes = neighborLanes(default=spec.defaultNeighborLanes)
         if nLanes > 1:
             kernel, lanes = spec.tiledKernel, nLanes
 

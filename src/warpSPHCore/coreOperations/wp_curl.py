@@ -10,7 +10,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import getIndexRange, checkOffset
+from ..radiusSearch.grid_util import getIndexRangeLane, laneSum
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -35,7 +35,7 @@ def computeSPHCurlTensor_Func_i(
 
     # Neighbor range within offsetArray to iterate; offsetArray is either the adjacency
     # neighbor list or the grid's sorted particle index, depending on the caller.
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     # Optional correction terms
     iCorrectionData: Any, # ParticleCorrectionData_1/2/3, picked by dimensionality
@@ -49,7 +49,7 @@ def computeSPHCurlTensor_Func_i(
 ):
     out = zero_like_warp(outputValue)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -103,7 +103,7 @@ def computeSPHCurlTensor_Func_i(
 
 @wp.func
 def computeSPHCurlTensor_Func_Adjacency(
-    i: wp.int32, dim: wp.int32,
+    i: wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
     # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
     # Domain properties 
@@ -132,7 +132,7 @@ def computeSPHCurlTensor_Func_Adjacency(
 
     out = zero_like_warp(outputValue)
     for o in range(numOffsets):
-        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, useAdjacency, adjacencyState, gridState, queryState, domainState)
         if beginIndex < 0:
             continue
 
@@ -178,7 +178,7 @@ def computeSPHCurlTensor_Kernel(
         return
 
     outputValues[i] = computeSPHCurlTensor_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
@@ -189,12 +189,43 @@ def computeSPHCurlTensor_Kernel(
     )
 
 
+@wp.kernel
+def computeSPHCurlTensor_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any,
+    kernelProperties: kernelState,
+    numDims: wp.int32, flatInputShape: wp.int32, flatOutputShape: wp.int32,
+    queryValues: Any, referenceValues: Any,
+    outputValues: wp.array(dtype=Any),
+):
+    i, lane = wp.tid()
+    partial = computeSPHCurlTensor_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+        numDims, flatInputShape, flatOutputShape,
+        queryValues, referenceValues,
+        zero_like_warp(outputValues[i]),
+    )
+    # Every lane must read the reduction before the writer branch: its adjoint
+    # broadcasts through a block barrier (the same contract as gradient).
+    total = laneSum(partial)
+    if lane == 0:
+        outputValues[i] = total
+
+
 def _curlOutputDtype(ctx, extras):
     return _get_warp_vector_dtype(int(extras["flatOutputShape"]), extras["queryValuesFlat"].dtype)
 
 
 _CURL_SPEC = OperatorSpec(
     kernel=computeSPHCurlTensor_Kernel,
+    tiledKernel=computeSPHCurlTensor_KernelTiled,
+    defaultNeighborLanes=1,
     outputs=(OutputSpec(dtype=_curlOutputDtype),),
     extras=(
         ExtraSpec("numDims", ExtraKind.SCALAR),

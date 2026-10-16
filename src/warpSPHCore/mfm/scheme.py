@@ -71,6 +71,9 @@ def mfmRates(geom: MeshlessGeometry, rho: torch.Tensor, vel: torch.Tensor, P: to
              massFluxLimit: float = 0.1):
     """Rates ``dQ/dt`` of shape ``(N, 2 + dim)`` and a dict of diagnostics
     (``flux``, ``Sstar``, ``Pstar``, ``alpha``)."""
+    mode = mode.upper()
+    if mode not in ("MFM", "MFV"):
+        raise ValueError("mode must be 'MFM' or 'MFV'")
     N, dim = vel.shape
     i, j, d = geom.i, geom.j, geom.d
     frac = geom.faceFraction()

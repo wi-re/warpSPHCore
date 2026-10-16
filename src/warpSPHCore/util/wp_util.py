@@ -45,10 +45,10 @@ from .support import volumeToSupport
 from ..dataTypes import DomainDescription
 
 def generateNeighborTestData(nx, targetNumNeighbors, dim, periodic, device):
-
-
-    minDomain = torch.tensor([-1] * dim, dtype = torch.float32, device = device)
-    maxDomain = torch.tensor([ 1] * dim, dtype = torch.float32, device = device)
+    """Regular test lattice with floating tensors in the SPH process precision."""
+    dtype = get_torch_precision()
+    minDomain = torch.tensor([-1] * dim, dtype = dtype, device = device)
+    maxDomain = torch.tensor([ 1] * dim, dtype = dtype, device = device)
     periodicity = torch.tensor([periodic] * dim, device = device, dtype = torch.bool)
 
     extent = maxDomain - minDomain
@@ -61,11 +61,11 @@ def generateNeighborTestData(nx, targetNumNeighbors, dim, periodic, device):
 
     positions = []
     for d in range(dim):
-        positions.append(torch.linspace(minDomain[d] + dx / 2, maxDomain[d] - dx / 2, int((extent[d] - dx) / dx) + 1, device = device))
+        positions.append(torch.linspace(minDomain[d] + dx / 2, maxDomain[d] - dx / 2, int((extent[d] - dx) / dx) + 1, device = device, dtype=dtype))
     grid = torch.meshgrid(*positions, indexing = 'xy')
     
     positions = torch.stack(grid, dim = -1).reshape(-1,dim).to(device)
-    supports = torch.ones(positions.shape[0], device = device) * h
+    supports = torch.ones(positions.shape[0], device = device, dtype=dtype) * h
     
     domain = DomainDescription(minDomain, maxDomain, periodicity, dim)
     

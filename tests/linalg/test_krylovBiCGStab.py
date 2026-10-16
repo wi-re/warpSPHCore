@@ -51,13 +51,25 @@ def test_matchesLegacyWhenTheRecurrenceIsHonest(dev, dtype, checkEvery, precond)
         _same(new, old)
 
 
-def test_warmStartAndCallablePrecond(dev):
+@pytest.mark.parametrize('seed', [0, 6, 24])
+def test_warmStartAndCallablePrecond(dev, seed):
     A, b = _nonsym(180, dev)
     mv = lambda v: A @ v
     d = 1.0 / torch.diagonal(A)
-    x0 = torch.randn(180, device=dev) * 0.1
+    generator = torch.Generator(device=dev).manual_seed(seed)
+    x0 = torch.randn(180, device=dev, generator=generator) * 0.1
     kw = dict(rtol=1e-5, maxiter=100, precond=lambda v: d * v)
-    _same(bicgstab(mv, b, x0, **kw), bicgstabSolveLegacy(mv, b, x0, **kw))
+    new, old = bicgstab(mv, b, x0, **kw), bicgstabSolveLegacy(mv, b, x0, **kw)
+    # As above, the legacy half-step uses pk rather than preconditioned phat.
+    # CUDA seed 24 takes an unnecessary full step; seed 6 later breaks down.
+    # The corrected half-step already satisfies the original system in both.
+    assert new.statusInt() >= 0
+    assert new.trueResidual <= kw['rtol'] * b.norm()
+    assert old[1] < 0 or new.statusInt() <= old[1]
+    reference = torch.linalg.solve(A.double(), b.double()).to(b.dtype)
+    assert (new.x - reference).norm() <= 1e-4 * reference.norm()
+    if new.statusInt() == old[1]:
+        _same(new, old)
 
 
 def test_convergedAlwaysMeansTheTrueResidualPassed(dev):

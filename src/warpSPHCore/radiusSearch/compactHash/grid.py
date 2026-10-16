@@ -11,27 +11,35 @@ from ...dataTypes import *
 from ...enumTypes import *
 
 def computeGridSupport(supportsX, supportsY, scheme: SupportScheme):
+    # The maximum of an empty role contributes zero to the radius bound.
+    # Grid construction supplies a positive geometric sentinel when no pairs
+    # can exist; ordinary nonempty support semantics stay unchanged.
+    def maximum(supports):
+        return supports.max() if supports.numel() else supports.new_zeros(())
     # print(f'SupportsX: {supportsX}')
     # print(f'SupportsY: {supportsY}')
     if scheme == SupportScheme.Gather:  # gather
-        return torch.max(supportsX)
+        return maximum(supportsX)
     elif scheme == SupportScheme.Scatter:  # scatter
-        return torch.max(supportsY)
+        return maximum(supportsY)
     elif scheme == SupportScheme.MeanSymmetric: # partialSymmetric
-        return torch.max((supportsX + supportsY) / 2)
+        # Query/reference populations need not match; bound every cross pair.
+        return (maximum(supportsX) + maximum(supportsY)) / 2
     # torch.maximum, not Python max(): the latter compares two device tensors
     # on the host (a sync); the value is the same either way
     elif scheme == SupportScheme.KernelMeanSymmetric:  # symmetric
-        return torch.maximum(torch.max(supportsX), torch.max(supportsY))
+        return torch.maximum(maximum(supportsX), maximum(supportsY))
     elif scheme == SupportScheme.SuperSymmetric:  # superSymmetric
-        return torch.maximum(torch.max(supportsX), torch.max(supportsY))
+        return torch.maximum(maximum(supportsX), maximum(supportsY))
     elif scheme == SupportScheme.PartialSymmetric:  # partialSymmetric
-        return torch.maximum(torch.max(supportsX), torch.max(supportsY))
+        return torch.maximum(maximum(supportsX), maximum(supportsY))
     else:
         raise ValueError('Invalid scheme value. Must be a valid SupportScheme. Value is {}'.format(scheme))
 
 
 def getDomainExtents(y, minDomain: Optional[torch.Tensor], maxDomain: Optional[torch.Tensor]):
+    if y.shape[0] == 0 and (minDomain is None or maxDomain is None):
+        raise ValueError('Empty reference populations require explicit domain min and max bounds.')
     if minDomain is not None and maxDomain is not None:
         return minDomain, maxDomain
     elif minDomain is not None:

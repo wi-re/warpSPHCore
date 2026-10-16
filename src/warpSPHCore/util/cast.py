@@ -124,7 +124,15 @@ def castTorchToWarpAsBuiltins(x_torch):
     This function also performs conversions to builtin warp types, e.g., vec2f for 2D float tensors, vec3i for 3D int tensors, etc.
     
     """
-    if not x_torch.is_contiguous():
+    if x_torch.numel() == 0:
+        # Empty Torch views are contiguous even with zero/singleton strides.
+        # Warp still checks component strides for vector/matrix dtypes.
+        strides, stride = [], 1
+        for size in reversed(x_torch.shape):
+            strides.append(stride)
+            stride *= max(size, 1)
+        x_torch = x_torch.as_strided(x_torch.shape, tuple(reversed(strides)))
+    elif not x_torch.is_contiguous():
         x_torch = x_torch.contiguous()
 
     ndim = x_torch.ndim

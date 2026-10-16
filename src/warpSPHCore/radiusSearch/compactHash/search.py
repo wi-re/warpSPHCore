@@ -12,8 +12,11 @@ from ...enumTypes import *
 
 from ...profiling import record_function
 from .grid import *
-from .wp_countNeighbors import radiusSearchCountNeighborsCompactHashMap
-from .wp_collectNeighbors import radiusSearchCollectCompactHashMap
+from .wp_countNeighbors import radiusSearchCountNeighborsCompactHashMap, radiusSearchCountNeighborsSpatial
+from .wp_collectNeighbors import (radiusSearchCollectCompactHashMap, radiusSearchCollectJOnly, fillCSRRows,
+                                 radiusSearchCollectSpatial, radiusSearchCollectJOnlySpatial)
+from ..csr import buildCSROffsets, validateParticleCounts, validateEdgeCapacity
+from ..options import resolveCollection, resolveQueryOrder
 
 def radiusSearchOnCompactHashMap(
     datastructure: CompactHashMap,
@@ -27,10 +30,24 @@ def radiusSearchOnCompactHashMap(
     hashMapLength: int = 4096,
     capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
     reuse: Optional[AdjacencyList] = None,
+    *,
+    collection: str = 'auto',
+    queryOrder: str = 'auto',
 ):                
+    """Build CSR, preserving original rows and particle IDs under either schedule.
+
+    Both paths preserve exact pair ordering and capacity/reuse semantics. Split
+    ``auto`` collection selects split on CUDA and fused on CPU. ``auto`` query
+    order reuses the reference permutation for aliased self queries; other
+    queries retain input order. No additional sort or inverse-permutation pass.
+    """
+    collection = resolveCollection(collection, queryPositions.device)
+    queryOrder = resolveQueryOrder(queryOrder, queryPositions, referencePositions)
+    spatial = queryOrder == 'spatial'
     # `capacity`: spare room of the flat pair arrays (CapacityPolicy; None = exactly sized, no padding).
     # `reuse`: the list this rebuild replaces: its capacity is kept while the new count still fits (stable shapes),
     # and with `capacity.inPlace` its buffers are overwritten and shared by the result.
+    validateParticleCounts(queryPositions.shape[0], referencePositions.shape[0])
     mode_uint = datastructure.mode_uint
     minDomain = domainDescription.min if domainDescription.min is not None else None
     maxDomain = domainDescription.max if domainDescription.max is not None else None
@@ -41,7 +58,8 @@ def radiusSearchOnCompactHashMap(
     # the periodic flags read to the host once (iterating the device tensor synced per axis)
     periodicHost = periodicity.tolist() if isinstance(periodicity, torch.Tensor) else list(periodicity)
     x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicHost))]).mT
-    y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicHost))]).mT
+    # Spatial kernels read the already wrapped/sorted reference positions.
+    y = queryPositions if spatial else torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicHost))]).mT
     
     sortedPositions = datastructure.sortedPositions
     sortedSupports = datastructure.sortedSupports
@@ -69,7 +87,7 @@ def radiusSearchOnCompactHashMap(
         N = queryPositions.shape[0]
         M = sortedPositions.shape[0]
         edge_count_t, edge_count = allocateTorchWarp(queryPositions.shape[0], wp.int32, warpDevice)
-        wp.launch(radiusSearchCountNeighborsCompactHashMap, dim=queryPositions.shape[0], inputs=[
+        countInputs = [
             castTorchToWarp(y),
             castTorchToWarp(querySupports),
             castTorchToWarp(sortedPositions),
@@ -86,17 +104,17 @@ def radiusSearchOnCompactHashMap(
             castTorchToWarp(periodicity),
             wp.uint32(mode_uint),
             edge_count
-        ], device=warpDevice, stream=_torchStream)
+        ]
+        if spatial:
+            countInputs.append(castTorchToWarp(sortIndex))
+        wp.launch(radiusSearchCountNeighborsSpatial if spatial else radiusSearchCountNeighborsCompactHashMap,
+                  dim=queryPositions.shape[0], inputs=countInputs, device=warpDevice, stream=_torchStream)
     with record_function("neighborSearch - allocate neighbors"):
 
 
         # the count kernel ran on torch's current stream, so the read below is ordered after it
         # (the device-wide wp.synchronize() this used to need predates pinning the launches)
-        total_edges = torch.sum(edge_count_t).cpu().item()
-
-        # Compute cumulative offsets
-        edge_offsets = torch.zeros(N, dtype=torch.int32, device = queryPositions.device)
-        edge_offsets[1:] = torch.cumsum(edge_count_t[:-1], dim=0)
+        edge_offsets, total_edges = buildCSROffsets(edge_count_t)
         # the collect kernel runs on torch's current stream, after the cumsum (no device-wide sync needed)
         edge_offsets_warp = wp.from_torch(edge_offsets)
 
@@ -104,21 +122,27 @@ def radiusSearchOnCompactHashMap(
         numEdges = int(total_edges)
         capacityEdges = numEdges if capacity is None else capacity.capacityFor(
             numEdges, None if reuse is None else reuse.paddedI.shape[0])
+        validateEdgeCapacity(numEdges, capacityEdges)
         inPlace = (capacity is not None and capacity.inPlace and reuse is not None
                    and reuse.paddedI.shape[0] == capacityEdges and reuse.paddedJ.shape == reuse.paddedI.shape
                    and reuse.paddedI.device == queryPositions.device
-                   and reuse.numNeighbors.shape == edge_count_t.shape and reuse.edgeOffsets.shape == edge_offsets.shape)
+                   and reuse.numNeighbors.shape == edge_count_t.shape and reuse.edgeOffsets.shape == edge_offsets.shape
+                   and reuse.paddedI.dtype == get_torch_index_dtype() and reuse.paddedJ.dtype == get_torch_index_dtype()
+                   and reuse.numNeighbors.dtype == edge_count_t.dtype and reuse.edgeOffsets.dtype == edge_offsets.dtype)
         if inPlace:
             edge_i_t, edge_j_t = reuse.paddedI, reuse.paddedJ
             edge_i, edge_j = castTorchToWarp(edge_i_t), castTorchToWarp(edge_j_t)
         else:
-            edge_i_t, edge_i = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
-            edge_j_t, edge_j = allocateTorchWarp(capacityEdges, wp.int64, warpDevice)
+            edge_i_t, edge_i = allocateTorchWarp(capacityEdges, index_t, warpDevice)
+            edge_j_t, edge_j = allocateTorchWarp(capacityEdges, index_t, warpDevice)
         if capacityEdges > numEdges or inPlace:
             edge_i_t.fill_(-1)
             edge_j_t.fill_(-1)
     with record_function("neighborSearch - collect neighbors"):
-        wp.launch(radiusSearchCollectCompactHashMap, dim=queryPositions.shape[0], inputs=[
+        collectKernel = radiusSearchCollectJOnly if collection == 'split' else radiusSearchCollectCompactHashMap
+        if spatial:
+            collectKernel = radiusSearchCollectJOnlySpatial if collection == 'split' else radiusSearchCollectSpatial
+        wp.launch(collectKernel, dim=queryPositions.shape[0], inputs=[
             castTorchToWarp(y),
             castTorchToWarp(querySupports),
             castTorchToWarp(sortedPositions),
@@ -140,6 +164,10 @@ def radiusSearchOnCompactHashMap(
             edge_i,
             edge_j
         ], device=warpDevice, stream=_torchStream)
+        if collection == 'split':
+            wp.launch(fillCSRRows, dim=(queryPositions.shape[0], 32),
+                      inputs=[edge_count, edge_offsets_warp, edge_i], block_dim=128,
+                      device=warpDevice, stream=_torchStream)
         if inPlace:
             # the per-row arrays too: a graph reads them at fixed addresses. After the collect launch (it reads
             # the new counts and offsets from the arrays it was given); same stream, so ordered.

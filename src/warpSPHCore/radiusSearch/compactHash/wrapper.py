@@ -34,6 +34,9 @@ def radiusSearchCompactHashMap_(
     capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
     reuse: Optional[AdjacencyList] = None,
     datastructure: Optional[CompactHashMap] = None,
+    *,
+    collection: str = 'auto',
+    queryOrder: str = 'auto',
 ):
     with record_function("warpNeighborSearch - radiusSearchCompactHashMap"):
         datastructure = datastructure if datastructure is not None else buildCompactHashMap(
@@ -58,6 +61,8 @@ def radiusSearchCompactHashMap_(
             hashMapLength,
             capacity=capacity,
             reuse=reuse,
+            collection=collection,
+            queryOrder=queryOrder,
         )
         
         return adjacencyCH if not returnCompactHashMap else (adjacencyCH, datastructure)
@@ -73,12 +78,15 @@ def radiusSearchCompactHashMap(
     returnCompactHashMap: bool = False,
     referenceParticles: Optional[ParticleState] = None,
     capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
+    *,
+    collection: str = 'auto',
+    queryOrder: str = 'auto',
 ):
     referenceParticles = queryParticles if referenceParticles is None else referenceParticles
     queryPositions = queryParticles.positions
     referencePositions = referenceParticles.positions
-    querySupports = queryParticles.supports if queryParticles.supports is not None else torch.zeros(queryParticles.positions.shape[0], device=queryParticles.positions.device)
-    referenceSupports = referenceParticles.supports if referenceParticles.supports is not None else torch.zeros(referenceParticles.positions.shape[0], device=referenceParticles.positions.device)
+    querySupports = queryParticles.supports if queryParticles.supports is not None else queryPositions.new_zeros(queryPositions.shape[0])
+    referenceSupports = referenceParticles.supports if referenceParticles.supports is not None else referencePositions.new_zeros(referencePositions.shape[0])
     periodicity = torch.tensor(domain.periodic if domain.periodic is not None else [False] * queryParticles.positions.shape[1], device=queryParticles.positions.device) if not isinstance(domain.periodic, torch.Tensor) else domain.periodic.clone().to(queryParticles.positions.device)
 
     if hashMapLengthMode == HashMapLengthMode.Fixed:
@@ -103,4 +111,6 @@ def radiusSearchCompactHashMap(
         hashMapLength,
         returnCompactHashMap,
         capacity=capacity,
+        collection=collection,
+        queryOrder=queryOrder,
     )

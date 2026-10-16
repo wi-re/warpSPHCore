@@ -7,7 +7,7 @@ pairwise antisymmetry (conservation), no pair list."""
 import pytest
 import torch
 
-from test_mfm import GAMMA, KERNEL, _lattice
+from test_mfm import DTYPE, GAMMA, KERNEL, _lattice
 from warpSPHCore import DomainDescription, ParticleState
 from warpSPHCore.enumTypes import KernelFunctions
 from warpSPHCore.mfm import MeshlessGeometry, MeshlessWarp, mfmRates, signalTimestep
@@ -82,12 +82,14 @@ def test_timestep_matches_the_torch_reference(device):
 
 
 def test_three_dimensional_rates_match(device):
+    if device.type == 'cpu':
+        pytest.skip('3D SPH qualification runs on CUDA')
     n = 6
     ax = torch.arange(n, dtype=torch.float64)
     pts = torch.stack(torch.meshgrid(ax, ax, ax, indexing="ij"), -1).reshape(-1, 3) / n
     gen = torch.Generator().manual_seed(5)
     pts = (pts + (torch.rand(pts.shape, generator=gen, dtype=torch.float64) - 0.5) * 0.2 / n) % 1.0
-    N, dx, dt_ = pts.shape[0], 1.0 / n, torch.float32
+    N, dx, dt_ = pts.shape[0], 1.0 / n, DTYPE
     dom = DomainDescription(torch.zeros(3, dtype=dt_, device=device), torch.ones(3, dtype=dt_, device=device),
                             torch.ones(3, dtype=torch.bool, device=device), 3)
     pos = pts.to(dt_).to(device)
@@ -142,7 +144,7 @@ def _lattice3(device, n=8, jitter=0.3, seed=2):
     pts = torch.stack(torch.meshgrid(ax, ax, ax, indexing="ij"), -1).reshape(-1, 3) / n
     gen = torch.Generator().manual_seed(seed)
     pts = (pts + (torch.rand(pts.shape, generator=gen, dtype=torch.float64) - 0.5) * jitter / n) % 1.0
-    N, dx, dt_ = pts.shape[0], 1.0 / n, torch.float32
+    N, dx, dt_ = pts.shape[0], 1.0 / n, DTYPE
     dom = DomainDescription(torch.zeros(3, dtype=dt_, device=device), torch.ones(3, dtype=dt_, device=device),
                             torch.ones(3, dtype=torch.bool, device=device), 3)
     return pts.to(dt_).to(device), torch.full((N,), 2.6 * dx, dtype=dt_, device=device), dom
@@ -150,6 +152,8 @@ def _lattice3(device, n=8, jitter=0.3, seed=2):
 
 @pytest.mark.parametrize("dimension", [2, 3])
 def test_multigrid_closure_matches_plain_cg_and_needs_fewer_iterations(device, dimension):
+    if dimension == 3 and device.type == 'cpu':
+        pytest.skip('3D SPH qualification runs on CUDA')
     if dimension == 2:
         P, dom = _lattice(device, 40, jitter=0.3)
         pos, h = P.positions, P.supports
@@ -171,7 +175,7 @@ def test_multigrid_closure_matches_plain_cg_and_needs_fewer_iterations(device, d
 
 
 def test_multigrid_handles_a_one_dimensional_and_an_open_domain(device):
-    n, dt_ = 600, torch.float32
+    n, dt_ = 600, DTYPE
     x = ((torch.arange(n, dtype=dt_) + 0.5) / n).to(device)[:, None]
     x = x + 0.2 / n * torch.sin(37.0 * x)                                   # disorder
     h = torch.full((n,), 7.0 / (2 * n), dtype=dt_, device=device)
@@ -204,6 +208,8 @@ def test_mfv_mass_flux_limiter_agrees_between_backends_and_limits_only_the_mass(
 
 
 def test_single_precision_thresholds_and_coincident_particles_in_the_warp_backend(device):
+    if DTYPE != torch.float32:
+        pytest.skip('This regression targets the float32 face threshold')
     from test_mfm import _strip
     P, dom = _strip(device, 1.0e-3)
     w = MeshlessWarp.build(P.positions, P.supports, dom, KERNEL, closure="none", cond_max=1e30)

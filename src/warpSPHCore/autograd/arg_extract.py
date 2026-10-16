@@ -10,6 +10,10 @@ from .arg_check import *
 from ..radiusSearch import buildCompactHashMap
 from ..util.stateBundle import getStateBundle
 from ..util.latticeDensity import latticeDensityFactor
+from ..type_config import index_t, offset_t
+
+_INDEX_KIND = FieldKind.INT32 if index_t == wp.int32 else FieldKind.INT64
+_OFFSET_KIND = FieldKind.INT32 if offset_t == wp.int32 else FieldKind.INT64
 
 def extractStateInfo(
     queryParticles: ParticleState,
@@ -180,7 +184,7 @@ def extractStateInfo(
                 adj_neighborList    = adjacency.paddedJ
                 adj_neighborOffsets = adjacency.edgeOffsets
                 adj_numNeighbors    = adjacency.numNeighbors
-                grid_sortIndex  = nullField(FieldKind.INT64, dim, device)
+                grid_sortIndex  = nullField(_INDEX_KIND, dim, device)
                 grid_qMin       = domainMin
                 grid_qMax       = domainMax
                 grid_hCell      = scalar_t(scalar_t(0.0))
@@ -190,8 +194,8 @@ def extractStateInfo(
                 grid_numOffsets = 0
                 grid_cellOffsets = nullField(FieldKind.VEC3I, dim, device)
             else:
-                adj_neighborList    = nullField(FieldKind.INT64, dim, device)
-                adj_neighborOffsets = nullField(FieldKind.INT32, dim, device)
+                adj_neighborList    = nullField(_INDEX_KIND, dim, device)
+                adj_neighborOffsets = nullField(_OFFSET_KIND, dim, device)
                 adj_numNeighbors    = nullField(FieldKind.INT32, dim, device)
                 grid_sortIndex   = adjacency.sortIndex
                 grid_qMin        = adjacency.qMin

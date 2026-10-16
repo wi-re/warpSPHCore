@@ -38,6 +38,7 @@ def buildParticleSoA(
     supports: torch.Tensor,
     masses: torch.Tensor,
     densities: Optional[torch.Tensor] = None,
+    kinds: Optional[torch.Tensor] = None,
 ):
     SoA = _SoA_BY_DIM[dim]()
     SoA.positions = castTorchToWarpAsBuiltins(positions.contiguous())
@@ -47,7 +48,8 @@ def buildParticleSoA(
     if densities is None:
         densities = torch.zeros(n, device=positions.device, dtype=positions.dtype)
     SoA.densities = castTorchToWarp(densities.contiguous())
-    SoA.kinds = castTorchToWarp(torch.zeros(n, device=positions.device, dtype=torch.int32))
+    SoA.kinds = castTorchToWarp(kinds if kinds is not None else
+                               torch.zeros(n, device=positions.device, dtype=torch.int32))
     return SoA
 
 
@@ -66,10 +68,12 @@ def buildKernelState(
     laplacianMode: Optional[LaplacianScheme] = None,
     calibrateNormalization: bool = False,
     normalizationCoefficient: float = 1.0,
+    operationMode: OperationDirection = OperationDirection.TrueAllToToAll,
 ) -> kernelState:
     k = kernelState()
     k.kernelFunction = kernel.value
     k.supportMode = supportSchemeToUint(supportMode)
+    k.operationMode = operationMode.value
     # gradientMode/laplacianMode default to 0, which matches neither GradientScheme
     # nor LaplacianScheme's enum values (both start at 1) -- CSR JVP kernels that
     # branch on kernelProperties.gradientMode/.laplacianMode (Gradient/Divergence/
@@ -262,8 +266,8 @@ def buildAdjacencyOrGridState(
 
     if isinstance(adjacency, CompactHashMap):
         useAdjacency = False
-        adjState.neighborList = castTorchToWarp(torch.zeros(1, device=device, dtype=torch.int64))
-        adjState.neighborOffsets = castTorchToWarp(torch.zeros(1, device=device, dtype=torch.int32))
+        adjState.neighborList = castTorchToWarp(torch.zeros(1, device=device, dtype=get_torch_index_dtype()))
+        adjState.neighborOffsets = castTorchToWarp(torch.zeros(1, device=device, dtype=get_torch_offset_dtype()))
         adjState.numNeighbors = castTorchToWarp(torch.zeros(1, device=device, dtype=torch.int32))
 
         gState.sortIndex = castTorchToWarp(adjacency.sortIndex)
@@ -283,7 +287,7 @@ def buildAdjacencyOrGridState(
         adjState.neighborOffsets = castTorchToWarp(adjacency.edgeOffsets)
         adjState.numNeighbors = castTorchToWarp(adjacency.numNeighbors)
 
-        gState.sortIndex = castTorchToWarp(torch.zeros(1, device=device, dtype=torch.int64))
+        gState.sortIndex = castTorchToWarp(torch.zeros(1, device=device, dtype=get_torch_index_dtype()))
         gState.qMin = castTorchToWarpAsBuiltins(domain.min)
         gState.qMax = castTorchToWarpAsBuiltins(domain.max)
         gState.hCell = scalar_t(0.0)
@@ -335,6 +339,9 @@ def launchGeometryJVP(
     extraTensors: tuple = (),
     extraScalars: tuple = (),
     numThreads: Optional[int] = None,
+    queryKinds: Optional[torch.Tensor] = None,
+    referenceKinds: Optional[torch.Tensor] = None,
+    operationMode: OperationDirection = OperationDirection.TrueAllToToAll,
 ) -> torch.Tensor:
     """Autograd-bridged launcher for every Tier-2 JVP kernel's shared CSR
     argument order (`queryState, referenceState, queryTangentState,
@@ -360,13 +367,14 @@ def launchGeometryJVP(
     a dynamic for-loop bound).
 
     `domainState`/`correctionData`/`correctionTangentData`/`adjacencyState`/
-    `gridState`/`kernelProperties`/particle `kinds` are built once per call
+    `gridState`/`kernelProperties` are built once per call
     and closed over by `build_fn` rather than threaded through
     `flat_tensors`: none of them are differentiable (indices, domain bounds,
     disabled-correction flags), so there is nothing for the bridge to track
-    for them -- only the 16 particle-state tensors (8 primal + 8 tangent)
-    and any `extraTensors` participate in `StateAwareWarpFunction`'s
-    autograd bookkeeping.
+    for them. The 16 floating particle-state tensors (8 primal + 8 tangent),
+    correction/extra tensors and frozen integer kinds pass through the bridge.
+    Kinds have no tangent, but saving them preserves ordinary input ownership
+    and version checks through a delayed backward.
 
     `correctionTangentData` (`warpier_tier2_correction_jvp_plan.md` phase
     a2) is an unconditional canonical-ABI parameter, exactly like
@@ -479,11 +487,24 @@ def launchGeometryJVP(
         tangentQueryRenormL = torch.zeros((nQuery, dim, dim), device=device, dtype=dtype)
 
     domainState = buildDomainState(domain)
-    kernelProperties = buildKernelState(kernelFn, supportMode, gradientMode=gradientMode, laplacianMode=laplacianMode)
+    kernelProperties = buildKernelState(kernelFn, supportMode, gradientMode=gradientMode,
+                                        laplacianMode=laplacianMode, operationMode=operationMode)
+    if adjacency is None:
+        # Correction constructors also call this launcher directly, bypassing
+        # warpOperationJVP's default-grid setup. Honor their public None default.
+        from ..radiusSearch import buildCompactHashMap
+        adjacency = buildCompactHashMap(
+            queryPositions, referencePositions, querySupports, referenceSupports,
+            periodicity=domain.periodic, domainDescription=domain,
+            mode=SupportScheme.SuperSymmetric,
+        )
     useAdjacency, adjacencyState, gridState, _numOffsets = buildAdjacencyOrGridState(adjacency, domain)
 
-    qKinds = castTorchToWarp(torch.zeros(nQuery, device=device, dtype=torch.int32))
-    rKinds = castTorchToWarp(torch.zeros(nRef, device=device, dtype=torch.int32))
+    # Kinds are frozen categorical inputs, not tangents. Keep their actual
+    # values and the requested mode so the existing kernel filters match the
+    # primal. Optional defaults retain the internal PolyFit launch contract.
+    queryKinds = queryKinds if queryKinds is not None else torch.zeros(nQuery, device=device, dtype=torch.int32)
+    referenceKinds = referenceKinds if referenceKinds is not None else torch.zeros(nRef, device=device, dtype=torch.int32)
 
     _ParticleSoA = _SoA_BY_DIM[dim]
 
@@ -499,28 +520,29 @@ def launchGeometryJVP(
     ] + list(extraTensors) + [referenceVolumes, tangentReferenceVolumes] + [
         queryCRKA, queryCRKB, queryCRKGradA, queryCRKGradB,
         tangentQueryCRKA, tangentQueryCRKB, tangentQueryCRKGradA, tangentQueryCRKGradB,
-    ] + [queryRenormL, tangentQueryRenormL]
+    ] + [queryRenormL, tangentQueryRenormL, queryKinds, referenceKinds]
     n_extra = len(extraTensors)
     _volumeIdx = 16 + n_extra
     _crkIdx = _volumeIdx + 2
     _renormIdx = _crkIdx + 8
+    _kindIdx = _renormIdx + 2
 
     def build_fn(wa: list, use_bundle: bool = False) -> tuple:
         qPart = _ParticleSoA()
         qPart.positions, qPart.supports = wa[0], wa[2]
-        qPart.masses, qPart.densities, qPart.kinds = wa[4], wa[6], qKinds
+        qPart.masses, qPart.densities, qPart.kinds = wa[4], wa[6], wa[_kindIdx]
 
         rPart = _ParticleSoA()
         rPart.positions, rPart.supports = wa[1], wa[3]
-        rPart.masses, rPart.densities, rPart.kinds = wa[5], wa[7], rKinds
+        rPart.masses, rPart.densities, rPart.kinds = wa[5], wa[7], wa[_kindIdx + 1]
 
         qTangent = _ParticleSoA()
         qTangent.positions, qTangent.supports = wa[8], wa[10]
-        qTangent.masses, qTangent.densities, qTangent.kinds = wa[12], wa[14], qKinds
+        qTangent.masses, qTangent.densities, qTangent.kinds = wa[12], wa[14], wa[_kindIdx]
 
         rTangent = _ParticleSoA()
         rTangent.positions, rTangent.supports = wa[9], wa[11]
-        rTangent.masses, rTangent.densities, rTangent.kinds = wa[13], wa[15], rKinds
+        rTangent.masses, rTangent.densities, rTangent.kinds = wa[13], wa[15], wa[_kindIdx + 1]
 
         extra = tuple(wa[16 + i] for i in range(n_extra))
 

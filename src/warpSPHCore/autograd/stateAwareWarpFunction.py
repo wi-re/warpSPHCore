@@ -5,6 +5,7 @@ import warp as wp
 from ..util import *
 from .cache import *
 from ..profiling import record_function
+from .stream import torchWarpStream
 
 
 def _field_cache_grad_enabled() -> bool:
@@ -67,6 +68,12 @@ class StateAwareWarpFunction(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, jvp_fn, build_fn, launcher, kernel, output_shape, output_dtype, *flat_tensors):
+        device = next((t.device for t in flat_tensors if isinstance(t, torch.Tensor)), None)
+        with torchWarpStream(device):
+            return StateAwareWarpFunction._forward(ctx, jvp_fn, build_fn, launcher, kernel, output_shape, output_dtype, *flat_tensors)
+
+    @staticmethod
+    def _forward(ctx, jvp_fn, build_fn, launcher, kernel, output_shape, output_dtype, *flat_tensors):
         # with record_function(f"Warp Function State Aware Forward"):
         ctx.jvp_fn = jvp_fn
         ctx.build_fn = build_fn
@@ -200,6 +207,13 @@ class StateAwareWarpFunction(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
+        outputs = ctx.output_warp
+        device = outputs[0].device if isinstance(outputs, (list, tuple)) else outputs.device
+        with torchWarpStream(device):
+            return StateAwareWarpFunction._backward(ctx, *grad_outputs)
+
+    @staticmethod
+    def _backward(ctx, *grad_outputs):
         N = StateAwareWarpFunction._N_NON_TENSOR
         n_flat = len(ctx.is_tensor)
 
@@ -225,10 +239,10 @@ class StateAwareWarpFunction(torch.autograd.Function):
         if isinstance(output_warp, (list, tuple)):
             for out, grad in zip(output_warp, grad_outputs):
                 if grad is not None:
-                    grads[out] = wp.from_torch(grad.contiguous().clone(), dtype=out.dtype)
+                    grads[out] = wp.from_torch(ownedBackwardSeed(grad), dtype=out.dtype)
         else:
             if grad_outputs[0] is not None:
-                grads[output_warp] = wp.from_torch(grad_outputs[0].contiguous().clone(), dtype=output_warp.dtype)
+                grads[output_warp] = wp.from_torch(ownedBackwardSeed(grad_outputs[0]), dtype=output_warp.dtype)
 
         ctx.tape.backward(grads=grads)
 
@@ -298,6 +312,16 @@ class StateAwareWarpFunction(torch.autograd.Function):
         # for the whole call, instead of one per tensor.
         live_mask = _liveTangentMask(flat_tangents)
         if not any(live_mask):
+            # Torch cannot attach a None forward gradient to an empty custom
+            # Function output in some versions. Materialize its shape-correct
+            # zero tangent; ordinary nonempty inactive outputs keep None.
+            outputs = ctx.output_warp
+            if isinstance(outputs, (list, tuple)):
+                if any(out.size == 0 for out in outputs):
+                    return tuple(torch.zeros_like(wp.to_torch(out)) if out.size == 0 else None
+                                 for out in outputs)
+            elif outputs.size == 0:
+                return torch.zeros_like(wp.to_torch(outputs))
             return None
 
         if ctx.jvp_fn is None:
@@ -323,19 +347,19 @@ def hasLiveTangent(t) -> bool:
     tensor primitive kept for that shared definition and for any direct
     caller; `jvp()` itself uses the batched `_liveTangentMask` below rather
     than calling this once per tensor (each call is its own GPU->CPU sync)."""
-    return t is not None and bool(t.abs().max() > 0)
+    return t is not None and t.numel() > 0 and bool(t.abs().max() > 0)
 
 
 def _liveTangentMask(tangents) -> list:
     """Batched form of ``[hasLiveTangent(t) for t in tangents]``: reduces
-    every non-None tensor's ``.abs().max()`` on-device (no sync per tensor --
+    every nonempty, non-None tensor's ``.abs().max()`` on-device (no sync per tensor --
     ``torch.Tensor.max()`` returns a GPU-resident 0-d tensor), stacks the
     results, and pays exactly ONE GPU->CPU round trip for the whole call via
     a single ``.tolist()`` instead of one round trip per tensor. Equivalent
     to (not an approximation of) the per-tensor version -- same "> 0" test,
     same None-stays-False handling -- just batched. See `jvp()`'s own comment
     for the profiled cost this replaces."""
-    idx = [i for i, t in enumerate(tangents) if t is not None]
+    idx = [i for i, t in enumerate(tangents) if t is not None and t.numel() > 0]
     mask = [False] * len(tangents)
     if not idx:
         return mask
@@ -346,4 +370,3 @@ def _liveTangentMask(tangents) -> list:
 
 
 warpWrapperStateaware = StateAwareWarpFunction.apply
-    

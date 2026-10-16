@@ -101,3 +101,74 @@ def test_residualStatistics(kind):
 def test_unknownStatisticRaises():
     with pytest.raises(ValueError):
         residualStatistic(torch.zeros(3), None, 'nope', 1.0, False)
+
+
+def test_nonmonotone_adaptive_statistic_is_not_a_convergence_certificate():
+    store = Store()
+    store._jacobiIterationHistory = {'k': 8}
+    schedule = CheckSchedule(store, 'k', 'adaptive', 0, 4)
+
+    def step(x, i):
+        return x + 1, torch.tensor(0. if i == 0 else 1.), None
+
+    out = runStationary(step, torch.zeros(1), maxIters=4, tolerance=.5, schedule=schedule)
+    assert out.iterations == 4 and not out.converged
+    assert out.termination == 'budget' and out.firstConvergedIteration == 1
+    assert store._jacobiIterationHistory['k'] == 1
+    assert torch.equal(out.x, torch.tensor([4.]))
+
+
+@pytest.mark.parametrize('where', ['iterate', 'stat', 'relative'])
+def test_nonfinite_step_freezes_last_finite_iterate(where):
+    store = Store()
+    store._jacobiIterationHistory = {'k': 8}
+    schedule = CheckSchedule(store, 'k', 'adaptive', 0, 6)
+
+    def step(x, i):
+        xn, stat, norm = x + 1, torch.tensor(1.), torch.tensor(1.)
+        if i == 1:
+            if where == 'iterate':
+                xn *= float('nan')
+            elif where == 'stat':
+                stat *= float('nan')
+            else:
+                norm *= float('nan')
+        return xn, stat, norm
+
+    out = runStationary(step, torch.zeros(1), maxIters=6, tolerance=0, relTarget=.1, schedule=schedule)
+    assert out.iterations == 4 and not out.converged and out.termination == 'nonfinite'
+    assert torch.equal(out.x, torch.ones(1))
+
+
+@pytest.mark.parametrize('kind', ['flooredOneSided', 'oneSided', 'meanAbsolute'])
+def test_empty_selection_has_no_active_equations(kind):
+    residual = torch.ones(3)
+    stat, norm = residualStatistic(residual, torch.empty(0, dtype=torch.int64), kind, floor=1, relative=True)
+    assert stat == norm == 0
+
+
+def test_missing_relative_statistic_is_a_clear_error():
+    schedule = CheckSchedule(Store(), 'k', 'every', 0, 2)
+    with pytest.raises(ValueError, match='rNorm'):
+        runStationary(lambda x, i: (x, torch.tensor(1.), None), torch.zeros(1),
+                      maxIters=2, tolerance=0, relTarget=.1, schedule=schedule)
+
+
+def test_tuple_pressure_and_residual_state_is_preserved():
+    # The downstream optimal pressure solve carries precisely this tuple.
+    pressure, residual = torch.zeros(2), torch.ones(2)
+    schedule = CheckSchedule(Store(), 'optimal', 'every', 0, 4)
+
+    def step(state, i):
+        p, r = state
+        rn = r / 2
+        return (p + r, rn), rn.abs().mean(), None
+
+    out = runStationary(step, (pressure, residual), maxIters=4, tolerance=.2,
+                        schedule=schedule, track=lambda state: state[0].mean()[None])
+    assert out.converged and out.iterations == 3
+    torch.testing.assert_close(out.x[0], torch.full((2,), 1.75))
+    torch.testing.assert_close(out.x[1], torch.full((2,), .125))
+    assert out.tracked[-1] == (1.75,)
+    assert torch.equal(pressure, torch.zeros(2))
+    assert torch.equal(residual, torch.ones(2))

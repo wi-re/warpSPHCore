@@ -33,7 +33,7 @@ partial derivatives of order 1..p with unit weight over the square
 ``sqrt(V)`` selects the stencil members; (c) the interface point is Eq. 25 with
 the particle supports ``queryParticles.supports``; (d) a stencil with fewer
 members than required, or ``cond > cond_max``, is deactivated (weight 0), and
-if every stencil is deactivated the central fit is used regardless.
+if every stencil is deactivated the particle's first-order state is used.
 
 The sector stencil sizes of Gao et al. are not consistent on a uniform lattice
 (a 45-degree sector of radius 4.5 sqrt(V) holds ~8 particles, they require 10;
@@ -111,6 +111,7 @@ class Reconstructor:
         self.dim = fits[0].dim
         self._gram: dict = {}
         self.last_central: Optional[torch.Tensor] = None
+        self.last_fallback: Optional[torch.Tensor] = None
 
     # ------------------------------------------------------------------
     @staticmethod
@@ -148,6 +149,8 @@ class Reconstructor:
         deg, rc, CT, cmin = TENO_ORDERS[order]
         q = queryParticles
         dim = q.positions.shape[1]
+        if dim not in (1,2):
+            raise NotImplementedError('sector reconstruction is defined for 1-D and 2-D only')
         sqrtV = (q.masses / q.densities) ** (1.0 / dim)
         nSec = 8 if dim == 2 else 2
         # 1-D is not in the paper: a radius of rc*sqrt(V) holds only ~2 rc points
@@ -169,6 +172,8 @@ class Reconstructor:
         """MLS-WENO (Avesani et al. 2014)."""
         q = queryParticles
         dim = q.positions.shape[1]
+        if dim not in (1,2):
+            raise NotImplementedError('sector reconstruction is defined for 1-D and 2-D only')
         sqrtV = (q.masses / q.densities) ** (1.0 / dim)
         hm = sigmaMls * sqrtV
         nSec = 8 if dim == 2 else 2
@@ -219,21 +224,26 @@ class Reconstructor:
     def _weights2(self, beta: torch.Tensor) -> torch.Tensor:
         act = torch.isfinite(beta)
         big = torch.finfo(beta.dtype).max
+        def softmax(logits):
+            # An all-inactive row has no normalized weights. Substitute finite
+            # logits before softmax so its inactive backward never sees NaNs.
+            live = torch.isfinite(logits).any(1, keepdim=True)
+            return torch.softmax(torch.where(live, logits, torch.zeros_like(logits)), dim=1)
         if self.kind == "weno":
             logw = torch.full_like(beta, float("-inf"))
             lam = torch.ones_like(beta)
             lam[:, 0] = self.params["lambda0"]
             logw = torch.where(act, torch.log(lam) - self.params["r"] * torch.log(self.params["eps"] + beta.clamp(max=big)),
                                logw)
-            w = torch.softmax(logw, dim=1)
+            w = softmax(logw)
+            w = torch.where(act.any(1, keepdim=True), w, torch.zeros_like(w))
         else:
             lg = torch.where(act, -6.0 * torch.log(beta.clamp(max=big) + self.params["eps"]),
                              torch.full_like(beta, float("-inf")))
-            chi0 = torch.softmax(lg, dim=1)[:, 0]
+            chi0 = softmax(lg)[:, 0]
             central = (chi0 >= self.params["C_T"]) & act[:, 0]
             side = lg[:, 1:]
-            sidew = torch.softmax(side, dim=1)
-            sidew = torch.nan_to_num(sidew, nan=0.0)          # all sectors deactivated
+            sidew = softmax(side)
             w = torch.zeros_like(beta)
             w[:, 1:] = sidew
             dead = (~central) & ~torch.isfinite(side).any(1)
@@ -244,7 +254,7 @@ class Reconstructor:
         w = torch.nan_to_num(w, nan=0.0)
         s = w.sum(1, keepdim=True)
         dead = s.squeeze(1) == 0                              # every stencil deactivated
-        w = w / s.clamp_min(torch.finfo(w.dtype).tiny)
+        w = w / torch.where(s > 0, s, torch.ones_like(s))
         w[dead, 0] = 1.0
         return w
 
@@ -269,6 +279,7 @@ class Reconstructor:
         beta = self.smoothness(coeffs)
         omega = self.weights(beta)
         self.last_beta, self.last_omega = beta, omega
+        self.last_fallback = ~torch.isfinite(beta).any(dim=1)
         vec = f.dim() == 2
         om = omega if vec else omega.unsqueeze(-1)                       # (N, K, D)
         h = self.interfaceSupports.to(d.dtype)
@@ -282,6 +293,12 @@ class Reconstructor:
                 v = v if vec else v.unsqueeze(-1)
                 term = torch.where(wk != 0, wk * v, torch.zeros_like(v))
                 val = term if val is None else val + term
+            # A deficient central fit is not a trustworthy reconstruction.
+            # With no usable candidate, use the particle's first-order state.
+            fallback = self.last_fallback[idx]
+            fallback = fallback if vec else fallback.unsqueeze(-1)
+            value = f[idx] if vec else f[idx].unsqueeze(-1)
+            val = torch.where(fallback, value, val)
             return val if vec else val[..., 0]
 
         return state(i, oi), state(j, oj)

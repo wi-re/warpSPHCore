@@ -14,7 +14,7 @@ import warp as wp
 from typing import Any
 from warp.types import vector
 
-from ..type_config import scalar_t
+from ..type_config import scalar_t, index_t, offset_t
 from ..math import zero_like_warp
 
 __all__ = ["mfmClosureMatvecCSR_Kernel", "mfmClosureMatvecCSR"]
@@ -22,8 +22,8 @@ __all__ = ["mfmClosureMatvecCSR_Kernel", "mfmClosureMatvecCSR"]
 
 @wp.kernel
 def mfmClosureMatvecCSR_Kernel(
-    neighborOffsets: wp.array(dtype=wp.int32), numNeighbors: wp.array(dtype=wp.int32),  # type: ignore
-    neighborList: wp.array(dtype=wp.int64), kappa: wp.array(dtype=scalar_t), p: wp.array(dtype=Any),  # type: ignore
+    neighborOffsets: wp.array(dtype=offset_t), numNeighbors: wp.array(dtype=wp.int32),  # type: ignore
+    neighborList: wp.array(dtype=index_t), kappa: wp.array(dtype=scalar_t), p: wp.array(dtype=Any),  # type: ignore
     output_y: wp.array(dtype=Any), output_diag: wp.array(dtype=scalar_t),  # type: ignore
 ):
     """`wp_mfm.mfmClosureMatvec_Kernel` on the bare CSR arrays: the same loop and arithmetic (bitwise-identical
@@ -37,9 +37,9 @@ def mfmClosureMatvecCSR_Kernel(
     diag = scalar_t(0.0)
     pi = p[i]
     for n in range(numIndices):
-        k = kappa[beginIndex + n]
+        k = kappa[beginIndex + offset_t(n)]
         if k > scalar_t(0.0):
-            j = wp.int32(neighborList[beginIndex + n])
+            j = wp.int32(neighborList[beginIndex + offset_t(n)])
             acc += k * (pi - p[j])
             diag += k
     output_y[i] = acc

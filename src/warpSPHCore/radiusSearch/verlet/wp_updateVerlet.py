@@ -26,15 +26,15 @@ def updateNeighborsVerletFunc(
     mode_uint: wp.uint32,
 
     # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
-    neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32,
+    neighborList: wp.array(dtype = index_t), # type: ignore
+    neighborOffset : offset_t, numNeighs: wp.int32,
 
     # New Neighbor list data
-    newNeighborOffset: wp.int32, newNumNeighs: wp.int32,
+    newNeighborOffset: offset_t, newNumNeighs: wp.int32,
 
     # Outputs
-    edge_i: wp.array1d(dtype=wp.int64),  # shape [total_edges] # type: ignore
-    edge_j: wp.array1d(dtype=wp.int64)   # shape [total_edges] # type: ignore
+    edge_i: wp.array1d(dtype=index_t),  # shape [total_edges] # type: ignore
+    edge_j: wp.array1d(dtype=index_t)   # shape [total_edges] # type: ignore
 ):
     xi = queryPositions[i]
     hi = querySupports[i]
@@ -48,7 +48,7 @@ def updateNeighborsVerletFunc(
     counter = wp.int32(0)
     # Loop over neighbors to compute the gradient contribution from each neighbor
     for neighborIndex in range(numNeighs):
-        jj = neighborOffset + neighborIndex
+        jj = neighborOffset + offset_t(neighborIndex)
         j  = wp.int32(neighborList[jj])
 
         xj = referencePositions[j]
@@ -59,10 +59,10 @@ def updateNeighborsVerletFunc(
         
         r_ij = safe_sqrt(wp.dot(x_ij, x_ij))
 
-        edge_index = newNeighborOffset + counter
+        edge_index = newNeighborOffset + offset_t(counter)
         if r_ij <= hij:
-            edge_i[edge_index] = wp.int64(i)
-            edge_j[edge_index] = wp.int64(j)
+            edge_i[edge_index] = index_t(i)
+            edge_j[edge_index] = index_t(j)
             counter += 1
 
     return counter
@@ -76,13 +76,13 @@ def updateNeighborsVerlet(
     domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), periodicity : wp.array(dtype = wp.bool), # type: ignore
 
     mode_uint: wp.uint32, 
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
+    neighborList: wp.array(dtype = index_t), neighborListRowOffsets: wp.array(dtype = offset_t), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
 
     # Output
-    newNeighborListRowOffsets: wp.array(dtype = wp.int32), newNeighborCounter: wp.array(dtype = wp.int32), # type: ignore  
+    newNeighborListRowOffsets: wp.array(dtype = offset_t), newNeighborCounter: wp.array(dtype = wp.int32), # type: ignore
 
-    edge_i: wp.array1d(dtype=wp.int64),  # shape [total_edges] # type: ignore
-    edge_j: wp.array1d(dtype=wp.int64)   # shape [total_edges] # type: ignore  
+    edge_i: wp.array1d(dtype=index_t),  # shape [total_edges] # type: ignore
+    edge_j: wp.array1d(dtype=index_t)   # shape [total_edges] # type: ignore
 ):                                                                            
     i = wp.tid()
     if i >= queryPositions.shape[0]:

@@ -15,11 +15,13 @@ from warpSPHCore import (DomainDescription, OperationProperties, ParticleState,
 from warpSPHCore.enumTypes import (KernelFunctions, OperationDirection,
                                    SupportScheme, WarpOperation)
 from warpSPHCore.polyfit import Reconstructor, monomialExponents, smoothnessGram
+from warpSPHCore.type_config import get_torch_precision
 
 KERNEL = KernelFunctions.Wendland2
+DTYPE = get_torch_precision()
 
 
-def _periodic_case(device, n, jitter=0.3, seed=0, dtype=torch.float32):
+def _periodic_case(device, n, jitter=0.3, seed=0, dtype=DTYPE):
     g = torch.Generator().manual_seed(seed)
     ax = torch.arange(n, dtype=torch.float64)
     pts = torch.stack(torch.meshgrid(ax, ax, indexing="ij"), -1).reshape(-1, 2) / n

@@ -315,14 +315,14 @@ def _matDtype(ctx, extras):
 @wp.func
 def mfmMoments_Func_i(
     i: wp.int32, iPtcl: Any, referenceState: Any, domainState: domainData, kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     EZero: Any,
 ):
     omega = scalar_t(0.0)
     E = zero_like_warp(EZero)
     cnt = wp.int32(0)
     for n in range(numIndices):
-        j = wp.int32(offsetArray[beginIndex + n])
+        j = wp.int32(offsetArray[beginIndex + offset_t(n)])
         if j == i:
             continue
         jPtcl = getParticleData(referenceState, j)
@@ -392,7 +392,7 @@ _MOMENTS_SPEC = OperatorSpec(
 @wp.func
 def mfmGradients_Func_i(
     i: wp.int32, iPtcl: Any, referenceState: Any, domainState: domainData, kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     rho: wp.array(dtype=scalar_t), vel: wp.array(dtype=Any), pres: wp.array(dtype=scalar_t),  # type: ignore
     sRhoZero: Any, sVelZero: Any,
 ):
@@ -400,7 +400,7 @@ def mfmGradients_Func_i(
     sVel = zero_like_warp(sVelZero)
     sP = zero_like_warp(sRhoZero)
     for n in range(numIndices):
-        j = wp.int32(offsetArray[beginIndex + n])
+        j = wp.int32(offsetArray[beginIndex + offset_t(n)])
         if j == i:
             continue
         jPtcl = getParticleData(referenceState, j)
@@ -473,7 +473,7 @@ _GRADIENTS_SPEC = OperatorSpec(
 @wp.func
 def mfmLimiter_Func_i(
     i: wp.int32, iPtcl: Any, referenceState: Any, domainState: domainData, kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     rho: wp.array(dtype=scalar_t), vel: wp.array(dtype=Any), pres: wp.array(dtype=scalar_t),  # type: ignore
     gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
     nbHiRho: scalar_t, nbLoRho: scalar_t, mdHiRho: scalar_t, mdLoRho: scalar_t,
@@ -481,7 +481,7 @@ def mfmLimiter_Func_i(
     nbHiV: Any, nbLoV: Any, mdHiV: Any, mdLoV: Any,
 ):
     for n in range(numIndices):
-        j = wp.int32(offsetArray[beginIndex + n])
+        j = wp.int32(offsetArray[beginIndex + offset_t(n)])
         if j == i:
             continue
         jPtcl = getParticleData(referenceState, j)
@@ -608,7 +608,7 @@ def mfmClosureResidual_Kernel(
             continue
         offsetArray = adjacencyState.neighborList if useAdjacency else gridState.sortIndex
         for n in range(numIndices):
-            j = wp.int32(offsetArray[beginIndex + n])
+            j = wp.int32(offsetArray[beginIndex + offset_t(n)])
             if j == i:
                 continue
             jPtcl = getParticleData(referenceState, j)
@@ -643,14 +643,14 @@ def mfmClosureWeights_Kernel(
     beginIndex = adjacencyState.neighborOffsets[i]
     numIndices = adjacencyState.numNeighbors[i]
     for n in range(numIndices):
-        j = wp.int32(adjacencyState.neighborList[beginIndex + n])
+        j = wp.int32(adjacencyState.neighborList[beginIndex + offset_t(n)])
         k = scalar_t(0.0)
         if j != i:
             jPtcl = getParticleData(referenceState, j)
             if wp.length(computeDistanceVec(iPtcl.position, jPtcl.position, domainState)) <= wp.max(iPtcl.support, jPtcl.support):
                 A = pairFace(i, j, iPtcl, jPtcl, domainState, kernelProperties, vol, Einv, condBad, centred, areaCap)
                 k = wp.pow(wp.length(A), power)
-        output_kappa[beginIndex + n] = k
+        output_kappa[beginIndex + offset_t(n)] = k
 
 
 @wp.kernel
@@ -675,9 +675,9 @@ def mfmClosureMatvec_Kernel(
     diag = scalar_t(0.0)
     pi = p[i]
     for n in range(numIndices):
-        k = kappa[beginIndex + n]
+        k = kappa[beginIndex + offset_t(n)]
         if k > scalar_t(0.0):
-            j = wp.int32(adjacencyState.neighborList[beginIndex + n])
+            j = wp.int32(adjacencyState.neighborList[beginIndex + offset_t(n)])
             acc += k * (pi - p[j])
             diag += k
     output_y[i] = acc
@@ -764,7 +764,7 @@ def reconstructSide(
 @wp.func
 def mfmFlux_Func_i(
     i: wp.int32, iPtcl: Any, referenceState: Any, domainState: domainData, kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     rho: wp.array(dtype=scalar_t), vel: wp.array(dtype=Any), pres: wp.array(dtype=scalar_t),  # type: ignore
     gRho: wp.array(dtype=Any), gVel: wp.array(dtype=Any), gP: wp.array(dtype=Any),  # type: ignore
     aRho: wp.array(dtype=scalar_t), aVel: wp.array(dtype=Any), aP: wp.array(dtype=scalar_t),  # type: ignore
@@ -778,7 +778,7 @@ def mfmFlux_Func_i(
     dp = zero_like_warp(dpIn)
     de = deIn
     for n in range(numIndices):
-        j = wp.int32(offsetArray[beginIndex + n])
+        j = wp.int32(offsetArray[beginIndex + offset_t(n)])
         if j == i:
             continue
         # canonical pair (a, b), a < b: both threads of the pair compute the identical flux
@@ -1019,7 +1019,7 @@ def mfmCoarseStencil_Kernel(
             continue
         offsetArray = adjacencyState.neighborList if useAdjacency else gridState.sortIndex
         for n in range(numIndices):
-            j = wp.int32(offsetArray[beginIndex + n])
+            j = wp.int32(offsetArray[beginIndex + offset_t(n)])
             if j == i:
                 continue
             jPtcl = getParticleData(referenceState, j)
@@ -1041,7 +1041,7 @@ def mfmCoarseStencil_Kernel(
                 slot = (dx + 1) * 3 + (dy + 1)
             if dim == 1:
                 slot = dx + 1
-            S[slot] += kappa[beginIndex + n]
+            S[slot] += kappa[beginIndex + offset_t(n)]
     output_S[i] = S
 
 
@@ -1085,7 +1085,7 @@ def mfmTimestep_Kernel(
             continue
         offsetArray = adjacencyState.neighborList if useAdjacency else gridState.sortIndex
         for n in range(numIndices):
-            j = wp.int32(offsetArray[beginIndex + n])
+            j = wp.int32(offsetArray[beginIndex + offset_t(n)])
             if j == i:
                 continue
             jPtcl = getParticleData(referenceState, j)

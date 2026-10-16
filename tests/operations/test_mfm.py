@@ -9,6 +9,7 @@ import math
 
 import pytest
 import torch
+import warp as wp
 
 from warpSPHCore import (DomainDescription, OperationProperties, ParticleState,
                          radiusSearchCompactHashMap, warpOperation)
@@ -18,12 +19,15 @@ from warpSPHCore.mfm import (MeshlessGeometry, SUPPORTED_KERNELS, conserved, fac
                              kernelWeight, mfmRates, pairLimit, primitives, signalTimestep,
                              slopeLimiter, starState, conditionBeta)
 from warpSPHCore.mfm.geometry import _closeFaces, _scatter
+from warpSPHCore.type_config import scalar_t
 
 KERNEL = KernelFunctions.Wendland2
 GAMMA = 1.4
+DTYPE = wp.dtype_to_torch(scalar_t)
 
 
-def _lattice(device, n, jitter=0.3, seed=0, periodic=True, dtype=torch.float32, support=3.0):
+def _lattice(device, n, jitter=0.3, seed=0, periodic=True, dtype=None, support=3.0):
+    dtype = DTYPE if dtype is None else dtype
     g = torch.Generator().manual_seed(seed)
     ax = torch.arange(n, dtype=torch.float64)
     pts = torch.stack(torch.meshgrid(ax, ax, indexing="ij"), -1).reshape(-1, 2) / n
@@ -350,7 +354,7 @@ def test_conserved_primitive_roundtrip():
 
 @pytest.mark.parametrize("mode", ["MFM", "MFV"])
 def test_periodic_sod_tube_conserves_and_resolves_the_star_state(device, mode):
-    n, dt_, nngb = 200, torch.float32, 7.0
+    n, dt_, nngb = 200, DTYPE, 7.0
     x = ((torch.arange(n, dtype=dt_) + 0.5) / n).to(device)
     high = (x >= 0.25) & (x < 0.75)
     rho = torch.where(high, 1.0, 0.125).to(dt_)
@@ -401,13 +405,15 @@ def test_a_custom_star_state_plugs_into_the_mfm_flux(device):
 
 
 def test_three_dimensional_uniform_flow_and_conservation(device):
+    if device.type == 'cpu':
+        pytest.skip('3D SPH qualification runs on CUDA')
     n = 6
     ax = torch.arange(n, dtype=torch.float64)
     pts = torch.stack(torch.meshgrid(ax, ax, ax, indexing="ij"), -1).reshape(-1, 3) / n
     gen = torch.Generator().manual_seed(5)
     pts = (pts + (torch.rand(pts.shape, generator=gen, dtype=torch.float64) - 0.5) * 0.2 / n) % 1.0
     N, dx = pts.shape[0], 1.0 / n
-    dt_ = torch.float32
+    dt_ = DTYPE
     dom = DomainDescription(torch.zeros(3, dtype=dt_, device=device), torch.ones(3, dtype=dt_, device=device),
                             torch.ones(3, dtype=torch.bool, device=device), 3)
     P = ParticleState(positions=pts.to(dt_).to(device), supports=torch.full((N,), 2.6 * dx, dtype=dt_, device=device),
@@ -528,8 +534,9 @@ def test_precision_defaults():
     assert pinvAbove(torch.float32) < pinvAbove(torch.float64)
 
 
-def _strip(device, squeeze, dtype=torch.float32):
+def _strip(device, squeeze, dtype=None):
     """A thin, rotated strip of particles: N_cond ~ 0.4 / squeeze^2."""
+    dtype = DTYPE if dtype is None else dtype
     import math
     n = 40
     ax, ay = torch.arange(n, dtype=torch.float64), torch.arange(7, dtype=torch.float64)
@@ -550,6 +557,8 @@ def _strip(device, squeeze, dtype=torch.float32):
 
 
 def test_the_face_fallback_threshold_follows_the_precision(device):
+    if DTYPE != torch.float32:
+        pytest.skip('This regression targets the float32 face threshold')
     P, dom = _strip(device, 1.0e-3)                                  # N_cond ~ 4e4 (rotated): fine for GIZMO's 1e6, not in float32
     g32 = MeshlessGeometry.build(P, dom, KERNEL, closure="none", cond_max=1e30)
     assert g32.cond.median() > 2.1e4

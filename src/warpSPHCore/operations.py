@@ -310,8 +310,8 @@ def warpOperationJVP(
       `warpier_tier2_operators_plan.md` extended this to the five
       value-having operators' own position/support tangent, each computed
       with `queryValues`/`referenceValues` held at their **primal** value
-      (`fi`/`fj` frozen) -- landed one at a time in `_GEOMETRY_JVP_DISPATCH`;
-      whichever haven't landed yet still raise `NotImplementedError`.
+      (`fi`/`fj` frozen). All five are registered in `_GEOMETRY_JVP_DISPATCH`,
+      with the dimension/scheme/correction exclusions described below.
       Density's density tangent does not exist (Density has no density
       input) and never will. `adjacency` accepts an `AdjacencyList`, a
       `CompactHashMap`, or `None` (a `CompactHashMap` is then built the same
@@ -356,10 +356,9 @@ def warpOperationJVP(
       consumer exists).
     * **Both at once** (`warpier_tier2_combined_jvp_plan.md`): for the five
       value-having operators, supplying a value tangent alongside a geometry
-      tangent computes both of the above -- the geometry JVP with values
-      frozen at primal, the value JVP via `warpOperation` relaunched on the
-      tangent value arrays with geometry frozen at primal -- and returns
-      their sum. This is not an approximation: every operator here is
+      tangent computes and adds both contributions. Supported fused kernels
+      accumulate field and geometry terms in one launch; the remaining path
+      relaunches `warpOperation` on the field tangents. Every operator here is
       exactly linear in `queryValues`/`referenceValues` with a geometry-
       dependent (but value-independent) coefficient, so the cross term in
       the total differential is exactly zero and the two already-correct
@@ -442,6 +441,7 @@ def warpOperationJVP(
             zeroPositions = lambda n: torch.zeros((n, domain.dim), device=queryParticles.positions.device, dtype=queryParticles.positions.dtype)
             return computeSPHDensityGeometryJVP(
                 queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+                operationMode=operationProperties.operationMode,
                 queryTangentState=ParticleTangentState(
                     positions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
                     supports=tangentQuerySupports,
@@ -507,6 +507,7 @@ def warpOperationJVP(
             zeroPositions = lambda n: torch.zeros((n, domain.dim), device=queryParticles.positions.device, dtype=queryParticles.positions.dtype)
             return computeCovarianceGeometryJVP(
                 queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+                operationMode=operationProperties.operationMode,
                 queryTangentState=ParticleTangentState(
                     positions=tangentQueryPositions if tangentQueryPositions is not None else zeroPositions(nQuery),
                     supports=tangentQuerySupports,
@@ -638,6 +639,7 @@ def warpOperationJVP(
             densities=tangentQueryDensities,
         )
         dispatchKwargs = dict(
+            operationMode=operationProperties.operationMode,
             referenceParticles=referenceParticles,
             referenceTangentState=ParticleTangentState(
                 positions=tangentReferencePositions,
@@ -761,8 +763,8 @@ def warpOperationHVP(
     once more in the same direction `v` -- "a JVP of that JVP".
 
     Only Density's position Hessian is implemented so far
-    (`coreOperations.wp_densityHVP.computeSPHDensityPositionHVP`), matching
-    `warpOperationJVP`'s own current geometry-JVP scope. It is a **separate entry
+    (`coreOperations.wp_densityHVP.computeSPHDensityPositionHVP`); first-order
+    geometry JVPs cover the other operators too. It is a **separate entry
     point**, not a `warpOperationJVP` option, because generic torch-level
     composition (`torch.func.jvp` twice, or nested
     `torch.autograd.forward_ad`) does not work for a warp-kernel-backed
@@ -787,6 +789,7 @@ def warpOperationHVP(
         )
     return computeSPHDensityPositionHVP(
         queryParticles, domain, operationProperties.kernel, operationProperties.supportMode, adjacency,
+        operationMode=operationProperties.operationMode,
         tangentQueryPositions=tangentQueryPositions,
         referenceParticles=referenceParticles,
         tangentReferencePositions=tangentReferencePositions,

@@ -27,8 +27,8 @@ def countNeighborsVerletFunc(
     mode_uint: wp.uint32,
 
     # Neighbor list data, pre accessed to avoid gradient issues with dynamic for loops
-    neighborList: wp.array(dtype = wp.int64), # type: ignore
-    neighborOffset : wp.int32, numNeighs: wp.int32,
+    neighborList: wp.array(dtype = index_t), # type: ignore
+    neighborOffset : offset_t, numNeighs: wp.int32,
 ):
     xi = queryPositions[i]
     hi = querySupports[i]
@@ -42,7 +42,7 @@ def countNeighborsVerletFunc(
     counter = wp.int32(0)
     # Loop over neighbors to compute the gradient contribution from each neighbor
     for neighborIndex in range(numNeighs):
-        jj = neighborOffset + neighborIndex
+        jj = neighborOffset + offset_t(neighborIndex)
         j  = wp.int32(neighborList[jj])
 
         xj = referencePositions[j]
@@ -66,7 +66,7 @@ def countNeighborsVerlet(
     domainMin : wp.array(dtype = scalar_t), domainMax : wp.array(dtype = scalar_t), periodicity : wp.array(dtype = wp.bool), # type: ignore
 
     mode_uint: wp.uint32, 
-    neighborList: wp.array(dtype = wp.int64), neighborListRowOffsets: wp.array(dtype = wp.int32), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
+    neighborList: wp.array(dtype = index_t), neighborListRowOffsets: wp.array(dtype = offset_t), numNeighbors: wp.array(dtype = wp.int32), # type: ignore
 
     # Output
     neighborCounter: wp.array(dtype = wp.int32), # type: ignore    

@@ -11,16 +11,41 @@ def computeCRKTermsWarp(
 
 
     m_2_det = torch.det(m_2).abs()
-    m_2_inv = torch.linalg.pinv(m_2)# if m_2.shape[1] != 2 else pinv2x2(m_2)[0]
+    mask = (num_nbrs < 2) | (m_2_det < 1e-14)
+    identity = torch.eye(m_2.shape[-1], dtype=m_2.dtype, device=m_2.device)
+
+    def safe_moments(mask, m0, m1, m2, dm0, dm1, dm2):
+        # The limiter is a constant identity correction. Keep inactive algebra
+        # finite BEFORE reciprocals and inverses, including its adjoints.
+        return (torch.where(mask, torch.ones_like(m0), m0),
+                torch.where(mask[:, None], torch.zeros_like(m1), m1),
+                torch.where(mask[:, None, None], identity, m2),
+                torch.where(mask[:, None], torch.zeros_like(dm0), dm0),
+                torch.where(mask[:, None, None], torch.zeros_like(dm1), dm1),
+                torch.where(mask[:, None, None, None], torch.zeros_like(dm2), dm2))
+
+    m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma = safe_moments(
+        mask, m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma)
+    m_2_inv = torch.linalg.pinv(m_2)
+    projection = torch.einsum('nij, ni, nj -> n', m_2_inv, m_1, m_1)
+    schur = m_0 - projection
+    # Invertible spatial moments do not imply independent constant/linear
+    # constraints: references on an affine plane away from the query can
+    # have nonsingular m2 but singular augmented moments. Reject nonpositive
+    # or cancellation-sized Schur complements relative to their own terms.
+    tolerance = 32 * torch.finfo(m_0.dtype).eps * (m_0.abs() + projection.abs())
+    mask = mask | (~torch.isfinite(schur)) | (schur <= tolerance)
+    m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma = safe_moments(
+        mask, m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma)
+    m_2_inv = torch.where(mask[:, None, None], identity, m_2_inv)
     # m_2_inv = 1/m_2 
     
     # print(f'm_2_det: {m_2_det.min():scalar_t(8.3)g}, {m_2_det.max():scalar_t(8.3)g}, {m_2_det.mean():scalar_t(8.3)g} has nan: {torch.isnan(m_2_det).any()} has inf: {torch.isinf(m_2_det).any()}')
     # 
-    is_singular = torch.where(m_2_det < 1e-14, (1.0), (0.0))
     # print(f'Number of singular matrices: {is_singular.sum()}')
     #     # Eq. 12.
     # ai = scalar_t(1.0)/(m0 - dot(temp_vec, m1, d))
-    A = 1 / (m_0 - torch.einsum('nij, ni, nj -> n', m_2_inv, m_1, m_1))
+    A = 1 / torch.where(mask, torch.ones_like(schur), schur)
     # # Eq. 13.
     # mat_vec_mult(m2inv, m1, d, bi)
     # for gam in range(d):
@@ -44,10 +69,8 @@ def computeCRKTermsWarp(
 
     # num_nbrs = coo_to_csr(actualNeighbors).rowEntries
 
-    mask = (num_nbrs < 2) | (is_singular > (0.0))
-
     if mask.any():
-        print(f"Warning: {mask.sum()} particles have less than 2 neighbors or singular moment matrices. Applying limiter to CRK terms for these particles.")
+        print(f"Warning: {mask.sum()} particles have insufficient neighbors or degenerate moment systems. Applying limiter to CRK terms for these particles.")
 
     # if N_NBRS < 2 or is_singular > scalar_t(0.0):
     # d_ai[d_idx] = scalar_t(1.0)

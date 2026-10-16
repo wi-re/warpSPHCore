@@ -16,6 +16,7 @@ from ..compactHash import *
 from .validCheck import _verlet_validity_metrics
 from .wp_validity import verletValidityMetrics
 from .util import _minimum_image_delta
+from ..options import resolveCollection, resolveQueryOrder
 
 # @torch.jit.script
 # --- deferred validity checks (CUDA-graph capture of a whole step) ----------
@@ -52,7 +53,10 @@ def buildVerletList_(
         capacity : Optional[CapacityPolicy] = DEFAULT_CAPACITY,
         rebuildSlack : float = 0.0,
         gridFactory = None,
-        forceRebuild : bool = False):
+        forceRebuild : bool = False, *,
+        collection: str = 'auto', queryOrder: str = 'auto'):
+    collection = resolveCollection(collection, queryPositions.device)
+    queryOrder = resolveQueryOrder(queryOrder, queryPositions, referencePositions)
     with record_function(f"[Verlet] {mode}"):
         if priorNeighborhood is None or (priorNeighborhood is not None and priorNeighborhood.queryPositions is None) or (priorNeighborhood is not None and priorNeighborhood.referencePositions is None):
             if verbose:
@@ -63,6 +67,7 @@ def buildVerletList_(
                     querySupports * verletScale, referenceSupports * verletScale,
                     domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                     datastructure=gridFactory() if gridFactory is not None else None,
+                    collection=collection, queryOrder=queryOrder,
                     capacity=capacity,
                 )
         else:
@@ -75,6 +80,7 @@ def buildVerletList_(
                         querySupports * verletScale, referenceSupports * verletScale,
                         domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                     datastructure=gridFactory() if gridFactory is not None else None,
+                    collection=collection, queryOrder=queryOrder,
                         capacity=capacity,
                     )
             elif forceRebuild:
@@ -86,6 +92,7 @@ def buildVerletList_(
                         querySupports * verletScale, referenceSupports * verletScale,
                         domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                         datastructure=gridFactory() if gridFactory is not None else None,
+                    collection=collection, queryOrder=queryOrder,
                         capacity=capacity, reuse=priorNeighborhood,
                     )
             else:
@@ -174,6 +181,7 @@ def buildVerletList_(
                                 querySupports * verletScale, referenceSupports * verletScale,
                                 domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                     datastructure=gridFactory() if gridFactory is not None else None,
+                    collection=collection, queryOrder=queryOrder,
                                 capacity=capacity, reuse=priorNeighborhood,
                             )
                             
@@ -220,6 +228,7 @@ def buildVerletList(
         rebuildSlack : float = 0.0,
         gridFactory = None,
         forceRebuild : bool = False,
+        *, collection: str = 'auto', queryOrder: str = 'auto',
 ):
     with record_function(f"[warpSPH] - buildVerletList"):
         if referenceParticles is None:
@@ -229,5 +238,6 @@ def buildVerletList(
             queryParticles.positions, referenceParticles.positions,
             queryParticles.supports, referenceParticles.supports,
             domain, verletScale, supportMode, 
-            priorNeighborhood, verbose, capacity, rebuildSlack, gridFactory, forceRebuild
+            priorNeighborhood, verbose, capacity, rebuildSlack, gridFactory, forceRebuild,
+            collection=collection, queryOrder=queryOrder
         )

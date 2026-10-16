@@ -21,6 +21,10 @@ The only numerical difference is float summation order (~1e-7 relative).
 
 ``WARPSPHCORE_NEIGHBOR_LANES`` (or :func:`setNeighborLanes`) picks the lane
 count; ``1`` (or ``0``) restores the thread-per-particle kernels everywhere.
+Without an explicit process setting, qualified kernels default to 32 lanes;
+the trial curl and Laplacian variants retain one lane pending consumer and
+large-problem qualification. OperatorSpec.defaultNeighborLanes carries that
+choice; ordinary and prepared launchers honor it alike.
 Lane counts must divide the 32-thread warp evenly to keep blocks full, so
 only powers of two up to 32 are accepted. A process-wide setting, read at
 launch time, so it can be flipped between calls (A/B timing, bisection).
@@ -46,21 +50,28 @@ def _validate(lanes: int) -> int:
     return lanes
 
 
-def _fromEnv() -> int:
+def _fromEnv() -> Optional[int]:
     raw = os.environ.get('WARPSPHCORE_NEIGHBOR_LANES')
-    return DEFAULT_NEIGHBOR_LANES if raw is None or raw == '' else _validate(int(raw))
+    return None if raw is None or raw == '' else _validate(int(raw))
 
 
 _envLanes = _fromEnv()
 
 
-def neighborLanes() -> int:
-    """Lanes per particle for operators that have a tiled kernel (1 = off)."""
-    return _override if _override is not None else _envLanes
+def neighborLanes(*, default: int = DEFAULT_NEIGHBOR_LANES) -> int:
+    """Resolve explicit process overrides before an operator's default.
+
+    Trial kernels may default to one lane until consumer qualification. An
+    explicit environment value or setNeighborLanes still selects their tiled
+    variant. Calling without arguments retains the existing 32-lane default.
+    """
+    if _override is not None:
+        return _override
+    return _envLanes if _envLanes is not None else _validate(default)
 
 
 def setNeighborLanes(lanes: Optional[int]) -> None:
     """Override the lane count for this process; ``None`` reverts to the
-    environment / default."""
+    environment / per-operator default."""
     global _override
     _override = None if lanes is None else _validate(lanes)

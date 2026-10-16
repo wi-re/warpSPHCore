@@ -136,7 +136,7 @@ def computePolyMoments_Func_i(
     i: wp.int32, dim: wp.int32,
     iPtcl: Any, referenceState: Any,
     domainState: domainData, kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     iCorrectionData: Any, correctionData: Any,
     # end of the canonical ABI prefix
 
@@ -147,7 +147,7 @@ def computePolyMoments_Func_i(
     s = scalar_t(0.0)
     count = wp.int32(0)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -289,19 +289,19 @@ def computePolyRHS_Func_i(
     i: wp.int32, dim: wp.int32,
     iPtcl: Any, referenceState: Any,
     domainState: domainData, kernelProperties: kernelState,
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype=wp.int64),  # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype=index_t),  # type: ignore
     iCorrectionData: Any, correctionData: Any,
     # end of the canonical ABI prefix
 
     ea: Any,  # type: ignore
     values: wp.array(dtype=Any),  # type: ignore
-    centerValue: Any,  # type: ignore   f_i (zero for the MLS form)
+    centerValue: scalar_t,  # type: ignore   f_i[comp] (zero for the MLS form)
     comp: wp.int32,
     sector: wp.int32, numSectors: wp.int32, unitWeights: wp.int32,
 ):
     s = scalar_t(0.0)
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -310,7 +310,7 @@ def computePolyRHS_Func_i(
         w, xi = polyFitWeight(i, j, iPtcl, jPtcl, domainState, kernelProperties, correctionData, dim,
                               sector, numSectors, unitWeights)
         fj = values[j]
-        s += w * polyMonomial(ea, xi, dim) * (fj[comp] - centerValue[comp])
+        s += w * polyMonomial(ea, xi, dim) * (fj[comp] - centerValue)
     return s
 
 
@@ -335,9 +335,9 @@ def computePolyRHS_Func_Adjacency(
         if not checkDirectionality_i(iPtcl.kind, kernelProperties.operationMode):
             return s
     iCorrectionData = getParticleCorrectionData_i(correctionData, i)
-    centerValue = values[i] * scalar_t(0.0)
+    centerValue = scalar_t(0.0)
     if subtractCenter != 0:
-        centerValue = values[i]
+        centerValue = values[i][comp]
 
     for o in range(numOffsets):
         beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, useAdjacency, adjacencyState, gridState, queryState, domainState)

@@ -1,5 +1,6 @@
 
 from ..dataTypes import CompactHashMap
+from dataclasses import replace
 
 from .crk_density import _computeCRKDensity_stateBackend
 from .crk_terms import computeCRKTermsWarp
@@ -32,6 +33,8 @@ def computeCRKFactors(
   operationMode: OperationDirection = OperationDirection.AllToAll,
   adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None,
   referenceState: Optional[ParticleState] = None,
+  *,
+  referenceVolumeMode: Optional[OperationDirection] = None,
 ):
     """Solves for the CRK correction terms (A, B, gradA, gradB) for every query
     particle, along with the apparent-volume estimate and a CRK-corrected consistency
@@ -41,6 +44,16 @@ def computeCRKFactors(
     extractStateInfo) -- there is no longer a neighbor-list-only restriction here, since
     computeCRKMoments/_computeCRKVolume_stateBackend/_computeCRKDensity_stateBackend are
     all dual-path (adjacency + grid) kernels.
+
+    For a distinct referenceState, moment/density weights are apparent volumes
+    estimated on that reference population against itself. Query apparent
+    volumes are returned separately. A query-to-reference adjacency cannot be
+    reused for the reference-to-reference estimate, which builds its own grid.
+    ``referenceVolumeMode=None`` preserves the inherited interaction mode.
+    An explicit mode independently selects reference-to-reference volume
+    interactions, including for an aliased population. Use TrueAllToToAll
+    when that whole reference cloud represents the intended geometric volume
+    samples. Query volumes and moment interactions still use operationMode.
     """
     volumeProperties = OperationProperties(
         kernel=kernel,
@@ -51,6 +64,13 @@ def computeCRKFactors(
         queryParticles, volumeProperties, domain,
         adjacency=adjacency, referenceParticles=referenceState,
     )
+    referenceArea = apparentArea
+    if (referenceState is not None and referenceState is not queryParticles) or referenceVolumeMode is not None:
+        referenceArea = _computeCRKVolume_stateBackend(
+            queryParticles if referenceState is None else referenceState,
+            replace(volumeProperties, operationMode=(operationMode if referenceVolumeMode is None else referenceVolumeMode)),
+            domain, adjacency=None,
+        )
 
     momentsProperties = OperationProperties(
         kernel=kernel,
@@ -59,7 +79,7 @@ def computeCRKFactors(
     )
     m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma, numNeighbors = _computeCRKMoments_stateBackend(
         queryParticles, momentsProperties, domain,
-        queryVolumes=apparentArea, referenceVolumes=apparentArea,
+        queryVolumes=apparentArea, referenceVolumes=referenceArea,
         adjacency=adjacency, referenceParticles=referenceState,
     )
 
@@ -77,7 +97,7 @@ def computeCRKFactors(
     crk_density = _computeCRKDensity_stateBackend(
         queryParticles, densityProperties, domain,
         crkState=CRKState(A=A, B=B, gradA=gradA, gradB=gradB),
-        queryVolumes=apparentArea, referenceVolumes=apparentArea,
+        queryVolumes=apparentArea, referenceVolumes=referenceArea,
         adjacency=adjacency, referenceParticles=referenceState,
     )
 
@@ -93,6 +113,8 @@ def computeCRKFactorsJVP(
   adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None,
   referenceState: Optional[ParticleState] = None,
   referenceTangentState: Optional['ParticleTangentState'] = None,
+  *,
+  referenceVolumeMode: Optional[OperationDirection] = None,
 ):
     """JVP counterpart to `computeCRKFactors`
     (`warpier_tier2_correction_jvp_plan.md` phase (c), Stages 1-3): given
@@ -118,6 +140,13 @@ def computeCRKFactorsJVP(
     Returns `(apparentArea, dApparentArea, crkState, crkTangentState)`. Does
     not compute `crk_density`/its tangent -- that diagnostic has no consumer
     anywhere in the JVP path.
+
+    Distinct reference populations use reference-to-reference apparent volumes
+    and their tangents, matching computeCRKFactors. Omitted reference tangents
+    mean zero; aliasing the primal state does not alias its role tangents.
+    With an explicit referenceVolumeMode, the separate reference volume
+    estimate uses referenceTangentState in both of its roles, even if the
+    reference population aliases the query. None retains the legacy reuse.
     """
     volumeProperties = OperationProperties(
         kernel=kernel,
@@ -130,9 +159,28 @@ def computeCRKFactorsJVP(
     )
     dApparentArea = computeCRKVolumeGeometryJVP(
         queryParticles, domain, kernel, adjacency, apparentArea,
+        operationMode=operationMode,
         queryTangentState=queryTangentState,
         referenceParticles=referenceState, referenceTangentState=referenceTangentState,
     )
+    referenceArea, dReferenceArea = apparentArea, dApparentArea
+    if (referenceState is not None and referenceState is not queryParticles) or referenceVolumeMode is not None:
+        volumeReference = queryParticles if referenceState is None else referenceState
+        referenceMode = operationMode if referenceVolumeMode is None else referenceVolumeMode
+        referenceArea = _computeCRKVolume_stateBackend(
+            volumeReference, replace(volumeProperties, operationMode=referenceMode), domain, adjacency=None,
+        )
+        tangent = referenceTangentState
+        if tangent is None or tangent.positions is None:
+            tangent = ParticleTangentState(
+                positions=torch.zeros_like(volumeReference.positions),
+                supports=None if tangent is None else tangent.supports, masses=None,
+            )
+        dReferenceArea = computeCRKVolumeGeometryJVP(
+            volumeReference, domain, kernel, None, referenceArea,
+            operationMode=referenceMode,
+            queryTangentState=tangent, referenceTangentState=tangent,
+        )
 
     momentsProperties = OperationProperties(
         kernel=kernel,
@@ -141,12 +189,13 @@ def computeCRKFactorsJVP(
     )
     m_0, m_1, m_2, dm_0dgamma, dm_1dgamma, dm_2dgamma, numNeighbors = _computeCRKMoments_stateBackend(
         queryParticles, momentsProperties, domain,
-        queryVolumes=apparentArea, referenceVolumes=apparentArea,
+        queryVolumes=apparentArea, referenceVolumes=referenceArea,
         adjacency=adjacency, referenceParticles=referenceState,
     )
     dm_0, dm_1, dm_2, d_dm_0dgamma, d_dm_1dgamma, d_dm_2dgamma = computeCRKMomentsGeometryJVP(
         queryParticles, domain, kernel, adjacency,
-        referenceVolumes=apparentArea, tangentReferenceVolumes=dApparentArea,
+        operationMode=operationMode,
+        referenceVolumes=referenceArea, tangentReferenceVolumes=dReferenceArea,
         queryTangentState=queryTangentState,
         referenceParticles=referenceState, referenceTangentState=referenceTangentState,
     )

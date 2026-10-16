@@ -14,14 +14,17 @@ Per iteration the driver keeps `stat`, the convergence flag (`stat < tolerance`,
 `(min, max, mean)` of the iterate) on the device, and reads the flag back only where the `CheckSchedule` says so (every iteration, or the adaptive
 marks learned from the previous solve of the same kind). The histories come back in one transfer at the end. With `schedule='every'` the iterate
 returned is bitwise the one a loop reading the host after every iteration returned; `adaptive` may run past the first converged iteration by up to
-the gap to the next checkpoint (more converged, never less).
+the gap to the next checkpoint. A nonmonotone statistic can worsen during that
+overshoot; only the last supplied statistic determines `converged`.
 """
 
 import math
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple
 
 import torch
+from torch.utils._pytree import tree_flatten, tree_unflatten
+from .krylov.common import finiteScalar, nonnegativeInt, validateVector
 
 __all__ = ['CheckSchedule', 'residualStatistic', 'runStationary', 'StationaryResult', 'RESIDUAL_STATISTICS']
 
@@ -42,6 +45,12 @@ class CheckSchedule:
     """
 
     def __init__(self, store, key: str, mode: str, minIters: int, maxIters: int, verbose: bool = False):
+        if mode not in ('every', 'adaptive'):
+            raise ValueError("mode must be 'every' or 'adaptive'")
+        nonnegativeInt('minIters', minIters)
+        nonnegativeInt('maxIters', maxIters)
+        if minIters > maxIters:
+            raise ValueError('minIters must not exceed maxIters')
         self.store, self.key = store, key
         self.minIters, self.maxIters = minIters, maxIters
         history = getattr(store, '_jacobiIterationHistory', None)
@@ -82,6 +91,11 @@ def residualStatistic(residual: torch.Tensor, index: Optional[torch.Tensor], kin
     `relative`) is `mean|r|`, for the relative disjunct of the stopping test.
     """
     r = residual if index is None else residual.index_select(0, index)
+    if kind not in RESIDUAL_STATISTICS:
+        raise ValueError(f'unknown residual statistic {kind!r}; one of {RESIDUAL_STATISTICS}')
+    if r.numel() == 0:
+        stat = residual.new_zeros(())  # no active equations: vacuous convergence
+        return stat, stat if relative else None
     if kind == 'flooredOneSided':
         stat = torch.mean(torch.clamp(-r, min=-floor))
     elif kind == 'oneSided':
@@ -99,15 +113,17 @@ def residualStatistic(residual: torch.Tensor, index: Optional[torch.Tensor], kin
 
 @dataclass
 class StationaryResult:
-    x: torch.Tensor                                     # the last iterate
+    x: Any                                              # the last tensor or structured tensor state
     iterations: int                                     # iterations run (the check schedule may run past the first converged one)
     stats: List[float] = field(default_factory=list)    # the statistic of every iteration
     tracked: List[tuple] = field(default_factory=list)  # `track(x)` of every iteration (e.g. (min, max, mean) of the pressure)
     converged: bool = False                             # the last iteration met the test
+    termination: str = 'budget'                         # converged / budget / nonfinite
+    firstConvergedIteration: Optional[int] = None         # first eligible supplied statistic to pass, even if skipped
 
 
-def runStationary(step: Callable[[torch.Tensor, int], Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]],
-                  x0: torch.Tensor, *, maxIters: int, tolerance: float, schedule: CheckSchedule,
+def runStationary(step: Callable[[Any, int], Tuple[Any, torch.Tensor, Optional[torch.Tensor]]],
+                  x0: Any, *, maxIters: int, tolerance: float, schedule: CheckSchedule,
                   relTarget: Optional[float] = None, inclusive: bool = False, track: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
                   onIteration: Optional[Callable] = None) -> StationaryResult:
     """Iterate `x, stat, rNorm = step(x, i)` until the statistic passes, reading the host only where `schedule.check(i)` says so.
@@ -115,30 +131,73 @@ def runStationary(step: Callable[[torch.Tensor, int], Tuple[torch.Tensor, torch.
     Converged: `stat < tolerance` (`stat <= tolerance` with `inclusive`), or (when `relTarget` is given) `rNorm <= relTarget`. `track(x)` returns a small vector logged per iteration
     (on the device, read once at the end). `onIteration(i, x, stat)` is a host-side debug hook (verbose runs; it may read the host).
     `schedule.record` is called with the per-iteration flags so the next solve of the same kind checks where this one first converged.
+
+    `step` owns the statistic's meaning: the pressure examples measure the
+    input iterate's residual before updating. Thus `converged` describes the
+    last supplied statistic, not a verified residual of the returned vector.
+    Nonfinite iterates/statistics freeze the last finite iterate until the next
+    checkpoint and return termination='nonfinite'. Adaptive checks do not
+    freeze transiently converged iterates.
+    The iterate may be a tensor or a pytree of tensors (e.g. pressure and a
+    recurrence residual), with fixed structure and tensor metadata. `step`
+    must return new tensors rather than mutate the supplied state.
     """
+    nonnegativeInt('maxIters', maxIters)
+    finiteScalar('tolerance', tolerance)
+    if relTarget is not None:
+        finiteScalar('relTarget', relTarget)
     x = x0
+    leaves, structure = tree_flatten(x0)
+    if not leaves or not all(isinstance(t, torch.Tensor) for t in leaves):
+        raise ValueError('x0 must be a tensor or a nonempty pytree of tensors')
+    reference = list(leaves)
+    device = leaves[0].device
+    if any(t.device != device for t in leaves):
+        raise ValueError('all x0 tensors must be on the same device')
     stats: List[torch.Tensor] = []
     flags: List[torch.Tensor] = []
     tracked: List[torch.Tensor] = []
+    failures: List[torch.Tensor] = []
+    failed = torch.zeros((), dtype=torch.bool, device=device)
     converged = None
     for i in range(maxIters):
-        x, stat, rNorm = step(x, i)
+        xn, stat, rNorm = step(x, i)
+        nextLeaves, nextStructure = tree_flatten(xn)
+        if nextStructure != structure:
+            raise ValueError('step iterate must preserve the x0 structure')
+        for new, ref in zip(nextLeaves, reference):
+            validateVector(new, ref, 'step iterate')
+        for name, value in (('stat', stat), ('rNorm', rNorm)):
+            if value is None and name == 'rNorm' and relTarget is None:
+                continue
+            if not isinstance(value, torch.Tensor) or value.ndim != 0 or value.device != device or not value.is_floating_point():
+                raise ValueError(f'{name} must be a scalar floating-point tensor on {device}')
+        finite = torch.isfinite(stat)
+        for new in nextLeaves:
+            finite = finite & torch.isfinite(new).all()
+        if rNorm is not None:
+            finite = finite & torch.isfinite(rNorm)
+        failed = failed | ~finite
+        leaves = [torch.where(failed, old, new) for old, new in zip(leaves, nextLeaves)]
+        x = tree_unflatten(leaves, structure)
         converged = (stat <= tolerance) if inclusive else (stat < tolerance)
         if relTarget is not None:
             converged = converged | (rNorm <= relTarget)
+        converged = converged & ~failed
         stats.append(stat)
         flags.append(converged)
+        failures.append(failed)
         if track is not None:
             tracked.append(track(x))
         if onIteration is not None:
             onIteration(i, x, stat)
-        if schedule.check(i) and bool(converged):
+        if schedule.check(i) and bool(converged | failed):
             break
 
     result = StationaryResult(x=x, iterations=len(stats))
     if stats:
         s = torch.stack(stats)
-        columns = [s.view(-1, 1), torch.stack(flags).to(s.dtype).view(-1, 1)]
+        columns = [s.view(-1, 1), torch.stack(flags).to(s.dtype).view(-1, 1), torch.stack(failures).to(s.dtype).view(-1, 1)]
         if tracked:
             columns.append(torch.stack(tracked).to(s.dtype))
         host = torch.cat(columns, dim=1).cpu()                  # the one device -> host transfer of the solve
@@ -146,6 +205,8 @@ def runStationary(step: Callable[[torch.Tensor, int], Tuple[torch.Tensor, torch.
         flagsHost = [bool(f) for f in host[:, 1].tolist()]
         schedule.record(flagsHost)
         result.converged = flagsHost[-1]
+        result.firstConvergedIteration = next((k + 1 for k, c in enumerate(flagsHost) if c and k >= schedule.minIters), None)
+        result.termination = 'nonfinite' if bool(host[-1, 2]) else ('converged' if result.converged else 'budget')
         if tracked:
-            result.tracked = [tuple(row) for row in host[:, 2:].tolist()]
+            result.tracked = [tuple(row) for row in host[:, 3:].tolist()]
     return result

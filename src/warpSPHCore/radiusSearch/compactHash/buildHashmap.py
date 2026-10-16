@@ -16,6 +16,7 @@ from .sort import *
 from .indexing import *
 from .wp_hashCells import *
 import numpy as np
+from ..csr import validateParticleCounts
 
 def buildCompactHashMap(
     queryPositions: torch.Tensor,
@@ -27,6 +28,9 @@ def buildCompactHashMap(
     mode: SupportScheme = SupportScheme.Gather,
     hashMapLength: int = 4096
 ):
+    validateParticleCounts(queryPositions.shape[0], referencePositions.shape[0])
+    if hashMapLength <= 0:
+        raise ValueError('hashMapLength must be positive, including for empty populations.')
     with record_function("warpNeighborSearch - buildCompactHashMap"):
         with record_function("neighborSearch - preprocess"):
             mode_uint = wp.uint32(mode.value)
@@ -38,6 +42,10 @@ def buildCompactHashMap(
             minDomain = domainDescription.min if domainDescription.min is not None else None
             maxDomain = domainDescription.max if domainDescription.max is not None else None
             hMax = computeGridSupport(querySupports, referenceSupports, mode)
+            if queryPositions.shape[0] == 0 or referencePositions.shape[0] == 0:
+                # No interacting pairs exist. Keep a valid, positive cell size
+                # even if the selected role's radius bound is vacuously zero.
+                hMax = torch.where(hMax > 0, hMax, torch.ones_like(hMax))
             minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
 
         with record_function("neighborSearch - sortParticles"):
@@ -158,7 +166,7 @@ def buildCompactHashMap(
         hashMap = CompactHashMap(
             sortedPositions=sortedPositions,
             sortedSupports=sortedSupports,
-            sortIndex=sortIndex,
+            sortIndex=sortIndex.to(dtype=get_torch_index_dtype()),
             hashTable=hashTable,
             sortedCellTable=sortedCellTable,
             qMin=qMin,
@@ -172,4 +180,4 @@ def buildCompactHashMap(
             cellOffsets = offsets
         )
         return hashMap
-    
+

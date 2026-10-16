@@ -54,7 +54,7 @@ def computeCRKMomentsJVP_Func_i(
     domainState: domainData,
     kernelProperties: kernelState,
 
-    beginIndex: wp.int32, numIndices: wp.int32, offsetArray: wp.array(dtype = wp.int64), # type: ignore
+    beginIndex: offset_t, numIndices: wp.int32, offsetArray: wp.array(dtype = index_t), # type: ignore
 
     iCorrectionData: Any, correctionData: Any,
     iCorrectionTangentData: Any, correctionTangentData: Any,
@@ -76,7 +76,7 @@ def computeCRKMomentsJVP_Func_i(
     eye = warp_eye(iPtcl.position)
 
     for neighborIndex in range(numIndices):
-        jj = beginIndex + neighborIndex
+        jj = beginIndex + offset_t(neighborIndex)
         j = wp.int32(offsetArray[jj])
         jPtcl = getParticleData(referenceState, j)
         if kernelProperties.operationMode != wp.static(OperationDirection.TrueAllToToAll.value):
@@ -250,6 +250,7 @@ def computeCRKMomentsGeometryJVP(
     queryTangentState: ParticleTangentState,
     referenceParticles: Optional[ParticleState] = None,
     referenceTangentState: Optional[ParticleTangentState] = None,
+    operationMode: OperationDirection = OperationDirection.AllToAll,
 ):
     """`(dm_0, dm_1, dm_2, d_dm_0dgamma, d_dm_1dgamma, d_dm_2dgamma)` -- the
     JVP counterpart to `_computeCRKMoments_stateBackend`. Always
@@ -305,6 +306,8 @@ def computeCRKMomentsGeometryJVP(
         queryParticles.positions, queryParticles.supports, queryParticles.masses,
         referenceParticles.positions, referenceParticles.supports, referenceParticles.masses,
         queryTangentState, referenceTangentState,
+        queryKinds=queryParticles.kinds, referenceKinds=referenceParticles.kinds,
+        operationMode=operationMode,
         outputShape=[nQuery] * 6,
         outputDtype=[scalar_t, vecD, matDD, vecD, matDD, vecD3],
         queryDensities=queryParticles.densities,

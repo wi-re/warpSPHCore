@@ -95,6 +95,16 @@ def verletValidityMetrics(queryPositions, referencePositions, priorQueryPosition
     """``(shouldRebuild, maxDistance, supportFactor, minSupport, supportBuffer)``, all 0-d tensors (as
     `_verlet_validity_metrics`)."""
     device = queryPositions.device
+    if (queryPositions.shape != priorQueryPositions.shape or
+            referencePositions.shape != priorReferencePositions.shape):
+        zero = querySupports.new_zeros(())
+        return torch.ones((), dtype=torch.bool, device=device), zero, zero, zero, zero
+    if queryPositions.shape[0] == 0 or referencePositions.shape[0] == 0:
+        # There are no pairs to invalidate while either population stays
+        # empty. Population-count changes are handled by the rebuild caller.
+        zero = querySupports.new_zeros(())
+        flag = torch.zeros((), dtype=torch.bool, device=device)
+        return flag, zero, zero, zero, zero
     sameSet = (queryPositions is referencePositions and priorQueryPositions is priorReferencePositions
                and querySupports is referenceSupports and supports_a is supports_b)
     acc = torch.full((6,), float('inf'), dtype=querySupports.dtype, device=device)
