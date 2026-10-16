@@ -108,3 +108,16 @@ higherOrderSPH/harness/pde/REPORT_pde_smoke.md
 
 # scratch space (probes, extracted paper text, throwaway scripts)
 .tmp/
+
+# Development evidence lives in the sibling warpSPHDevelopment/core folder.
+# Keep small pointers and existing historical Markdown, not generated runs.
+/docs/development/*
+!/docs/development/README.md
+/docs/regression/*
+!/docs/regression/*.md
+/experiments/*/figures/
+/experiments/*/results/
+/experiments/index_width/results.json
+/experiments/index_width/audit.json
+/experiments/index_width/summary.md
+/higherOrderSPH/harness/pde/REPORT_pde_*.md

@@ -1,16 +1,20 @@
 """Timing and actual directed non-self interaction rates from the width sweep."""
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+from development_paths import coreDevelopmentPath
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.ticker import EngFormatter
 
-HERE=Path(__file__).resolve().parent
+HERE=coreDevelopmentPath('experiments/index_width')
 report=json.loads((HERE/'results.json').read_text())
 assert report['complete']
 plt.rcParams.update({'font.size':10,'axes.grid':True,'grid.alpha':.25})
-folder=HERE/'figures';folder.mkdir(exist_ok=True)
+folder=HERE/'figures';folder.mkdir(parents=True,exist_ok=True)
 for name in ('density','gradient','laplacian'):
     fig,axes=plt.subplots(2,2,figsize=(11,7.4),sharex=True)
     for col,requested in enumerate((55,220)):

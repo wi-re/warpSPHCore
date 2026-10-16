@@ -3,6 +3,8 @@ const sidebars = {
   wiki: [
     'index',
     'quickstart',
+    'examples',
+    'development-artifacts',
     {
       type: 'category',
       label: 'Operators',
@@ -29,6 +31,10 @@ const sidebars = {
     'kernels',
     'neighbor-search',
     'renorm',
+    'field-reconstruction-guide',
+    'reconstruction',
+    'mfm',
+    'linalg',
     'lattice-calibration',
     'autograd',
     'data-types',

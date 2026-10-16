@@ -12,6 +12,8 @@ warpSPHCore is a Warp- and PyTorch-based backend for core Smoothed Particle Hydr
 - CRK correction and gradient-renormalization utilities for linear-reproducing consistency
 - Reverse-mode gradients and forward-mode JVPs (value and geometry tangents) through the same `torch.autograd.Function` bridge
 - PyTorch tensor inputs and outputs, with Warp kernels under the hood
+- Local polynomial derivatives, TENO/WENO interface reconstruction and ideal-gas MFM/MFV rates
+- Matrix-free solvers with constraints, nullspaces and diagonal/block preconditioning
 
 ## Installation
 
@@ -42,6 +44,12 @@ Core package requirements:
 - warp-lang
 - NumPy
 
+Python 3.10+ is the package metadata range. CPU CI is configured for Python
+3.12; the current local CPU/CUDA qualification uses Python 3.13.14, Torch
+2.13.0+cu130, Warp 1.17.0 and NumPy 2.5.2. Older dependency combinations and
+every Python version in that metadata range are not individually qualified.
+See [qualification and development records](docs/docs/development-artifacts.md).
+
 Notebook and plotting extras used by `notebooks/` (all installed by
 `pip install -e ".[notebooks]"`):
 
@@ -53,6 +61,33 @@ GPU notes:
 - For GPU execution, use a CUDA-capable PyTorch build and a compatible NVIDIA driver.
 - A separate CUDA toolkit installation is not required for this package.
 - Warp still needs to be initialized once per process with `wp.init()`.
+
+## Precision and index configuration
+
+Set configuration before importing `warpSPHCore`; types are fixed when Warp
+structs and kernels are defined:
+
+```python
+import os
+os.environ["warpSPHCore_PRECISION"] = "float32"     # or float64
+os.environ["warpSPHCore_INDEX_DTYPE"] = "int32"     # particle IDs; or int64
+os.environ["warpSPHCore_OFFSET_DTYPE"] = "int32"    # CSR addresses; or int64
+import warpSPHCore as sph
+```
+
+All three settings are independent. Both integer settings default to int32;
+per-particle neighbor counts remain int32, with totals and prefix scans computed
+in int64 and checked before narrowing. An optional `warpSPHCore_config` module
+can instead define `precision`, `dim`, `index_dtype` and `offset_dtype`, taking
+precedence over environment settings. Inspect the active types with
+`sph.get_type_config()`.
+
+The current flat-array representation retains Warp's signed-int32 dimension
+limit, including neighbor capacity headroom; selecting int64 offsets does not
+remove that backend limit. Particle IDs and edge offsets have separate meanings:
+total neighbor entries can exceed int32 well before the particle population does.
+Torch consumers that require long indices can convert the views returned by
+`adjacency.livePairs()`; production edge traversal uses Warp CSR kernels.
 
 ## Quickstart
 
@@ -75,7 +110,7 @@ nx, target_neighbors, dim, periodic = 32, 55, 2, True
 positions, supports, n, domain, dx = generateNeighborTestData(
     nx, target_neighbors, dim, periodic, device
 )
-masses = torch.full((n,), 1.0, device=device)
+masses = torch.full_like(supports, dx**dim)
 kinds = torch.zeros(n, dtype=torch.int32, device=device)
 particles = ParticleState(positions, supports, masses, kinds)
 
@@ -87,9 +122,10 @@ properties = OperationProperties(
     operationMode=OperationDirection.AllToAll,
 )
 rho = sph.warpOperation(particles, properties, domain)
+particles.densities = rho
 
 # A gradient of a vector field, Difference scheme.
-vec = torch.stack([positions[:, 0], positions[:, 1]], dim=1)
+vec = torch.sin(torch.pi * positions)  # smooth on the periodic domain
 properties = OperationProperties(
     kernel=KernelFunctions.Wendland2,
     operation=WarpOperation.Gradient,
@@ -105,6 +141,32 @@ grad = sph.warpOperation(
 
 `warpOperation` covers CRK correction (`crkState=`) and gradient renormalization (`renormalizationState=`) the same way — see [Quickstart](https://fluids.dev/warpSPHCore/docs/quickstart) and the [per-operator pages](https://fluids.dev/warpSPHCore/docs/operations/density) on the wiki for corrections, forward/reverse-mode differentiation, and every option.
 
+## Runnable composition examples
+
+After installing the package, run the checked examples in fresh precision processes:
+
+```bash
+python scripts/examples/run_all.py --device cpu --precision float32
+python scripts/examples/run_all.py --device cpu --precision float64
+# With a real CUDA device:
+python scripts/examples/run_all.py --device cuda --precision float64
+```
+
+The examples cover constrained diffusion, singular graph solves, a vector
+GMRES problem with block preconditioning, MINRES/Richardson, corrected
+operator derivatives, polynomial/nonlinear reconstruction and MFM/MFV rates
+with a short periodic update. Each checks its numerical result and raises
+on failure. See [examples and their assumptions](docs/docs/examples.md).
+The files live in the repository and can also use an installed wheel.
+
+## Development records
+
+Detailed development reports, raw results and generated plot collections live in
+`../warpSPHDevelopment/core/`, outside this checkout. The shared
+`warpSPHDevelopment` folder can hold other projects and is backed up manually.
+Reproduction code, public docs and curated guide figures remain in Git. See the
+[artifact layout and regeneration instructions](docs/docs/development-artifacts.md).
+
 ## Common entry points
 
 - `warpSPHCore.warpOperation` / `warpSPHCore.warpOperationJVP`: the state-object entry points (above)
@@ -112,6 +174,10 @@ grad = sph.warpOperation(
 - `warpSPHCore.radiusSearchCompactHashMap` / `buildCompactHashMap`: compact-hash neighbor search
 - `warpSPHCore.crk.computeCRKFactors`: CRK apparent-volume and correction tensors
 - `warpSPHCore.renorm.computeRenormalizationMatrices`: gradient-renormalization matrices
+- `warpSPHCore.polyfit.PolyFit` / `Reconstructor`: local polynomial derivatives and nonlinear interface states with rank diagnostics and first-order fallback; see [Reconstruction](docs/docs/reconstruction.md)
+- [How the schemes reconstruct a field](docs/docs/field-reconstruction-guide.md): illustrated SPH, CRK, MLS/LABFM and TENO/WENO comparison with reproducible production examples.
+- `warpSPHCore.mfm.MeshlessGeometry` / `MeshlessWarp`: conservative MFM/MFV rates, geometric guards and explicit face closure; see [MFM/MFV](docs/docs/mfm.md).
+- `warpSPHCore.linalg`: verified CG/BiCG/BiCGStab/GMRES/MINRES and bounded Richardson, restricted systems with Dirichlet lifting, explicit nullspace/compatibility/gauge helpers, diagonal/block preconditioners, optional native CG/BiCGStab workspaces, stationary iteration, and small symmetric pseudoinverses; see [Linear algebra](docs/docs/linalg.md)
 - `warpSPHCore.util.generateNeighborTestData`: a regular test lattice with a target neighbor count
 
 See the [API reference](https://fluids.dev/warpSPHCore/docs/api) for the full function list and the [Data types](https://fluids.dev/warpSPHCore/docs/data-types) page for every enum (`WarpOperation`, `KernelFunctions`, `SupportScheme`, `GradientScheme`, `OperationDirection`, ...).
@@ -160,5 +226,9 @@ Before publishing, bump the package version in both `pyproject.toml` and `src/wa
 ```bash
 pytest tests/
 ```
+
+On a CUDA host, `python scripts/diagnostics/run_cuda_gate.py` checks linalg,
+native pinv streams/graphs, neighbor rebuilds and tiled operators in separate
+float32 and float64 processes. It fails when CUDA is unavailable.
 
 This includes `tests/operations/test_gradcheck_scripts.py`, which runs every script under `scripts/gradcheck/` (plus the Tier-1/Tier-2 forward-mode spikes under `scripts/spikes/`) as a subprocess, since `warpSPHCore_PRECISION` is baked into every compiled kernel at first import and cannot change mid-process. For the forward-value diagnostic matrix and a quick smoke sweep, see `scripts/diagnostics/run_operation_matrix_sweep.sh --quick`.

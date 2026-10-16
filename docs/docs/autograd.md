@@ -294,6 +294,55 @@ rebuilt from `flat_tangents`'s fixed positions:
   `(tangent,) + (None,) * (n-1)` — `jvp()` must return one entry per
   `forward` output.
 
+## Frozen interaction rules
+
+Geometry JVPs use the same `ParticleState.kinds` and
+`OperationProperties.operationMode` as the forward operator. These select
+which query/reference category pairs contribute; they do not select a spatial
+axis. Kinds are integer inputs with no tangent. The JVP bridge saves them as
+ordinary nondifferentiable inputs, so changing them in place before backward
+is detected by Torch's version checks.
+
+This applies to explicit `warpOperationJVP`, the Torch dual-tensor route,
+renormalization/CRK construction and Density's position HVP. The existing
+direction definitions and HVP self-pair convention are preserved. Captured
+calls can read updated kinds at the same tensor addresses; changing the
+operation-mode enum requires a new launch/capture configuration.
+
+CRK rows rejected by its low-count/singularity limiter have a constant
+identity correction and zero tangent/adjoint. Their inputs are replaced with
+finite constants before singular algebra, preventing an inactive division
+by zero from contaminating backward with NaNs. Cutoff crossings themselves
+remain nonsmooth.
+
+`tests/operations/test_kind_directions.py` checks mixed categories and all
+interaction modes against the masked primal, including correction chains,
+Torch duals, reverse-over-JVP, HVP finite differences, saved-kind mutation
+checks and CUDA stream/capture replay.
+
+## Empty populations
+
+Zero-query outputs preserve the operator's trailing field/spatial axes. With
+zero references, the core SPH sums and their supported JVPs are finite zeros.
+Empty backward seeds and empty vector/matrix inputs use canonical strides for
+Warp; Torch dual tangent detection treats an empty tangent as inactive and
+materializes a shape-correct zero tangent for an empty output. Density's
+explicit CSR position HVP follows the same empty-set convention.
+
+Renormalization keeps its identity fallback, with zero correction tangent.
+CRK apparent volumes and diagnostic densities return zero when their
+normalizing sum is exactly zero, while the correction keeps its existing
+identity fallback. These branch derivatives do not differentiate particle
+creation/deletion or neighborhood/rank switches. See the
+[neighbor-search contract](neighbor-search) for bounds and rebuild requirements.
+
+For warmed mixed Torch/Warp CUDA capture, the existing
+`warpSPHCore.autograd.stream.torchWarpCapture(graph)` context, inside a
+`torchWarpStream(device)` scope, registers the current-stream capture with Warp
+and defers cyclic garbage collection until
+it ends. This prevents older Warp resources from being freed during capture;
+empty Density/JVP replay is qualified through that boundary.
+
 ## Caching layers
 
 Three deliberately-separated layers, all keyed to *tensor identity*,
@@ -341,8 +390,9 @@ and only when forward-mode AD is actually in use. This is a standing
 invariant with a census, not a hope:
 `tests/operations/test_no_host_sync.py` counts readbacks on specific
 modules, `scripts/benchmarks/count_host_syncs.py` does the whole-repo census, and
-the motivating before/after records are in `docs/regression/` (the
-[renormalization](renorm) fallback is the canonical example).
+the historical before/after audit remains in `docs/regression/` (the
+[renormalization](renorm) fallback is the canonical example). New detailed
+records use the [external development archive](development-artifacts.md).
 
 ## Tests
 

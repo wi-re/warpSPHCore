@@ -17,7 +17,7 @@ with $\mathrm{coeff}_{ij}$ selected by `gradientMode`
 |---|---|---|
 | `Naive` (1) | $f_j\, V_j$ | the standard "scatter" form |
 | `Symmetric` (2) | $m_j\,\rho_i\!\left(\dfrac{f_i}{\rho_i^2} + \dfrac{f_j}{\rho_j^2}\right)$ | density-symmetric; no $V_j$ term at all |
-| `Difference` (3) | $(f_j - f_i)\, V_j$ | the consistent two-particle difference form; reproduces linear fields exactly on a complete neighbor set |
+| `Difference` (3) | $(f_j - f_i)\, V_j$ | annihilates constants; exact linear reproduction requires the appropriate resolved moment correction |
 | `Summation` (4) | $(f_j + f_i)\, V_j$ | |
 
 where

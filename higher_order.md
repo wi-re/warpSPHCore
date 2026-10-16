@@ -788,6 +788,15 @@ Static results (2-D hex lattice, jitter 0.3, periodic; particle counts 288 / 115
 
 ## Phase 8 — MFM column (outlook, not scheduled)
 
+**16 October 2026 capability update:** the current production qualification is
+recorded in the archived `core/docs/development/mfm-validation.md`
+(see [development records](docs/docs/development-artifacts.md)) and the
+[public contracts](docs/docs/mfm.md). It includes post-fix jittered Gresho
+repeats, smooth-wave/Sod controls, rank/AD boundary fixes and frozen face-moment
+diagnostics. In particular, zeroth-moment closure does not enforce unchanged
+first moments. The historical chronology and external comparisons below are
+retained as evidence, rather than silently treated as current qualification.
+
 **Goal:** Add Hopkins (2015) meshless finite mass (MFM) as one more scheme
 row in the final comparison table. Added 2026-10-09; the frontend side is
 tracked in warpSPH `PESPH_PLAN.md` §7 (MFM is its stated longer-term goal).

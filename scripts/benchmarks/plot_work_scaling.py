@@ -11,6 +11,10 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from development_paths import coreDevelopmentPath
 
 import matplotlib
 matplotlib.use('Agg')
@@ -106,11 +110,11 @@ def format_axis(ax, *, metric, particle_axis=True):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--scaling-input', type=Path, default=ROOT / 'docs/regression/cg_scaling_2026_10_15.json')
-    parser.add_argument('--accuracy-input', type=Path, default=ROOT / 'docs/regression/cg_scaling_accuracy_2026_10_15.json')
-    parser.add_argument('--operator-input', type=Path, default=ROOT / 'docs/regression/sph_work_2026_10_15.json')
-    parser.add_argument('--output-dir', type=Path, default=ROOT / 'docs/development/assets')
-    parser.add_argument('--manifest', type=Path, default=ROOT / 'docs/regression/scaling_figures_2026_10_15.json')
+    parser.add_argument('--scaling-input', type=Path, default=coreDevelopmentPath('docs/regression/cg_scaling_2026_10_15.json'))
+    parser.add_argument('--accuracy-input', type=Path, default=coreDevelopmentPath('docs/regression/cg_scaling_accuracy_2026_10_15.json'))
+    parser.add_argument('--operator-input', type=Path, default=coreDevelopmentPath('docs/regression/sph_work_2026_10_15.json'))
+    parser.add_argument('--output-dir', type=Path, default=coreDevelopmentPath('docs/development/assets'))
+    parser.add_argument('--manifest', type=Path, default=coreDevelopmentPath('docs/regression/scaling_figures_2026_10_15.json'))
     parser.add_argument('--prefix', default='scaling-2026-10-15')
     args = parser.parse_args()
     paths = [args.scaling_input, args.accuracy_input, args.operator_input]

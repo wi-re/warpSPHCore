@@ -10,7 +10,7 @@ linear-reproducing consistency.
 
 The defining properties, all of which this wiki documents per operator:
 
-- **Structured state, one dispatch.** Every operator is reached through one
+- **Structured state, one dispatch.** Every core SPH sum is reached through one
   entry point, `warpOperation`, which takes semantic state objects
   (`ParticleState`, `OperationProperties`, `DomainDescription`, and
   optional correction states) and dispatches straight to the operator's
@@ -21,7 +21,7 @@ The defining properties, all of which this wiki documents per operator:
   (`AdjacencyList`) or direct grid traversal over a `CompactHashMap`
   (Z-order-sorted cells + hash table). `adjacency=None` builds the hash map
   on the fly; see [Neighbor search](/docs/neighbor-search).
-- **Differentiable end to end.** Every launch goes through a
+- **Differentiable core SPH compositions.** Core SPH launches go through a
   `torch.autograd.Function` bridge ([Autodiff machinery](/docs/autograd)):
   reverse-mode gradients come from Warp's tape; forward-mode JVPs
   (`warpOperationJVP`) are hand-derived per operator for value and
@@ -32,8 +32,7 @@ The defining properties, all of which this wiki documents per operator:
   (`CRKState`), gradient renormalization (`RenormalizationState`),
   apparent-volume substitution, and grad-h terms are passed as state
   objects; a kernel is "corrected" exactly when a state is supplied.
-  The lattice-normalization calibration (the current branch's work) is
-  the newest member of this family — see
+  Uniform-lattice normalization calibration uses the same dispatch — see
   [Lattice normalization calibration](/docs/lattice-calibration).
 
 ## The operators
@@ -60,10 +59,20 @@ The defining properties, all of which this wiki documents per operator:
 | [Renormalization](/docs/renorm) | Covariance $\to$ pseudo-inverse renormalization matrix, its JVP |
 | [Lattice calibration](/docs/lattice-calibration) | The $1/L$ kernel scaling that corrects a uniform lattice's quadrature offset |
 
+Local polynomial fits and nonlinear interface states have independent
+[PolyFit/Reconstructor APIs](/docs/reconstruction), with their own numerical,
+derivative and fallback contracts.
+The [illustrated field reconstruction guide](/docs/field-reconstruction-guide)
+compares their values, derivatives and interface states with standard SPH.
+The [MFM/MFV backend](/docs/mfm) supplies meshless geometry, conservative
+face-flux rates and explicit projected/unclosed formulations.
+
 ## Infrastructure
 
 | Page | Contents |
 |---|---|
+| [Runnable examples](/docs/examples) | Checked solver, correction/AD, reconstruction and MFM/MFV compositions, including isolated-wheel execution |
+| [Linear algebra](/docs/linalg) | Matrix-free solvers, constraints, nullspaces, preconditioners and numerical/ownership contracts |
 | [Neighbor search](/docs/neighbor-search) | Compact-hash grid (Z-order sort, cell table, hash table, count/collect), Verlet lists, other backends |
 | [Autodiff machinery](/docs/autograd) | The `torch.autograd.Function` bridge, `OperatorSpec`/`SPHContext`, JVP dispatch, no-host-sync design |
 | [Data types](/docs/data-types) | `ParticleState`, `OperationProperties`, `DomainDescription`, adjacency structures, correction states, all enums |
@@ -96,13 +105,14 @@ closed, kept for the "why is this shaped this way" record — live in
 [`warpier_fields.md`](https://github.com/wi-re/warpSPHCore/blob/main/docs/historic_plans/warpier_fields.md)
 (state objects, caching, the declared ABI). The still-open punch list is
 [`warpier_residual_open_problems_plan.md`](https://github.com/wi-re/warpSPHCore/blob/main/warpier_residual_open_problems_plan.md)
-(repo root), and the higher-order-convergence study plan — new, separate,
-nothing implemented yet — is
+(repo root). The higher-order study and its capability updates are in
 [`higher_order.md`](https://github.com/wi-re/warpSPHCore/blob/main/higher_order.md)
 (repo root). Warp-kernel authoring gotchas that
 bit the implementations are logged in
 [`docs/lessons_learned.md`](https://github.com/wi-re/warpSPHCore/blob/main/docs/lessons_learned.md);
-performance measurement records are under `docs/regression/`.
+Historical small measurement reports remain under `docs/regression/`; new raw
+results and detailed reports use the [external development archive](development-artifacts.md).
+The current capability plan is `REPOSITORY_PLAN.md` at the repository root.
 
 ## Requirements
 

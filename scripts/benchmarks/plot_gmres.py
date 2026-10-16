@@ -5,6 +5,10 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from development_paths import coreDevelopmentPath, artifactLabel
 
 import matplotlib
 matplotlib.use('Agg')
@@ -21,7 +25,7 @@ def main():
               ('mixed', 'FP32 vectors / FP64 accumulation, rtol = 2e-5'),
               ('float64', 'FP64 vectors / FP64 accumulation, rtol = 1e-10')]
     for row, (name, title) in enumerate(labels):
-        source = args.root / f'docs/regression/gmres_sph_{name}_2026_10_15.json'
+        source = coreDevelopmentPath(f'docs/regression/gmres_sph_{name}_2026_10_15.json')
         data = json.loads(source.read_text())
         for path, expected in data['sourceSha256'].items():
             if hashlib.sha256((args.root / path).read_bytes()).hexdigest() != expected:
@@ -48,7 +52,7 @@ def main():
     axes[0, 1].legend(fontsize=8, loc='upper left')
     fig.suptitle('Restarted GMRES on a fixed nonsymmetric SPH operator\n'
                  'restart 20; observed work includes frozen callbacks and residual verification', fontsize=12)
-    destination = args.root / 'docs/development/assets/gmres-scaling-2026-10-15'
+    destination = coreDevelopmentPath('docs/development/assets/gmres-scaling-2026-10-15')
     destination.parent.mkdir(parents=True, exist_ok=True)
     outputs = []
     for suffix in ('.png', '.svg'):
@@ -56,10 +60,10 @@ def main():
         fig.savefig(path, dpi=170)
         outputs.append(path)
     plt.close(fig)
-    manifest = dict(inputs={str(p.relative_to(args.root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
-                    outputs={str(p.relative_to(args.root)): hashlib.sha256(p.read_bytes()).hexdigest() for p in outputs},
+    manifest = dict(inputs={artifactLabel(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
+                    outputs={artifactLabel(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in outputs},
                     plotSourceSha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
-    (args.root / 'docs/regression/gmres_figures_2026_10_15.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    (coreDevelopmentPath('docs/regression/gmres_figures_2026_10_15.json')).write_text(json.dumps(manifest, indent=2) + '\n')
     print(destination.with_suffix('.png'))
 
 

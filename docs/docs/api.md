@@ -1,10 +1,44 @@
 # API reference
 
+[Runnable examples](examples.md) shows these entry points composed into
+checked solver, correction/AD, reconstruction and MFM/MFV clients.
+
+For meshless geometry, reconstruction and conservative flux rates, see the
+[MFM/MFV API and numerical contracts](mfm.md).
+
 Every public function, by module. Signatures are abbreviated to the
 arguments that matter; the detailed pages carry the equations, options,
 and JVP scopes. Flat imports work for everything listed
 (`from warpSPHCore import …` — see `__init__.py`'s `__all__`
 aggregation).
+
+CUDA operators, prepared launches, geometry/value JVPs, Density HVPs and the
+autograd bridges follow Torch's current stream on the tensor's device. Warp
+adjoint-buffer initialization, reverse launches and gradient clearing use that
+same stream. Callers establish dependencies before moving data or reusing
+scratch across streams; the bridge adds no device-wide synchronization.
+
+## Type configuration — `type_config.py`
+
+Configure before import/compilation. `warpSPHCore_PRECISION=float32|float64`
+selects floating-point precision; `warpSPHCore_INDEX_DTYPE=int32|int64` selects
+stored particle IDs, and `warpSPHCore_OFFSET_DTYPE=int32|int64` selects CSR offsets
+and edge-address arithmetic. Both integer settings default to int32 independently
+of precision. Per-row counts remain int32; search totals/prefix scans use int64,
+with a range check before storing offsets or allocating neighbor capacity.
+
+The optional `warpSPHCore_config` module uses `precision`, `dim`, `index_dtype`
+and `offset_dtype`, overriding corresponding environment settings. Types cannot
+be changed after import; start a new process for another configuration.
+`get_type_config()` reports `scalar_t`, `dim_t`, `index_t`, `offset_t` and
+`neighbor_count_t`; `get_torch_index_dtype()` and `get_torch_offset_dtype()` return
+the matching Torch dtypes. Manually supplied adjacency/grid buffers must use the
+configured types; kernels receive these buffers directly without dtype conversion.
+
+Int64 offsets remove the repository's narrowing points but do not remove Warp's
+current signed-int32 array-dimension limit. Flat neighbor capacity, including
+padding/headroom, and particle populations are checked against that backend
+limit before allocation/traversal. Grid cell keys retain int64 independently.
 
 ## Operators — `operations.py`
 
@@ -14,6 +48,23 @@ aggregation).
 | `warpOperationJVP(…, tangentQueryValues=None, tangentReferenceValues=None, queryTangentState=None, referenceTangentState=None, crkTangentState=None, renormalizationTangentState=None, tangentReferenceVolumes=None, …)` | forward-mode JVP of `warpOperation`: returns the **sum** of the requested pieces (value tangent, geometry tangent, correction tangents); scope rules per operator (which schemes/ops accept which tangents) | the JVP sections of the operator pages |
 | `warpOperationHVP(…, v)` | the Density **position Hessian** $\nabla^2_{xx}\rho_i$ applied to a vector field — a dedicated kernel, not a composed JVP (only operator with an HVP) | [Density — HVP](operations/density#jvp--hvp) |
 | `sphOperation_warp(…)` | the flat-tensor entry point (queryKinds/referenceKinds as keyword-only required tensors, `useCRK`/`useVolume`/`useGradHTerms`/`useGradientRenormalization` flags) — the interface the lower-level callers and the integrator repo use | [Autodiff machinery](autograd) (the bridge it resolves into) |
+
+CUDA neighbor loops can use multiple cooperating lanes per query particle.
+`setNeighborLanes(1)` selects serial traversal; `setNeighborLanes(32)` explicitly
+selects tiled kernels where available. Other supported choices are 2, 4, 8 and
+16. `setNeighborLanes(None)` restores the environment/per-operator defaults.
+The environment equivalent is `WARPSPHCORE_NEIGHBOR_LANES`, read at import time.
+CPU execution remains serial.
+
+Density, interpolation, gradient, divergence and covariance retain their
+existing 32-lane defaults. Curl and Laplacian have trial tiled variants and
+retain serial defaults: explicit lane choices opt into them. Small-problem
+speedups do not imply a large-problem speedup, so benchmark the intended size,
+degree and traversal before selecting lanes. Ordinary and prepared launches
+resolve the same policy. The existing correction and AD scope is preserved;
+geometry JVPs continue to use their existing kernels. Changing a captured
+operator's lane configuration requires rebuilding its graph or clearing its
+owning solver workspace's capture cache.
 
 ## Neighbor search — `radiusSearch/`
 
@@ -32,8 +83,8 @@ aggregation).
 
 | function | what it does | details |
 |---|---|---|
-| `computeCRKFactors(queryParticles, domain, kernel, operationMode=AllToAll, adjacency=None, referenceState=None)` | the full CRK pipeline: apparent volume → moments → solve → limiter; returns `(apparentArea, crk_density, CRKState)` | [CRK overview](crk/crk-overview) |
-| `computeCRKFactorsJVP(…)` | the pipeline's JVP (chained volume → moments → `torch.func.jvp` through the terms solve) | [CRK overview — JVP](crk/crk-overview) |
+| `computeCRKFactors(queryParticles, domain, kernel, operationMode=AllToAll, adjacency=None, referenceState=None, *, referenceVolumeMode=None)` | full CRK pipeline; optional independent reference-to-reference volume rule; returns `(apparentArea, crk_density, CRKState)` | [CRK overview](crk/crk-overview) |
+| `computeCRKFactorsJVP(…)` | the pipeline's JVP (chained volume → moments → `torch.autograd.functional.jvp` through the terms solve) | [CRK overview — JVP](crk/crk-overview) |
 | `computeKernelCRK(…)` / `computeKernelGradientCRK(…)` | the corrected kernel value / gradient $\widehat W_{ij}$, $\nabla\widehat W_{ij}$ | [CRK overview — corrected kernel](crk/crk-overview#the-corrected-kernel-and-gradient) |
 | `computeKernelGradientCRKJVP(…)` / `correctGradientCRKJVP(…)` | the forward-mode building blocks the operator JVPs call for the CRK pieces | [CRK overview](crk/crk-overview) |
 
@@ -42,8 +93,33 @@ aggregation).
 | function | what it does | details |
 |---|---|---|
 | `computeRenormalizationMatrices(queryParticles, operationProperties, domain, …, returnEigVals=True)` | covariance (on a properties *copy*) → low-neighbor identity fallback → pseudo-inverse; returns `(C, eigVals, RenormalizationState)` | [Renormalization](renorm#computerenormalizationmatrices) |
-| `computeRenormalizationMatricesJVP(…, queryTangentState, …)` | the JVP: `dC` (masked) → $dL = -L\,dC\,L$ | [Renormalization — JVP](renorm#jvp) |
+| `computeRenormalizationMatricesJVP(…, queryTangentState, …)` | masked covariance tangent → selected spectral inverse tangent, including retained/discarded rotation | [Renormalization — JVP](renorm#jvp) |
 | `pinv1x1` / `pinv2x2_warpBackend` (and the `pinv_warp` dispatcher, `pinv/`) | the dimension-dispatched pseudo-inverse (2D closed-form symmetric eigendecomposition, Warp kernel) | [Renormalization — step 3](renorm#computerenormalizationmatrices) |
+
+## Polynomial fits and reconstruction — `polyfit/`
+
+| entry point | what it does | details |
+|---|---|---|
+| `PolyFit.build(particles, domain, kernel, order, ...)` | local MLS/RKPM or LABFM fit; values, diffuse derivatives and interface states, with rank/condition diagnostics | [Reconstruction](reconstruction) |
+| `Reconstructor.teno(...)` / `Reconstructor.weno(...)` | component-wise nonlinear candidate weighting; first-order fallback when no candidate is usable | [Reconstruction](reconstruction) |
+| `interfacePairs(...)` | live directed/half pair lists and minimum-image vectors | [Reconstruction](reconstruction) |
+
+## Linear algebra — `linalg/`
+
+| function | what it does | details |
+|---|---|---|
+| `cg(...)` / `bicg(...)` / `bicgstab(...)` | Matrix-free solves with device stopping predicates, bounded restarts and verified original residuals | [Linear algebra](linalg) |
+| `gmres(..., restart=30, preconditionerSide='right', accumulationDtype=None)` | Restarted Arnoldi/Givens solve with left/right preconditioning, bounded residual repair and verified convergence | [Restarted GMRES](linalg#restarted-gmres) |
+| `minres(..., symmetric=True, precond=None, preconditionerSPD=False)` | Short-recurrence indefinite/singular symmetric solve, explicit inverse-SPD contract and verified original residual | [MINRES](linalg#short-recurrence-minres) |
+| `richardson(..., omega=None, backtracking=True, maxBacktracks=8)` | Fixed/adaptive scalar updates, bounded true-residual search, finite best-iterate fallback and explicit trial diagnostics | [Richardson](linalg#bounded-richardson-iteration) |
+| `LinearOperator(shape, dtype, device, matvec=None, matvecOut=None, adjoint=None)` | Callable operator metadata, supplied-output action and optional explicit transpose | [Operator metadata](linalg#explicit-operator-metadata) |
+| `RestrictedSystem(operator, freeIndices)` | Owned coordinate restriction, Dirichlet RHS lifting/reconstruction, explicit reduced adjoint and inverse-action restriction | [Restricted systems](linalg#restricted-systems-and-prescribed-values) |
+| `NullspaceSystem(operator, rightBasis, leftBasis, ...)` | Declared Euclidean nullspaces, explicit source compatibility/projection, projected inverse actions, gauges and original-source residual reports | [Nullspaces and gauges](linalg#nullspaces-source-compatibility-and-gauges) |
+| `DiagonalPreconditioner(diagonal, ...)` / `BlockJacobiPreconditioner(blocks, ...)` | Owned inverse actions, explicit singular/SPD policies, adjoints, fixed-address updates and optional native small-block application | [Preconditioner helpers](linalg#diagonal-and-block-jacobi-helpers) |
+| `CGWorkspace(b, maxiter, history=True, capture=False)` | Reusable native inference-only CG updates, optional history, owned results, supplied-output matvecs and cached CUDA chunks | [Native CG workspace](linalg#native-cg-workspace) |
+| `BiCGStabWorkspace(b, maxiter, history=True, capture=False)` | Native right-preconditioned BiCGStab, reusable scratch, half/full guards, supplied-output operator/preconditioner actions and cached chunks | [Native BiCGStab workspace](linalg#native-bicgstab-workspace) |
+| `pinvSymmetric(M, rtol=None)` / `applyPinv(V, M, rtol=None)` | Small symmetric pseudoinverse and fused application, with reverse/forward AD fallback | [Small symmetric matrices](linalg#small-symmetric-matrices) |
+| `runStationary(...)` / `CheckSchedule(...)` / `residualStatistic(...)` | Shared stationary loop, checkpoint schedule and pressure residual statistics | [Stationary iteration](linalg#stationary-iteration) |
 
 ## Kernels — `kernels/`
 

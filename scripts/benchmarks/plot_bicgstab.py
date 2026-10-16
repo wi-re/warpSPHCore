@@ -4,6 +4,10 @@
 import hashlib
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from development_paths import coreDevelopmentPath, artifactLabel
 
 import matplotlib
 matplotlib.use('Agg')
@@ -14,12 +18,12 @@ def main():
     root = Path(__file__).resolve().parents[2]
     datasets, inputs, outputs = [], {}, {}
     for precision in ('float32','float64'):
-        path = root/f'docs/regression/bicgstab_{precision}_2026_10_15.json'
+        path = coreDevelopmentPath(f'docs/regression/bicgstab_{precision}_2026_10_15.json')
         data = json.loads(path.read_text())
         for source,expected in data['sourceSha256'].items():
             assert hashlib.sha256((root/source).read_bytes()).hexdigest()==expected,source
         datasets.append(data)
-        inputs[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+        inputs[artifactLabel(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
     for mode in ('fixed','verified'):
         fig,axes = plt.subplots(2,2,figsize=(11,7.5),constrained_layout=True)
         for row,data in enumerate(datasets):
@@ -46,12 +50,13 @@ def main():
         fig.suptitle(f"BiCGStab on nonsymmetric SPH, 57 neighbors: {mode} work\n"
                      'Warmed whole calls; work includes frozen callbacks and residual verification',fontsize=12)
         for suffix in ('.png','.svg'):
-            path = root/f'docs/development/assets/bicgstab-{mode}-2026-10-15{suffix}'
+            path = coreDevelopmentPath(f'docs/development/assets/bicgstab-{mode}-2026-10-15{suffix}')
+            path.parent.mkdir(parents=True, exist_ok=True)
             fig.savefig(path,dpi=170)
-            outputs[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+            outputs[artifactLabel(path)] = hashlib.sha256(path.read_bytes()).hexdigest()
         plt.close(fig)
     manifest = dict(inputs=inputs,outputs=outputs,plotSourceSha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
-    (root/'docs/regression/bicgstab_figures_2026_10_15.json').write_text(json.dumps(manifest,indent=2)+'\n')
+    (coreDevelopmentPath('docs/regression/bicgstab_figures_2026_10_15.json')).write_text(json.dumps(manifest,indent=2)+'\n')
     print('Saved fixed/verified paired timing and interaction-rate figures.')
 
 

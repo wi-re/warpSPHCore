@@ -17,6 +17,11 @@ fluid associated with particle $i$ from the kernel's own normalization
 ($\sum_j W_{ij} \approx 1/V_i$), and is the weight the CRK moments and
 density use in place of $m_j/\rho_j$.
 
+When the kernel sum is exactly zero, the implementation returns zero apparent
+volume with zero tangent/adjoint on that branch. This finite sentinel means
+that no volume can be inferred from the neighborhood. It also covers empty
+reference populations; it does not assert consistency or reproduction there.
+
 Computed with the **Gather** support scheme and the **uncorrected**
 kernel (no CRK, no renormalization, no apparent volume — the kernel's
 `correctionData` argument is present for ABI consistency but unused).

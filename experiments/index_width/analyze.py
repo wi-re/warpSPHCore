@@ -1,10 +1,15 @@
 """Regenerate measured tables and audit the recorded experiment."""
 import hashlib
 import json
+import torch
 from pathlib import Path
+import sys
 
-HERE=Path(__file__).resolve().parent
-ROOT=HERE.parents[1]
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+from development_paths import coreDevelopmentPath
+
+ROOT=Path(__file__).resolve().parents[2]
+HERE=coreDevelopmentPath('experiments/index_width')
 r=json.loads((HERE/'results.json').read_text())
 assert r['complete'] and len(r['records'])==10
 assert sum(len(row['operators']) for row in r['records'])==120
@@ -13,7 +18,7 @@ assert all(o['exact_outputs'] and o['exact_production_reference'] for row in r['
 assert all(all(row['checks'].values()) for row in r['records'])
 for info in r['generated_sources'].values():
     assert hashlib.sha256(Path(info['generated_path']).read_bytes()).hexdigest()==info['generated_sha256']
-header=Path('/home/lu26029/miniconda3/envs/warp/lib/python3.13/site-packages/torch/include/ATen/native/TensorAdvancedIndexingUtils.h')
+header=Path(torch.__file__).resolve().parent/'include/ATen/native/TensorAdvancedIndexingUtils.h'
 text=header.read_text()
 assert 'indice = indice.to(at::kLong);' in text
 large=[row for row in r['records'] if row['n']==4194304]

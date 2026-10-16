@@ -17,8 +17,11 @@ $$
 where $\mathbf{C}_i$ is the [Covariance](operations/covariance) of the
 kernel gradient field at $i$. $\mathbf{C}_i$ measures the linear
 reproduction error of the neighbor set; inverting it (pseudo-inverse,
-since free-surface particles give a rank-deficient matrix) makes the
-corrected operator reproduce linear fields exactly. The order of
+when a stencil has unresolved directions) makes the
+corrected Difference gradient reproduce linear fields on fully resolved
+stencils. A free surface alone does not imply rank loss; a one-sided stencil
+can still span every direction. Low-neighbor and truncated directions follow
+the fallback policies below. The order of
 application is fixed: CRK correction first, then
 $\mathbf{L}_i\mathbf{G}_i$ (see the
 [Gradient](operations/gradient) page).
@@ -98,7 +101,7 @@ applying it here as well covers 3D.
 |---|---|
 | 1 | `pinv1x1` (trivial reciprocal) |
 | 2 | `pinv2x2_warpBackend` — a Warp kernel with the **closed-form symmetric eigendecomposition** (the general 2×2-SVD formula this used to use is unstable for near-isotropic covariances). Eigenvalue cutoff: an eigenvalue is inverted only if it is finite in absolute value *and* above `rcond = 1e-6` times the dominant one, so anisotropic/thin neighborhoods don't produce huge inverted eigenvalues. Re-checks `num_nbrs < 4` (i.e. `< dim + 2`) → identity. |
-| 3 | `torch.linalg.pinv(C, rtol=1e-6)` (the 3×3 Warp kernel exists, `pinv/wp_pinv3x3.py`, but is not wired in yet); `eigVals` from `torch.linalg.eigvals`, sorted by descending magnitude. |
+| 3 | Plain radial covariance uses Torch's symmetric spectral inverse at `rtol=1e-6`, with a selected-branch derivative shared by reverse AD and explicit JVP. Covariance with CRK/Grad-H/renorm corrections retains the general `torch.linalg.pinv` path. `eigVals` retain the existing diagnostics from `torch.linalg.eigvals`. |
 
 **Outputs:** `C` `[N,D,D]` (the covariance, *after* the identity
 fallback — the matrix the pseudo-inverse actually inverted), `eigVals`
@@ -110,6 +113,15 @@ fallback — the matrix the pseudo-inverse actually inverted), `eigVals`
 call — the renormalization matrix is then a correction *on top of* the
 other corrections, which is the configuration the gradient JVP
 scripts exercise.
+
+On a fixed retained set, reverse and forward derivatives include rotation
+between a retained eigenvalue `a` and a discarded eigenvalue `b`, with coefficient
+`1/(a*(a-b))`. The usual Moore–Penrose backward at exact rank loss omits the
+nonzero discarded `b` in that coefficient. The 3D plain-covariance path now
+uses the selected spectral rule, including repeated full-rank eigenvalues,
+reverse-over-JVP and second reverse derivatives. Thin 3D line/plane stencils
+are qualified on CUDA. Cutoff/rank crossings remain nonsmooth; discarded
+directions do not acquire a reproducing gradient.
 
 ## JVP
 
@@ -130,22 +142,38 @@ $\mathbf{C}_i$:
    replaces low-neighbor rows by the *constant* identity, so their
    tangent is exactly zero —
    `dC = torch.where(lowNbrMask, 0, dC_raw)`.
-3. **The matrix-inverse derivative**:
+3. **The selected symmetric spectral-inverse derivative**. At full rank:
 
 $$
 d\mathbf{L}_i = -\,\mathbf{L}_i\, d\mathbf{C}_i\, \mathbf{L}_i
 $$
 
-with $\mathbf{L}_i$ consumed from this function's own primal call
+For a truncated direction this also includes retained/discarded subspace
+motion: between retained eigenvalue $a$ and discarded eigenvalue $b$, the
+coefficient multiplying the corresponding entry of $d\mathbf C$ is
+$1/(a(a-b))$. This includes small **nonzero** discarded eigenvalues; treating
+them as exact zeros gives a different derivative. The implementation uses
+projected small solves, avoiding eigenvector derivatives at repeated retained
+eigenvalues. The retained set must stay fixed: crossing the cutoff is
+nonsmooth. The primal cutoff and eigenvalue diagnostics are unchanged.
+
+$\mathbf{L}_i$ is consumed from this function's own primal call
 (same "consume an already-validated value" pattern the CRK JVP uses).
 The neighbor count is recomputed via a second internal covariance call
 (the primal function does not return it).
 
+Both covariance calls and the covariance tangent honor the same particle
+kinds and `operationProperties.operationMode`. A query row rejected by that
+mode has the existing low-neighbor identity correction and zero tangent.
+
 `crkState`/`gradHState` are **not** accepted here — the covariance JVP
 kernel is deliberately CRK/grad-h-free, matching the "renorm alone
-first" scoping (CRK+renorm tangents *simultaneously* through this path
-is a documented fast follow-up). Validated to float64 round-off by
-`scripts/spikes/spike_forward_mode_tier2_renorm.py`.
+first" scoping. A downstream operator can consume independently constructed
+CRK and renorm states/tangents together; this does not require constructing
+the covariance with a CRK-corrected gradient. Full-rank evidence is in
+`scripts/spikes/spike_forward_mode_tier2_renorm.py`; truncated-subspace and
+composition regressions are listed below. All three traversal inputs,
+including omitted adjacency, are accepted.
 
 The lattice-normalization calibration ($1/L$ kernel scaling for a
 uniform lattice's quadrature offset) is a separate, unrelated feature
@@ -165,6 +193,12 @@ that used to share this page — see
   parity + `torch.autograd.gradcheck` across all three traversal
   inputs (gated by `tests/operations/test_gradcheck_scripts.py`).
 - `scripts/spikes/spike_forward_mode_tier2_renorm.py` — the JVP, float64.
+- `tests/operations/test_renorm_rank_jvp.py` — truncated-subspace rotation,
+  selected spectral finite differences, repeated retained eigenvalues and
+  low-neighbor zero tangents.
+- `tests/operations/test_capability_composition.py` — recomputed density,
+  apparent-volume/CRK/renorm tangents through Gradient, and corrected SPH
+  Dirichlet solves.
 
 ## See also
 

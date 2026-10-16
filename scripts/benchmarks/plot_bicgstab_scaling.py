@@ -10,6 +10,10 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from development_paths import coreDevelopmentPath, artifactLabel
 import statistics
 
 import matplotlib
@@ -103,10 +107,10 @@ def main():
     root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('inputs', type=Path, nargs='+')
-    parser.add_argument('--output-dir', type=Path, default=root/'docs/development/assets')
+    parser.add_argument('--output-dir', type=Path, default=coreDevelopmentPath('docs/development/assets'))
     parser.add_argument('--stem', default='bicgstab-scaling-2026-10-15')
     parser.add_argument('--manifest', type=Path,
-                        default=root/'docs/regression/bicgstab_scaling_figures_2026_10_15.json')
+                        default=coreDevelopmentPath('docs/regression/bicgstab_scaling_figures_2026_10_15.json'))
     args = parser.parse_args()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     manifest = dict(inputs={}, outputs={}, series=[],
@@ -116,7 +120,7 @@ def main():
     for path in args.inputs:
         data = json.loads(path.read_text())
         validate(data, root)
-        manifest['inputs'][str(path.resolve().relative_to(root))] = digest(path)
+        manifest['inputs'][artifactLabel(path)] = digest(path)
         precision = data['dtype'].removeprefix('torch.')
         degrees = sorted({row['meanDegree'] for row in data['records']})
         for mode in ('fixed', 'verified'):
@@ -193,7 +197,7 @@ def main():
             for suffix in ('.png', '.svg'):
                 output = args.output_dir/f'{args.stem}-{precision}-{mode}{suffix}'
                 fig.savefig(output, dpi=170)
-                manifest['outputs'][str(output.resolve().relative_to(root))] = digest(output)
+                manifest['outputs'][artifactLabel(output)] = digest(output)
             plt.close(fig)
     args.manifest.parent.mkdir(parents=True, exist_ok=True)
     args.manifest.write_text(json.dumps(manifest, indent=2)+'\n')

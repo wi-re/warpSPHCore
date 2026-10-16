@@ -161,8 +161,8 @@ matters is `cases/weaklyCompressible.calibrateRestDensityMasses`
 (warpSPH), which needs $L$ to separate the ideal-lattice quadrature
 offset from the sampler's block-fit error — two independent problems
 that both show up as "the initial state does not read $\rho_0$".
-Performance records for the calibration work live in
-`docs/regression/`.
+Historical calibration reports remain in `docs/regression/`. New raw
+measurements use the [external development archive](development-artifacts.md).
 
 ## Tests
 

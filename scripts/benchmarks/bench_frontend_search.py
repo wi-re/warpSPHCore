@@ -15,9 +15,12 @@ import json
 import math
 import os
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from development_paths import coreDevelopmentPath
 import statistics
 import subprocess
-import sys
 import time
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -265,7 +268,7 @@ def main():
     ap.add_argument('--output', type=Path)
     ap.add_argument('--scenarios', nargs='+', choices=SCENARIOS, default=list(SCENARIOS))
     ap.add_argument('--policies', nargs='+', choices=POLICIES, default=['wide-fused', 'narrow-fused', 'automatic'])
-    ap.add_argument('--output-dir', type=Path, default=ROOT / 'docs/regression/frontend_search_2026_10_15')
+    ap.add_argument('--output-dir', type=Path, default=coreDevelopmentPath('docs/regression/frontend_search_2026_10_15'))
     ap.add_argument('--repeats', type=int, default=2)
     ap.add_argument('--warmup', type=int, default=40)
     ap.add_argument('--active', type=int, default=160)

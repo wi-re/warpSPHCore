@@ -24,6 +24,10 @@ removed — useful to *see* what the correction is doing, not a
 replacement for the [Density](../operations/density) operator in a
 simulation.
 
+An exactly zero normalizing denominator returns zero diagnostic density and
+zero derivatives on that branch, including rows with no contributing neighbors.
+This is a finite empty-neighborhood convention, not an inferred physical density.
+
 Implementation notes:
 
 - The kernel accumulates the two sums and returns them; the ratio is

@@ -33,6 +33,46 @@ map and then collects neighbors into an `AdjacencyList`.
 `buildCompactHashMap(...)` exposes the hash map alone;
 `radiusSearchOnCompactHashMap(...)` the collection step alone.
 
+Empty query, reference and both-empty populations are supported. The list
+retains `numRows=N_query` and `numCols=N_reference`, with zero live edges,
+zero row counts/offsets, and the selected integer dtypes. Exact allocation
+(`capacity=None`) has zero pair storage; the default capacity policy retains
+at least one padded slot filled with -1. Empty reference grids require explicit
+domain `min` and `max`; bounds cannot be inferred from missing coordinates.
+The grid remains valid with a positive cell size and no occupied reference cells.
+
+Verlet rebuilds handle particle-count changes into and out of empty populations.
+An unchanged empty pair domain needs no movement/support rebuild and reports
+finite zero validity metrics. A count change invalidates the prior list.
+In-place capacity reuse retains addresses only while the allocation fits;
+captures must be rebuilt after a shape/address change. Fixed grid slots support
+zero reference particles, including CUDA build replay at that fixed size.
+
+All three entry points accept keyword-only `collection` and `queryOrder` options;
+the same options are forwarded by `buildVerletList` and its raw-tensor variant.
+`collection='auto'` (default) uses split collection on CUDA and fused on CPU.
+Explicit `collection='split'` and `collection='fused'` override that choice.
+Split collection writes `J` with the same traversal and ordering, then generates `I` from
+CSR counts/offsets using 32 cooperating lanes per row. Both arrays retain their
+usual format, padding and capacity/reuse behavior.
+
+`queryOrder='auto'` (default) visits aliased self queries in the existing grid's
+cell order. For sorted slot `s`, both count and collect write to original row
+`sortIndex[s]`; fused collection writes that original I directly. Query positions
+come from the already wrapped `sortedPositions`, and query supports are indexed
+by original row. No extra sort, inverse permutation, particle-state reorder or
+post-collection reindex pass is needed. J order within each original CSR row is
+unchanged. Independent query/reference position layouts fall back to input
+order, even when their populations are the same size. `queryOrder='input'`
+forces input execution order; explicit `'spatial'` requires aliased positions.
+
+The warpSPH frontend exposes these through `ComputeConfig.neighborCollection`
+and `neighborQueryOrder`; `neighborGridBuild='scheme'|'eager'` separately selects
+the scheme's existing pair-grid factory or bypasses it for an eager rebuild.
+The query-order validation report and measurements are preserved in the
+[external development archive](development-artifacts.md), under
+`core/docs/development/query-order-validation.md`.
+
 The stages (all in `radiusSearch/compactHash/`):
 
 ### 1. Cell size and support
@@ -103,15 +143,21 @@ The stages (all in `radiusSearch/compactHash/`):
   (`isInSupport`: minimum-image distance $r \le h_{ij}$ under the
   scheme's pairwise support, with periodic wrap on cell components) —
   and writes `neighborCounts[i]`.
-- A host-visible `total_edges` is summed (one `wp.synchronize`), CSR
-  offsets are built, and
+- Counts are summed and prefix-scanned in int64; the host-visible total and
+  allocation capacity are checked before offsets are stored in their configured
+  dtype. Count, collect and optional row-fill launches follow Torch's current
+  stream. Then
   `radiusSearchCollectCompactHashMap` writes the `edge_i`/`edge_j`
   arrays, translating sorted indices back through `sortIndex`.
 
-**Output:** an `AdjacencyList` with `i`, `j` (int64),
-`numNeighbors`, `edgeOffsets` (int32), `rowNum/colNum`, the
+**Output:** an `AdjacencyList` with `paddedI`, `paddedJ` (configured particle-ID
+dtype), `numNeighbors` (int32), `edgeOffsets` (configured CSR-offset dtype),
+`numRows/numCols`, the
 query/reference positions and supports, and a back-reference to the
 `CompactHashMap` it was built from.
+Particle IDs and offsets independently default to int32; configure
+`warpSPHCore_INDEX_DTYPE` and `warpSPHCore_OFFSET_DTYPE` before import to select
+int32 or int64. Warp's current flat-array dimension limit still applies.
 
 The `CompactHashMap` itself holds: `sortedPositions`,
 `sortedSupports`, `sortIndex`, `hashTable`, `sortedCellTable`,

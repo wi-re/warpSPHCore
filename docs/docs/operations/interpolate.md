@@ -32,7 +32,8 @@ gradient terms (`gradA`/`gradB`; if you pass a `CRKState` without them
 the backend substitutes correctly-shaped dummies, since the kernel only
 uses $A_i, B_i$).
 
-**Output:** same shape as `referenceValues` `[N, ...]`. Warp kernels
+**Output:** `[N_query, ...]`, preserving the trailing shape of
+`referenceValues`. The query and reference counts can differ. Warp kernels
 support rank-1/2 field types, so fields of rank $>2$ are flattened to
 one vector dimension before the launch and reshaped back afterwards.
 

@@ -39,7 +39,7 @@ nx, target_neighbors, dim, periodic = 32, 55, 2, True
 positions, supports, n, domain, dx = generateNeighborTestData(
     nx, target_neighbors, dim, periodic, device
 )
-masses   = torch.full((n,), 1.0, device=device)      # unit nominal density
+masses   = torch.full_like(supports, dx**dim)      # unit nominal density
 kinds    = torch.zeros(n, dtype=torch.int32, device=device)
 particles = ParticleState(positions, supports, masses, kinds)
 
@@ -54,10 +54,12 @@ properties = OperationProperties(
     operationMode=OperationDirection.AllToAll,
 )
 rho = sph.warpOperation(particles, properties, domain)
+particles.densities = rho
+density_properties = properties
 print("density:", rho.shape)          # [N]
 
 # 3. A gradient of a vector field, Difference scheme.
-vec = torch.stack([positions[:, 0], positions[:, 1]], dim=1)
+vec = torch.sin(torch.pi * positions)  # smooth on the periodic domain
 properties = OperationProperties(
     kernel=KernelFunctions.Wendland2,
     operation=WarpOperation.Gradient,
@@ -90,11 +92,13 @@ apparent_area, crk_density, crk_state = computeCRKFactors(
 # Gradient renormalization (De Courcy et al. 2024 style):
 renorm = computeRenormalizationMatrices(
     particles, properties, domain,
+    referenceVolumes=apparent_area,
 )   # -> (C, eigVals, RenormalizationState)
 
 grad_crk = sph.warpOperation(
     particles, properties, domain,
     queryValues=vec, referenceValues=vec,
+    referenceVolumes=apparent_area,
     crkState=crk_state,                 # CRK-corrected kernel gradient
     renormalizationState=renorm[2],     # ... then renormalized
 )
@@ -112,7 +116,7 @@ and the field values:
 
 ```python
 positions.requires_grad_(True)
-rho = sph.warpOperation(particles, properties, domain)
+rho = sph.warpOperation(particles, density_properties, domain)
 rho.sum().backward()
 print(positions.grad.shape)
 ```
@@ -124,13 +128,11 @@ directions, through the same public entry point:
 from warpSPHCore import ParticleTangentState
 
 dpositions = torch.randn_like(positions)
+tangent = ParticleTangentState(positions=dpositions, supports=None, masses=None)
 drho = sph.warpOperationJVP(
-    particles, properties, domain,
-    queryTangentState=ParticleTangentState(
-        positions=dpositions,
-        supports=torch.zeros(n, device=device),
-        masses=torch.zeros(n, device=device),
-    ),
+    particles, density_properties, domain,
+    queryTangentState=tangent,
+    referenceTangentState=tangent,  # move both roles of this physical cloud
 )
 ```
 
@@ -157,3 +159,8 @@ pytest tests/operations            # CPU + CUDA (CUDA skipped if absent)
 The gradcheck suites run as subprocesses at float64
 (`tests/operations/test_gradcheck_scripts.py`) because precision is
 baked in at import time.
+
+For complete checked compositions, including the density/correction/gradient
+derivative chain, start with [Runnable examples](examples.md). The density
+derivative snippets above differentiate the density operator alone; cached
+correction tensors must be rebuilt inside a differentiated composition.

@@ -5,8 +5,9 @@ operators to **linear-reproducing consistency**: per query particle $i$,
 a scalar $A_i$ and a vector $B_i$ (and their position-derivatives
 $\nabla A_i$, $\nabla B_i$) are solved from kernel-weighted moments so
 that the corrected kernel and its gradient reproduce constants and
-linear fields exactly, even on incomplete neighbor sets (free surfaces,
-boundaries, low counts).
+linear fields exactly on incomplete neighbor sets when the augmented moment
+constraints are independent and numerically resolved. Degenerate stencils use
+the constant identity fallback described below.
 
 Module: `src/warpSPHCore/crk/`. Public API:
 
@@ -53,10 +54,42 @@ apparent_area, crk_density, crk_state = computeCRKFactors(
     operationMode=OperationDirection.AllToAll,
     adjacency=None,                 # AdjacencyList | CompactHashMap | None
     referenceState=None,
+    referenceVolumeMode=None,       # independent reference-to-reference rule
 )
 ```
 
-Three stages, each a dual-path (adjacency + grid) kernel:
+With a distinct `referenceState`, the returned apparent volume is defined
+on the query population against the reference population. Moment/density
+weights instead use apparent volumes estimated on the reference population
+against itself. These arrays follow different particle IDs and can have
+different lengths. The extra reference estimate builds its own grid, since
+a query-to-reference neighbor list cannot describe reference-to-reference
+interactions. With one population, the original estimate is reused.
+
+`referenceVolumeMode=None` preserves that inherited interaction mode and
+reuse policy. An explicit mode computes a separate reference-to-reference
+estimate, including for an aliased population. Query volumes and moment
+interactions still follow `operationMode`. A cross-category rule can reject
+all reference-to-reference query rows, leaving zero weights and identity
+fallbacks. When the whole reference cloud is the intended geometric sample,
+`referenceVolumeMode=OperationDirection.TrueAllToToAll` gives it an independent
+unfiltered volume estimate. The caller chooses the reference cloud and its
+volume rule; ghosts included by that rule participate in volume estimation.
+Downstream operators must use the same reference weights and Scatter support
+to inherit the construction's reproduction identities.
+To obtain those weights through the public API, take the first return from
+`computeCRKFactors(referenceState, domain, kernel, operationMode=referenceVolumeMode)`
+and pass it as `referenceVolumes` to the consuming operator. The first return
+from the query/reference construction belongs to the query population.
+
+Empty query populations preserve all output shapes. With no contributing
+neighbors, apparent volume and diagnostic density are zero, and correction
+terms use the existing constant identity fallback (`A=1`, `B=0`, zero spatial
+derivatives). Their geometry tangents and adjoints are finite zeros while that
+branch stays selected. These conventions do not supply a reproducing stencil.
+Empty reference populations require explicit domain bounds for grid construction.
+
+The correction stages and diagnostic use dual-path adjacency/grid kernels:
 
 1. **Apparent volume** — $V_i = 1/\sum_j W_{ij}$, computed with the
    **Gather** scheme and the *uncorrected* kernel
@@ -85,6 +118,16 @@ Three stages, each a dual-path (adjacency + grid) kernel:
    $\nabla B_i = 0$ — the uncorrected kernel. A warning is printed with
    the count.
 
+   The limiter also rejects a nonfinite or unresolved Schur complement
+   `s = m0 - m1ᵀ pinv(m2) m1`: `s <= 32*eps*(abs(m0)+abs(projection))`,
+   where `projection = m1ᵀ pinv(m2) m1` and `eps` is the tensor dtype's
+   machine epsilon. This detects singular augmented moment constraints even
+   when `m2` is invertible, such as reference points on an affine plane away
+   from the query. Rejected rows use finite constant algebra before division
+   and have zero tangents/adjoints. The existing neighbor/determinant cutoffs
+   remain in force. The guard is a numerical fallback, not a conditioning
+   certificate for every accepted stencil; crossings are nonsmooth.
+
 4. **Diagnostic density** — the CRK-corrected consistency density
    [CRK density](crk-density).
 
@@ -106,6 +149,7 @@ apparent_area, d_apparent_area, crk_state, crk_tangent_state = \
         queryTangentState,                     # ParticleTangentState
         referenceTangentState=None,
         operationMode=..., adjacency=None, referenceState=None,
+        referenceVolumeMode=None,
     )
 ```
 
@@ -119,6 +163,31 @@ through it is exact. `create_graph=True` is required so
 $dA, dB, d\mathrm{grad}A, d\mathrm{grad}B$ stay differentiable back to
 positions/supports for whole-pipeline gradcheck. The diagnostic
 `crk_density` is not computed (no consumer in the JVP path).
+
+For distinct populations, reference-volume tangents also use the
+reference-to-reference estimate. Supply the reference geometry tangent
+explicitly: an omitted reference tangent means zero even when primal
+particles are shared between roles. All three traversal inputs, including
+omitted adjacency, are supported. `tests/operations/test_crk_reference_roles.py`
+qualifies unequal populations, reference permutation invariance, finite
+differences and reverse-mode dot products with AllToAll and kind 0 particles.
+With an explicit `referenceVolumeMode`, reference-to-reference volume
+tangents use the reference tangent in both roles, including when the primal
+population aliases the query. Supply both role tangents for one physical
+moving population.
+
+Both constructors propagate frozen particle kinds and `operationMode` through
+volume and moment evaluation. The JVP differentiates the selected forward
+pipeline, including its constant low-count/singular fallback. That fallback
+uses finite inputs before inverse/reciprocal algebra so excluded rows have
+finite zero derivatives. `tests/operations/test_kind_directions.py` qualifies
+mixed-kind derivative parity for all interaction modes.
+`tests/operations/test_correction_numerics.py` additionally qualifies the
+independent unfiltered reference-volume option for all 15 directions with
+mixed reference kinds: moment reproduction identities, downstream linear
+interpolation/Gradient, finite differences and reverse dot products. This
+uses well-resolved 2D stencils, Scatter support and Naive Gradient; it does
+not certify every volume/boundary policy or poorly conditioned stencil.
 
 This is the usual way to obtain the `CRKTangentState` that the
 operators' geometry JVPs accept as `crkTangentState` (omitting it holds

@@ -5,6 +5,10 @@ import gzip
 import hashlib
 import json
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from development_paths import coreDevelopmentPath
 import statistics
 
 
@@ -25,8 +29,8 @@ def physical_rows(r):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument('--root', type=Path, default=Path('docs/regression/sloshing_motion_2026_10_15'))
-    ap.add_argument('--figure', type=Path, default=Path('docs/development/assets/sloshing-motion-2026-10-15.png'))
+    ap.add_argument('--root', type=Path, default=coreDevelopmentPath('docs/regression/sloshing_motion_2026_10_15'))
+    ap.add_argument('--figure', type=Path, default=coreDevelopmentPath('docs/development/assets/sloshing-motion-2026-10-15.png'))
     args = ap.parse_args()
     trials, diagnostics, visual = [records(args.root / d) for d in ('trials', 'diagnostics', 'visual')]
     if (len(trials), len(diagnostics), len(visual)) != (24, 9, 2):

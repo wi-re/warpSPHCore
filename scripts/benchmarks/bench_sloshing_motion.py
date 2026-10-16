@@ -15,15 +15,18 @@ import importlib
 import json
 import os
 from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from development_paths import coreDevelopmentPath
 import statistics
 import subprocess
-import sys
 import time
 
 import bench_frontend_search as benchmark
 
 ROOT = benchmark.ROOT
-DEFAULT_FIXTURES = ROOT / 'docs/regression/sloshing_motion_2026_10_15/fixtures'
+DEFAULT_FIXTURES = coreDevelopmentPath('docs/regression/sloshing_motion_2026_10_15/fixtures')
 
 
 def worker(args):
@@ -193,7 +196,7 @@ def main():
     ap.add_argument('--output', type=Path)
     ap.add_argument('--phases', nargs='+', default=['startup', 'impact1', 'impact3'])
     ap.add_argument('--policies', nargs='+', default=['wide-fused', 'narrow-fused', 'narrow-split', 'automatic'])
-    ap.add_argument('--output-dir', type=Path, default=ROOT / 'docs/regression/sloshing_motion_2026_10_15/trials')
+    ap.add_argument('--output-dir', type=Path, default=coreDevelopmentPath('docs/regression/sloshing_motion_2026_10_15/trials'))
     ap.add_argument('--fixtures', type=Path, default=DEFAULT_FIXTURES)
     ap.add_argument('--warmup', type=int, default=200)
     ap.add_argument('--active', type=int, default=1000)
