@@ -338,7 +338,7 @@ def mfmMoments_Func_i(
     return omega, E, cnt
 
 
-@wp.kernel
+@wp.kernel(enable_backward=False)
 def mfmMoments_Kernel(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
@@ -416,7 +416,7 @@ def mfmGradients_Func_i(
     return sRho, sVel, sP
 
 
-@wp.kernel
+@wp.kernel(enable_backward=False)
 def mfmGradients_Kernel(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
@@ -511,7 +511,7 @@ def mfmLimiter_Func_i(
     return nbHiRho, nbLoRho, mdHiRho, mdLoRho, nbHiP, nbLoP, mdHiP, mdLoP, nbHiV, nbLoV, mdHiV, mdLoV
 
 
-@wp.kernel
+@wp.kernel(enable_backward=False)
 def mfmLimiter_Kernel(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
@@ -583,7 +583,7 @@ def pairFace(i: wp.int32, j: wp.int32, iPtcl: Any, jPtcl: Any, domainState: doma
                        kernelProperties.kernelFunction, domainState.dim, centred, areaCap)
 
 
-@wp.kernel
+@wp.kernel(enable_backward=False)
 def mfmClosureResidual_Kernel(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
@@ -621,7 +621,7 @@ def mfmClosureResidual_Kernel(
     output_a2[i] = acc2
 
 
-@wp.kernel
+@wp.kernel(enable_backward=False)
 def mfmClosureWeights_Kernel(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
@@ -653,7 +653,7 @@ def mfmClosureWeights_Kernel(
         output_kappa[beginIndex + offset_t(n)] = k
 
 
-@wp.kernel
+@wp.kernel(enable_backward=False)
 def mfmClosureMatvec_Kernel(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
@@ -775,7 +775,7 @@ def mfmFlux_Func_i(
     dmIn: scalar_t, dpIn: Any, deIn: scalar_t,
 ):
     dm = dmIn
-    dp = zero_like_warp(dpIn)
+    dp = dpIn   # carry momentum across grid cells, like mass and energy
     de = deIn
     for n in range(numIndices):
         j = wp.int32(offsetArray[beginIndex + offset_t(n)])
@@ -916,7 +916,7 @@ def mfmFlux_Func_i(
     return dm, dp, de
 
 
-@wp.kernel
+@wp.kernel(enable_backward=False)
 def mfmFlux_Kernel(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
@@ -988,7 +988,7 @@ def _wrapDiff(diff: wp.int32, n: wp.int32, periodic: wp.int32):
     return diff
 
 
-@wp.kernel
+@wp.kernel(enable_backward=False)
 def mfmCoarseStencil_Kernel(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
@@ -1060,7 +1060,7 @@ _COARSE_STENCIL_SPEC = OperatorSpec(
 # 6. signal-velocity time step
 # ---------------------------------------------------------------------------------------
 
-@wp.kernel
+@wp.kernel(enable_backward=False)
 def mfmTimestep_Kernel(
     queryState: Any, referenceState: Any, domainState: domainData,
     useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,

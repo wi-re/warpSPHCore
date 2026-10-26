@@ -26,7 +26,7 @@ from .precision import faceCondMax
 from .limiters import conditionBeta
 from .multigrid import CellMultigrid
 from ..type_config import scalar_t
-from .fastLaunch import PreparedLauncher
+from ..autograd.prepared import PreparedLauncher
 from .wp_mfm import (_CLOSURE_RES_SPEC, _CLOSURE_W_SPEC, _COARSE_STENCIL_SPEC, _FLUX_SPEC, _GRADIENTS_SPEC,
                      _LIMITER_SPEC, _MOMENTS_SPEC, _TIMESTEP_SPEC, _ctx, mfmClosureMatvecWarp)
 from .wp_closure import mfmClosureMatvecCSR

@@ -30,13 +30,13 @@ def divergenceProduct(
     dim = wp.int32(3) # hardcoded as this is the overload for 3D.
 
     if dotMode:
-        for i in range(outputElements):
+        for i in range(wp.static(len(output))):
             for d in range(dim):
                 res[i] += fij[i * dim + d] * kernelGradient[d]
     else:
-        for i in range(outputElements):
+        for i in range(wp.static(len(output))):
             for d in range(dim):
-                res[i] += fij[i + d * outputElements] * kernelGradient[d]
+                res[i] += fij[i + d * wp.static(len(output))] * kernelGradient[d]
 
     return res
 
@@ -51,13 +51,13 @@ def divergenceProduct(
     dim = wp.int32(2) # hardcoded as this is the overload for 2D.
 
     if dotMode:
-        for i in range(outputElements):
+        for i in range(wp.static(len(output))):
             for d in range(dim):
                 res[i] += fij[i * dim + d] * kernelGradient[d]
     else:
-        for i in range(outputElements):
+        for i in range(wp.static(len(output))):
             for d in range(dim):
-                res[i] += fij[i + d * outputElements] * kernelGradient[d]
+                res[i] += fij[i + d * wp.static(len(output))] * kernelGradient[d]
 
     return res
 

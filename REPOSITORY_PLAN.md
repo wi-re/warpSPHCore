@@ -66,3 +66,24 @@ records original paths and SHA-256 checksums.
 Keep public contracts, examples, reproduction tools, small regression fixtures
 and curated teaching figures in this repository. Use the
 [artifact policy](docs/docs/development-artifacts.md) for future outputs.
+
+### Compressible consumer cleanup — 21 October 2026
+
+The user requested a performance and architecture pass over MFM/MFV. The generic
+prepared structured-operator launcher now lives in `autograd.prepared`, with the
+old `mfm.fastLaunch` import retained. It exposes host traversal metadata so a
+consumer can compile separate grid/list entry points sharing pair physics.
+Grid/list flux qualification found and fixed the loss of incoming momentum
+between grid cells in `mfmFlux_Func_i`; the single-range neighbour path is
+unchanged. Companion evidence is in warpSPH's
+`docs/meshless_gizmo_validation/PERFORMANCE_2026-10-21.md`.
+Prepared traversal metadata is independent of no-tape eligibility. Native
+meshless entry kernels skip unused backward generation, matching the existing
+public forward-only guard; shared functions and the differentiable Torch
+reference remain available. Final focused core contracts: 125 passed, 12 skipped.
+
+### Shared SPH register evaluation — 21 October 2026
+
+At the user’s request, temporarily prioritize shared core register pressure over solver-specific register tuning. Use the existing operator evaluation suite for bounded, source-matched experiments on static dimensions, traversal specialization and accumulator lifetimes. Preserve forward and derivative contracts; adopt changes only with numerical and measured throughput evidence. Track results in `docs/regression/core_register_pass_2026_10_21.md`. This explicitly reopens timing optimization for this pass.
+
+The shared register screen retained static tensor extents in outer products, divergence and raw CRK moments. Repeated CSR moment timings improve 17–33% in 2D FP32 and 12–16% in 3D FP64; NCU identifies reduced local tensor traffic despite higher register allocation. Blanket register caps, traversal/policy specialization and static distance changes remain experimental because some workloads regress. See `docs/regression/core_register_pass_2026_10_21.md`; MFM/MFV staged consumer qualification is complete; the companion report records saved-state and daemon/video controls, modest MFV improvements and neutral MFM timing. Focused tuning remains deferred.

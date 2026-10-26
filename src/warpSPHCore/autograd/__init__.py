@@ -33,3 +33,5 @@ __all__.extend([
     "clearWarpArrayCache",
     "clearKernelArgsCache"
 ])
+from .prepared import PreparedLauncher
+__all__.append('PreparedLauncher')

@@ -61,6 +61,7 @@ def computeCRKMoments_Func_i(
     output_dm_1dgamma: matrix(shape=(Any, Any), dtype=scalar_t), # type: ignore
     output_dm_2dgamma: vector(length=Any, dtype=scalar_t) # type: ignore (flattened to avoid issues with warp's handling of rank-3 tensors)
 ):
+    spatialDim = wp.static(len(output_m_1))
     m_0 = zero_like_warp(output_m_0)
     m_1 = zero_like_warp(output_m_1)
     m_2 = zero_like_warp(output_m_2)
@@ -95,14 +96,14 @@ def computeCRKMoments_Func_i(
         dm_0dgamma += V_j * gradw_ij
         dm_1dgamma += V_j * (wp.outer(x_ij, gradw_ij) + w_ij * eye)
 
-        for alpha in range(dim):
-            for beta in range(dim):
-                for gamma in range(dim):
+        for alpha in range(spatialDim):
+            for beta in range(spatialDim):
+                for gamma in range(spatialDim):
                     gradTerm = x_ij[alpha] * x_ij[beta] * gradw_ij[gamma]
                     deltaA = x_ij[alpha] * kroneckerDelta(beta, gamma)
                     deltaB = kroneckerDelta(alpha, gamma) * x_ij[beta]
                     kernelTerm = w_ij * (deltaA + deltaB)
-                    dm_2dgamma[gamma * dim * dim + alpha * dim + beta] += V_j * (gradTerm + kernelTerm)
+                    dm_2dgamma[gamma * spatialDim * spatialDim + alpha * spatialDim + beta] += V_j * (gradTerm + kernelTerm)
 
         numNeighbors += 1
 

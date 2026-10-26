@@ -14,9 +14,9 @@ def outerTensorProduct(
     
     # the output is stored as a flattened vector, so we need to compute the correct index for accumulation
     res = type(out)(scalar(0.0))
-    for i in range(flatInputShape): # loop over elements of input tensor
+    for i in range(wp.static(len(tensor))): # loop over elements of input tensor
         for j in range(dim): # loop over dimensions of output gradient
-            outIndex = j * flatInputShape + i # compute flattened index for output
+            outIndex = j * wp.static(len(tensor)) + i # compute flattened index for output
             res[outIndex] += vec[j] * tensor[i] # accumulate outer product into output
             
     return res
@@ -32,7 +32,7 @@ def outerTensorProduct(
     
     # the output is stored as a flattened vector, so we need to compute the correct index for accumulation
     res = type(out)(scalar_t(0.0))
-    for i in range(flatInputShape): # loop over elements of input tensor
+    for i in range(wp.static(len(tensor))): # loop over elements of input tensor
         for j in range(dim): # loop over dimensions of output gradient
             outIndex = j  + i * dim# compute flattened index for output
             res[outIndex] += vec[j] * tensor[i] # accumulate outer product into output
@@ -48,7 +48,7 @@ def outerTensorProduct(
 ):
     # for 1D vectors the outer product is just a scalar multiplication, so we can skip the indexing logic
     res = type(out)(scalar_t(0.0))
-    for i in range(flatInputShape):
+    for i in range(wp.static(len(tensor))):
         res[i] += vec[0] * tensor[i]
     return res
     
