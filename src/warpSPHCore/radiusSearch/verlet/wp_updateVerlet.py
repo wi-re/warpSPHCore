@@ -34,7 +34,8 @@ def updateNeighborsVerletFunc(
 
     # Outputs
     edge_i: wp.array1d(dtype=index_t),  # shape [total_edges] # type: ignore
-    edge_j: wp.array1d(dtype=index_t)   # shape [total_edges] # type: ignore
+    edge_j: wp.array1d(dtype=index_t),  # shape [total_edges] # type: ignore
+    storeI: wp.bool,
 ):
     xi = queryPositions[i]
     hi = querySupports[i]
@@ -61,7 +62,8 @@ def updateNeighborsVerletFunc(
 
         edge_index = newNeighborOffset + offset_t(counter)
         if r_ij <= hij:
-            edge_i[edge_index] = index_t(i)
+            if storeI:
+                edge_i[edge_index] = index_t(i)
             edge_j[edge_index] = index_t(j)
             counter += 1
 
@@ -82,7 +84,8 @@ def updateNeighborsVerlet(
     newNeighborListRowOffsets: wp.array(dtype = offset_t), newNeighborCounter: wp.array(dtype = wp.int32), # type: ignore
 
     edge_i: wp.array1d(dtype=index_t),  # shape [total_edges] # type: ignore
-    edge_j: wp.array1d(dtype=index_t)   # shape [total_edges] # type: ignore
+    edge_j: wp.array1d(dtype=index_t),  # shape [total_edges] # type: ignore
+    storeI: wp.bool,
 ):                                                                            
     i = wp.tid()
     if i >= queryPositions.shape[0]:
@@ -96,6 +99,6 @@ def updateNeighborsVerlet(
         mode_uint, 
         neighborList, neighborListRowOffsets[i], numNeighbors[i],
         newNeighborListRowOffsets[i], newNeighborCounter[i],
-        edge_i, edge_j
+        edge_i, edge_j, storeI
     )
     

@@ -201,3 +201,16 @@ write only the real edges (or none; adjacency is not part of a particle trace).
   nothing needs it, so tests exercise the guards.
 * Headroom too small → frequent overflow re-runs; tune from the call audit on dam break / sloshing.
 * Shrinking policy must not thrash around the 50 % line (hysteresis: shrink to ~65 % fill).
+
+## Optional CSR-only rows (2026-10-29)
+
+User requests omitting redundant COO I at allocation, exposed by warpSPH compute
+configuration with compressible-only frontend defaults. `storeI=False` on compact
+hash and Verlet searches selects J-only collection without allocating/filling I.
+`paddedI=None`; CSR is unchanged. Filtering inherits this representation and
+in-place rebuilds retain buffers only when the requested representation matches.
+`cooRows()`/`livePairs()` explicitly reconstruct uncached compatibility rows.
+MeshlessWarp.build forwards storeI for its own search. Core default remains True.
+See tests/radiusSearch/test_csrOnly.py and the paired frontend report for validation.
+The existing signed-int32 flat-array dimension guard still applies with int64
+offsets; omission does not enable arrays beyond that backend limit.

@@ -33,6 +33,7 @@ def radiusSearchOnCompactHashMap(
     *,
     collection: str = 'auto',
     queryOrder: str = 'auto',
+    storeI: bool = True,
 ):                
     """Build CSR, preserving original rows and particle IDs under either schedule.
 
@@ -41,6 +42,8 @@ def radiusSearchOnCompactHashMap(
     order reuses the reference permutation for aliased self queries; other
     queries retain input order. No additional sort or inverse-permutation pass.
     """
+    if type(storeI) is not bool:
+        raise ValueError('storeI must be a bool')
     collection = resolveCollection(collection, queryPositions.device)
     queryOrder = resolveQueryOrder(queryOrder, queryPositions, referencePositions)
     spatial = queryOrder == 'spatial'
@@ -121,27 +124,34 @@ def radiusSearchOnCompactHashMap(
         # Allocate output arrays on GPU, with spare capacity beyond the real count (padded with -1, see AdjacencyList)
         numEdges = int(total_edges)
         capacityEdges = numEdges if capacity is None else capacity.capacityFor(
-            numEdges, None if reuse is None else reuse.paddedI.shape[0])
+            numEdges, None if reuse is None else reuse.paddedJ.shape[0])
         validateEdgeCapacity(numEdges, capacityEdges)
         inPlace = (capacity is not None and capacity.inPlace and reuse is not None
-                   and reuse.paddedI.shape[0] == capacityEdges and reuse.paddedJ.shape == reuse.paddedI.shape
-                   and reuse.paddedI.device == queryPositions.device
+                   and reuse.paddedJ.shape[0] == capacityEdges
+                   and ((reuse.paddedI is not None) == storeI)
+                   and (not storeI or (reuse.paddedI.shape == reuse.paddedJ.shape
+                                        and reuse.paddedI.device == queryPositions.device
+                                        and reuse.paddedI.dtype == get_torch_index_dtype()))
+                   and reuse.paddedJ.device == queryPositions.device
                    and reuse.numNeighbors.shape == edge_count_t.shape and reuse.edgeOffsets.shape == edge_offsets.shape
-                   and reuse.paddedI.dtype == get_torch_index_dtype() and reuse.paddedJ.dtype == get_torch_index_dtype()
+                   and reuse.paddedJ.dtype == get_torch_index_dtype()
                    and reuse.numNeighbors.dtype == edge_count_t.dtype and reuse.edgeOffsets.dtype == edge_offsets.dtype)
         if inPlace:
             edge_i_t, edge_j_t = reuse.paddedI, reuse.paddedJ
-            edge_i, edge_j = castTorchToWarp(edge_i_t), castTorchToWarp(edge_j_t)
+            edge_i = castTorchToWarp(edge_i_t) if storeI else wp.array(dtype=index_t, device=warpDevice)
+            edge_j = castTorchToWarp(edge_j_t)
         else:
-            edge_i_t, edge_i = allocateTorchWarp(capacityEdges, index_t, warpDevice)
+            edge_i_t, edge_i = (allocateTorchWarp(capacityEdges, index_t, warpDevice) if storeI
+                                else (None, wp.array(dtype=index_t, device=warpDevice)))
             edge_j_t, edge_j = allocateTorchWarp(capacityEdges, index_t, warpDevice)
         if capacityEdges > numEdges or inPlace:
-            edge_i_t.fill_(-1)
+            if storeI:
+                edge_i_t.fill_(-1)
             edge_j_t.fill_(-1)
     with record_function("neighborSearch - collect neighbors"):
-        collectKernel = radiusSearchCollectJOnly if collection == 'split' else radiusSearchCollectCompactHashMap
+        collectKernel = radiusSearchCollectJOnly if collection == 'split' or not storeI else radiusSearchCollectCompactHashMap
         if spatial:
-            collectKernel = radiusSearchCollectJOnlySpatial if collection == 'split' else radiusSearchCollectSpatial
+            collectKernel = radiusSearchCollectJOnlySpatial if collection == 'split' or not storeI else radiusSearchCollectSpatial
         wp.launch(collectKernel, dim=queryPositions.shape[0], inputs=[
             castTorchToWarp(y),
             castTorchToWarp(querySupports),
@@ -164,7 +174,7 @@ def radiusSearchOnCompactHashMap(
             edge_i,
             edge_j
         ], device=warpDevice, stream=_torchStream)
-        if collection == 'split':
+        if storeI and collection == 'split':
             wp.launch(fillCSRRows, dim=(queryPositions.shape[0], 32),
                       inputs=[edge_count, edge_offsets_warp, edge_i], block_dim=128,
                       device=warpDevice, stream=_torchStream)

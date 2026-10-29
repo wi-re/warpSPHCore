@@ -18,7 +18,8 @@ from ..type_config import *
 
 # CAPACITY PADDING (2026-10-13). The flat pair arrays are allocated with spare capacity so a rebuild can keep its shape
 # (and, later, its buffers) and no consumer may rely on their length:
-#   * `paddedI` / `paddedJ` have length >= `numEdges`; entries [numEdges:] are -1 in BOTH arrays (never a valid particle,
+#   * With storeI=False, paddedI is None; CSR remains complete. cooRows()/livePairs() explicitly reconstruct rows without caching.
+#   * Stored `paddedI` / `paddedJ` have length >= `numEdges`; entries [numEdges:] are -1 in BOTH arrays (never a valid particle,
 #     and NOT a dummy particle: nothing about the padding is visible in particle data or exported traces).
 #   * the real entries are the velocity-Verlet SUPERSET of the interacting pairs, not the active pairs: a raw-pair
 #     consumer must still test `dist < h` itself.
@@ -56,7 +57,7 @@ DEFAULT_CAPACITY = CapacityPolicy()
 
 @dataclass(slots=True)
 class AdjacencyList:
-    paddedI: torch.Tensor
+    paddedI: Optional[torch.Tensor]
     paddedJ: torch.Tensor
     numNeighbors: torch.Tensor
     edgeOffsets: torch.Tensor
@@ -74,11 +75,30 @@ class AdjacencyList:
     # Number of real entries at the front of paddedI / paddedJ (the rest is -1 padding). Host int, known at build time.
     numEdges: Optional[int] = None
 
+    def cooRows(self, *, padded=True):
+        """Explicit temporary COO rows; CSR-only lists never cache this allocation.
+
+        Normal operators use edgeOffsets/numNeighbors/paddedJ. Development,
+        differentiation and wall consumers may request rows explicitly.
+        """
+        n = self.paddedJ.numel() if padded or self.numEdges is None else self.numEdges
+        if self.paddedI is not None:
+            return self.paddedI[:n]
+        from ..radiusSearch.compactHash.wp_collectNeighbors import fillCSRRows
+        rows = torch.full((n,), -1, dtype=self.paddedJ.dtype, device=self.paddedJ.device)
+        if self.numRows and n:
+            stream = wp.stream_from_torch(torch.cuda.current_stream(rows.device)) if rows.is_cuda else None
+            wp.launch(fillCSRRows, dim=(self.numRows, 32), block_dim=128,
+                      inputs=[wp.from_torch(self.numNeighbors), wp.from_torch(self.edgeOffsets), wp.from_torch(rows)],
+                      device=str(rows.device), stream=stream)
+        return rows
+
     def livePairs(self):
         """(i, j) views of the real entries only (the padding sliced off): the exact arrays the unpadded list used to
-        have. Costs no sync and no copy; the shapes follow the rebuild, so this is for eager consumers only."""
-        n = self.paddedI.shape[0] if self.numEdges is None else self.numEdges
-        return self.paddedI[:n], self.paddedJ[:n]
+        have. Stored COO rows are views; CSR-only lists explicitly allocate temporary
+        rows. Neither caches the reconstruction. Shapes follow rebuilds: eager consumers only."""
+        n = self.paddedJ.shape[0] if self.numEdges is None else self.numEdges
+        return self.cooRows(padded=False), self.paddedJ[:n]
 
 @dataclass(slots=True)
 class AdjacencyListWarp:

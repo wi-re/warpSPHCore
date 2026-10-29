@@ -37,6 +37,7 @@ def radiusSearchCompactHashMap_(
     *,
     collection: str = 'auto',
     queryOrder: str = 'auto',
+    storeI: bool = True,
 ):
     with record_function("warpNeighborSearch - radiusSearchCompactHashMap"):
         datastructure = datastructure if datastructure is not None else buildCompactHashMap(
@@ -62,7 +63,7 @@ def radiusSearchCompactHashMap_(
             capacity=capacity,
             reuse=reuse,
             collection=collection,
-            queryOrder=queryOrder,
+            queryOrder=queryOrder, storeI=storeI,
         )
         
         return adjacencyCH if not returnCompactHashMap else (adjacencyCH, datastructure)
@@ -81,6 +82,7 @@ def radiusSearchCompactHashMap(
     *,
     collection: str = 'auto',
     queryOrder: str = 'auto',
+    storeI: bool = True,
 ):
     referenceParticles = queryParticles if referenceParticles is None else referenceParticles
     queryPositions = queryParticles.positions
@@ -112,5 +114,5 @@ def radiusSearchCompactHashMap(
         returnCompactHashMap,
         capacity=capacity,
         collection=collection,
-        queryOrder=queryOrder,
+        queryOrder=queryOrder, storeI=storeI,
     )

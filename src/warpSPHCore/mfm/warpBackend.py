@@ -154,7 +154,7 @@ class MeshlessWarp:
               cg_iters: int = 200, lam0: Optional[torch.Tensor] = None, guards: bool = True,
               face_cond_max: Optional[float] = None, centred_weights: bool = True, area_cap: bool = False,
               closure_solver: str = "auto", mg_min_particles: int = 2048,
-              mg_max_coarse: int = 512, lam_cap: float = 1e3, closure_cap: float = 0.0) -> "MeshlessWarp":
+              mg_max_coarse: int = 512, lam_cap: float = 1e3, closure_cap: float = 0.0, storeI: bool = True) -> "MeshlessWarp":
         _forwardOnly(positions, supports, domain.min, domain.max, lam0)
         if closure not in ("project", "none"):
             raise ValueError("closure must be 'project' or 'none'")
@@ -164,7 +164,7 @@ class MeshlessWarp:
                           kinds=torch.zeros(N, dtype=torch.int32, device=positions.device))
         if adjacency is None:
             from ..radiusSearch import radiusSearchCompactHashMap
-            adjacency = radiusSearchCompactHashMap(P, domain, mode=SupportScheme.SuperSymmetric)
+            adjacency = radiusSearchCompactHashMap(P, domain, mode=SupportScheme.SuperSymmetric, storeI=storeI)
         props = OperationProperties(kernel=kernel, supportMode=SupportScheme.Gather,
                                     operationMode=OperationDirection.AllToAll)
         self = cls(P, props, domain, adjacency, kernel, dim)
@@ -235,7 +235,7 @@ class MeshlessWarp:
         adj = self.adjacency
         N = lam.shape[0]
         i = torch.repeat_interleave(torch.arange(N, device=lam.device), adj.numNeighbors.long())
-        mag = (lam[adj.livePairs()[1].long()] - lam[i]).norm(dim=-1)
+        mag = (lam[adj.paddedJ[:adj.numEdges].long()] - lam[i]).norm(dim=-1)
         scale = torch.clamp(cap / mag.clamp_min(1e-30), max=1.0).to(lam.dtype)
         return scale, (mag > cap).to(lam.dtype).mean()
 

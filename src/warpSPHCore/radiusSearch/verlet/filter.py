@@ -21,8 +21,12 @@ def filterVerletList_(
         domain: DomainDescription, adjacency: AdjacencyList, 
         mode : str = 'symmetric',
         capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
+    *, storeI: Optional[bool] = None,
 ):                   
     
+    storeI = adjacency.paddedI is not None if storeI is None else storeI
+    if type(storeI) is not bool:
+        raise ValueError('storeI must be a bool')
     validateParticleCounts(queryPositions.shape[0], referencePositions.shape[0])
     _torchStream = wp.stream_from_torch(torch.cuda.current_stream(queryPositions.device)) if queryPositions.is_cuda else None
     edge_count = torch.zeros_like(adjacency.numNeighbors)
@@ -51,10 +55,12 @@ def filterVerletList_(
     numEdges = int(total_edges)
     capacityEdges = numEdges if capacity is None else capacity.capacityFor(numEdges)
     validateEdgeCapacity(numEdges, capacityEdges)
-    i_torch, edge_i = allocateTorchWarp(capacityEdges, index_t, warpDevice)
+    i_torch, edge_i = (allocateTorchWarp(capacityEdges, index_t, warpDevice) if storeI
+                       else (None, wp.array(dtype=index_t, device=warpDevice)))
     j_torch, edge_j = allocateTorchWarp(capacityEdges, index_t, warpDevice)
     if capacityEdges > numEdges:
-        i_torch.fill_(-1)
+        if storeI:
+            i_torch.fill_(-1)
         j_torch.fill_(-1)
 
     wp.launch(
@@ -68,7 +74,7 @@ def filterVerletList_(
         castTorchToWarp(adjacency.paddedJ), castTorchToWarp(adjacency.edgeOffsets), castTorchToWarp(adjacency.numNeighbors),
         edge_offsets_warp, castTorchToWarp(edge_count),
 
-        edge_i, edge_j
+        edge_i, edge_j, storeI
         ], device=str(queryPositions.device), stream=_torchStream
     )
 
@@ -87,9 +93,10 @@ def filterVerletList(
         supportMode: SupportScheme = SupportScheme.Gather,
         referenceParticles: Optional[ParticleState] = None, 
         capacity: Optional[CapacityPolicy] = DEFAULT_CAPACITY,
+    *, storeI: Optional[bool] = None,
 ):
     return filterVerletList_(
         queryParticles.positions, referenceParticles.positions if referenceParticles is not None else queryParticles.positions, 
         queryParticles.supports, referenceParticles.supports if referenceParticles is not None else queryParticles.supports,
-        domain, adjacency, supportMode, capacity
+        domain, adjacency, supportMode, capacity, storeI=storeI
     )

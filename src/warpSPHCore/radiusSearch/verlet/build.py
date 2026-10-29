@@ -54,7 +54,9 @@ def buildVerletList_(
         rebuildSlack : float = 0.0,
         gridFactory = None,
         forceRebuild : bool = False, *,
-        collection: str = 'auto', queryOrder: str = 'auto'):
+        collection: str = 'auto', queryOrder: str = 'auto', storeI: bool = True):
+    if type(storeI) is not bool:
+        raise ValueError('storeI must be a bool')
     collection = resolveCollection(collection, queryPositions.device)
     queryOrder = resolveQueryOrder(queryOrder, queryPositions, referencePositions)
     with record_function(f"[Verlet] {mode}"):
@@ -67,7 +69,7 @@ def buildVerletList_(
                     querySupports * verletScale, referenceSupports * verletScale,
                     domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                     datastructure=gridFactory() if gridFactory is not None else None,
-                    collection=collection, queryOrder=queryOrder,
+                    collection=collection, queryOrder=queryOrder, storeI=storeI,
                     capacity=capacity,
                 )
         else:
@@ -80,10 +82,10 @@ def buildVerletList_(
                         querySupports * verletScale, referenceSupports * verletScale,
                         domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                     datastructure=gridFactory() if gridFactory is not None else None,
-                    collection=collection, queryOrder=queryOrder,
+                    collection=collection, queryOrder=queryOrder, storeI=storeI,
                         capacity=capacity,
                     )
-            elif forceRebuild:
+            elif forceRebuild or ((priorNeighborhood.paddedI is not None) != storeI):
                 # the caller already knows the prior list is stale (e.g. a `verletStaleFlag` it read): no second check; the
                 # prior list still gives the new one its capacity (stable shapes, `CapacityPolicy.inPlace` buffers)
                 with record_function(f"[Verlet] Forced rebuild"):
@@ -92,7 +94,7 @@ def buildVerletList_(
                         querySupports * verletScale, referenceSupports * verletScale,
                         domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                         datastructure=gridFactory() if gridFactory is not None else None,
-                    collection=collection, queryOrder=queryOrder,
+                    collection=collection, queryOrder=queryOrder, storeI=storeI,
                         capacity=capacity, reuse=priorNeighborhood,
                     )
             else:
@@ -181,7 +183,7 @@ def buildVerletList_(
                                 querySupports * verletScale, referenceSupports * verletScale,
                                 domain.periodic, domain, mode, hashMapLength=queryPositions.shape[0]+1,
                     datastructure=gridFactory() if gridFactory is not None else None,
-                    collection=collection, queryOrder=queryOrder,
+                    collection=collection, queryOrder=queryOrder, storeI=storeI,
                                 capacity=capacity, reuse=priorNeighborhood,
                             )
                             
@@ -228,7 +230,7 @@ def buildVerletList(
         rebuildSlack : float = 0.0,
         gridFactory = None,
         forceRebuild : bool = False,
-        *, collection: str = 'auto', queryOrder: str = 'auto',
+        *, collection: str = 'auto', queryOrder: str = 'auto', storeI: bool = True,
 ):
     with record_function(f"[warpSPH] - buildVerletList"):
         if referenceParticles is None:
@@ -239,5 +241,5 @@ def buildVerletList(
             queryParticles.supports, referenceParticles.supports,
             domain, verletScale, supportMode, 
             priorNeighborhood, verbose, capacity, rebuildSlack, gridFactory, forceRebuild,
-            collection=collection, queryOrder=queryOrder
+            collection=collection, queryOrder=queryOrder, storeI=storeI
         )
