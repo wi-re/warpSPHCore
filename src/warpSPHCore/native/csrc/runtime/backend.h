@@ -31,7 +31,6 @@ void gpu_run(Task, const Context &, const Prepared &, Buffer, ConstBuffer, const
 void gpu_read(const Context &, void *, const void *, size_t);
 void gpu_write(const Context &, void *, const void *, size_t);
 void gpu_zero(const Context &, void *, size_t);
-int64_t gpu_scan(const Context &, int64_t, ConstBuffer, Buffer);
 #endif
 inline bool floating(int slot) {
     return slot == QX || slot == RX || slot == QH || slot == RH || slot == MASS || slot == LO ||

@@ -14,37 +14,11 @@
 #include "coreOperations/native/csrc_covariance/nt_covariance_forward.h"
 #include "coreOperations/native/csrc_covariance/nt_covariance_adjoint.h"
 
-#include "radiusSearch/native/csrc_radius/nt_radius_forward.h"
 #include "runtime/backend.h"
 namespace sph_native::runtime {
-template <class T, int D> struct CheckedCollectRow {
-    RowArgs<T, D> a;
-    int32_t *error;
-    SPH_HD void operator()(int64_t i) const {
-        int64_t start = a.offsets[i], found = 0;
-        for (int64_t j = 0; j < a.references; ++j)
-            if (a.candidate(i, j)) {
-                if (found < a.counts[i])
-                    a.collected[start + found] = j;
-                ++found;
-            }
-        if (found != a.counts[i])
-            add_atomic(error, int32_t(1));
-    }
-};
 template <class T, int D, class Launch>
 void run_rows(Task task, const Prepared &p, RowArgs<T, D> a, Buffer out, ConstBuffer cot,
-              const Adjoints &gradients, int32_t *error, const Launch &launch) {
-    if (task == Task::Count) {
-        a.counts = static_cast<int32_t *>(out.data);
-        launch(p.rows, CountRow<T, D>{a});
-        return;
-    }
-    if (task == Task::Collect) {
-        a.collected = static_cast<int64_t *>(out.data);
-        launch(p.rows, CheckedCollectRow<T, D>{a, error});
-        return;
-    }
+              const Adjoints &gradients, const Launch &launch) {
     GradientBuffers<T> bars{};
     bars.mask = gradients.requested & used_gradients(p.properties);
     for (int s = 0; s < OUTPUT; ++s)

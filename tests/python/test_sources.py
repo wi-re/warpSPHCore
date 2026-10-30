@@ -12,11 +12,14 @@ def test_source_manifests_are_module_owned():
     cpu, gpu = discover_sources(package)
     assert any('/coreOperations/native/csrc_density/' in path for path in cpu)
     assert any('/radiusSearch/native/csrc_radius/' in path for path in gpu)
+    assert any('/radiusSearch/native/csrc_compact/' in path for path in cpu + gpu)
     assert all(not Path(path).is_relative_to(package / 'native/csrc') for path in cpu + gpu)
     # Higher-level native code has no registry of operator source filenames.
     assert not (package / 'native/csrc/kernels.h').exists()
     assert Path(get_include()) == package / 'native/csrc'
     assert (Path(get_include()) / 'execution/traversal.h').is_file()
+    assert (Path(get_include()) / 'execution/compactTraversal.h').is_file()
+    assert (Path(get_include()) / 'execution/scan_gpu.cu').is_file()
 
 
 def test_nested_frontend_manifest_discovery_without_import(tmp_path):

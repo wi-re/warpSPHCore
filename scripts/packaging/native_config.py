@@ -22,6 +22,7 @@ def generate(backend, cpu_arch, architectures, output, metadata):
         raise RuntimeError('ROCm wheels must be built with ROCm Torch')
     cpu, gpu = sources.discover_sources(PACKAGE)
     shared = PACKAGE / 'native/csrc'
+    gpu = sorted(str(p) for p in (shared / 'execution').glob('*.cu')) + gpu
     common = sorted(str(p) for p in [*shared.glob('*.cpp'), *(shared / 'torch').rglob('*.cpp')])
     includes = [str(PACKAGE / 'native/csrc'), str(PACKAGE), str(Path(torch.__file__).parent / 'include')]
     if backend == 'hip':

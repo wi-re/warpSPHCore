@@ -1,8 +1,11 @@
 {
   "cpu": [
-    "csrc_radius/nt_radius_forward.cpp"
+    "csrc_radius/nt_radius_forward.cpp",
+    "csrc_compact/nt_compact.cpp",
+    "csrc_compact/nt_compact_cpu.cpp"
   ],
   "gpu": [
-    "csrc_radius/nt_radius_forward.cu"
+    "csrc_radius/nt_radius_forward.cu",
+    "csrc_compact/nt_compact_gpu.cu"
   ]
 }

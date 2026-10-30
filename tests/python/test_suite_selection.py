@@ -29,7 +29,7 @@ def test_docs_only_changes_do_not_run_numerics():
 
 
 def test_standalone_runtime_does_not_recompile_torch_or_warp():
-    result = selection.select(['src/warpSPHCore/native/csrc/runtime/scan_gpu.cu'])
+    result = selection.select(['src/warpSPHCore/native/csrc/runtime/api.cpp'])
     assert result['native']
     assert sum(result.values()) == 1
 
@@ -38,3 +38,14 @@ def test_colocated_warp_kernel_does_not_run_native_or_adapter_matrix():
     result = selection.select(['src/warpSPHCore/coreOperations/native/wp_density.py'])
     assert result['warp'] and result['parity']
     assert not result['native'] and not result['torch'] and not result['torch_full']
+
+
+def test_shared_device_scan_reaches_both_native_consumers():
+    result = selection.select(['src/warpSPHCore/native/csrc/execution/scan_gpu.cu'])
+    assert result['native'] and result['torch'] and not result['warp']
+
+
+def test_shared_grid_math_runs_native_search_parity():
+    result = selection.select(['src/warpSPHCore/native/csrc/math/grid.h'])
+    assert result['native'] and result['torch'] and result['parity']
+    assert not result['warp']

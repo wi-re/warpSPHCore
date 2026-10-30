@@ -1,6 +1,8 @@
 #pragma once
 #include <cstdint>
+#include <memory>
 #include "dataTypes/slots.h"
+#include "dataTypes/compactHash.h"
 
 #if defined(_WIN32)
 #if defined(SPH_NATIVE_BUILDING_LIBRARY)
@@ -13,6 +15,10 @@
 #endif
 
 namespace sph_native {
+namespace compact {
+struct Data;
+struct Access;
+} // namespace compact
 enum class Precision { Float32, Float64 };
 enum class Device { CPU, CUDA, HIP };
 enum class Validation { Contents, Metadata };
@@ -102,13 +108,49 @@ struct Adjoints {
 };
 constexpr uint64_t gradient_bit(Slot slot) { return uint64_t(1) << slot; }
 
+struct SearchOptions {
+    int64_t hash_buckets = 0; // zero chooses roughly one bucket per reference
+};
+struct SearchStatistics {
+    int64_t references, occupied_cells, hash_buckets;
+    int64_t grid_cells[3];
+    double cell_width, radius_bound;
+};
+// Owns index memory on its build device. Particle arrays remain caller-owned.
+// Construction completes on the supplied stream. Moving references across cells
+// or growing the search radius beyond radius_bound requires rebuilding the index.
+class SPH_NATIVE_API CompactHash {
+  public:
+    CompactHash();
+    ~CompactHash();
+    CompactHash(CompactHash &&) noexcept;
+    CompactHash &operator=(CompactHash &&) noexcept;
+    CompactHash(const CompactHash &) = delete;
+    CompactHash &operator=(const CompactHash &) = delete;
+    SearchStatistics statistics() const;
+    // Borrowed read-only view for native frontend kernels. Retain the index
+    // until work using its device pointers has completed on the caller's stream.
+    compact::View view() const;
+
+  private:
+    std::unique_ptr<compact::Data> data_;
+    friend struct compact::Access;
+    friend CompactHash build_compact_hash(const Context &, const Problem &, SearchOptions);
+};
+SPH_NATIVE_API CompactHash build_compact_hash(const Context &, const Problem &, SearchOptions = {});
+SPH_NATIVE_API void radius_count(const Context &, const Problem &, const CompactHash &,
+                                 Buffer counts);
+SPH_NATIVE_API void radius_collect(const Context &, const Problem &, const CompactHash &,
+                                   Buffer indices);
+
 SPH_NATIVE_API bool supports(Device device);
 SPH_NATIVE_API int64_t output_elements(const Problem &problem);
 SPH_NATIVE_API void forward(const Context &, const Problem &, Buffer output);
 // Explicit VJP only: caller retains inputs and supplies cotangents and buffers.
 SPH_NATIVE_API void adjoint(const Context &, const Problem &, ConstBuffer cotangent,
                             const Adjoints &);
-// All-pairs search: count -> scan/allocate -> collect. Both scan and collect
+// Compact-hash search: count -> scan/allocate -> collect. The overloads without
+// an index build a temporary one; retain a CompactHash to reuse it. Scan and collect
 // synchronize on GPU; forward and adjoint launches remain stream-ordered.
 SPH_NATIVE_API void radius_count(const Context &, const Problem &, Buffer counts);
 // GPU scans keep prefixes on device; only the total and error status return to host.

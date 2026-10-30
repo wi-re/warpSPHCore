@@ -91,8 +91,12 @@ int main(int argc, char **argv) {
         // start of that query's row in the flat neighbour_indices array.
         // Self neighbours are included. For this fixture the rows are [0, 1]
         // and [0, 1], with counts [2, 2] and offsets [0, 2].
+        // Build the occupied-cell index once and reuse it for both passes.
+        // References crossing cell boundaries or a larger search radius require
+        // rebuilding it; changing query positions is supported within this bound.
+        auto search_index = sph::build_compact_hash(context, problem);
         std::vector<int32_t> neighbour_counts(particle_count);
-        sph::radius_count(context, problem, as_output_buffer(neighbour_counts));
+        sph::radius_count(context, problem, search_index, as_output_buffer(neighbour_counts));
 
         std::vector<int64_t> neighbour_offsets(particle_count);
         const int64_t edge_count =
@@ -103,7 +107,7 @@ int main(int argc, char **argv) {
         problem.adjacency.counts = as_input_buffer(neighbour_counts);
         problem.adjacency.offsets = as_input_buffer(neighbour_offsets);
         problem.adjacency.indices = as_input_buffer(neighbour_indices);
-        sph::radius_collect(context, problem, as_output_buffer(neighbour_indices));
+        sph::radius_collect(context, problem, search_index, as_output_buffer(neighbour_indices));
 
         // 4. Compute density: density[i] = sum_j mass[j] * W(i, j).
         //

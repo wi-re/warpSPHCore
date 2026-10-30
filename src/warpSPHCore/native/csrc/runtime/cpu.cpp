@@ -17,15 +17,10 @@ struct ParallelCPU {
 };
 void cpu_run(Task task, const Context &ctx, const Prepared &p, Buffer out, ConstBuffer cot,
              const Adjoints &bars) {
-    int32_t error = 0;
     numeric(p, [&](auto scalar, auto dimension) {
         using T = decltype(scalar);
         constexpr int D = decltype(dimension)::value;
-        run_rows(task, p, row_args<T, D>(p, out), out, cot, bars, &error,
-                 ParallelCPU{ctx.cpu_threads});
+        run_rows(task, p, row_args<T, D>(p, out), out, cot, bars, ParallelCPU{ctx.cpu_threads});
     });
-    if (error)
-        throw std::invalid_argument(
-            "Radius counts no longer match the geometry; recount before collection");
 }
 } // namespace sph_native::runtime

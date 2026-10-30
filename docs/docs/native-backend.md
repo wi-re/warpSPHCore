@@ -205,16 +205,72 @@ been validated. It allows primal/VJP work to be enqueued without a final host
 synchronize. Callers must revalidate after changing geometry, densities or CSR
 contents. Numerical outputs must not overlap their input storage.
 
-For the existing all-pairs search, call `radius_count`, then `radius_scan` to
-produce int64 offsets and return the required edge capacity, allocate int64 IDs,
-and call `radius_collect`. Counts and collection run on the selected device.
-CPU scanning uses checked int64 accumulation. CUDA and HIP share a hierarchical
+Radius search uses a compact hash of occupied reference cells. Cells are grouped
+by the existing uint32 prime hash, retain full int64 Cartesian keys to resolve
+collisions, and contain stable original reference IDs. CPU and GPU share cell
+indexing, periodic wrapping, unique stencil traversal and the exact minimum-image
+distance predicate. Cell width conservatively bounds the selected support policy,
+with padding for floating-point minimum-image arithmetic. Extremely small grids
+are coarsened to preserve the existing scalar squared-distance underflow convention. Periodic axes use floor
+cell counts, and one/two-cell axes visit each cell once. Nonperiodic out-of-domain
+positions clamp only for indexing; distance checks still use their actual positions.
+The native cutoff remains strict (`distance < support`), including zero-radius
+rows. Warp's compact search uses an inclusive cutoff; exact boundary membership
+therefore retains the established backend distinction.
+
+Build a reusable index, count, scan, allocate and collect:
+
+```cpp
+auto index = build_compact_hash(context, problem, SearchOptions{4096});
+radius_count(context, problem, index, counts);
+const auto edges = radius_scan(context, problem.query.count, counts_view, offsets);
+// Allocate edges int64 IDs and set problem.adjacency.counts/offsets.
+radius_collect(context, problem, index, indices);
+```
+
+`SearchOptions.hash_buckets=0` selects approximately one bucket per reference;
+one bucket is legal and resolves all collisions using full cell keys. The overloads
+without an index build a temporary one. The standalone example retains one index
+across count and collect. The Torch adapter builds the same native index directly
+from Torch memory and shares the count/collect rows; it no longer scans all pairs.
+The final CSR scan also uses the common native CPU/CUDA/HIP scan, rather than
+Torch tensor scans or scalar reductions. CSR rows preserve ascending original
+reference IDs using an in-place heap sort.
+
+An index owns its buffers, is movable, and stays bound to its build device,
+precision, dimensionality, reference count and domain. Queries may move or be
+replaced within `statistics().radius_bound`. Reference motion within the same cells and
+support changes within that bound are valid. Indexed API calls check current cell
+membership and radius bounds, including in `Validation::Metadata`; changes across
+cells, domain changes or wider support require rebuilding and raise explicitly.
+These checks reduce device geometry to a small status/maxima record; they do not
+download positions or supports. `statistics()` reports occupied-cell counts,
+conceptual grid dimensions, cell width and the reusable radius bound. The floating-
+point padding is reserved for traversal correctness and cannot be consumed by
+support growth. Periodic coordinates whose image count cannot be represented
+reliably in the selected precision are rejected explicitly. Only occupied-cell storage is allocated, including
+sparse 3D domains; axis counts are capped conservatively so int64 keys cannot overflow.
+
+For native frontends, `index.view()` borrows read-only device pointers and grid
+metadata. Include `execution/compactTraversal.h` and use
+`compact::CellTraversal<T,D>` to enumerate candidate cell ranges; each stored
+particle carries its original reference ID. Keep the index alive until work using
+its view has completed. The frontend applies its own pair predicate and accumulation.
+
+CPU construction uses `std::sort`. CUDA/HIP construction uses shared portable
+bottom-up merge sorting, marks cell boundaries, scans them on device and emits
+compact bucket/cell tables. Construction completes on the caller's stream before
+publishing the index. This first GPU sorter performs a binary rank search per
+element per merge pass; it is a correctness implementation rather than a tuned
+radix-sort replacement. Allocation, validation and exact edge-capacity boundaries
+still synchronize; graph capture and Verlet maintenance remain future work.
+
+CPU CSR scanning uses checked int64 accumulation. CUDA and HIP share a hierarchical
 device prefix scan: counts, tile sums and offsets remain on the device. Only the
-small total/status result returns to the host, synchronizing the supplied stream
-so the caller can allocate exact edge capacity. Negative counts and int64
-overflow are rejected. Collection also synchronizes, rejects stale counts and
-bounds its writes before reporting a mismatch. Search still uses all-pairs
-traversal; spatially indexed standalone search remains future work.
+small total/status result returns to the host so the caller can allocate exact
+edge capacity. Negative counts and int64 overflow are rejected. Collection also
+synchronizes, rejects inconsistent counts and bounds its writes before reporting
+a mismatch. Dense neighborhoods still require visiting every relevant pair.
 
 `adjoint(context, problem, cotangent, gradients)` exposes an explicit VJP for an
 individual operation. The caller retains the unmodified primal inputs and CSR,
@@ -260,7 +316,7 @@ GPU test. No performance measurements were made.
 | Execution | Parallel CPU; CUDA; experimental HIP (ROCm compilation gate) |
 | Spatial dimensions | 1, 2, 3 |
 | Floating-point types | float32 and float64, selected from tensors at runtime |
-| Neighbours | Exact all-pairs radius search, canonical CSR, ascending reference IDs |
+| Neighbours | Compact-hash radius search, minimum images, canonical CSR, ascending reference IDs |
 | Kernels | Wendland2/4/6, cubic/quartic/quintic spline, B7/B8, HOCT4, Gaussian, Poly6, Spiky, Viscosity, Cohesion, Adhesion |
 | Operators | Density, Interpolate, Gradient, Divergence, Curl, Laplacian, Covariance |
 | Fields | Scalar, vector and matrix fields; each field axis has spatial extent D |
@@ -276,14 +332,14 @@ GPU test. No performance measurements were made.
 Use `radiusSearch(particles, domain, referenceParticles=None, mode=...)` to build
 an unpadded CSR list. Use `warpOperation(...)` or its native alias
 `sphOperation(...)` with the established semantic state and operation properties.
-When adjacency is omitted, the native all-pairs search builds it. Common
+When adjacency is omitted, the native compact-hash search builds it. Common
 `ParticleState`, `DomainDescription`, `OperationProperties`, `CapacityPolicy`
 and `AdjacencyList` definitions are shared with the Warp backend; they are not
 separate native copies. Their established dataTypes imports remain available.
 
-Search is **O(Nquery * Nreference)** and intended for small correctness fixtures.
-Scalable spatial indexing and Verlet maintenance remain future work. Native
-search emits int64 IDs/offsets regardless of Warp import-time type settings.
+Search visits nearby occupied cells after index construction. Dense or very
+large-radius queries can still visit every reference. Native search emits int64
+IDs/offsets regardless of Warp import-time type settings.
 CSR tensors supplied by another producer may use either integer width.
 
 Corrections (including volume overrides, CRK, grad-h, renormalization, calibration,
@@ -363,15 +419,24 @@ warpSPHCore/
   radiusSearch/
     native/
       __init__.py
-      wrapper.py                 # existing Warp compact hash or native all-pairs
+      wrapper.py                 # selected Warp or native compact-hash backend
       nt_radius.py
       sources.json
       csrc_radius/
-        nt_radius_forward.h      # shared count/collect row implementations
+        nt_radius_forward.h      # shared indexed count/collect rows
         nt_radius_forward.cpp
         nt_radius_forward.cu
         nt_radius_dispatch.h
+      csrc_compact/              # framework-free index API and CPU/GPU builders
+        nt_compact.cpp
+        nt_compact_cpu.cpp
+        nt_compact_gpu.cu
 ```
+
+Shared index views and traversal live in `native/csrc/dataTypes/compactHash.h`,
+`math/grid.h` and `execution/compactTraversal.h`. The device prefix scan and
+runtime guards live under `native/csrc/execution/`; both the standalone and
+Torch builds compile the common execution sources.
 
 Higher-level code imports the common wrapper from its local `native` package.
 The Warp entry point in `operations.py` now reaches the same density/gradient

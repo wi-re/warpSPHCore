@@ -1,5 +1,10 @@
 #pragma once
 #include "config.h"
+#if defined(__HIPCC__)
+#include <hip/hip_runtime.h>
+#elif defined(__CUDACC__)
+#include <cuda_runtime.h>
+#endif
 namespace sph_native {
 template <class T> SPH_HD void add_atomic(T *pointer, T value) {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)

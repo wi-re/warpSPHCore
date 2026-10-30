@@ -1,5 +1,5 @@
 #pragma once
-#if defined(SPH_NATIVE_HIP)
+#if defined(SPH_NATIVE_HIP) || defined(USE_ROCM) || defined(__HIPCC__)
 #include <hip/hip_runtime.h>
 #define GPU(name) hip##name
 using NativeStream = hipStream_t;

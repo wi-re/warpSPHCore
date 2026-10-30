@@ -1,6 +1,7 @@
 #include "runtime/backend.h"
 #include "kernels/radial.h"
 #include "execution/scan.h"
+#include "radiusSearch/native/csrc_compact/nt_compact_backend.h"
 #include <algorithm>
 #include <cstring>
 #include <vector>
@@ -310,12 +311,15 @@ void adjoint(const Context &c, const Problem &view, ConstBuffer cot, const Adjoi
     run(Task::Adjoint, c, p, {}, cot, bars);
 }
 void radius_count(const Context &c, const Problem &view, Buffer out) {
+    auto index = build_compact_hash(c, view);
+    radius_count(c, view, index, out);
+}
+void radius_count(const Context &c, const Problem &view, const CompactHash &index, Buffer out) {
     check_context(c);
     auto p = prepare(view, Task::Count);
     check_buffer({out.data, out.size}, p.rows, 4, "counts output");
     no_input_alias(p, out, bytes(p.rows, 4));
-    validate_contents(c, p, Task::Count);
-    run(Task::Count, c, p, out);
+    compact::search(c, view, index, out, false);
 }
 int64_t radius_scan(const Context &c, int64_t n, ConstBuffer counts, Buffer offsets) {
     check_context(c);
@@ -328,20 +332,14 @@ int64_t radius_scan(const Context &c, int64_t n, ConstBuffer counts, Buffer offs
     if (c.device != Device::CPU)
         return gpu_scan(c, n, counts, offsets);
 #endif
-    std::vector<int32_t> host(size_t(n), 0);
-    read(c, host.data(), counts.data, bytes(n, 4));
-    std::vector<int64_t> prefix(size_t(n), 0);
-    int64_t total = 0;
-    for (int64_t i = 0; i < n; ++i) {
-        const auto [sum, valid] = checked_scan_add(total, host[i]);
-        require(valid, "Invalid counts or CSR size overflow");
-        prefix[i] = total;
-        total = sum;
-    }
-    write(c, offsets.data, prefix.data(), bytes(n, 8));
-    return total;
+    return exclusive_scan_cpu(static_cast<const int32_t *>(counts.data),
+                              static_cast<int64_t *>(offsets.data), n);
 }
 void radius_collect(const Context &c, const Problem &view, Buffer out) {
+    auto index = build_compact_hash(c, view);
+    radius_collect(c, view, index, out);
+}
+void radius_collect(const Context &c, const Problem &view, const CompactHash &index, Buffer out) {
     check_context(c);
     auto p = prepare(view, Task::Collect);
     check_buffer({out.data, out.size}, 0, 8, "indices output");
@@ -349,12 +347,14 @@ void radius_collect(const Context &c, const Problem &view, Buffer out) {
     p.required |= gradient_bit(NEIGHBORS);
     p.indices_bits = 64;
     // Output capacity is validated before any writes, even in Metadata mode.
-    validate_contents(c, p, Task::Collect);
+    auto csr_context = c;
+    csr_context.validation = Validation::Metadata;
+    validate_contents(csr_context, p, Task::Collect);
     auto inputs = p;
     inputs.required &= ~gradient_bit(NEIGHBORS);
     no_input_alias(inputs, out, bytes(out.size, 8));
     // Counts may sum to zero while output is null. The checked row never writes then.
     check_buffer({out.data, out.size}, out.size, 8, "indices output");
-    run(Task::Collect, c, p, out);
+    compact::search(c, view, index, out, true);
 }
 } // namespace sph_native

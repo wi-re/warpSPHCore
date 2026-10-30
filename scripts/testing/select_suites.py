@@ -39,7 +39,8 @@ def select(paths):
                 selected.add('native')
             elif '/native/' in path and path.endswith(('.h', '.cuh', '.cpp', '.cu')):
                 selected.update(('native', 'torch'))
-                if '/kernels/' in path or '/csrc_' in path:
+                if any(part in path for part in ('/kernels/', '/csrc_', '/math/',
+                                                  '/execution/compactTraversal.h', '/dataTypes/compactHash.h')):
                     selected.add('parity')
             elif '/native/' in path:
                 selected.update(('python', 'torch', 'torch_full'))

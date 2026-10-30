@@ -1,5 +1,5 @@
-#include "runtime/backend.h"
-#include "runtime/gpu_runtime.cuh"
+#include "api.h"
+#include "execution/device_runtime.cuh"
 #include "execution/scan.h"
 #include <algorithm>
 #include <vector>
