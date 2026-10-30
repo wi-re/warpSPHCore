@@ -1,5 +1,7 @@
 """Verify a binary native wheel with Warp and compiler/JIT imports blocked."""
 import argparse
+import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -19,7 +21,13 @@ def main():
             names = archive.namelist()
             assert 'warpSPHCore/native/_lib/build.json' in names
             assert 'warpSPHCore/native/_lib/libwarpsph_native.so' in names
+            metadata = json.loads(archive.read('warpSPHCore/native/_lib/build.json'))
             archive.extractall(directory)
+        env = os.environ.copy()
+        if metadata['backend'] == 'cpu':
+            if args.device != 'cpu':
+                parser.error('A CPU wheel can only be checked with --device cpu')
+            env['CUDA_VISIBLE_DEVICES'] = ''
         code = '''
 import importlib.abc
 import json
@@ -53,11 +61,12 @@ print('Prebuilt wheel: compiler/JIT and Warp imports blocked; passed')
 if tests:
     import pytest
     raise SystemExit(pytest.main([str(Path(tests) / 'test_native.py'), str(Path(tests) / 'test_layout.py'),
-                                 str(Path(tests) / 'test_build.py'), '-k', 'not imports_with_warp_blocked', '-q', '-x']))
+                                 str(Path(tests) / 'test_build.py'), str(Path(tests) / 'test_kernels.py'),
+                                 str(Path(tests) / 'test_primal.py'), str(Path(tests) / 'test_autograd.py'), '-k', 'not imports_with_warp_blocked', '-q', '-x']))
 '''
         subprocess.run([sys.executable, '-c', code, directory, str(example), args.device,
                         str(Path(__file__).resolve().parents[2] / 'tests/native') if args.tests else ''],
-                       cwd=directory, check=True)
+                       cwd=directory, env=env, check=True)
 
 
 if __name__ == '__main__':

@@ -1,18 +1,19 @@
 #pragma once
-#include "execution/traversal.h"
+#include "execution/fieldTraversal.h"
+#include "kernels/evaluation.h"
 namespace sph_native {
-template <typename T, int D> struct DifferenceGradientPair {
-    static constexpr int components = D;
-    SPH_HD static void accumulate(const RowArgs<T, D>& a, int64_t i, int64_t j,
-                                  const T (&dx)[D], T, T gradient, T (&sum)[D]) {
-        const T factor = (a.rvalue[j] - a.qvalue[i]) * (a.mass[j] / a.density[j]) * gradient;
-        for (int d = 0; d < D; ++d) sum[d] += factor * dx[d];
+template <class T, int D> struct GradientPair {
+    SPH_HD static void accumulate(const RowArgs<T, D> &a, int64_t i, int64_t j, const T (&dx)[D],
+                                  T r, T w, T g, T (&sum)[D * D * D]) {
+        for (int c = 0; c < a.fields; ++c)
+            for (int d = 0; d < D; ++d)
+                sum[c * D + d] += field_weight(a, i, j, c) * g * dx[d];
     }
 };
-template <typename T, int D> using GradientRow = OperatorRow<T, D, DifferenceGradientPair<T, D>>;
+template <class T, int D> using GradientRow = FieldOperatorRow<T, D, GradientPair<T, D>>;
 struct GradientRows {
-    template <typename T, int D, class Launcher>
-    void operator()(int64_t n, RowArgs<T, D> a, const Launcher& launch) const {
+    template <class T, int D, class Launcher>
+    void operator()(int64_t n, RowArgs<T, D> a, const Launcher &launch) const {
         launch(n, GradientRow<T, D>{a});
     }
 };

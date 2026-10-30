@@ -7,5 +7,8 @@ bool has_gpu() {
     return false;
 #endif
 }
-STABLE_TORCH_LIBRARY(warpsph_native, m) { m.def("has_gpu() -> bool"); m.impl("has_gpu", TORCH_BOX(&has_gpu)); }
+STABLE_TORCH_LIBRARY(warpsph_native, m) {
+    m.def("has_gpu() -> bool");
+    m.impl("has_gpu", TORCH_BOX(&has_gpu));
+}
 } // namespace sph_native

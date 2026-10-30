@@ -37,11 +37,12 @@ pip install -e ".[dev]"
 
 ## Experimental native backend
 
-An isolated forward-only pilot can run without Warp. Install `.[native]` and set
-`WARPSPHCORE_BACKEND=native` **before importing** the package. It provides exact
-all-pairs CSR construction, Wendland2 density and difference-gradient of a scalar
-field in 1D/2D/3D, float32/float64. CPU and GPU launches use the same C++ row kernels.
-The default backend remains Warp, installed with `.[warp]`.
+The experimental native backend runs without Warp. Install `.[native]` and set
+`WARPSPHCORE_BACKEND=native` **before importing** the package. It provides all 15
+kernel families, seven standard SPH operators, and manual first-order reverse
+passes for smooth kernels in 1D/2D/3D, float32/float64. CPU and GPU launches use
+the same C++ numerical implementations. The default backend remains Warp,
+installed with `.[warp]`.
 
 ```bash
 pip install -e ".[native]"
@@ -53,8 +54,9 @@ WARPSPHCORE_BACKEND=native python scripts/examples/native_core.py --device cuda
 Native wheels can be built with CMake for CPU, CUDA, or experimental ROCm;
 compatible wheels load without a compiler, with cached JIT as the source fallback.
 See [native backend scope, wheel builds, and HPC deployment](docs/docs/native-backend.md) for
-build requirements, HIP checks, supported interfaces and remaining work. This
-pilot is not a complete replacement for the Warp operator/AD/simulation stack.
+build requirements, HIP checks, supported interfaces and remaining work.
+Corrections, scalable search, higher-order AD and complete frontend simulations
+remain work in progress.
 
 ## Requirements
 

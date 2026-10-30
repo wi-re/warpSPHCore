@@ -1,42 +1,47 @@
-__all__ = []
+from .._backend import BACKEND
+if BACKEND == "native":
+    from .native import evaluateKernel, KernelEvaluation
+    __all__ = ["evaluateKernel", "KernelEvaluation"]
+else:
+    __all__ = []
 
-from .properties import *
-__all__.extend([
-    'sphKernelScale',
-    'sphKernelC_d',
-    'sphKernelN_H',
-    'sphKernel_xi',
-    'resolveNormalization',
-])
+    from .properties import *
+    __all__.extend([
+        'sphKernelScale',
+        'sphKernelC_d',
+        'sphKernelN_H',
+        'sphKernel_xi',
+        'resolveNormalization',
+    ])
 
-# These should not be used directly thus they are not exported by default
-# from .eval_kernel import *
-# __all__.extend([
-#     'eval_k',
-#     'eval_dkdq',
-#     'eval_d2kdq2',
-#     'eval_d3kdq3',
-#     'eval_C_d',
-#     'eval_kernelScale',
-#     'eval_packing',
-# ])
+    # These should not be used directly thus they are not exported by default
+    # from .eval_kernel import *
+    # __all__.extend([
+    #     'eval_k',
+    #     'eval_dkdq',
+    #     'eval_d2kdq2',
+    #     'eval_d3kdq3',
+    #     'eval_C_d',
+    #     'eval_kernelScale',
+    #     'eval_packing',
+    # ])
 
-from .gradH import sphKernelDkDh, sphGradientDkDh
-from .laplacian import sphKernelLaplacian
-from .hessian import sphKernelHessian
-from .kernel import sphKernel, sphKernel_ij
-from .gradient import sphKernelGradient, sphKernelGradient_ij
-from .kernelJVP import sphKernelJVP, sphKernelJVP_ij
+    from .gradH import sphKernelDkDh, sphGradientDkDh
+    from .laplacian import sphKernelLaplacian
+    from .hessian import sphKernelHessian
+    from .kernel import sphKernel, sphKernel_ij
+    from .gradient import sphKernelGradient, sphKernelGradient_ij
+    from .kernelJVP import sphKernelJVP, sphKernelJVP_ij
 
-__all__.extend([
-    'sphKernelDkDh',
-    'sphGradientDkDh',
-    'sphKernelLaplacian',
-    'sphKernelHessian',
-    'sphKernel',
-    'sphKernel_ij',
-    'sphKernelGradient',
-    'sphKernelGradient_ij',
-    'sphKernelJVP',
-    'sphKernelJVP_ij',
-])
+    __all__.extend([
+        'sphKernelDkDh',
+        'sphGradientDkDh',
+        'sphKernelLaplacian',
+        'sphKernelHessian',
+        'sphKernel',
+        'sphKernel_ij',
+        'sphKernelGradient',
+        'sphKernelGradient_ij',
+        'sphKernelJVP',
+        'sphKernelJVP_ij',
+    ])

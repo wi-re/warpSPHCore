@@ -8,7 +8,7 @@ def radiusSearch(queryParticles: ParticleState, domain: DomainDescription,
     from ...native._build import build
     from ...native._inputs import prepare_geometry
     reference = referenceParticles if referenceParticles is not None else queryParticles
-    args = prepare_geometry(queryParticles, reference, domain)
+    args = prepare_geometry(queryParticles, reference, domain, allow_reverse=True)
     if not isinstance(mode, SupportScheme):
         raise TypeError('mode must be a SupportScheme')
     neighbors, counts, offsets = build().radius(*args, mode.value)

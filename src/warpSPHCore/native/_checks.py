@@ -2,7 +2,7 @@
 import torch
 from torch.autograd import forward_ad
 
-def _forward_only(*values):
+def check_execution(*values, allow_reverse=False):
     for value in values:
         if not isinstance(value, torch.Tensor):
             continue
@@ -10,5 +10,9 @@ def _forward_only(*values):
             raise NotImplementedError('Native pilot does not support graph capture')
         if forward_ad.unpack_dual(value).tangent is not None:
             raise NotImplementedError('Native pilot does not support forward-mode AD')
-        if torch.is_grad_enabled() and value.requires_grad:
+        if not allow_reverse and torch.is_grad_enabled() and value.requires_grad:
             raise NotImplementedError('Native pilot is forward-only; use the Warp backend for autograd')
+
+
+def _forward_only(*values):
+    check_execution(*values)

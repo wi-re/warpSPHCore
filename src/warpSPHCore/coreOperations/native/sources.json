@@ -1,10 +1,34 @@
 {
   "cpu": [
     "csrc_density/nt_density_forward.cpp",
-    "csrc_gradient/nt_gradient_forward.cpp"
+    "csrc_gradient/nt_gradient_forward.cpp",
+    "csrc_interpolate/nt_interpolate_forward.cpp",
+    "csrc_divergence/nt_divergence_forward.cpp",
+    "csrc_curl/nt_curl_forward.cpp",
+    "csrc_covariance/nt_covariance_forward.cpp",
+    "csrc_laplacian/nt_laplacian_forward.cpp",
+    "csrc_density/nt_density_adjoint.cpp",
+    "csrc_interpolate/nt_interpolate_adjoint.cpp",
+    "csrc_gradient/nt_gradient_adjoint.cpp",
+    "csrc_divergence/nt_divergence_adjoint.cpp",
+    "csrc_curl/nt_curl_adjoint.cpp",
+    "csrc_covariance/nt_covariance_adjoint.cpp",
+    "csrc_laplacian/nt_laplacian_adjoint.cpp"
   ],
   "gpu": [
     "csrc_density/nt_density_forward.cu",
-    "csrc_gradient/nt_gradient_forward.cu"
+    "csrc_gradient/nt_gradient_forward.cu",
+    "csrc_interpolate/nt_interpolate_forward.cu",
+    "csrc_divergence/nt_divergence_forward.cu",
+    "csrc_curl/nt_curl_forward.cu",
+    "csrc_covariance/nt_covariance_forward.cu",
+    "csrc_laplacian/nt_laplacian_forward.cu",
+    "csrc_density/nt_density_adjoint.cu",
+    "csrc_interpolate/nt_interpolate_adjoint.cu",
+    "csrc_gradient/nt_gradient_adjoint.cu",
+    "csrc_divergence/nt_divergence_adjoint.cu",
+    "csrc_curl/nt_curl_adjoint.cu",
+    "csrc_covariance/nt_covariance_adjoint.cu",
+    "csrc_laplacian/nt_laplacian_adjoint.cu"
   ]
 }

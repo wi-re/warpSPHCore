@@ -39,7 +39,7 @@ jobs:
           WARPSPHCORE_BACKEND: native
           WARPSPHCORE_NATIVE_BUILD: cpu
           MAX_JOBS: "2"
-        run: pytest tests/native/test_native.py tests/native/test_layout.py tests/native/test_build.py -q
+        run: pytest tests/native/test_native.py tests/native/test_layout.py tests/native/test_build.py tests/native/test_kernels.py tests/native/test_primal.py tests/native/test_autograd.py -q
 
       - name: Build and check compiler-free stable-ABI CPU wheel
         run: |

@@ -165,14 +165,13 @@ def test_superset_csr_padding_self_pairs_and_constant_gradient(device, index_dty
 def test_failures_are_explicit_and_csr_is_validated(device):
     q, r, d, qf, rf = case(device)
     prop = sph.OperationProperties(sph.KernelFunctions.Wendland2, operation=sph.WarpOperation.Density)
-    with pytest.raises(NotImplementedError, match='Wendland2'):
-        sph.warpOperation(q, replace(prop, kernel=sph.KernelFunctions.CubicSpline), d)
-    with pytest.raises(NotImplementedError, match='Density and Gradient'):
-        sph.warpOperation(q, replace(prop, operation=sph.WarpOperation.Curl), d)
+    with pytest.raises(TypeError, match='kernel'):
+        sph.warpOperation(q, replace(prop, kernel=1234), d)
+    with pytest.raises(NotImplementedError, match='Custom'):
+        sph.warpOperation(q, replace(prop, operation=sph.WarpOperation.Custom), d)
     with pytest.raises(NotImplementedError, match='Corrections'):
         sph.warpOperation(q, prop, d, queryVolumes=q.masses)
-    with pytest.raises(NotImplementedError, match='forward-only'):
-        sph.warpOperation(replace(q, positions=q.positions.clone().requires_grad_()), prop, d)
+    assert sph.warpOperation(replace(q, positions=q.positions.clone().requires_grad_()), prop, d).requires_grad
     with torch.autograd.forward_ad.dual_level():
         dual = torch.autograd.forward_ad.make_dual(q.positions, torch.zeros_like(q.positions))
         with pytest.raises(NotImplementedError, match='forward-mode'):

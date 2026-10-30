@@ -4,10 +4,11 @@ title: Experimental native backend
 
 # Experimental native backend
 
-The native backend is a correctness-first vertical slice of the core. It can
-build a neighbourhood and evaluate density and a scalar-field gradient without
-installing or importing Warp. The existing Warp backend remains the default.
-This is not yet full operator, derivative or frontend simulation parity.
+The native backend builds neighbourhoods, evaluates all 15 radial kernel families,
+and runs the seven standard SPH operators without installing or importing Warp.
+It includes manual first-order adjoints for smooth kernels. CPU, CUDA and HIP
+share the same numerical headers; Warp remains the default backend. Corrections,
+higher-order derivatives and complete frontend simulations remain unported.
 
 ## Install and select
 
@@ -44,7 +45,7 @@ attempting to register a second copy through JIT.
 
 The C++ boundary now uses stable LibTorch tensors, registration, dispatcher,
 parallel execution, device guards and stream APIs, targeting Torch 2.10. It has
-no direct ATen/c10 C++ or Python C-API dependencies. Forward-only AD checks stay
+no direct ATen/c10 C++ or Python C-API dependencies. Autograd capability checks stay
 at the Python entry points; the stable Tensor API does not expose a
 `requires_grad` query. Native source builds require Torch >= 2.10; binary wheels
 are deliberately pinned and qualified against only the exact build used to
@@ -128,8 +129,11 @@ remain required; compilers and Ninja are unnecessary for a compatible wheel.
 | Spatial dimensions | 1, 2, 3 |
 | Floating-point types | float32 and float64, selected from tensors at runtime |
 | Neighbours | Exact all-pairs radius search, canonical CSR, ascending reference IDs |
-| Density | Wendland2 mass-weighted kernel sum |
-| Gradient | Wendland2 Difference scheme, scalar values, output `[N,D]` |
+| Kernels | Wendland2/4/6, cubic/quartic/quintic spline, B7/B8, HOCT4, Gaussian, Poly6, Spiky, Viscosity, Cohesion, Adhesion |
+| Operators | Density, Interpolate, Gradient, Divergence, Curl, Laplacian, Covariance |
+| Fields | Scalar, vector and matrix fields; each field axis has spatial extent D |
+| Schemes | All four gradient schemes; all four Laplacian schemes; both divergence contractions |
+| Reverse AD | Manual first-order VJPs for the 11 smooth-origin kernels; fixed CSR topology |
 | Supports | Gather, Scatter, MeanSymmetric, KernelMeanSymmetric, SuperSymmetric |
 | Categories | All existing operation-direction enums, preserving query/reference roles |
 | Geometry | Independent query/reference populations; mixed periodic axes; unwrapped positions |
@@ -150,14 +154,22 @@ Scalable spatial indexing and Verlet maintenance remain future work. Native
 search emits int64 IDs/offsets regardless of Warp import-time type settings.
 CSR tensors supplied by another producer may use either integer width.
 
-Autograd, dual tensors, other kernel functions, vector/tensor-valued gradients,
-corrections, other operations, capacity/rebuild reuse and graph capture are not
-implemented. Unsupported requests raise rather than importing/falling back to
-Warp. `torch.no_grad()` may be used for inference with grad-requiring inputs.
+Corrections (including volume overrides, CRK, grad-h, renormalization, calibration,
+positive divergence and consistent divergence), covariance counts, partial support
+policies, capacity/rebuild reuse and graph capture are unsupported. Dot Laplacian
+requires a vector or matrix field outside 1D. Unsupported requests raise explicitly.
+
+`warpSPHCore.kernels.evaluateKernel(displacements, supports, kernel)` returns value,
+gradient, Hessian, support derivative, gradient-support derivative, regularized
+Laplacian and radial metadata. This primitive is forward-only as a Torch operation;
+its explicit derivative outputs are available to callers and shared operator adjoints.
+Smooth kernels use analytic origin limits and a near-origin derivative expansion.
+Cusp/singular force-kernel Hessians may be undefined at the origin. The legacy
+Laplacian estimator retains its regularization and zero result below its epsilon.
 
 C++ checks metadata, finite geometry, support/density validity, CSR offsets,
 capacity and live indices. Conservative content checks and exact-sized search
-allocation read device results on the host. Therefore this pilot does not yet
+allocation read device results on the host. Therefore native execution does not yet
 provide the existing Warp launch path's no-host-sync or capture contract.
 Future prepared execution must amortize validation without overlooking tensor
 mutation or storage replacement. No performance claim is made for this pass.
@@ -184,7 +196,10 @@ warpSPHCore/
       kernels/
         kernel.h                 # support-aware pair kernel evaluation
         kernelFunctions/
-          wendland2.h
+          *.h                    # all 15 radial families
+        radialJet.h              # analytic radial derivatives through third order
+        evaluation.h             # spatial and support derivatives
+        adjoint.h                # shared kernel VJPs
       execution/                 # CPU/GPU scheduling, type dispatch and CSR traversal
       torch/                     # reusable native tensor validation
       extension.cpp              # shared library capability registration
@@ -194,20 +209,25 @@ warpSPHCore/
       __init__.py                # common computeDensity/computeGradient exports
       wrapper.py                 # select Warp or native implementation
       wp_density.py              # Warp implementation, including tape support
-      wp_gradient.py
+      wp_gradient.py             # remaining five wp_ implementations also colocated
       nt_density.py              # native density Python/AD boundary
-      nt_gradient.py
+      nt_gradient.py             # nt_ entry points exist for all seven operators
+      nt_density_backward.py     # module-owned reverse entry point
       sources.json               # this module's CPU/GPU translation units
       csrc_density/
         nt_density_forward.h     # shared CPU/CUDA/HIP primal row implementation
         nt_density_forward.cpp   # checks, CPU launch and Torch registration
         nt_density_forward.cu    # thin GPU launch adapter
-      csrc_gradient/
+        nt_density_adjoint.h     # shared numerical VJP
+        nt_density_adjoint.cpp
+        nt_density_adjoint.cu
+      csrc_gradient/             # same forward/adjoint layout for each operator
         nt_gradient_forward.h
         nt_gradient_forward.cpp
         nt_gradient_forward.cu
     wp_density.py                # old import path aliases the colocated module
     wp_gradient.py
+  kernels/native/                # explicit kernel evaluator and csrc_kernel/
   radiusSearch/
     native/
       __init__.py
@@ -255,7 +275,7 @@ Parent package initialisers must also avoid eager Warp imports on a native path.
 For CRK, the intended ownership is `crk/native/{wrapper.py, wp_*.py, nt_*.py,
 sources.json}`, with compiled sources under `crk/native/csrc_<function>/`. Its existing
 high-level correction pipeline should call exports from `crk.native`. CRK
-implementations have not been moved or ported in this pilot.
+implementations have not been moved or ported.
 
 Tensor ownership stays with Torch. GPU execution uses Torch's current stream
 and device guard. `scripts/diagnostics/native_kernel_smoke.cpp` includes the
@@ -263,42 +283,34 @@ module-local primal headers directly and builds them without Torch.
 
 ## Forward, backward and adjoint file boundaries
 
-`nt_density.py` is the native Python entry point. It owns dispatch, capability
-checks, input preparation and the eventual autograd interface. Its primal
-calculation lives in `csrc_density/nt_density_forward.*`, with numerical code written once
-in the header and CPU/GPU launch adapters in `.cpp`/`.cu`.
+The implementation uses one primal calculation for inference and a grad-enabled
+forward. A Torch `autograd.Function` bridge saves inputs with version checks,
+prunes unrequested input gradients, and calls module-owned numerical adjoints.
+Backward orchestration and the adjoint are two layers of the same reverse pass;
+there is no second derivative formula in Python.
 
-The same primal calculation should serve inference and a grad-enabled forward
-call. The latter adds the bridge/context required to save inputs; it does not
-need a second copy of the forward mathematics. The current pilot still rejects
-AD, rather than implying that the manual derivative implementation exists.
-
-Future reverse-mode files have separate responsibilities:
-
-| File family | Intended responsibility |
+| File family | Responsibility |
 |---|---|
-| `nt_density.py` | Python entry, capability checks, selecting inference or an AD bridge |
-| `csrc_density/nt_density_forward.*` | Primal density calculation used by either forward route |
-| `nt_density_backward.py` | Torch-facing reverse orchestration: saved tensors, requested input gradients, calling adjoint operators and returning results |
-| `csrc_density/nt_density_adjoint.h/.cpp/.cu` | Numerical VJP: accumulate derivatives of the primal with an incoming output cotangent |
-| `csrc_density/nt_density_jvp.*` | Forward-mode tangent evaluation, when implemented |
+| `nt_density.py` | Python entry, capability checks and argument preparation |
+| `csrc_density/nt_density_forward.*` | Shared primal and CPU/GPU adapters |
+| `nt_density_backward.py` | Module-owned reverse entry into the common Torch bridge |
+| `native/_autograd.py` | Saved tensor/version handling, requested gradients and Torch backward protocol |
+| `csrc_density/nt_density_adjoint.*` | Analytic VJP contractions and CPU/GPU adapters |
+| `native/csrc/execution/adjointTraversal.h` | Shared CSR reverse traversal and scatter accumulation |
+| `native/csrc/kernels/adjoint.h` | Spatial/support kernel VJPs |
 
-Backward and adjoint here describe two layers of the same reverse-mode pass;
-there should not be two independent implementations of its derivative formula.
-The Torch integration mechanism (registered custom operators versus an autograd
-Function bridge) still needs deliberation. Small orchestration may stay in the
-entry file until it warrants a separate backward file. No empty derivative
-files are added just to reserve these names.
+All seven operators follow this layout. Gradients cover positions, supports,
+reference masses, relevant query/reference densities and fields, and periodic
+domain bounds. Aliased query/reference roles return separate contributions for
+Torch to accumulate. Radius search runs outside the differentiation graph;
+neighbour membership, periodic winding and cutoff transitions are discrete.
 
-The manual adjoint design must handle aliased query/reference roles, saved
-input version checks, requested-gradient pruning, self-pair limits and the
-currently supported higher-order contracts. Forward row ownership alone is
-insufficient: reference gradients can receive contributions from many query
-rows, requiring a deliberate CPU reduction/GPU accumulation policy. Adjoint
-pair mathematics should remain shared across targets, with accumulation policy
-in the execution layer. Kernel derivatives belong beside the common kernel
-functions. Neighbour topology and cutoff/rank transitions retain their explicit
-nondifferentiable or nonsmooth contracts.
+Reverse mode supports Wendland2/4/6, cubic/quartic/quintic, B7/B8, Gaussian,
+Poly6 and Cohesion. HOCT4, Spiky, Viscosity and Adhesion reverse mode remains
+explicitly unsupported pending nonsmooth/singular contracts. JVP, HVP and higher
+orders are unsupported; the backward bridge is once-differentiable. Reference
+scatter uses CPU atomic compare/exchange or GPU atomic addition. Strict Torch
+deterministic mode rejects this path; warn-only mode warns and executes.
 
 ## Correctness qualification
 
@@ -306,10 +318,10 @@ Run native tests and Warp reference tests in separate processes. Warp precision
 must be selected before importing its types.
 
 ```bash
-WARPSPHCORE_BACKEND=native pytest tests/native/test_native.py tests/native/test_layout.py tests/native/test_build.py -q
-WARPSPHCORE_NATIVE_PARITY=1 pytest tests/native/test_warp_parity.py -q
+WARPSPHCORE_BACKEND=native pytest tests/native/ -q
+WARPSPHCORE_NATIVE_PARITY=1 pytest tests/native/test_warp_parity.py tests/native/test_kernel_warp_parity.py tests/native/test_primal_warp_parity.py -q
 warpSPHCore_PRECISION=float64 WARPSPHCORE_NATIVE_PARITY=1 \
-  pytest tests/native/test_warp_parity.py -q
+  pytest tests/native/test_warp_parity.py tests/native/test_kernel_warp_parity.py tests/native/test_primal_warp_parity.py -q
 ```
 
 Native tests use an independent Torch all-pairs oracle and check malformed
@@ -318,19 +330,24 @@ fresh subprocess installs an import blocker for `warp` and runs the complete
 native example. Direct Warp comparisons use the same CSR, converting IDs and
 offsets to the Warp process's configured integer widths. No timing is measured.
 
-Local qualification on 30 October 2026 used Python 3.13.14, Torch
-2.13.0+cu130, Warp 1.17.0 for reference comparisons, CUDA 13.0 and HIP 7.2.4.
-The numerical gates passed 232 native CPU/CUDA checks, 90 cross-backend cases
-per precision, and 42 focused existing package/type/state/operator regressions.
-The built wheel's native example also passed in an isolated interpreter with
-Warp imports blocked. The module-layout pass also checks lazy wrapper imports, old Warp module
-aliases, nested frontend manifest discovery and packaged source ownership.
-The stable-ABI migration passed 241 native numerical/layout/loader checks,
-plus a private HIP-staging check. The packaged CUDA suite passed with JIT and
-Warp imports blocked; the CPU wheel also passed its applicable numerical suite.
-Both wheels passed the symbol audit for direct ATen/c10/CPython dependencies.
-A plain editable installation was checked in a disposable environment.
-No operator or timestep performance measurements were made.
+Local qualification uses Python 3.13.14, Torch 2.13.0+cu130, Warp 1.17.0,
+CUDA 13.0 and HIP 7.2.4. Kernel tests compare analytic derivatives through third
+order with independent Torch differentiation, including support knots, origin
+limits and normalization. Primal tests cover field ranks, dimensions, support
+policies and schemes against a dense Torch oracle. Adjoint tests compare with
+independent Torch AD and finite differences, including periodic images, aliases,
+chained density calculations and mutation checks. CPU and CUDA are exercised.
+
+Separate Warp comparisons cover both precisions. Tensor parity also exposed two
+existing shared Warp helper errors: 3D vector gradients flattened outer products
+with the axes swapped, and matrix divergence selected the opposite documented
+contraction axis. The shared helpers now follow the documented field-axis order;
+this changes those affected Warp outputs as well as aligning both backends.
+
+Wheel qualification blocks compiler and Warp imports and runs the numerical
+suite against the extracted binary. Symbol auditing rejects direct ATen/c10 and
+CPython dependencies. A plain editable install was checked in a disposable
+environment. No operator or timestep performance measurements are made.
 
 Standalone CPU qualification:
 
@@ -370,20 +387,32 @@ HIP_PLATFORM=amd hipcc -x hip --offload-arch=gfx1100 -std=c++17 \
 
 The shared row smoke checks float32/float64 and 1D/2D/3D. Local qualification
 includes CPU execution, CUDA Torch execution, HIP-on-NVIDIA execution and an
-offline AMD gfx1100/gfx942 compilation. After stable-ABI migration, all three
-full GPU adapter translation units also compiled offline for both AMD targets,
+offline AMD gfx1100/gfx942 compilation. After stable-ABI migration, all 16
+GPU adapter translation units (primals, adjoints, kernel evaluation and search)
+compiled offline for both AMD targets,
 using the installed Torch stable headers and official matching rocThrust/rocPRIM
 headers (with their release version headers generated). This is compilation
 qualification, not a linked ROCm Torch wheel. A ROCm Torch build and real AMD hardware are
 still required to qualify the complete AMD extension and its runtime behavior.
 AMD support remains experimental; real-device access is not a release gate for
-this pilot. Repeat the offline ROCm compile check when shared kernels change.
+this backend. Repeat the offline ROCm compile check when shared kernels change.
+
+The expanded port passed 2,536 numerical/layout/loader checks against the CUDA
+wheel and 1,288 applicable checks against the CPU wheel, with compiler and Warp
+imports blocked. Both wheels passed the stable-ABI symbol audit. Float64 primal
+parity and module-layout checks passed 398 cases (41 unsupported/native-only
+cases skipped). Float32 primal and kernel parity passed 482 cases (40 skipped);
+separate float64 kernel parity passed 90 cases. The Warp
+axis-helper and existing geometry-JVP regressions passed 64 cases; focused field,
+stream, neighbor-lane and dual-wrapper regressions passed another 56. The final
+source/JIT suite passed 2,537 checks; empty-population VJPs and a nondefault CUDA
+stream are covered.
 
 ## Remaining milestones
 
 1. Scalable native spatial search and Verlet/capacity lifecycle.
-2. Remaining operators, field ranks, kernels and corrections.
-3. VJP, JVP, reverse-over-JVP and explicit supported HVP contracts.
+2. Corrections, remaining field contracts and nonsmooth kernel adjoints.
+3. JVP, reverse-over-JVP and explicit supported HVP contracts.
 4. Prepared validation/workspaces, capture and compiler integration.
 5. Public manylinux wheel release automation; AMD runtime qualification when hardware is available.
 6. Frontend-owned Warp kernels needed by a selected complete simulation.

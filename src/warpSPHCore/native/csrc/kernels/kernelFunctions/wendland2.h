@@ -1,21 +1,27 @@
 #pragma once
-#include "math/pow.h"
+#include "kernels/radialJet.h"
+namespace sph_native {
+template <class T, int D> SPH_HD RadialJet<T> wendland2_shape(RadialJet<T> q) {
+    auto z = positive_power(T(1), q, D == 1 ? 3 : 4);
+    return z * (RadialJet<T>(T(1)) + q * T(D == 1 ? 3 : 4));
+}
+} // namespace sph_native
 
 namespace sph_native {
-// Wendland C2 value and coefficient multiplying displacement in its gradient.
-template <typename T, int D> SPH_HD void wendland(T r, T h, T& value, T& gradient) {
+template <class T, int D> SPH_HD void wendland(T r, T h, T &value, T &gradient) {
     value = gradient = T(0);
-    if (h <= T(0) || r > h) return;
-    const T q = r / h, z = T(1) - q;
+    if (h <= T(0) || r > h)
+        return;
+    auto f = wendland2_shape<T, D>({r / h, T(1)});
     const T pi = T(3.141592653589793238462643383279502884);
-    const T normal = D == 1 ? T(5) / T(4) : (D == 2 ? T(7) / pi : T(21) / (T(2) * pi));
-    if (D == 1) {
-        value = normal * power<T, D>(z, 3) * (T(1) + T(3) * q) / power<T, D>(h, D);
-        gradient = T(-12) * normal * z * z / power<T, D>(h, D + 2);
-    } else {
-        value = normal * power<T, D>(z, 4) * (T(1) + T(4) * q) / power<T, D>(h, D);
-        gradient = T(-20) * normal * power<T, D>(z, 3) / power<T, D>(h, D + 2);
-    }
+    const T C = D == 1 ? T(5) / T(4) : (D == 2 ? T(7) / pi : T(21) / (T(2) * pi));
+    T hd = T(1);
+    for (int d = 0; d < D; ++d)
+        hd *= h;
+    value = C * f.v / hd;
+    if (r > T(0))
+        gradient = C * f.d1 / (hd * h * r);
+    else
+        gradient = C * f.d2 / (hd * h * h);
 }
-
 } // namespace sph_native

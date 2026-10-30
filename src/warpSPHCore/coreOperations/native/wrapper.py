@@ -1,7 +1,7 @@
 """Common module-local wrapper for Warp and C++ operator implementations.
 
 Only an explicitly selected Warp implementation imports the wp_* modules.
-Native callers never enter the Warp argument conversion or autograd bridge.
+Native callers use their own Torch bridge and module-owned native kernels.
 """
 from ..._backend import resolve_backend as _resolve_backend
 from ..._models import ParticleState, DomainDescription, OperationProperties
@@ -61,7 +61,20 @@ def sphOperation(queryParticles: ParticleState, operationProperties: OperationPr
     if operationProperties.operation == WarpOperation.Gradient:
         return computeGradient(queryParticles, reference, domain, operationProperties, adjacency,
                                queryValues, referenceValues, backend='native')
-    raise NotImplementedError('Native pilot supports Density and Gradient only')
+    from ...enumTypes import WarpOperation as Op
+    if operationProperties.operation == Op.Interpolate:
+        from .nt_interpolate import compute
+    elif operationProperties.operation == Op.Divergence:
+        from .nt_divergence import compute
+    elif operationProperties.operation == Op.Curl:
+        from .nt_curl import compute
+    elif operationProperties.operation == Op.Laplacian:
+        from .nt_laplacian import compute
+    elif operationProperties.operation == Op.Covariance:
+        from .nt_covariance import compute
+    else:
+        raise NotImplementedError('Custom native operations require their own wrapper')
+    return compute(queryParticles, reference, domain, operationProperties, adjacency, queryValues, referenceValues)
 
 
 warpOperation = sphOperation

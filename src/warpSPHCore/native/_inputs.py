@@ -5,16 +5,17 @@ requirements and derivative policy belong to each nt_<operator> entry point.
 """
 from .._models import AdjacencyList
 from ..enumTypes import KernelFunctions
-from ._checks import _forward_only
+import torch
+from ._checks import check_execution
 
 
-def prepare_geometry(query, reference, domain):
+def prepare_geometry(query, reference, domain, *, allow_reverse=False):
     """Pack particle/domain geometry shared by search and pair operators."""
     if domain.dim != query.positions.shape[-1]:
         raise ValueError('domain.dim must match the positions dimension')
     tensors = (query.positions, reference.positions, query.supports, reference.supports,
                domain.min, domain.max, domain.periodic)
-    _forward_only(*tensors)
+    check_execution(*tensors, allow_reverse=allow_reverse)
     return tensors
 
 
@@ -26,15 +27,17 @@ def prepare_operator_inputs(query, reference, domain, properties, adjacency,
     density, or is empty for an operator that does not consume those slots.
     """
     from ..radiusSearch.native import radiusSearch
-    if properties.kernel != KernelFunctions.Wendland2:
-        raise NotImplementedError('Native pilot supports Wendland2 only')
+    if not isinstance(properties.kernel, KernelFunctions):
+        raise TypeError('kernel must be a KernelFunctions')
     if (any(x is not None for x in corrections) or properties.calibrateNormalization
-            or properties.positiveDivergence or properties.divergenceDotMode):
+            or properties.positiveDivergence):
         raise NotImplementedError('Corrections and specialised options are not supported by the native pilot')
-    geometry = prepare_geometry(query, reference, domain)
-    _forward_only(reference.masses, *fields, reference.densities)
+    geometry = prepare_geometry(query, reference, domain, allow_reverse=True)
+    check_execution(reference.masses, *fields, reference.densities, query.densities, allow_reverse=True)
     if adjacency is None:
-        adjacency = radiusSearch(query, domain, reference, properties.supportMode, backend='native')
+        # Neighbour topology is discrete; differentiate the fixed CSR primal.
+        with torch.no_grad():
+            adjacency = radiusSearch(query, domain, reference, properties.supportMode, backend='native')
     if not isinstance(adjacency, AdjacencyList):
         raise TypeError('Native pilot requires a Torch CSR AdjacencyList')
     if adjacency.numRows != len(query.positions) or adjacency.numCols != len(reference.positions):
@@ -44,4 +47,4 @@ def prepare_operator_inputs(query, reference, domain, properties, adjacency,
         fields = (empty, empty, empty)
     return [*geometry[:4], reference.masses, query.kinds, reference.kinds,
             *geometry[4:], adjacency.edgeOffsets, adjacency.numNeighbors,
-            adjacency.paddedJ, *fields]
+            adjacency.paddedJ, *fields, query.densities if query.densities is not None else query.positions.new_empty(0)]
