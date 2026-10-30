@@ -1,76 +1,86 @@
-__all__ = []
+from .._backend import BACKEND
 
-from .adjacency_t import AdjacencyList, AdjacencyListWarp, CapacityPolicy, DEFAULT_CAPACITY, adjacencyData, gridData
-from .hashMap_t import CompactHashMap
-__all__.extend([
-    'AdjacencyList',
-    'AdjacencyListWarp',
-    'CapacityPolicy',
-    'DEFAULT_CAPACITY',
-    'CompactHashMap',
-    'adjacencyData',
-    'gridData',
-])
+if BACKEND == "native":
+    from .._models import (ParticleState, ParticleTangentState, PointCloud,
+                           DomainDescription, OperationProperties, AdjacencyList,
+                           CapacityPolicy, DEFAULT_CAPACITY)
+    __all__ = ['ParticleState', 'ParticleTangentState', 'PointCloud',
+               'DomainDescription', 'OperationProperties', 'AdjacencyList',
+               'CapacityPolicy', 'DEFAULT_CAPACITY']
+else:
+    __all__ = []
+
+    from .adjacency_t import AdjacencyList, AdjacencyListWarp, CapacityPolicy, DEFAULT_CAPACITY, adjacencyData, gridData
+    from .hashMap_t import CompactHashMap
+    __all__.extend([
+        'AdjacencyList',
+        'AdjacencyListWarp',
+        'CapacityPolicy',
+        'DEFAULT_CAPACITY',
+        'CompactHashMap',
+        'adjacencyData',
+        'gridData',
+    ])
 
 
-from .domain_t import DomainDescription, domainData
-from .particleData import PointCloud, ParticleState, ParticleTangentState, particleDataSoA_1, particleDataSoA_2, particleDataSoA_3, WarpParticle_1, WarpParticle_2, WarpParticle_3
-__all__.extend([
-    'DomainDescription',
-    'domainData',
-    'PointCloud',
-    'ParticleState',
-    'ParticleTangentState',
-    'particleDataSoA_1',
-    'particleDataSoA_2',
-    'particleDataSoA_3',
-    'WarpParticle_1',
-    'WarpParticle_2',
-    'WarpParticle_3',
-])
+    from .domain_t import DomainDescription, domainData
+    from .particleData import PointCloud, ParticleState, ParticleTangentState, particleDataSoA_1, particleDataSoA_2, particleDataSoA_3, WarpParticle_1, WarpParticle_2, WarpParticle_3
+    __all__.extend([
+        'DomainDescription',
+        'domainData',
+        'PointCloud',
+        'ParticleState',
+        'ParticleTangentState',
+        'particleDataSoA_1',
+        'particleDataSoA_2',
+        'particleDataSoA_3',
+        'WarpParticle_1',
+        'WarpParticle_2',
+        'WarpParticle_3',
+    ])
 
-from .corrections_t import (
-    CRKState, GradHState, RenormalizationState,
-    CRKTangentState, RenormalizationTangentState,
-    correctionData_1, correctionData_2, correctionData_3,
-    correctionTangentData_1, correctionTangentData_2, correctionTangentData_3,
-    ParticleCorrectionData_1, ParticleCorrectionData_2, ParticleCorrectionData_3,
-    ParticleCorrectionTangentData_1, ParticleCorrectionTangentData_2, ParticleCorrectionTangentData_3,
-)
-__all__.extend([
-    'CRKState',
-    'GradHState',
-    'RenormalizationState',
-    'CRKTangentState',
-    'RenormalizationTangentState',
-    'correctionData_1',
-    'correctionData_2',
-    'correctionData_3',
-    'correctionTangentData_1',
-    'correctionTangentData_2',
-    'correctionTangentData_3',
-    'ParticleCorrectionData_1',
-    'ParticleCorrectionData_2',
-    'ParticleCorrectionData_3',
-    'ParticleCorrectionTangentData_1',
-    'ParticleCorrectionTangentData_2',
-    'ParticleCorrectionTangentData_3',
-])
+    from .corrections_t import (
+        CRKState, GradHState, RenormalizationState,
+        CRKTangentState, RenormalizationTangentState,
+        correctionData_1, correctionData_2, correctionData_3,
+        correctionTangentData_1, correctionTangentData_2, correctionTangentData_3,
+        ParticleCorrectionData_1, ParticleCorrectionData_2, ParticleCorrectionData_3,
+        ParticleCorrectionTangentData_1, ParticleCorrectionTangentData_2, ParticleCorrectionTangentData_3,
+    )
+    __all__.extend([
+        'CRKState',
+        'GradHState',
+        'RenormalizationState',
+        'CRKTangentState',
+        'RenormalizationTangentState',
+        'correctionData_1',
+        'correctionData_2',
+        'correctionData_3',
+        'correctionTangentData_1',
+        'correctionTangentData_2',
+        'correctionTangentData_3',
+        'ParticleCorrectionData_1',
+        'ParticleCorrectionData_2',
+        'ParticleCorrectionData_3',
+        'ParticleCorrectionTangentData_1',
+        'ParticleCorrectionTangentData_2',
+        'ParticleCorrectionTangentData_3',
+    ])
 
-from .properties_t import OperationProperties
-__all__.extend([
-    'OperationProperties',
-])
+    from .properties_t import OperationProperties
+    __all__.extend([
+        'OperationProperties',
+    ])
 
-from .kernelState_t import kernelState
-__all__.extend([
-    'kernelState',
-])
+    from .kernelState_t import kernelState
+    __all__.extend([
+        'kernelState',
+    ])
 
-from .field_t import Field, Role, ExecutionMode, FieldKind
-__all__.extend([
-    'Field',
-    'Role',
-    'ExecutionMode',
-    'FieldKind',
-])
+    from .field_t import Field, Role, ExecutionMode, FieldKind
+    __all__.extend([
+        'Field',
+        'Role',
+        'ExecutionMode',
+        'FieldKind',
+    ])

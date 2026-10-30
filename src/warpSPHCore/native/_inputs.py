@@ -1,0 +1,47 @@
+"""Reusable native wrapper preparation for core and frontend operators.
+
+Tensor shape/device/content validation remains in C++; operator-specific field
+requirements and derivative policy belong to each nt_<operator> entry point.
+"""
+from .._models import AdjacencyList
+from ..enumTypes import KernelFunctions
+from ._checks import _forward_only
+
+
+def prepare_geometry(query, reference, domain):
+    """Pack particle/domain geometry shared by search and pair operators."""
+    if domain.dim != query.positions.shape[-1]:
+        raise ValueError('domain.dim must match the positions dimension')
+    tensors = (query.positions, reference.positions, query.supports, reference.supports,
+               domain.min, domain.max, domain.periodic)
+    _forward_only(*tensors)
+    return tensors
+
+
+def prepare_operator_inputs(query, reference, domain, properties, adjacency,
+                            *, fields=(), corrections=()):
+    """Prepare the shared native pair-operator tensor layout and CSR adjacency.
+
+    fields contains the operator's query/reference scalar values and reference
+    density, or is empty for an operator that does not consume those slots.
+    """
+    from ..radiusSearch.native import radiusSearch
+    if properties.kernel != KernelFunctions.Wendland2:
+        raise NotImplementedError('Native pilot supports Wendland2 only')
+    if (any(x is not None for x in corrections) or properties.calibrateNormalization
+            or properties.positiveDivergence or properties.divergenceDotMode):
+        raise NotImplementedError('Corrections and specialised options are not supported by the native pilot')
+    geometry = prepare_geometry(query, reference, domain)
+    _forward_only(reference.masses, *fields, reference.densities)
+    if adjacency is None:
+        adjacency = radiusSearch(query, domain, reference, properties.supportMode, backend='native')
+    if not isinstance(adjacency, AdjacencyList):
+        raise TypeError('Native pilot requires a Torch CSR AdjacencyList')
+    if adjacency.numRows != len(query.positions) or adjacency.numCols != len(reference.positions):
+        raise ValueError('adjacency populations must match the particle states')
+    if not fields:
+        empty = query.positions.new_empty(0)
+        fields = (empty, empty, empty)
+    return [*geometry[:4], reference.masses, query.kinds, reference.kinds,
+            *geometry[4:], adjacency.edgeOffsets, adjacency.numNeighbors,
+            adjacency.paddedJ, *fields]

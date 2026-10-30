@@ -20,8 +20,13 @@ class SupportScheme(Enum):
 # def supportSchemeTomode(scheme: SupportScheme) -> str:
 #     return scheme.name
     
-import warp as wp
-def supportSchemeToUint(scheme: SupportScheme) -> wp.uint32:
+def supportSchemeToUint(scheme: SupportScheme):
+    from ._backend import BACKEND
+    if BACKEND == "native":
+        if not isinstance(scheme, SupportScheme):
+            raise ValueError(f"Unsupported support scheme: {scheme}")
+        return scheme.value
+    import warp as wp
     scheme_map = {
         SupportScheme.Gather: 11,
         SupportScheme.Scatter: 12,

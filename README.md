@@ -20,13 +20,13 @@ warpSPHCore is a Warp- and PyTorch-based backend for core Smoothed Particle Hydr
 Install the package in editable mode while developing:
 
 ```bash
-pip install -e .
+pip install -e ".[warp]"
 ```
 
 If you want to run the example notebooks in `notebooks/`, install the notebook extras as well:
 
 ```bash
-pip install -e ".[notebooks]"
+pip install -e ".[warp,notebooks]"
 ```
 
 For packaging and publishing, install the development extras or at least `build` and `twine`:
@@ -35,9 +35,30 @@ For packaging and publishing, install the development extras or at least `build`
 pip install -e ".[dev]"
 ```
 
+## Experimental native backend
+
+An isolated forward-only pilot can run without Warp. Install `.[native]` and set
+`WARPSPHCORE_BACKEND=native` **before importing** the package. It provides exact
+all-pairs CSR construction, Wendland2 density and difference-gradient of a scalar
+field in 1D/2D/3D, float32/float64. CPU and GPU launches use the same C++ row kernels.
+The default backend remains Warp, installed with `.[warp]`.
+
+```bash
+pip install -e ".[native]"
+WARPSPHCORE_BACKEND=native python scripts/examples/native_core.py --device cpu
+# Requires a CUDA compiler and a matching GPU-enabled Torch build:
+WARPSPHCORE_BACKEND=native python scripts/examples/native_core.py --device cuda
+```
+
+Native wheels can be built with CMake for CPU, CUDA, or experimental ROCm;
+compatible wheels load without a compiler, with cached JIT as the source fallback.
+See [native backend scope, wheel builds, and HPC deployment](docs/docs/native-backend.md) for
+build requirements, HIP checks, supported interfaces and remaining work. This
+pilot is not a complete replacement for the Warp operator/AD/simulation stack.
+
 ## Requirements
 
-Core package requirements:
+Requirements for the default Warp backend:
 
 - Python 3.10+
 - PyTorch
@@ -51,7 +72,7 @@ every Python version in that metadata range are not individually qualified.
 See [qualification and development records](docs/docs/development-artifacts.md).
 
 Notebook and plotting extras used by `notebooks/` (all installed by
-`pip install -e ".[notebooks]"`):
+`pip install -e ".[warp,notebooks]"`):
 
 - matplotlib, ipywidgets, ipympl — used across the notebook set
 - pandas, seaborn, tqdm — used by `warp_profile.ipynb` specifically

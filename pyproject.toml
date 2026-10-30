@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["scikit-build-core>=0.10,<1"]
+build-backend = "scikit_build_core.build"
 
 [project]
 name = "warpSPHCore"
@@ -21,11 +21,12 @@ classifiers = [
 ]
 dependencies = [
     "torch",
-    "warp-lang",
     "numpy",
 ]
 
 [project.optional-dependencies]
+warp = ["warp-lang"]
+native = ["ninja"]
 notebooks = [
     "matplotlib",
     "ipympl",
@@ -35,17 +36,20 @@ notebooks = [
     "tqdm",
 ]
 dev = [
+    "warp-lang",
+    "ninja",
     "pytest",
     "build",
+    "scikit-build-core>=0.10,<1",
+    "wheel",
     "twine",
     # tests/kernels/test_kernel_audit.py + scripts/kernels/kernel_audit.py
     # read scripts/kernels/kernel_specs.yaml
     "pyyaml",
 ]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
-py-modules = ["warpSPHCore_config"]
-
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+wheel.packages = ["src/warpSPHCore"]
+wheel.py-api = "py3"
+sdist.include = ["CMakeLists.txt", "scripts/packaging/*.py", "src/**"]

@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-pip install -e .          # core (torch, warp-lang, numpy)
+pip install -e ".[warp]" # default backend (torch, warp-lang, numpy)
 # or with test tooling:
 pip install -e ".[dev]"
 ```

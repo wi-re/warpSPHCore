@@ -1,0 +1,10 @@
+{
+  "cpu": [
+    "csrc_density/nt_density_forward.cpp",
+    "csrc_gradient/nt_gradient_forward.cpp"
+  ],
+  "gpu": [
+    "csrc_density/nt_density_forward.cu",
+    "csrc_gradient/nt_gradient_forward.cu"
+  ]
+}

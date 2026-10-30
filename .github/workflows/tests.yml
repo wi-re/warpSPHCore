@@ -34,6 +34,19 @@ jobs:
       - name: Run pytest suite
         run: pytest tests/ -v
 
+      - name: Check Warp-free native CPU capabilities
+        env:
+          WARPSPHCORE_BACKEND: native
+          WARPSPHCORE_NATIVE_BUILD: cpu
+          MAX_JOBS: "2"
+        run: pytest tests/native/test_native.py tests/native/test_layout.py tests/native/test_build.py -q
+
+      - name: Build and check compiler-free stable-ABI CPU wheel
+        run: |
+          python scripts/packaging/build_native_wheel.py --backend cpu --output /tmp/warpsph-native-wheel
+          python scripts/packaging/check_native_wheel.py /tmp/warpsph-native-wheel/*.whl --tests
+          python scripts/packaging/audit_native_abi.py /tmp/warpsph-native-wheel/*.whl
+
       - name: Check integer widths independently of precision
         run: python scripts/diagnostics/qualify_index_types.py --device cpu --output /tmp/index-types.json
 

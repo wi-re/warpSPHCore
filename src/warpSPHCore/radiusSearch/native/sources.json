@@ -1,0 +1,8 @@
+{
+  "cpu": [
+    "csrc_radius/nt_radius_forward.cpp"
+  ],
+  "gpu": [
+    "csrc_radius/nt_radius_forward.cu"
+  ]
+}
