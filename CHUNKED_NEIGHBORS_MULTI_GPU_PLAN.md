@@ -20,6 +20,12 @@ pre-existing wp_alpha.computeAlpha crash also reproduces against base 04e126e.
 Commands, expected skips, evidence and limitations are in the canonical plan.
 Native operators/compatible work and physical multi-GPU execution remain open.
 
+Transport decision, 2026-10-30: production uses PyTorch `torch.distributed`/c10d
+with NCCL, one process per GPU; Gloo CPU tensors provide a multiprocess debugging
+path. Local NCCL is 2.29.7. Experimental multiple ranks sharing one GPU require
+NCCL 2.30+ and explicit enablement; this does not replace physical multi-GPU gates.
+See the canonical plan's Phase4 transport section for sources and constraints.
+
 ## Integration order (completed history)
 
 1. Preserve the current frontend ACSPH work until its owner reaches a committed,
