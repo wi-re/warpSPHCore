@@ -40,7 +40,7 @@ project_crk_dualpath_and_latent_bugs memory entry for the full writeup:
 Both fixes were necessary; either alone still left the other's failure mode able to
 surface (fixing only #1 leaves fixing #2 to still show NaN gradients, and vice versa).
 
-This script IS registered in tests/operations/test_gradcheck_scripts.py's
+This script IS registered in tests/warp/operations/test_gradcheck_scripts.py's
 GRADCHECK_SCRIPTS list, same as every other operator's gradcheck_*_native.py script.
 
     python scripts/gradcheck/gradcheck_crk_native.py

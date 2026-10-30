@@ -43,7 +43,7 @@ dev = [
     "scikit-build-core>=0.10,<1",
     "wheel",
     "twine",
-    # tests/kernels/test_kernel_audit.py + scripts/kernels/kernel_audit.py
+    # tests/warp/kernels/test_kernel_audit.py + scripts/kernels/kernel_audit.py
     # read scripts/kernels/kernel_specs.yaml
     "pyyaml",
 ]
@@ -52,4 +52,7 @@ dev = [
 minimum-version = "build-system.requires"
 wheel.packages = ["src/warpSPHCore"]
 wheel.py-api = "py3"
-sdist.include = ["CMakeLists.txt", "cmake/**", "scripts/packaging/*.py", "scripts/examples/standalone/**", "tests/native/*.cpp", "tests/native/*.cu", "src/**"]
+sdist.include = ["CMakeLists.txt", "cmake/**", "scripts/packaging/*.py", "scripts/examples/standalone/**", "tests/native/cpp/*.h", "tests/native/cpp/*.cpp", "tests/native/cpp/*.cu", "src/**"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

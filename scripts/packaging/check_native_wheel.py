@@ -54,18 +54,18 @@ def forbidden(*args, **kwargs):
     raise AssertionError('JIT must never run for a compatible prebuilt wheel')
 builder.load_extension = forbidden
 tests = sys.argv[4]
+device = sys.argv[3]
 sys.argv = [sys.argv[2], '--device', sys.argv[3]]
 runpy.run_path(sys.argv[0], run_name='__main__')
 assert 'torch.utils.cpp_extension' not in sys.modules
 print('Prebuilt wheel: compiler/JIT and Warp imports blocked; passed')
 if tests:
     import pytest
-    raise SystemExit(pytest.main([str(Path(tests) / 'test_native.py'), str(Path(tests) / 'test_layout.py'),
-                                 str(Path(tests) / 'test_build.py'), str(Path(tests) / 'test_kernels.py'),
-                                 str(Path(tests) / 'test_primal.py'), str(Path(tests) / 'test_autograd.py'), '-k', 'not imports_with_warp_blocked', '-q', '-x']))
+    raise SystemExit(pytest.main([str(Path(tests) / 'native/torch'), '--suite', 'torch',
+                                 '--device', device, '-k', 'not imports_with_warp_blocked', '-q', '-x']))
 '''
         subprocess.run([sys.executable, '-c', code, directory, str(example), args.device,
-                        str(Path(__file__).resolve().parents[2] / 'tests/native') if args.tests else ''],
+                        str(Path(__file__).resolve().parents[2] / 'tests') if args.tests else ''],
                        cwd=directory, env=env, check=True)
 
 

@@ -1,29 +1,9 @@
 #include "runtime/backend.h"
 #include <algorithm>
 #include <string>
-#if defined(SPH_NATIVE_HIP)
-#include <hip/hip_runtime.h>
-#define GPU(name) hip##name
-using NativeStream = hipStream_t;
-#else
-#include <cuda_runtime.h>
-#define GPU(name) cuda##name
-using NativeStream = cudaStream_t;
-#endif
+#include "runtime/gpu_runtime.cuh"
 #include "coreOperations/native/csrc_dispatch/nt_operations.h"
 namespace sph_native::runtime {
-static void check(GPU(Error_t) error) {
-    if (error != GPU(Success))
-        throw std::runtime_error(GPU(GetErrorString)(error));
-}
-struct Guard {
-    int previous;
-    explicit Guard(int device) {
-        check(GPU(GetDevice)(&previous));
-        check(GPU(SetDevice)(device));
-    }
-    ~Guard() { (void)GPU(SetDevice)(previous); }
-};
 template <class Row> __global__ void rows(int64_t n, Row row) {
     for (int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x; i < n;
          i += int64_t(blockDim.x) * gridDim.x)

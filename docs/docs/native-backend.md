@@ -161,7 +161,7 @@ The commented example in `scripts/examples/standalone/main.cpp` shows input
 ownership and layouts, query/reference roles, CSR construction, density, and a
 scalar-field gradient that uses the computed density. The optional mass-gradient
 example is a separate function. Numerical smoke assertions live under
-`tests/native/standalone_smoke.cpp`.
+`tests/native/cpp/standalone_smoke.cpp`.
 
 Build each GPU directory with `cmake --build <directory> -j2`. Sites can supply
 `CMAKE_CUDA_COMPILER`, `CMAKE_HIP_COMPILER`, `CMAKE_HIP_COMPILER_ROCM_ROOT` and
@@ -208,10 +208,13 @@ contents. Numerical outputs must not overlap their input storage.
 For the existing all-pairs search, call `radius_count`, then `radius_scan` to
 produce int64 offsets and return the required edge capacity, allocate int64 IDs,
 and call `radius_collect`. Counts and collection run on the selected device.
-The initial scan uses a host prefix scan (including a counts download and offsets
-upload on GPU). Scan and collection synchronize; collection rejects stale counts
-and bounds its writes before reporting a mismatch. This provides correctness and
-standalone capability; scalable device search/scan remains future work.
+CPU scanning uses checked int64 accumulation. CUDA and HIP share a hierarchical
+device prefix scan: counts, tile sums and offsets remain on the device. Only the
+small total/status result returns to the host, synchronizing the supplied stream
+so the caller can allocate exact edge capacity. Negative counts and int64
+overflow are rejected. Collection also synchronizes, rejects stale counts and
+bounds its writes before reporting a mismatch. Search still uses all-pairs
+traversal; spatially indexed standalone search remains future work.
 
 `adjoint(context, problem, cotangent, gradients)` exposes an explicit VJP for an
 individual operation. The caller retains the unmodified primal inputs and CSR,
@@ -232,9 +235,8 @@ libraries are not required by the numerical core.
 The CPU/CUDA test bridge can be checked against independent Python oracles:
 
 ```bash
-WARPSPHCORE_BACKEND=native \
-WARPSPHCORE_STANDALONE_LIBRARY=build/standalone-cuda/libnative_standalone_test.so \
-  pytest tests/native/test_standalone.py -q
+pytest --suite standalone --device cuda \
+  --native-library=build/standalone-cuda/libnative_standalone_test.so -q
 ```
 
 Local qualification built and ran the standalone CPU and CUDA executables and an
@@ -244,10 +246,10 @@ for both gfx942 and gfx1100; actual AMD execution remains unqualified. CPU/GPU
 primal and explicit-adjoint tests cover all operator schemes, field ranks,
 precisions, kernels, support policies, CSR widths, empty populations, explicit
 accumulation, aliasing, bounds errors and caller streams. Parallel CPU tests use
-both one and four workers with shared reference-gradient scatters. The final
-standalone matrix passed 1,512 CPU/CUDA cases (756 applicable to the CPU-only
-build). The existing native Torch suite still passed 2,537 cases; its rebuilt
-CPU wheel passed 1,288 compiler-free checks and the stable-ABI audit. The ROCm
+both one and four workers with shared reference-gradient scatters. The standalone
+matrix qualifies both CPU and CUDA. CPU thread-count checks run only in the CPU
+suite. The native Torch adapter and compiler-free CPU wheel have separate checks,
+including a stable-ABI audit. The ROCm
 consumer executed the CPU path successfully and skipped its unavailable AMD
 GPU test. No performance measurements were made.
 
@@ -444,15 +446,50 @@ deterministic mode rejects this path; warn-only mode warns and executes.
 
 ## Correctness qualification
 
-Run native tests and Warp reference tests in separate processes. Warp precision
-must be selected before importing its types.
+Tests are separated by layer, then selected by execution device before native
+parametrization. Each suite runs in a fresh process because the package backend
+and Warp precision are import-time choices. A bare `pytest` runs the fast Python
+scaffolding suite and compiles no numerical code.
+
+| Suite | Location | Responsibility |
+|---|---|---|
+| `python` | `tests/python` | Models, source ownership, build/loading contracts, CI selection |
+| `warp` | `tests/warp` | Warp kernels, operators, search and frontend contracts |
+| `torch` | `tests/native/torch` | Native Torch adapter, autograd, kernel/primal integration |
+| `standalone` | `tests/native/standalone` | Framework-free library against independent numerical oracles |
+| `parity` | `tests/parity` | Explicit native/Warp comparisons |
+
+C++ tests live in `tests/native/cpp`; reusable oracles live in `tests/_support`.
+The standalone numerical matrix owns the full shared-core checks. Expensive
+Torch integration matrices carry `extended`; adapter changes run them, while
+shared C++ changes can run the smaller adapter contract suite. CI uses
+`scripts/testing/select_suites.py` to select owners from changed paths; docs-only
+changes do not launch numerical jobs. Packaging checks qualify wheel loading
+and ABI without repeating the full numerical matrix.
 
 ```bash
-WARPSPHCORE_BACKEND=native pytest tests/native/ -q
-WARPSPHCORE_NATIVE_PARITY=1 pytest tests/native/test_warp_parity.py tests/native/test_kernel_warp_parity.py tests/native/test_primal_warp_parity.py -q
-warpSPHCore_PRECISION=float64 WARPSPHCORE_NATIVE_PARITY=1 \
-  pytest tests/native/test_warp_parity.py tests/native/test_kernel_warp_parity.py tests/native/test_primal_warp_parity.py -q
+pytest --suite python -q
+pytest --suite torch --device cpu -m "not extended" -q
+pytest --suite torch --device cuda -q
+pytest --suite standalone --device cpu \
+  --native-library=build/standalone/libnative_standalone_test.so -q
+pytest --suite standalone --device cuda \
+  --native-library=build/standalone-cuda/libnative_standalone_test.so -q
+pytest --suite warp --device cpu -q
+pytest --suite parity --device cuda -q
+warpSPHCore_PRECISION=float64 pytest --suite parity --device cpu -q
+# C++ checks do not require Python or Torch:
+ctest --test-dir build/standalone-cuda -L cuda --output-on-failure
+ctest --test-dir build/standalone-cuda -L cpu --output-on-failure
 ```
+
+A specific test path infers its suite, e.g. `pytest tests/native/torch/test_native.py`.
+`--device all` deliberately selects every available device; the default is CPU.
+An explicitly requested unavailable device fails early. `--device hip` requires
+ROCm Torch for Python-driven tests; compile/link qualification and standalone
+C++ HIP tests require no ROCm Torch. HIP remains experimental until an AMD GPU
+is available for execution. Use the equals form of `--native-library=...` to
+prevent pytest's initial root discovery treating the library as a test path.
 
 Native tests use an independent Torch all-pairs oracle and check malformed
 inputs, empty sets, directions, mixed index widths, padding and stream use. A

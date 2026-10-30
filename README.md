@@ -215,11 +215,15 @@ See the [API reference](https://fluids.dev/warpSPHCore/docs/api) for the full fu
 
 ```
 src/warpSPHCore/     the package
-tests/               pytest suite (unit tests + the gradcheck/spike script gate)
+tests/
+  python/            Python scaffolding and build/loading contracts
+  warp/              Warp operators, search, frontend and gradcheck gates
+  native/            native Torch adapter, standalone oracles and C++ checks
+  parity/            explicit Warp/native comparisons
 docs/                the Docusaurus wiki source (fluids.dev/warpSPHCore)
 notebooks/           example notebooks + their shared helper modules (demo_util.py, profile_util.py)
 scripts/
-  gradcheck/         torch.autograd.gradcheck canary scripts, one per operator (run by tests/operations/test_gradcheck_scripts.py)
+  gradcheck/         torch.autograd.gradcheck canary scripts, one per operator (run by tests/warp/operations/test_gradcheck_scripts.py)
   spikes/            forward-mode JVP tier spikes (exploratory, gated the same way as gradcheck)
   diagnostics/       operation_matrix.py (forward-value sweep) and other ad hoc measurement tools
   benchmarks/        call-overhead and real-workload performance benchmarks
@@ -253,11 +257,19 @@ Before publishing, bump the package version in both `pyproject.toml` and `src/wa
 ## Testing
 
 ```bash
-pytest tests/
+pytest --suite python -q                 # default; no numerical compilation
+pytest --suite warp --device cpu -q
+pytest --suite torch --device cuda -q
 ```
+
+Each suite runs in its own process. Select `cpu`, `cuda` or `hip` explicitly;
+`all` requests every available device. The standalone library has a separate
+CMake/CTest suite and Python oracle suite. CI selects suites by changed files.
+See [native testing](docs/docs/native-backend.md#correctness-qualification) for
+standalone commands, parity checks and the smaller Torch contract suite.
 
 On a CUDA host, `python scripts/diagnostics/run_cuda_gate.py` checks linalg,
 native pinv streams/graphs, neighbor rebuilds and tiled operators in separate
 float32 and float64 processes. It fails when CUDA is unavailable.
 
-This includes `tests/operations/test_gradcheck_scripts.py`, which runs every script under `scripts/gradcheck/` (plus the Tier-1/Tier-2 forward-mode spikes under `scripts/spikes/`) as a subprocess, since `warpSPHCore_PRECISION` is baked into every compiled kernel at first import and cannot change mid-process. For the forward-value diagnostic matrix and a quick smoke sweep, see `scripts/diagnostics/run_operation_matrix_sweep.sh --quick`.
+The Warp suite includes `tests/warp/operations/test_gradcheck_scripts.py`, which runs every script under `scripts/gradcheck/` (plus the Tier-1/Tier-2 forward-mode spikes under `scripts/spikes/`) as a subprocess, since `warpSPHCore_PRECISION` is baked into every compiled kernel at first import and cannot change mid-process. For the forward-value diagnostic matrix and a quick smoke sweep, see `scripts/diagnostics/run_operation_matrix_sweep.sh --quick`.

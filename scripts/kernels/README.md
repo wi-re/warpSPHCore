@@ -3,7 +3,7 @@
 The machine half of "adding a kernel and checking that it works". A kernel
 is **onboarded** when its spec in `kernel_specs.yaml` passes the audit
 battery (`kernel_audit.py`), which is CI-gated by
-`tests/kernels/test_kernel_audit.py`.
+`tests/warp/kernels/test_kernel_audit.py`.
 
 ## Files
 
@@ -11,7 +11,7 @@ battery (`kernel_audit.py`), which is CI-gated by
 |---|---|
 | `kernel_specs.yaml` | machine-readable spec per kernel: source citation, dimensionless shape `f(q)` (q = r/H), `C` per dim, `sigma2/H2` per dim (D&A eq.-8 convention), code `packingRatio` + reference `N_H`, `ft_expected`, documented `known_issues` |
 | `kernel_audit.py` | the audit battery; evaluates the SHIPPED `eval_*` warp functions on CPU (float64) — never a re-transcription |
-| `tests/kernels/test_kernel_audit.py` | CI wrapper: runs the audit in a float64 subprocess, checks the verdict, and runs a broken-spec canary |
+| `tests/warp/kernels/test_kernel_audit.py` | CI wrapper: runs the audit in a float64 subprocess, checks the verdict, and runs a broken-spec canary |
 
 ## The checks (per spec'd dimension)
 
@@ -44,7 +44,7 @@ battery (`kernel_audit.py`), which is CI-gated by
 python scripts/kernels/kernel_audit.py            # all kernels
 python scripts/kernels/kernel_audit.py --ft       # + Fourier-sign check
 python scripts/kernels/kernel_audit.py --only b7  # one kernel
-pytest tests/kernels/                             # the CI gate
+pytest tests/warp/kernels/                             # the CI gate
 ```
 
 Exit code 0 iff no hard failures. `known_issues` entries in the spec
@@ -73,7 +73,7 @@ the spec gets cleaned up when the code is fixed.
    differs per dimension, as for the Wendland family).
 4. **Run the audit**; every check must PASS, or the deviation must be a
    documented `known_issues` entry with a reason (never silent).
-5. **Run the CI tests** (`pytest tests/kernels/`) and the full suite.
+5. **Run the CI tests** (`pytest tests/warp/kernels/`) and the full suite.
 6. **Commit** kernel + dispatch + spec together, so the audit of the
    committed code is the audit that passed.
 

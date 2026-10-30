@@ -15,9 +15,9 @@ import torch
 import warp as wp
 
 ROOT=Path(__file__).resolve().parents[2]
-TESTS=['tests/test_type_config.py','tests/radiusSearch/test_indexDtypes.py',
-       'tests/radiusSearch/test_indexStreams.py',
-       'tests/operations/test_operations_core.py','tests/operations/test_grid_modes.py']
+TESTS=['tests/warp/test_type_config.py','tests/warp/radiusSearch/test_indexDtypes.py',
+       'tests/warp/radiusSearch/test_indexStreams.py',
+       'tests/warp/operations/test_operations_core.py','tests/warp/operations/test_grid_modes.py']
 
 
 def main():
@@ -43,7 +43,7 @@ def main():
             env=dict(os.environ,warpSPHCore_PRECISION=precision,warpSPHCore_INDEX_DTYPE=ids,warpSPHCore_OFFSET_DTYPE=offsets)
             if args.device=='cpu':env['CUDA_VISIBLE_DEVICES']='-1'
             xml=Path(directory)/f'{precision}-{ids}-{offsets}.xml'
-            command=[sys.executable,'-m','pytest','-q',*TESTS,*args.extra_tests,'-x',f'--junitxml={xml}']
+            command=[sys.executable,'-m','pytest','--suite','warp','--device',args.device,'-q',*TESTS,*args.extra_tests,'-x',f'--junitxml={xml}']
             print(f'Qualifying {precision}, IDs={ids}, offsets={offsets}, {args.device}',flush=True)
             result=subprocess.run(command,cwd=ROOT,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
             record=dict(precision=precision,index_dtype=ids,offset_dtype=offsets,command=command[:-1],returncode=result.returncode)

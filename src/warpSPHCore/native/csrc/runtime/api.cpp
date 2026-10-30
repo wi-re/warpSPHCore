@@ -1,5 +1,6 @@
 #include "runtime/backend.h"
 #include "kernels/radial.h"
+#include "execution/scan.h"
 #include <algorithm>
 #include <cstring>
 #include <vector>
@@ -323,15 +324,19 @@ int64_t radius_scan(const Context &c, int64_t n, ConstBuffer counts, Buffer offs
     check_buffer({offsets.data, offsets.size}, n, 8, "offsets");
     require(!overlaps(counts.data, bytes(n, 4), offsets.data, bytes(n, 8)),
             "Scan buffers must not overlap");
+#ifdef SPH_NATIVE_HAS_GPU
+    if (c.device != Device::CPU)
+        return gpu_scan(c, n, counts, offsets);
+#endif
     std::vector<int32_t> host(size_t(n), 0);
     read(c, host.data(), counts.data, bytes(n, 4));
     std::vector<int64_t> prefix(size_t(n), 0);
     int64_t total = 0;
     for (int64_t i = 0; i < n; ++i) {
-        require(host[i] >= 0 && total <= std::numeric_limits<int64_t>::max() - host[i],
-                "Invalid counts or CSR size overflow");
+        const auto [sum, valid] = checked_scan_add(total, host[i]);
+        require(valid, "Invalid counts or CSR size overflow");
         prefix[i] = total;
-        total += host[i];
+        total = sum;
     }
     write(c, offsets.data, prefix.data(), bytes(n, 8));
     return total;

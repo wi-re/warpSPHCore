@@ -7,7 +7,7 @@ active) since the very first restructure commit, because computeRenormalizationM
 already reads its neighbor count from Covariance's own per-particle kernel output
 (covarianceReturnNumNeighbors=True), not from adjacency.numNeighbors -- the thing that
 actually needed AdjacencyList. Nothing before this script ever exercised the grid/None
-branches for renorm specifically: tests/operations/conftest.py's renorm_state() fixture
+branches for renorm specifically: tests/warp/operations/conftest.py's renorm_state() fixture
 always passes an explicit AdjacencyList. See warpier_core.md's "Renormalization Grid-Mode
 Coverage" note for the full story.
 

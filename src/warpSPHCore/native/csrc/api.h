@@ -111,6 +111,7 @@ SPH_NATIVE_API void adjoint(const Context &, const Problem &, ConstBuffer cotang
 // All-pairs search: count -> scan/allocate -> collect. Both scan and collect
 // synchronize on GPU; forward and adjoint launches remain stream-ordered.
 SPH_NATIVE_API void radius_count(const Context &, const Problem &, Buffer counts);
+// GPU scans keep prefixes on device; only the total and error status return to host.
 SPH_NATIVE_API int64_t radius_scan(const Context &, int64_t rows, ConstBuffer counts,
                                    Buffer offsets);
 SPH_NATIVE_API void radius_collect(const Context &, const Problem &, Buffer indices);
