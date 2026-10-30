@@ -20,7 +20,7 @@ from __future__ import annotations
 import types
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union, TYPE_CHECKING
 
 import torch
 
@@ -38,6 +38,9 @@ from ..dataTypes import (
     RenormalizationState,
     RenormalizationTangentState,
 )
+if TYPE_CHECKING:
+    from ..radiusSearch.chunked import ChunkedAdjacency
+
 from .launcher import launch_kernel
 from .lanes import DEFAULT_NEIGHBOR_LANES, neighborLanes
 from .stateAwareWarpFunction import _liveTangentMask
@@ -101,6 +104,14 @@ class ExtraKind(Enum):
     SCALAR = 1
 
 
+class RowRole(Enum):
+    """Particle identity of a tensor extra in whole-row chunk dispatch."""
+
+    QUERY = 0
+    REFERENCE = 1
+    REPLICATED = 2
+
+
 @dataclass(frozen=True)
 class ExtraSpec:
     """One declared name in an operator's ``additionalArguments``. ``kind``
@@ -111,6 +122,11 @@ class ExtraSpec:
 
     name: str
     kind: ExtraKind
+    rowRole: Union[RowRole, Callable[["SPHContext", Dict[str, Any]], RowRole], None] = None
+
+    def resolveRowRole(self, ctx, extras):
+        """A disabled optional field can explicitly retain its replicated dummy."""
+        return self.rowRole(ctx, extras) if isinstance(self.rowRole, types.FunctionType) else self.rowRole
 
 
 class ThreadSpec(Enum):
@@ -185,6 +201,13 @@ class OperatorSpec:
     #: Used only without an explicit process lane override. New tiled kernels
     #: can retain scalar dispatch until numerical and consumer gates qualify.
     defaultNeighborLanes: int = DEFAULT_NEIGHBOR_LANES
+    #: Explicit eager, no-AD opt-in: every output is one value per query row;
+    #: every tensor extra declares its row identity. Kernels see LOCAL query i
+    #: and GLOBAL reference j, so direct i == j tests require adaptation.
+    #: Pair outputs need another ABI.
+    rowChunked: bool = False
+    #: Query-only CRK estimators never dereference reference correction arrays.
+    queryOnlyCRK: bool = False
 
 
 @dataclass
@@ -218,7 +241,7 @@ class SPHContext:
     query: ParticleState
     properties: OperationProperties
     domain: DomainDescription
-    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap, "ChunkedAdjacency"]] = None
     reference: Optional[ParticleState] = None
     corrections: Corrections = field(default_factory=Corrections)
     mode: ExecutionMode = ExecutionMode.AUTO
@@ -497,6 +520,12 @@ def launchOperator(
             raise TypeError(f"launchOperator: extra {name!r} declared TENSOR, got {type(value)}")
         if spec_extra.kind is ExtraKind.SCALAR and is_tensor:
             raise TypeError(f"launchOperator: extra {name!r} declared SCALAR, got a torch.Tensor")
+
+    # Lazy import avoids the radius-search/autograd initialization cycle.
+    from ..radiusSearch.chunked import ChunkedAdjacency
+    if isinstance(ctx.adjacency, ChunkedAdjacency):
+        from .row_dispatch import launchRowChunks
+        return launchRowChunks(spec, ctx, extras)
 
     additionalArguments = tuple(extras[e.name] for e in spec.extras)
 

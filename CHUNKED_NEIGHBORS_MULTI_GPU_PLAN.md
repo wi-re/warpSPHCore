@@ -5,8 +5,8 @@ This sibling link assumes the documented paired checkout layout. In another
 layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
-Status, 2026-10-30: **Phase 2 standalone single-device construction/lifecycle
-qualified on CPU and CUDA**, in the paired `chunked-neighbor-planner` workspace,
+Status, 2026-10-30: **Phase 3 shared operators and first eager Monaghan checkpoint
+qualified; native compatible W next**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -18,7 +18,7 @@ int64; 186 distinct CUDA checks pass per offset configuration. Frontend focused
 CPU compatibility passes 73 checks. Runtime imports pass; the static scanner's
 pre-existing wp_alpha.computeAlpha crash also reproduces against base 04e126e.
 Commands, expected skips, evidence and limitations are in the canonical plan.
-Native operators/compatible work and physical multi-GPU execution remain open.
+Native compatible work and physical multi-GPU execution remain open; the shared-operator checkpoint below is now qualified.
 
 Transport decision, 2026-10-30: production uses PyTorch `torch.distributed`/c10d
 with NCCL, one process per GPU; Gloo CPU tensors provide a multiprocess debugging
@@ -27,6 +27,23 @@ runtime now passes a two-process/one-GPU communication/Warp-stream smoke with
 experimental shared-GPU ranks enabled. The reusable launcher and provenance are
 under frontend `.tmp/nccl-shared-gpu-20261030/`. This does not replace physical
 multi-GPU gates. See the canonical plan's Phase4 transport section.
+
+## Shared-operator / first solver checkpoint (2026-10-30)
+
+Phase3 now has an explicit host row adapter for shared particle-output operators,
+all canonical query/reference correction fields, and chunked prepared launches.
+Existing floating kernels and the Warp struct ABI remain unchanged. Extra tensors
+declare query/reference/replicated identity, including enabled optional fields.
+In-place reuse invalidates old storage leases; independent old buffers remain
+valid. AD/capture, partial-owner outputs and unported specs reject explicitly.
+
+Frontend support/dissipation integration and five tiny two-step eager Monaghan
+fixtures qualify stored-field, fresh-stage and source-budget parity. Select an
+explicit chunked Verlet list through a Python case build hook; defaults and CLI
+selection remain unchanged. Native CRK/CompSPH retained compatible W and full
+solver support, checkpoint/restart and physical distributed execution remain
+open. Per-side pressure and wall closure remain gated. The canonical plan has
+the full CPU/CUDA/int32/int64/FP64 test matrix and evidence directory.
 
 ## Integration order (completed history)
 
@@ -65,8 +82,8 @@ multi-GPU gates. See the canonical plan's Phase4 transport section.
 ## First deliverables and source anchors
 
 Metadata planning and direct single-device construction/lifecycle are qualified.
-Next: shared support/density/correction/gradient operators and native compatible
-work, with explicit mapping of every query/reference field. Physical two-/four-GPU
+Next: chunk-owned native compatible work, global force/half-velocity/work pass
+ordering, changed-list replay and CRKSPH/CompSPH solver parity. Physical two-/four-GPU
 execution follows solver parity. Preserve all fresh
 stage/integrator/model/forcing choices. Flat APIs remain available; unsupported
 large AD/graph/wall paths fail clearly instead of making a monolithic allocation.

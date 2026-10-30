@@ -35,10 +35,24 @@ def _inert(t: torch.Tensor) -> bool:
 
 
 class PreparedLauncher:
-    """The ABI prefix of one ``SPHContext``, built once; ``launch(spec, **extras)`` as ``launchOperator``."""
+    """The ABI prefix of one ``SPHContext``, built once; launch as launchOperator.
+
+    Chunk contexts retain a prefix per resident chunk and assemble particle
+    outputs only. They reject AD/capture and overwritten in-place generations.
+    As with flat prefixes, construct a new launcher when state tensor bindings
+    change; updates to the existing tensors remain visible.
+    """
 
     def __init__(self, ctx):
         self.ctx = ctx
+        from ..radiusSearch.chunked import ChunkedAdjacency
+        self._chunks = None
+        if isinstance(ctx.adjacency, ChunkedAdjacency):
+            from .row_dispatch import chunkContexts, validateContext
+            validateContext(ctx)
+            self._adjacency = ctx.adjacency
+            self._chunks = tuple((interval, PreparedLauncher(local)) for interval, local in chunkContexts(ctx))
+            return
         qVol, rVol = ctx.corrections.volumes
         state = (ctx.query, ctx.properties, ctx.domain, qVol, rVol, ctx.adjacency, ctx.reference,
                  ctx.corrections.crk, ctx.corrections.gradH, ctx.corrections.renorm)
@@ -63,6 +77,11 @@ class PreparedLauncher:
         self.cuda = ctx.query.positions.is_cuda
 
     def launch(self, spec, **extras):
+        if self._chunks is not None:
+            if self.ctx.adjacency is not self._adjacency:
+                raise ValueError('Build a new prepared launcher after replacing its chunked adjacency.')
+            from .row_dispatch import launchRowChunks
+            return launchRowChunks(spec, self.ctx, extras, prepared=self._chunks)
         tensors = [v for v in extras.values() if isinstance(v, torch.Tensor)]
         if not self._ok or (torch.is_grad_enabled() and not all(_inert(t) for t in tensors)):
             return launchOperator(spec, self.ctx, **extras)

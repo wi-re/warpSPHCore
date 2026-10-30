@@ -176,6 +176,7 @@ def computeSPHDensity_KernelTiled(
 
 
 _DENSITY_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=computeSPHDensity_Kernel,
     tiledKernel=computeSPHDensity_KernelTiled,
     outputs=(OutputSpec(dtype=lambda ctx, extras: castTorchToWarpAsBuiltins(ctx.query.masses).dtype),),

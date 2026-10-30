@@ -6,7 +6,7 @@ there is no implicit global J/I view or production operator fallback. The host
 reference planner synchronizes counts at rebuild time; this is not a device-only
 planner, a graph/AD backend, or distributed execution.
 """
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from hashlib import sha256
 import json
 import math
@@ -51,6 +51,11 @@ class OwnedRowChunk:
     adjacency: AdjacencyList
 
 
+@dataclass(slots=True)
+class _StorageLease:
+    valid: bool = True
+
+
 @dataclass(frozen=True, slots=True)
 class ChunkedAdjacency:
     """Iterate owned chunks explicitly; adjacency row numbers are chunk-local.
@@ -79,6 +84,12 @@ class ChunkedAdjacency:
     rebuildReason: str
     searchScratchBytes: int = 0
     sourceSignature: str | None = None
+    _storageLease: _StorageLease = field(default_factory=_StorageLease, compare=False, repr=False)
+
+    def assertStorageValid(self):
+        """An in-place rebuild may have overwritten this generation's CSR/J."""
+        if not self._storageLease.valid:
+            raise ValueError('Chunked adjacency storage was overwritten by an in-place rebuild; use the new generation.')
 
     def __iter__(self):
         return iter(self.chunks)
@@ -210,6 +221,8 @@ def _allocateChunks(plan, counts, prefix, owner, storeI, reuse, inPlace):
                                           and prior.paddedI.dtype == get_torch_index_dtype()))
                       and prior.edgeOffsets.shape == offsets.shape and prior.edgeOffsets.dtype == offsets.dtype
                       and prior.edgeOffsets.device == counts.device)
+        if compatible:
+            reuse._storageLease.valid = False
         j = prior.paddedJ if compatible else torch.empty(metadata.capacity, dtype=get_torch_index_dtype(), device=counts.device)
         i = (prior.paddedI if compatible else torch.empty_like(j)) if storeI else None
         j.fill_(-1)
@@ -237,6 +250,8 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
     _checkInputs(q, r, qh, rh, domain, mode, policy, storeI)
     if type(numOwners) is not int or numOwners < 1 or type(owner) is not int or not 0 <= owner < numOwners:
         raise ValueError('owner must identify one of numOwners positive logical owners.')
+    if reuse is not None:
+        reuse.assertStorageValid()
     config = _config(q, r, domain, mode, policy, storeI, scale, orderingKey, numOwners, owner, kind)
     q, r, qh, rh, domain = _snapshots(q, r, qh, rh, domain)
     counts = torch.zeros(len(q), dtype=torch.int32, device=q.device)
@@ -303,6 +318,7 @@ def chunkedVerletStaleFlag_(queryPositions, referencePositions, querySupports, r
     """Use the existing validity reduction; configuration changes always rebuild."""
     if not isinstance(adjacency, ChunkedAdjacency):
         raise TypeError('adjacency must be a ChunkedAdjacency.')
+    adjacency.assertStorageValid()
     mode = adjacency.mode if mode is None else mode
     _checkInputs(queryPositions, referencePositions, querySupports, referenceSupports, domain,
                  mode, adjacency.plan.policy, adjacency.storeI)
@@ -342,6 +358,8 @@ def buildChunkedVerletList_(queryPositions, referencePositions, querySupports, r
     prior = priorNeighborhood
     if prior is not None and not isinstance(prior, ChunkedAdjacency):
         raise TypeError('priorNeighborhood must be a ChunkedAdjacency.')
+    if prior is not None:
+        prior.assertStorageValid()
     compatible = (prior is not None and config == prior.plan.generation.configSignature and prior.kind == 'verlet'
                   and queryPositions.device == prior.queryPositions.device
                   and referencePositions.device == prior.referencePositions.device)
