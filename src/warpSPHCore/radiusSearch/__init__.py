@@ -38,3 +38,6 @@ __all__.extend(['RowChunk', 'RowChunkGeneration', 'RowChunkPlan', 'RowChunkPolic
 __all__.extend(chunked.__all__)
 from .pairField import ChunkedPairField
 __all__.append('ChunkedPairField')
+
+from .chunkedState import rowChunkCheckpointState, restoreRowChunkCheckpointState
+__all__.extend(['rowChunkCheckpointState', 'restoreRowChunkCheckpointState'])

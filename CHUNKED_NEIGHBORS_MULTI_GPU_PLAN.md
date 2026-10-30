@@ -6,7 +6,7 @@ layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
 Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
-physical multi-GPU/Isambard qualification next**, in the paired `chunked-neighbor-planner` workspace,
+local L1 native restart qualified; legacy import next**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -85,6 +85,25 @@ particle/work parity after fixing a tensor-dt-to-Python precision loss in the
 frontend adapter. Timings are diagnostic under ACSPH contention. The canonical
 plan records the exact matrix, observed memory, reproduction/failure evidence,
 API/dependency schedule and physical-device/site/capacity limitations.
+
+## Accepted-step native restart checkpoint (2026-10-30)
+
+`radiusSearch/chunkedState.py` exports/restores a checksummed versioned search
+recipe: frozen query/reference snapshots, domain, counts, generation and ordering
+metadata. Aliases and deterministic row traversal survive changed chunk budgets,
+owner counts and int32-to-int64 local offset configuration. Restore recounts and
+agrees on the complete target plan before allocating only owned J/I. No pair
+array, prefix, communicator or device ordinal is serialized. Precision and
+traversal-version mismatches reject explicitly.
+
+The paired frontend adds explicit accepted-step checkpoint APIs, atomic rank-zero
+HDF5 publication and a runner resume branch for eager driven Monaghan/CRKSPH/
+CompSPH. CPU Gloo and shared-GPU NCCL controls compare fresh stages, fields,
+per-row J/W hashes and full forcing history exactly (existing source-budget
+reduction tolerance retained). Empty owners and recoverable IO failures pass.
+The canonical plan records the full matrix, startup seed/restored-storage overlap,
+source-pinned evidence and API. Legacy flat import and physical-device restart
+remain open; all seven user-approved local steps are ordered in that plan.
 
 ## Integration order (completed history)
 
