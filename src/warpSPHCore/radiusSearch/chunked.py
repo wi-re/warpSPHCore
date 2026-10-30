@@ -14,6 +14,7 @@ import math
 import sys
 
 import torch
+import torch.autograd.forward_ad as fwAD
 import warp as wp
 
 from ..dataTypes import AdjacencyList, DomainDescription, ParticleState
@@ -145,7 +146,7 @@ def _checkInputs(q, r, qh, rh, domain, mode, policy, storeI):
         raise ValueError('Chunked search supports CPU and CUDA tensors.')
     if _DEFERRED_CHECKS[0] is not None or (q.is_cuda and torch.cuda.is_current_stream_capturing()):
         raise NotImplementedError('Chunked search does not support deferred/graph capture.')
-    if any(t.requires_grad for t in (q, r, qh, rh)):
+    if any(t.requires_grad or fwAD.unpack_dual(t).tangent is not None for t in (q, r, qh, rh)):
         raise NotImplementedError('Chunked search AD is not supported.')
     if q.ndim != 2 or r.ndim != 2 or q.shape[1] != r.shape[1] or q.shape[1] not in (2, 3):
         raise ValueError('Query/reference positions must have matching 2D or 3D coordinates.')
@@ -158,7 +159,7 @@ def _checkInputs(q, r, qh, rh, domain, mode, policy, storeI):
         raise ValueError('Chunked search requires explicit domain bounds/periodicity on the particle device.')
     if domain.min.dtype != q.dtype or domain.max.dtype != q.dtype or domain.periodic.dtype != torch.bool:
         raise ValueError('Domain bounds must use particle precision and periodicity must be bool.')
-    if domain.min.requires_grad or domain.max.requires_grad:
+    if any(t.requires_grad or fwAD.unpack_dual(t).tangent is not None for t in (domain.min,domain.max)):
         raise NotImplementedError('Chunked search AD is not supported.')
     validateParticleCounts(len(q), len(r))
     pairBytes = torch.empty((), dtype=get_torch_index_dtype()).element_size() * (1 + storeI)

@@ -380,3 +380,15 @@ def test_nondefault_cuda_stream_orders_grid_counts_collection_and_filter(device)
         expected = filterVerletList_(*args, flatOld, SupportScheme.SuperSymmetric, capacity=None)
     torch.cuda.current_stream(device).wait_stream(stream)
     equalRows(filtered, expected)
+
+
+@pytest.mark.parametrize('field',['positions','supports','domain'])
+def test_forward_dual_search_is_rejected_before_snapshot_detaches_tangent(device,field):
+    import torch.autograd.forward_ad as fwAD
+    q,r,qh,rh,d=sample(device)
+    with fwAD.dual_level():
+        if field=='positions':q=fwAD.make_dual(q,torch.ones_like(q))
+        elif field=='supports':qh=fwAD.make_dual(qh,torch.ones_like(qh))
+        else:d=DomainDescription(fwAD.make_dual(d.min,torch.ones_like(d.min)),d.max,d.periodic,d.dim)
+        with pytest.raises(NotImplementedError,match='AD'):
+            radiusSearchRowChunks_(q,r,qh,rh,d,policy=policy())

@@ -1,7 +1,8 @@
 """Explicit eager c10d coordination for replicated particles and owned CSR rows.
 
 The caller owns process-group initialization, timeout and destruction. No object
-collectives, pair transfers, global communicator or package/runtime changes.
+collectives, global communicator or package/runtime changes. Pair redistribution
+uses explicit bounded owner-to-owner transfers.
 Control handshakes detect differing call order/layout/generation before payload
 collectives. A launcher (e.g. torchrun) must terminate peers if a process dies.
 """
@@ -65,6 +66,7 @@ class RowChunkProcessGroup:
             raise ValueError('Row chunks require Gloo CPU or NCCL CUDA tensors.')
         if self.device.type == 'cuda' and self.device.index != torch.cuda.current_device():
             raise ValueError('Set the current CUDA device explicitly before binding the process group.')
+        self._eager()
         self.rank = dist.get_rank(group)
         self.size = dist.get_world_size(group)
         if self.rank < 0 or self.size < 1:
@@ -93,12 +95,17 @@ class RowChunkProcessGroup:
         """Fixed packing capacity; choose it when constructing the group."""
         return self._particleWorkspaceBytes
 
+    def _eager(self):
+        if self.device.type=='cuda' and torch.cuda.is_current_stream_capturing():
+            raise NotImplementedError('Distributed row chunks cannot run during CUDA graph capture; select eager execution before capture.')
+
     def _event(self, tag, start, payload=0):
         self.payloadBytes += payload
         self.events.append(dict(sequence=self.sequence, tag=tag, payloadBytes=payload,
                                 wallSeconds=time.perf_counter() - start))
 
     def _control(self, tag, metadata=None, error=None):
+        self._eager()
         start = time.perf_counter()
         try:
             encoded = json.dumps((self.sequence, tag, self.replicaChecks, metadata), sort_keys=True,
@@ -142,6 +149,7 @@ class RowChunkProcessGroup:
         The callback must not contain collectives. CUDA asynchronous device
         faults/process death still rely on c10d's timeout and the job launcher.
         """
+        self._eager()
         error, result = None, None
         started = time.perf_counter()
         try:
@@ -158,6 +166,7 @@ class RowChunkProcessGroup:
 
     def _checkedAgree(self,tag,function):
         """One handshake for local validation/allocation AND its JSON contract."""
+        self._eager()
         error,metadata=None,None
         started=time.perf_counter()
         try:

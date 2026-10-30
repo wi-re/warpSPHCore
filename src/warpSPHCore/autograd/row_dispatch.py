@@ -13,6 +13,7 @@ from ..dataTypes import CRKState, GradHState, ParticleState, RenormalizationStat
 from ..radiusSearch.verlet.build import _DEFERRED_CHECKS
 from ..radiusSearch.pairField import ChunkedPairField
 from .launcher import _allocate_output
+from .lanes import neighborLanes
 from .operator_spec import Corrections, ExtraKind, RowRole, ShapeOf, SPHContext
 
 
@@ -171,7 +172,14 @@ def launchRowChunks(spec, ctx, extras, prepared=None):
                    for e in spec.extras if isinstance(extras[e.name], torch.Tensor)}
         outputs = [(out.resolve(ctx, extras)[0], str(out.resolve(ctx, extras)[1]), out.chunkScratch)
                    for out in spec.outputs]
-        return (ctx.adjacency.plan.signature, spec.kernel.key, str(ctx.properties), scalars, tensors, outputs)
+        # Match operator_spec's effective selection, including scalar fallback.
+        # Different reduction trees must not silently mix across owners.
+        kernel,lanes=spec.kernel,1
+        if spec.tiledKernel is not None and ctx.query.positions.is_cuda:
+            lanes=neighborLanes(default=spec.defaultNeighborLanes)
+            if lanes>1:kernel=spec.tiledKernel
+        return (ctx.adjacency.plan.signature, spec.kernel.key, str(ctx.properties), scalars, tensors, outputs,
+                (kernel.key,lanes))
     communication._checkedAgree('operator:contract',validate)
     # Exact mode fingerprints every reference input. Contract mode checks layouts
     # here and retains exact checks at search/accepted/checkpoint boundaries.

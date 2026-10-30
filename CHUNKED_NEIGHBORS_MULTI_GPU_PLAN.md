@@ -6,7 +6,7 @@ layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
 Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 active**, in the paired `chunked-neighbor-planner` workspace,
+local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -265,3 +265,27 @@ checkpoint recovery1→4→5 ranks/int64/empty owners and injected IO controls p
 Full imports pass. The canonical plan has precise matrices, wall/memory limits,
 source-pinned evidence and paired heads. L5 is bounded-locally qualified; L6
 compatibility follows. Physical devices/site/scaling, MPI/ROCm and L7 stay open.
+
+## L6 bounded compatibility checkpoint (2026-10-30)
+
+The frontend now qualifies eager GSPH and InutsukaGSPH through explicit row roles,
+integer global self-pair identity, Gaussian density and all3 prepared Godunov
+operators. The shared startup/launcher/native-checkpoint gate admits5 schemes;
+legacy CSR/COO stays scoped to the original3. Floating Warp ASTs remain equal to
+L5 after integer rowStart normalization, and all16 flat Godunov gradchecks pass.
+
+Core rejects forward AD before detached search snapshots, rejects actual CUDA
+capture before any control callback/collective, and agrees effective kernel/lane
+selection before owned compute. Existing tiled kernels and scalar Godunov fallback
+pass global32-lane controls; different effective settings reject before launch.
+Final matrix:12 rank reports,24 operator configurations each,15 CPU/26 CUDA
+rejected contexts. Five-scheme final-source NCCL launcher/native IO repeats15
+serial jobs with exact field/time/OU parity across2→1 ranks and changed row caps.
+The canonical plan records292 formal passes/245 expected skips, full process/
+solver/offset/FP64 matrices, exact source variants and ignored evidence.
+
+L4–L6 meet their bounded local exits. The maintained support matrix is
+`../warpSPH/docs/chunked_distributed_support.md`. MFM/MFV/PESPH, walls/materials,
+chunked AD/graphs, physical GPUs/site/scaling and large-edge capacity gates remain
+open. L7 and MPI/ROCm builds remain deferred; no shared installs or ACSPH sources
+were changed, and contended single-GPU timings remain diagnostic.
