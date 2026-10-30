@@ -28,3 +28,11 @@ __all__.extend(compactHash.__all__)
 
 from .verlet import *
 __all__.extend(verlet.__all__)
+
+
+# Opt-in storage APIs; existing flat search remains the default.
+from .rowChunks import RowChunk, RowChunkGeneration, RowChunkPlan, RowChunkPolicy, buildRowChunkPlan
+from . import chunked
+from .chunked import *
+__all__.extend(['RowChunk', 'RowChunkGeneration', 'RowChunkPlan', 'RowChunkPolicy', 'buildRowChunkPlan'])
+__all__.extend(chunked.__all__)

@@ -5,17 +5,20 @@ This sibling link assumes the documented paired checkout layout. In another
 layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
-Status, 2026-10-30: **Phase 1 CPU reference planner qualified** in the paired
-`chunked-neighbor-planner` workspace, branch `codex/chunked-neighbor-planner`.
-Integrated core base is `04e126e` (version0.6.3); frontend base is `8b58008`.
-`radiusSearch/rowChunks.py` implements immutable generation/ownership metadata,
-capacity-bounded whole-row planning, int64 offset materialization and deterministic
-signatures. `tests/radiusSearch/test_rowChunks.py` has 59 CPU checks, including an
-exhaustive 1024-layout check and metadata-only prefixes exceeding INT_MAX.
-The six focused planner/search suites pass 160 checks with 89 skips under int64
-and 159 with 90 skips under the default int32 offsets. No CUDA execution, chunk
-collection or production solver dispatch is qualified by these CPU results.
-The canonical frontend plan records commands, evidence and the next Phase2 step.
+Status, 2026-10-30: **Phase 2 standalone single-device construction/lifecycle
+qualified on CPU and CUDA**, in the paired `chunked-neighbor-planner` workspace,
+branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
+(version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
+`radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
+direct filtering across changed chunk boundaries, generation/configuration
+invalidation and logical memory accounting. It reuses the existing numerical
+count/collect/filter kernels and adds only an integer global-I fill kernel.
+Full core neighbour CPU suites pass 487 checks under int32 offsets and 488 under
+int64; 186 distinct CUDA checks pass per offset configuration. Frontend focused
+CPU compatibility passes 73 checks. Runtime imports pass; the static scanner's
+pre-existing wp_alpha.computeAlpha crash also reproduces against base 04e126e.
+Commands, expected skips, evidence and limitations are in the canonical plan.
+Native operators/compatible work and physical multi-GPU execution remain open.
 
 ## Integration order (completed history)
 
@@ -53,21 +56,24 @@ The canonical frontend plan records commands, evidence and the next Phase2 step.
 
 ## First deliverables and source anchors
 
-Start with metadata-only partition tests and tiny forced chunks on one device.
-Then direct chunk construction/lifecycle, shared operators and native CRK work;
-physical two-/four-GPU execution follows single-device parity. Preserve all fresh
+Metadata planning and direct single-device construction/lifecycle are qualified.
+Next: shared support/density/correction/gradient operators and native compatible
+work, with explicit mapping of every query/reference field. Physical two-/four-GPU
+execution follows solver parity. Preserve all fresh
 stage/integrator/model/forcing choices. Flat APIs remain available; unsupported
 large AD/graph/wall paths fail clearly instead of making a monolithic allocation.
 
 Anchors under`src/warpSPHCore/`:
-`radiusSearch/csr.py`, `radiusSearch/compactHash/{search,wp_collectNeighbors}.py`,
+`radiusSearch/{rowChunks,chunked,csr}.py`,
+`radiusSearch/compactHash/{search,wp_collectNeighbors}.py`,
 `radiusSearch/verlet/{build,filter}.py`, `dataTypes/adjacency_t.py`,
 `autograd/{arg_extract,prepared,operator_spec,lanes}.py`, `util/stateBundle.py`,
 `mfm/{wp_closure,warpBackend}.py` and`ADJACENCY_CAPACITY_PLAN.md` at repository root.
 Existing`collection='split'` separates J collection and I fill; it is not the new
 whole-row chunk backend. Existing tiled lane kernels are not edge-storage tiles.
 
-Extend count/order/reuse/stream tests in`tests/radiusSearch/`, especially
+Chunk-specific suites: `tests/radiusSearch/test_rowChunks.py` and
+`tests/radiusSearch/test_chunkedSearch.py`. Existing compatibility suites include
 `test_csrOnly.py`, `test_splitCollection.py`, `test_indexDtypes.py`,
 `test_queryOrder.py` and`test_verletValidity.py`. Select int64 offsets before import
 with`warpSPHCore_OFFSET_DTYPE=int64`; keep particle IDs/counts int32. The canonical
