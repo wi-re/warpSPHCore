@@ -505,6 +505,14 @@ def launchOperator(
     engine -- no behaviour differs from an equivalent ``warpWrapper2`` call,
     only how a caller arrives at the arguments.
     """
+    # Lazy imports avoid the radius-search/autograd initialization cycle.
+    from ..radiusSearch.chunked import ChunkedAdjacency
+    from ..radiusSearch.pairField import ChunkedPairField
+    chunked = isinstance(ctx.adjacency, ChunkedAdjacency)
+    if chunked:
+        from .row_dispatch import launchRowChunks
+        return launchRowChunks(spec, ctx, extras)
+
     if ctx.mode is ExecutionMode.FORWARD:
         raise NotImplementedError(
             "ExecutionMode.FORWARD is not implemented (warpier_fields.md "
@@ -512,10 +520,6 @@ def launchOperator(
             "same as structFor/getStateBundle reject it internally."
         )
 
-    # Lazy imports avoid the radius-search/autograd initialization cycle.
-    from ..radiusSearch.chunked import ChunkedAdjacency
-    from ..radiusSearch.pairField import ChunkedPairField
-    chunked = isinstance(ctx.adjacency, ChunkedAdjacency)
     declared = {e.name: e for e in spec.extras}
     missing = [name for name in declared if name not in extras]
     if missing:
@@ -532,10 +536,6 @@ def launchOperator(
             raise TypeError(f"launchOperator: extra {name!r} requires a tensor or an owned chunk pair field")
         if spec_extra.kind is ExtraKind.SCALAR and is_tensor:
             raise TypeError(f"launchOperator: extra {name!r} declared SCALAR, got a torch.Tensor")
-
-    if chunked:
-        from .row_dispatch import launchRowChunks
-        return launchRowChunks(spec, ctx, extras)
 
     additionalArguments = tuple(extras[e.name] for e in spec.extras)
 

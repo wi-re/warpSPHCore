@@ -53,8 +53,10 @@ def _particle(p, rows, device, name, interval=None):
 def validateContext(ctx):
     adjacency = ctx.adjacency
     adjacency.assertStorageValid()
-    if adjacency.plan.numOwners != 1:
-        raise NotImplementedError('Row-chunk particle outputs require a complete single-owner list; distributed exchange is not implemented.')
+    if adjacency.communication is not None:
+        adjacency.communication.validateAdjacency(adjacency)
+    elif adjacency.plan.numOwners != 1:
+        raise NotImplementedError('Partial row-chunk outputs require a complete single-owner list or an explicit distributed process group.')
     if ctx.mode in (ExecutionMode.FORWARD, ExecutionMode.REVERSE):
         raise NotImplementedError('Row-chunk operators support eager execution without AD only.')
     device = ctx.query.positions.device
@@ -156,7 +158,41 @@ def _validateSpec(spec, ctx, extras):
 
 
 def launchRowChunks(spec, ctx, extras, prepared=None):
-    """Run each row once and copy only its particle outputs to the full state."""
+    """Complete owned rows, then replicate particle results before dependent reads."""
+    communication = ctx.adjacency.communication
+    if communication is None:
+        return _launchLocal(spec, ctx, extras, prepared)
+    def validate():
+        validateContext(ctx)
+        _validateSpec(spec, ctx, extras)
+        scalars = {e.name: str(extras[e.name]) for e in spec.extras
+                   if e.kind not in (ExtraKind.TENSOR, ExtraKind.CHUNK_TENSOR)}
+        tensors = {e.name: (list(extras[e.name].shape), str(extras[e.name].dtype))
+                   for e in spec.extras if isinstance(extras[e.name], torch.Tensor)}
+        outputs = [(out.resolve(ctx, extras)[0], str(out.resolve(ctx, extras)[1]), out.chunkScratch)
+                   for out in spec.outputs]
+        return (ctx.adjacency.plan.signature, spec.kernel.key, str(ctx.properties), scalars, tensors, outputs)
+    metadata = communication.localPhase('operator:validate', validate)
+    communication.agree('operator:contract', metadata)
+    # This eager proof-of-concept checks replicated inputs exactly. In particular
+    # a divergent reference correction cannot be hidden by exchanging a mixture
+    # of owner outputs. Owned pair buffers and unread scalar dummies are excluded.
+    reference = ctx.query if ctx.reference is None else ctx.reference
+    inputs = {str(i): t for i, t in enumerate(_tensors((ctx.query, reference, ctx.domain, ctx.corrections)))}
+    for e in spec.extras:
+        role = e.resolveRowRole(ctx, extras)
+        if role in (RowRole.QUERY, RowRole.REFERENCE) and isinstance(extras[e.name], torch.Tensor):
+            inputs['extra:' + e.name] = extras[e.name]
+    communication.assertReplicated('operator:replicated-inputs', inputs)
+    result = communication.localPhase('operator:compute', lambda: _launchLocal(spec, ctx, extras, prepared))
+    outputs = (result,) if len(spec.outputs) == 1 else result
+    communication.exchangeParticleOutputs(ctx.adjacency,
+        tuple(t for o, t in zip(spec.outputs, outputs) if not o.chunkScratch), tag='operator:' + spec.kernel.key)
+    return result
+
+
+def _launchLocal(spec, ctx, extras, prepared=None):
+    """Run local chunks only; unowned particle rows are unread until exchange."""
     from .operator_spec import launchOperator
     validateContext(ctx)
     roles = _validateSpec(spec, ctx, extras)

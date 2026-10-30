@@ -5,8 +5,8 @@ This sibling link assumes the documented paired checkout layout. In another
 layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
-Status, 2026-10-30: **Phase 3 bounded native CRKSPH/CompSPH compatible work qualified;
-Phase 4 distributed scheduling next**, in the paired `chunked-neighbor-planner` workspace,
+Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
+physical multi-GPU/Isambard qualification next**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -62,8 +62,29 @@ total resident work is unchanged apart from padding; kernel output scratch is
 bounded while particle outputs remain O(N). See the canonical plan for measured
 storage/timing, exact qualifications and limitations. Native special controls,
 AD/graphs/walls/materials, checkpoint/restart and partial-owner output exchange
-remain gated. Next implement the NCCL/Gloo replicated-state process backend;
+remain gated. The NCCL/Gloo process checkpoint below is qualified locally;
 physical multi-GPU and large-edge/capacity gates remain open.
+
+## Replicated-state process checkpoint (2026-10-30)
+
+`warpSPHCore.distributed.RowChunkProcessGroup` explicitly binds an existing c10d
+NCCL/CUDA or Gloo/CPU group. Distributed search counts only the local counting
+range, assembles replicated int32 counts/int64 prefix, validates configuration/
+generation/grid/partition agreement, then allocates/collects only owned chunks.
+Resident validity/rebuild is coordinated. Row dispatch and prepared operators
+exchange disjoint particle outputs before dependent reads, checking reference
+inputs and operation/layout contracts. Pair fields stay owned; distributed
+filtering/migration is still gated. There is no implicit/default process group.
+
+Separate CPU processes (two/three ranks), empty/uneven owners and deliberate
+contracts/fatal-peer tests pass. Two real NCCL ranks share one GPU through the
+isolated 2.32.3 runtime; bounded eager frontend Monaghan/native CRKSPH/CompSPH
+solver stages, owned work and forced replay match serial references. The longer
+16-step native tests cross OU knots and retain exact simulated time/history/
+particle/work parity after fixing a tensor-dt-to-Python precision loss in the
+frontend adapter. Timings are diagnostic under ACSPH contention. The canonical
+plan records the exact matrix, observed memory, reproduction/failure evidence,
+API/dependency schedule and physical-device/site/capacity limitations.
 
 ## Integration order (completed history)
 

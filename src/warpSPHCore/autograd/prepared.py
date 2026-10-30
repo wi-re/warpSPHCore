@@ -49,7 +49,10 @@ class PreparedLauncher:
         self._chunks = None
         if isinstance(ctx.adjacency, ChunkedAdjacency):
             from .row_dispatch import chunkContexts, validateContext
-            validateContext(ctx)
+            if ctx.adjacency.communication is None:
+                validateContext(ctx)
+            else:
+                ctx.adjacency.communication.localPhase('prepared:validate', lambda: validateContext(ctx))
             self._adjacency = ctx.adjacency
             self._chunks = tuple((interval, PreparedLauncher(local)) for interval, local in chunkContexts(ctx))
             return

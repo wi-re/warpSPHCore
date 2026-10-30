@@ -116,6 +116,17 @@ class RowChunkPlan:
     def totalEdges(self) -> int:
         return self.prefix[-1]
 
+    @property
+    def ownerRanges(self) -> tuple[tuple[int, int], ...]:
+        """Contiguous particle ownership derived from compute chunks, not counts."""
+        cursor, ranges = 0, []
+        for owner in range(self.numOwners):
+            owned = tuple(c for c in self.chunks if c.owner == owner)
+            stop = owned[-1].rowStop if owned else cursor
+            ranges.append((cursor, stop))
+            cursor = stop
+        return tuple(ranges)
+
     def globalOffsets(self) -> torch.Tensor:
         """Fresh CPU int64 P[N+1], independent of the flat offset default."""
         return torch.tensor(self.prefix, dtype=torch.int64)
