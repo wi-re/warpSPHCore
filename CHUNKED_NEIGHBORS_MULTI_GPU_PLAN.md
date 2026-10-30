@@ -5,14 +5,19 @@ This sibling link assumes the documented paired checkout layout. In another
 layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
-Status, 2026-10-30: core feature integrated into shared `main`; the user has
-authorized integration after frontend ACSPH checkpoint `3d80e5e`. The canonical
-frontend plan records merged heads, validation and implementation workspace.
-No chunked backend or distributed simulation has been implemented.
-Core baseline is`3c56e2f` on`codex/compressible-csr-only` (version0.6.3), based on
-shared`main` at`98081c1`. This handoff adds documentation only.
+Status, 2026-10-30: **Phase 1 CPU reference planner qualified** in the paired
+`chunked-neighbor-planner` workspace, branch `codex/chunked-neighbor-planner`.
+Integrated core base is `04e126e` (version0.6.3); frontend base is `8b58008`.
+`radiusSearch/rowChunks.py` implements immutable generation/ownership metadata,
+capacity-bounded whole-row planning, int64 offset materialization and deterministic
+signatures. `tests/radiusSearch/test_rowChunks.py` has 59 CPU checks, including an
+exhaustive 1024-layout check and metadata-only prefixes exceeding INT_MAX.
+The six focused planner/search suites pass 160 checks with 89 skips under int64
+and 159 with 90 skips under the default int32 offsets. No CUDA execution, chunk
+collection or production solver dispatch is qualified by these CPU results.
+The canonical frontend plan records commands, evidence and the next Phase2 step.
 
-## Integration order
+## Integration order (completed history)
 
 1. Preserve the current frontend ACSPH work until its owner reaches a committed,
    mergeable checkpoint; inspect fresh status in both repositories.
