@@ -10,6 +10,8 @@ from hashlib import sha256
 import json
 import time
 
+import numpy as np
+
 import torch
 import torch.distributed as dist
 import torch.autograd.forward_ad as fwAD
@@ -30,9 +32,12 @@ class RowChunkProcessGroup:
     only O(N) particle storage is replicated. Timings include control/host waits
     and are diagnostics, not transport benchmarks.
     """
-    def __init__(self, group, device):
+    def __init__(self, group, device, *, replicaChecks='exact'):
         if not dist.is_initialized():
             raise RuntimeError('Initialize torch.distributed with a finite timeout first.')
+        if replicaChecks not in ('exact','contract'):
+            raise ValueError('replicaChecks must be exact or contract.')
+        self.replicaChecks = replicaChecks
         self.group = group
         self.device = torch.device(device)
         if self.device.type == 'cuda' and self.device.index is None:
@@ -50,6 +55,20 @@ class RowChunkProcessGroup:
         self.events = deque(maxlen=512)
         self.payloadBytes = 0
         self.controlBytes = 0
+        self.replicaHashBytes = 0
+        self.replicaHashDeviceBytes = 0
+        self.replicaFields = dict(exact=0,contract=0)
+        # A control finishes its host read before returning, so these buffers
+        # can be reused even when the next call selects another CUDA stream.
+        self._controlSend = torch.empty(512,dtype=torch.uint8,device=self.device)
+        self._controlReceive = torch.empty((self.size,512),dtype=torch.uint8,device=self.device)
+        self._controlPeers = list(self._controlReceive.unbind(0))
+        self._hostSend = (torch.empty(512,dtype=torch.uint8,pin_memory=True)
+                          if self.device.type=='cuda' else self._controlSend)
+        self._hostReceive = (torch.empty((self.size,512),dtype=torch.uint8,pin_memory=True)
+                             if self.device.type=='cuda' else self._controlReceive)
+        self._hostSendArray = self._hostSend.numpy()
+        self._hostReceiveArray = self._hostReceive.numpy()
 
     def _event(self, tag, start, payload=0):
         self.payloadBytes += payload
@@ -59,7 +78,7 @@ class RowChunkProcessGroup:
     def _control(self, tag, metadata=None, error=None):
         start = time.perf_counter()
         try:
-            encoded = json.dumps((self.sequence, tag, metadata), sort_keys=True,
+            encoded = json.dumps((self.sequence, tag, self.replicaChecks, metadata), sort_keys=True,
                                  separators=(',', ':'), allow_nan=False).encode()
         except Exception as exc:
             encoded = b'invalid control metadata'
@@ -68,13 +87,18 @@ class RowChunkProcessGroup:
         # Fixed-size diagnostics let peers report a local validation/kernel
         # failure without entering a differently shaped payload collective.
         message = b'' if error is None else (type(error).__name__ + ': ' + str(error)).encode()[:479]
-        local = torch.tensor(list(digest + message + bytes(480-len(message))),
-                             dtype=torch.uint8, device=self.device)
-        peers = [torch.empty_like(local) for _ in range(self.size)]
-        dist.all_gather(peers, local, group=self.group)
+        record = digest + message + bytes(480-len(message))
+        self._hostSendArray[:] = np.frombuffer(record,dtype=np.uint8)
+        if self.device.type=='cuda':
+            self._controlSend.copy_(self._hostSend,non_blocking=True)
+        dist.all_gather(self._controlPeers,self._controlSend,group=self.group)
+        if self.device.type=='cuda':
+            # One blocking host transfer for the complete gathered packet,
+            # instead of one new device->host allocation/copy per peer.
+            self._hostReceive.copy_(self._controlReceive)
         self.sequence += 1
-        self.controlBytes += local.numel() * self.size
-        records = [bytes(p.cpu().tolist()) for p in peers]
+        self.controlBytes += 512 * self.size
+        records = [row.tobytes() for row in self._hostReceiveArray]
         failures = [(rank, p[32:].split(b'\0', 1)[0].decode(errors='replace'))
                     for rank, p in enumerate(records) if p[32] != 0]
         self._event(tag, start)
@@ -109,6 +133,21 @@ class RowChunkProcessGroup:
                 self.events[-1]['hostLocalSeconds'] = hostSeconds
         return result
 
+    def _checkedAgree(self,tag,function):
+        """One handshake for local validation/allocation AND its JSON contract."""
+        error,metadata=None,None
+        started=time.perf_counter()
+        try:
+            metadata=function()
+        except Exception as exc:
+            error=exc
+        hostSeconds=time.perf_counter()-started
+        try:
+            self._control(tag,metadata,error)
+        finally:
+            if self.events:self.events[-1]['hostLocalSeconds']=hostSeconds
+        return metadata
+
     def _tensor(self, tensor):
         if not isinstance(tensor, torch.Tensor) or tensor.device != self.device:
             raise ValueError(f'Collective tensor must be on {self.device}.')
@@ -121,58 +160,77 @@ class RowChunkProcessGroup:
         if tensor.dtype not in (torch.float32, torch.float64, torch.int32, torch.int64, torch.uint8):
             raise TypeError('Unsupported row-chunk collective dtype.')
 
-    def assertReplicated(self, tag, tensors):
-        """Exact rebuild/debug agreement on ordered reference fields (O(N))."""
+    def assertReplicated(self, tag, tensors, *, exact=False):
+        """Check ordered replica layouts; hash contents in exact/forced checks.
+
+        Contract mode assumes the dependency exchanges maintain replica values.
+        Search, accepted-state and checkpoint boundaries explicitly force exact
+        checks. Both modes retain layout/device/AD and collective-order checks.
+        """
         def fingerprints():
-            result = []
+            if type(exact) is not bool:
+                raise TypeError('exact must be a bool.')
+            full = exact or self.replicaChecks=='exact'
+            result = [('exact',full)]
             for name, tensor in tensors.items():
                 # bool domain fields are valid replica metadata, not payloads.
                 if not isinstance(tensor, torch.Tensor) or tensor.device != self.device:
                     raise ValueError(f'Replicated field {name} must be on {self.device}.')
                 if tensor.requires_grad or fwAD.unpack_dual(tensor).tangent is not None:
                     raise NotImplementedError('Distributed replicas do not support AD.')
-                raw = tensor.detach().contiguous().cpu().reshape(-1).view(torch.uint8).numpy().tobytes()
-                result.append((name, list(tensor.shape), str(tensor.dtype), sha256(raw).hexdigest()))
+                digest=None
+                if full:
+                    raw=tensor.detach().contiguous().cpu().reshape(-1).view(torch.uint8).numpy().tobytes()
+                    digest=sha256(raw).hexdigest()
+                    self.replicaHashBytes+=len(raw)
+                    if tensor.is_cuda:self.replicaHashDeviceBytes+=len(raw)
+                self.replicaFields['exact' if full else 'contract']+=1
+                result.append((name, list(tensor.shape), str(tensor.dtype), digest))
             return result
-        metadata = self.localPhase(tag + ':validate', fingerprints)
-        self.agree(tag, metadata)
+        self._checkedAgree(tag,fingerprints)
 
-    def exchangeRows(self, tensor, ranges, *, tag, signature):
-        """Replicate uniquely owned particle rows in place; never sum replicas."""
-        def validate():
-            self._tensor(tensor)
-            if tensor.ndim < 1 or len(ranges) != self.size:
-                raise ValueError('One particle-row interval is required per rank.')
-            cursor = 0
-            for a, b in ranges:
-                if type(a) is not int or type(b) is not int or a != cursor or b < a:
-                    raise ValueError('Owner intervals must form an ordered disjoint partition.')
-                cursor = b
-            if cursor != len(tensor):
-                raise ValueError('Owner intervals must cover all particle rows.')
-        self.localPhase(tag + ':validate', validate)
-        self.agree(tag, (signature, list(tensor.shape), str(tensor.dtype), ranges))
-        start = time.perf_counter()
-        for owner, (a, b) in enumerate(ranges):
-            if b > a and tensor[a:b].numel():
-                source = dist.get_global_rank(self.group, owner) if self.group is not None else owner
-                dist.broadcast(tensor[a:b], src=source, group=self.group)
-        self._event(tag + ':rows', start, tensor.numel() * tensor.element_size())
+    def _rowLayout(self,tensor,ranges):
+        self._tensor(tensor)
+        if tensor.ndim<1 or len(ranges)!=self.size:
+            raise ValueError('One particle-row interval is required per rank.')
+        cursor=0
+        for a,b in ranges:
+            if type(a) is not int or type(b) is not int or a!=cursor or b<a:
+                raise ValueError('Owner intervals must form an ordered disjoint partition.')
+            cursor=b
+        if cursor!=len(tensor):
+            raise ValueError('Owner intervals must cover all particle rows.')
+        return (list(tensor.shape),str(tensor.dtype))
+
+    def _broadcastRows(self,tensor,ranges,tag):
+        start=time.perf_counter()
+        for owner,(a,b) in enumerate(ranges):
+            if b>a and tensor[a:b].numel():
+                source=dist.get_global_rank(self.group,owner) if self.group is not None else owner
+                dist.broadcast(tensor[a:b],src=source,group=self.group)
+        self._event(tag+':rows',start,tensor.numel()*tensor.element_size())
         return tensor
 
-    def reduceScalar(self, value, *, operation, tag):
+    def exchangeRows(self,tensor,ranges,*,tag,signature):
+        """Replicate uniquely owned particle rows in place; never sum replicas."""
+        self._checkedAgree(tag,lambda:(signature,self._rowLayout(tensor,ranges),ranges))
+        return self._broadcastRows(tensor,ranges,tag)
+
+    def reduceScalar(self,value,*,operation,tag):
         """MIN timestep, MAX flag or SUM uniquely owned local contributions."""
-        def validate():
+        out=None
+        def prepare():
+            nonlocal out
             self._tensor(value)
-            if value.ndim != 0 or operation not in ('min', 'max', 'sum'):
+            if value.ndim!=0 or operation not in ('min','max','sum'):
                 raise ValueError('Scalar reduction requires min/max/sum and a scalar tensor.')
-        self.localPhase(tag + ':validate', validate)
-        self.agree(tag, (operation, str(value.dtype)))
-        out = self.localPhase(tag + ':allocate', value.clone)
-        start = time.perf_counter()
-        dist.all_reduce(out, op={'min': dist.ReduceOp.MIN, 'max': dist.ReduceOp.MAX,
-                                'sum': dist.ReduceOp.SUM}[operation], group=self.group)
-        self._event(tag + ':reduce', start, out.element_size())
+            out=value.clone()
+            return operation,str(value.dtype)
+        self._checkedAgree(tag,prepare)
+        start=time.perf_counter()
+        dist.all_reduce(out,op={'min':dist.ReduceOp.MIN,'max':dist.ReduceOp.MAX,
+                               'sum':dist.ReduceOp.SUM}[operation],group=self.group)
+        self._event(tag+':reduce',start,out.element_size())
         return out
 
     def any(self, flag, *, tag):
@@ -189,11 +247,15 @@ class RowChunkProcessGroup:
             raise ValueError('Rank must hold exactly its planned chunks, including zero-edge rows.')
 
     def exchangeParticleOutputs(self, adjacency, tensors, *, tag):
-        self.localPhase(tag + ':adjacency', lambda: self.validateAdjacency(adjacency))
-        self.agree(tag + ':outputs', (adjacency.plan.signature, len(tensors)))
-        for index, tensor in enumerate(tensors):
-            self.exchangeRows(tensor, adjacency.plan.ownerRanges, tag=f'{tag}:{index}',
-                              signature=adjacency.plan.signature)
+        def validate():
+            self.validateAdjacency(adjacency)
+            return (adjacency.plan.signature,adjacency.plan.ownerRanges,
+                    [self._rowLayout(t,adjacency.plan.ownerRanges) for t in tensors])
+        # All outputs of this operator share a dependency boundary. Validate
+        # the complete ordered batch before any payload; preserve broadcasts.
+        self._checkedAgree(tag+':outputs',validate)
+        for index,tensor in enumerate(tensors):
+            self._broadcastRows(tensor,adjacency.plan.ownerRanges,f'{tag}:{index}')
 
     def sumOwned(self, tensor, adjacency, *, tag):
         def local():
@@ -208,5 +270,9 @@ class RowChunkProcessGroup:
 
     def summary(self):
         return dict(backend=self.backend, rank=self.rank, ranks=self.size, device=str(self.device),
-                    controls=self.sequence, logicalPayloadBytes=self.payloadBytes,
-                    controlReceiveBytes=self.controlBytes, recentEvents=list(self.events))
+                    replicaChecks=self.replicaChecks,controls=self.sequence,logicalPayloadBytes=self.payloadBytes,
+                    controlReceiveBytes=self.controlBytes,controlBufferAllocations=4 if self.device.type=='cuda' else 2,
+                    controlBufferBytes=512*(self.size+1)*(2 if self.device.type=='cuda' else 1),
+                    controlHostReadbacks=self.sequence if self.device.type=='cuda' else 0,
+                    replicaHashBytes=self.replicaHashBytes,replicaHashDeviceBytes=self.replicaHashDeviceBytes,
+                    replicaFields=dict(self.replicaFields),recentEvents=list(self.events))

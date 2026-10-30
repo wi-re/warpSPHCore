@@ -264,7 +264,7 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
         communication.agree('search:configuration', (config, generationNumber, expectedSignature))
     q, r, qh, rh, domain = local('search:snapshots', lambda: _snapshots(q, r, qh, rh, domain))
     if communication is not None:
-        communication.assertReplicated('search:replicas', dict(q=q, r=r, qh=qh, rh=rh))
+        communication.assertReplicated('search:replicas', dict(q=q, r=r, qh=qh, rh=rh),exact=True)
     counts = local('search:count-allocation', lambda: torch.zeros(len(q), dtype=torch.int32, device=q.device))
     def count():
         grid, scratch = None, 0
@@ -296,7 +296,7 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
         communication.exchangeRows(counts, _balancedRanges(len(q), numOwners),
                                    tag='search:counts', signature=config)
         if grid is not None:
-            communication.assertReplicated('search:grid-order', dict(sortIndex=grid.sortIndex))
+            communication.assertReplicated('search:grid-order', dict(sortIndex=grid.sortIndex),exact=True)
     plan, prefix = local('search:plan', lambda: _plan(counts, generationNumber, config, policy, len(r), numOwners, expectedSignature))
     if communication is not None:
         communication.agree('search:partition', plan.signature)

@@ -172,11 +172,10 @@ def launchRowChunks(spec, ctx, extras, prepared=None):
         outputs = [(out.resolve(ctx, extras)[0], str(out.resolve(ctx, extras)[1]), out.chunkScratch)
                    for out in spec.outputs]
         return (ctx.adjacency.plan.signature, spec.kernel.key, str(ctx.properties), scalars, tensors, outputs)
-    metadata = communication.localPhase('operator:validate', validate)
-    communication.agree('operator:contract', metadata)
-    # This eager proof-of-concept checks replicated inputs exactly. In particular
-    # a divergent reference correction cannot be hidden by exchanging a mixture
-    # of owner outputs. Owned pair buffers and unread scalar dummies are excluded.
+    communication._checkedAgree('operator:contract',validate)
+    # Exact mode fingerprints every reference input. Contract mode checks layouts
+    # here and retains exact checks at search/accepted/checkpoint boundaries.
+    # Owned pair buffers and unread scalar dummies are excluded.
     reference = ctx.query if ctx.reference is None else ctx.reference
     inputs = {str(i): t for i, t in enumerate(_tensors((ctx.query, reference, ctx.domain, ctx.corrections)))}
     for e in spec.extras:

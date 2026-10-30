@@ -10,11 +10,12 @@ import torch.distributed as dist
 
 @pytest.mark.skipif(not dist.is_gloo_available(), reason='Gloo required')
 @pytest.mark.parametrize('ranks', [2, 3])
-def test_process_owned_counts_operators_lifecycle_and_errors(tmp_path, ranks):
+@pytest.mark.parametrize('checks',['exact','contract'])
+def test_process_owned_counts_operators_lifecycle_and_errors(tmp_path, ranks,checks):
     worker = Path(__file__).with_name('_rowChunkWorker.py')
     env = dict(os.environ, CUDA_VISIBLE_DEVICES='', OMP_NUM_THREADS='2', PYTHONDONTWRITEBYTECODE='1')
     cmd = [sys.executable, '-m', 'torch.distributed.run', '--standalone', f'--nproc-per-node={ranks}',
-           str(worker), '--device', 'cpu', '--output', str(tmp_path)]
+           str(worker),'--replica-checks',checks,'--device','cpu','--output',str(tmp_path)]
     completed = subprocess.run(cmd, env=env, text=True, stdout=subprocess.PIPE,
                                stderr=subprocess.STDOUT, timeout=180)
     assert completed.returncode == 0, completed.stdout

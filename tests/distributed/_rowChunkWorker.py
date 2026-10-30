@@ -181,13 +181,84 @@ def failures(comm):
     # Divergent reference data must fail BEFORE outputs can hide the discrepancy
     # by broadcasting a mixture of owner results.
     q.masses[0] += comm.rank*.01
-    rejected(lambda: warpOperation(q, props, domain, adjacency=adj, referenceParticles=r), 'disagree')
+    if comm.replicaChecks=='exact':
+        rejected(lambda: warpOperation(q, props, domain, adjacency=adj, referenceParticles=r), 'disagree')
+    else:
+        rejected(lambda:comm.assertReplicated('test:accepted-boundary',dict(masses=q.masses),exact=True),'disagree')
     print(f'[distributed core rank {comm.rank}] coordinated failure checks: passed', flush=True)
     return 8
 
 
+
+def protocolAudit(comm):
+    """Check whole-batch validation, forced exact checks and cached-control reuse."""
+    cached=hasattr(comm,'_controlSend')
+    addresses=None if not cached else tuple(t.data_ptr() for t in
+        (comm._controlSend,comm._controlReceive,comm._hostSend,comm._hostReceive))
+    factories={name:getattr(torch,name) for name in ('empty','empty_like','tensor')}
+    calls=[]
+    def tracked(name,function):
+        def create(*a,**kw):
+            calls.append(name)
+            return function(*a,**kw)
+        return create
+    for name,function in factories.items():setattr(torch,name,tracked(name,function))
+    try:
+        for index in range(12):comm.agree('test:cached-control',index)
+    finally:
+        for name,function in factories.items():setattr(torch,name,function)
+    if cached:assert not calls,calls
+    def rejected(function,text):
+        try:function()
+        except DistributedContractError as exc:assert text in str(exc),str(exc)
+        else:raise AssertionError('expected coordinated rejection: '+text)
+    value=torch.arange(5,dtype=torch.float32,device=comm.device)+comm.rank
+    if comm.replicaChecks=='contract':
+        before=comm.replicaHashBytes
+        comm.assertReplicated('test:layout-only',dict(value=value))
+        assert comm.replicaHashBytes==before
+    rejected(lambda:comm.assertReplicated('test:forced-exact',dict(value=value),exact=True),'disagree')
+    mode=comm.replicaChecks
+    comm.replicaChecks='exact' if comm.rank==0 else 'contract'
+    try:rejected(lambda:comm.agree('test:mismatched-policy',None),'disagree')
+    finally:comm.replicaChecks=mode
+    # An error message must not survive in a reused packet on the next call.
+    comm.agree('test:after-policy-failure',True)
+    rejected(lambda:comm.reduceScalar(value,operation='min',tag='test:bad-scalar'),'Scalar reduction')
+    q,r,domain=sample(comm.device,nq=5)
+    adj=radiusSearchRowChunks(q,domain,policy=RowChunkPolicy(edgeBudget=80,maxRows=2),communication=comm)
+    a,b=adj.plan.ownerRanges[comm.rank]
+    expected=torch.arange(10,dtype=torch.float32,device=comm.device).reshape(5,2)
+    output=expected.clone()
+    other=expected.long().clone()
+    output[:a]=-999;output[b:]=-999;other[:a]=-999;other[b:]=-999
+    before=comm.sequence
+    comm.exchangeParticleOutputs(adj,(output,other),tag='test:batch-outputs')
+    if cached:assert comm.sequence-before==1
+    equal(output,expected);equal(other,expected.long())
+    broadcast=dist.broadcast
+    def forbidden(*a,**kw):raise AssertionError('invalid batch entered payload broadcast')
+    dist.broadcast=forbidden
+    try:
+        bad=other if comm.rank==0 else other[:2]
+        rejected(lambda:comm.exchangeParticleOutputs(adj,(output,bad),tag='test:bad-last-output'),'cover all')
+    finally:dist.broadcast=broadcast
+    comm.agree('test:after-batch-failure',True)
+    if cached and comm.device.type=='cuda':
+        streams=[torch.cuda.Stream(device=comm.device) for _ in range(2)]
+        for index in range(12):
+            with torch.cuda.stream(streams[index%2]):
+                comm.agree('test:control-stream-switch',index)
+    if cached:
+        assert addresses==tuple(t.data_ptr() for t in
+            (comm._controlSend,comm._controlReceive,comm._hostSend,comm._hostReceive))
+    return dict(cachedControlBuffers=cached,explicitTensorFactoriesFor12Controls=len(calls),
+                coordinatedFailures=4,wholeBatchValidation=True)
+
+
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--replica-checks',choices=('exact','contract'),default='exact')
     parser.add_argument('--device', default='cpu')
     parser.add_argument('--output')
     parser.add_argument('--die-rank', type=int)
@@ -195,7 +266,7 @@ def main():
     if args.device.startswith('cuda'):
         torch.cuda.set_device(torch.device(args.device))
     dist.init_process_group('nccl' if args.device.startswith('cuda') else 'gloo', timeout=timedelta(seconds=30))
-    comm = RowChunkProcessGroup(dist.group.WORLD, args.device)
+    comm = RowChunkProcessGroup(dist.group.WORLD,args.device,replicaChecks=args.replica_checks)
     wp.init()
     setNeighborLanes(1)
     try:
@@ -210,9 +281,10 @@ def main():
         with torch.cuda.stream(stream) if stream is not None else contextlib.nullcontext():
             checks = correctness(comm)
             errors = failures(comm)
+            protocol=protocolAudit(comm)
         if stream is not None:
             stream.synchronize()
-        summary = dict(status='passed', pid=os.getpid(), checks=checks, coordinatedFailures=errors,
+        summary = dict(status='passed', pid=os.getpid(), checks=checks, coordinatedFailures=errors,protocol=protocol,
                        **comm.summary())
         if comm.device.type == 'cuda':
             import ctypes

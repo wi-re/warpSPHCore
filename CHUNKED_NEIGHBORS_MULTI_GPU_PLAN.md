@@ -6,7 +6,7 @@ layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
 Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 restart and L2 launcher qualified; L3 overhead next**, in the paired `chunked-neighbor-planner` workspace,
+local L1 restart and L2 launcher qualified; L3 control/hash slice qualified; payload/workspaces next**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -15,8 +15,9 @@ invalidation and logical memory accounting. It reuses the existing numerical
 count/collect/filter kernels and adds only an integer global-I fill kernel.
 Full core neighbour CPU suites pass 487 checks under int32 offsets and 488 under
 int64; 186 distinct CUDA checks pass per offset configuration. Frontend focused
-CPU compatibility passes 73 checks. Runtime imports pass; the static scanner's
-pre-existing wp_alpha.computeAlpha crash also reproduces against base 04e126e.
+CPU compatibility passes 73 checks. Runtime imports pass. The former static scanner wp_alpha.computeAlpha crash is
+now fixed in the paired frontend, with a full clean static pass; see the canonical
+plan's resolution note. Older integration results below remain historical.
 Commands, expected skips, evidence and limitations are in the canonical plan.
 The native compatible-work checkpoint below is now qualified; physical multi-GPU execution remains open.
 
@@ -180,3 +181,21 @@ manifests, recoverable IO/capacity failures and a locally checked Slurm template
 are available. MPI/ROCm builds are explicitly deferred. L3 control/hash overhead
 is next; distributed filtering, broader compatibility, actual wide-edge access
 and physical multi-GPU/site/capacity/performance gates remain open.
+
+## L3 control/validation checkpoint (2026-10-30)
+
+Explicit exact/contract replica checks now separate per-operator content hashing
+from layout contracts, while search/rebuild and frontend accepted/checkpoint
+boundaries force exact data agreement. Exact remains default; fast contract
+mode assumes the dependency schedule maintains in-stage replica values. Control
+packets and pinned host staging are reused; local validation/JSON contracts,
+scalar clone validation and complete operator output batches need fewer
+handshakes. Data broadcasts and floating kernels remain unchanged.
+
+Matched frozen7c09724 controls6756→3288 per rank; FP32 hashed bytes7,860,720
+→222,528 with contract mode;20,268 explicit control Tensor factories→0 after
+construction. CPU FP32/FP64 and shared-GPU NCCL exact stages/fields/W/time/OU
+controls pass, including nondefault/alternating streams, recoverable/fatal
+failures, long forced replay and changed-mode restart. See the canonical plan
+for precise scope, limitations and source-pinned evidence. Next L3 work is
+compatible particle payload packing and bounded workspace reuse.
