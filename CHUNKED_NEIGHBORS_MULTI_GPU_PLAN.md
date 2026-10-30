@@ -6,7 +6,7 @@ layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
 Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 active**, in the paired `chunked-neighbor-planner` workspace,
+local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 active**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -246,3 +246,22 @@ import scanner passes. The canonical plan/evidence records exact counts, timings
 source variants and limits. L4 is locally qualified; L5 stress is active and L6
 compatibility follows, as authorized by the user. Physical devices/site/scaling,
 MPI/ROCm builds and large-memory L7 remain deferred.
+
+## L5 bounded stability/failure checkpoint (2026-10-30)
+
+A durable seeded worker exercises4/5 CPU ranks, repeated population/geometry/
+capacity/alignment/policy/owner changes, empty owners, in-place leases, exact flat
+filter parity, retained W/J and obsolete pair Tensor lifetime. Transfer-contract
+failures recover; fatal sender/receiver tests require launcher peer termination.
+NCCL2-rank exact/contract48-cycle controls keep one4 KiB packet cache and no old
+pair Tensors; CPU FP64/int64 repeats48 cycles on5 ranks. Torch allocator spans are
+bounded locally, without a backend/process peak or long-duration claim.
+
+The frontend now coordinates native work-input allocation before payload, with
+one-rank RHS OOM/retry controls and unchanged numerical Warp ASTs. Both native
+schemes pass64 filtering/replay steps /512 fresh RHS per scheme/rank across54 OU
+knots, exact state/work/clock/history and zero steady allocated-memory span. Native
+checkpoint recovery1→4→5 ranks/int64/empty owners and injected IO controls pass.
+Full imports pass. The canonical plan has precise matrices, wall/memory limits,
+source-pinned evidence and paired heads. L5 is bounded-locally qualified; L6
+compatibility follows. Physical devices/site/scaling, MPI/ROCm and L7 stay open.
