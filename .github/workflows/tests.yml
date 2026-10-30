@@ -34,6 +34,17 @@ jobs:
       - name: Run pytest suite
         run: pytest tests/ -v
 
+      - name: Build and qualify the Torch-independent C++ library
+        run: |
+          cmake -S . -B /tmp/warpsph-standalone -DWARPSPHCORE_BUILD_STANDALONE=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/warpsph-standalone-install
+          cmake --build /tmp/warpsph-standalone -j2
+          ctest --test-dir /tmp/warpsph-standalone --output-on-failure
+          WARPSPHCORE_BACKEND=native WARPSPHCORE_STANDALONE_LIBRARY=/tmp/warpsph-standalone/libnative_standalone_test.so pytest tests/native/test_standalone.py -q
+          cmake --install /tmp/warpsph-standalone
+          cmake -S scripts/examples/standalone -B /tmp/warpsph-consumer -DCMAKE_PREFIX_PATH=/tmp/warpsph-standalone-install
+          cmake --build /tmp/warpsph-consumer -j2
+          /tmp/warpsph-consumer/sph_example
+
       - name: Check Warp-free native CPU capabilities
         env:
           WARPSPHCORE_BACKEND: native

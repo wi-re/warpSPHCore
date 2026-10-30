@@ -70,7 +70,7 @@ def build():
             return _extension
         shared = package / 'native/csrc'
         cpu, gpu = discover_sources(package)
-        common = [str(path) for path in sorted(shared.rglob('*.cpp'))]
+        common = [str(path) for path in sorted([*shared.glob('*.cpp'), *(shared / 'torch').rglob('*.cpp')])]
         load_extension('warpsph_native', common + cpu, gpu,
                        include_paths=(package,))
         _extension = torch.ops.warpsph_native

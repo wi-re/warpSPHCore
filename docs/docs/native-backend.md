@@ -121,6 +121,128 @@ still needs a controlled build image and dependency audit; site wheels target
 the cluster's existing environment. Runtime Torch and accelerator libraries
 remain required; compilers and Ninja are unnecessary for a compatible wheel.
 
+## Standalone C++ execution
+
+The optional `warpsph_core` library has no Torch, Python or Warp build/runtime
+dependency. It exports a C++17 API from `native/csrc/api.h`, installed as `api.h`
+beneath the CMake target's include directory. The exported target is
+`warpSPHCore::core`. The Torch adapter and standalone library compile the same
+module-owned primal and adjoint policies; they do not maintain separate formulas.
+
+```bash
+# CPU: requires a C++17 compiler, CMake and OpenMP (no Python discovery).
+cmake -S . -B build/standalone \
+  -DWARPSPHCORE_BUILD_STANDALONE=ON -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX="$PWD/install"
+cmake --build build/standalone -j2
+ctest --test-dir build/standalone --output-on-failure
+cmake --install build/standalone
+
+# A separate C++ application consumes the installed package:
+cmake -S scripts/examples/standalone -B build/consumer \
+  -DCMAKE_PREFIX_PATH="$PWD/install"
+cmake --build build/consumer -j2
+build/consumer/sph_example
+
+# Standalone CUDA build (includes CPU execution):
+cmake -S . -B build/standalone-cuda \
+  -DWARPSPHCORE_BUILD_STANDALONE=ON -DWARPSPHCORE_NATIVE_BACKEND=cuda \
+  -DCMAKE_CUDA_ARCHITECTURES='90-real;120-real' -DCMAKE_BUILD_TYPE=Release
+
+# Standalone ROCm build, without an AMD GPU on the build host:
+cmake -S . -B build/standalone-hip \
+  -DWARPSPHCORE_BUILD_STANDALONE=ON -DWARPSPHCORE_NATIVE_BACKEND=hip \
+  -DCMAKE_HIP_ARCHITECTURES='gfx942;gfx1100' -DCMAKE_BUILD_TYPE=Release
+```
+
+Build each GPU directory with `cmake --build <directory> -j2`. Sites can supply
+`CMAKE_CUDA_COMPILER`, `CMAKE_HIP_COMPILER`, `CMAKE_HIP_COMPILER_ROCM_ROOT` and
+`CMAKE_PREFIX_PATH` for their toolkit. GPU runtimes must be available to the
+application's dynamic loader, for example through cluster environment modules.
+`WARPSPHCORE_CPU_ARCH=portable|native|<target>` applies to the standalone CPU
+implementation too. `WARPSPHCORE_STANDALONE_OPENMP=OFF` selects serial CPU code;
+`WARPSPHCORE_STANDALONE_TESTS=OFF` omits the test programs and test-only bridge.
+
+`Problem` describes particle/domain/field/CSR views. Each buffer is contiguous,
+non-owning storage with a capacity measured in elements. Positions have shape
+`[N,D]`, supports/masses/densities/kinds `[N]`, and scalar/vector/matrix fields
+`[N]`, `[N,D]`, `[N,D,D]`. Floating-point buffers use `Problem.precision`, kinds
+and neighbour counts use int32, and periodicity uses bool. CSR offsets and IDs
+independently accept int32 or int64. An output's logical size is given by
+`output_elements(problem)`. The caller allocates it and retains all buffers
+until the work on its stream has completed.
+
+```cpp
+#include <api.h>
+using namespace sph_native;
+Context context;                       // parallel CPU, or set device/stream
+Problem problem;                       // fill borrowed particle/domain/CSR views
+problem.properties.operation = Operation::Gradient;
+Buffer result{output_pointer, output_capacity};
+forward(context, problem, result);
+```
+
+All seven standard primals, 15 kernels, precisions, dimensions and field contracts
+listed below are available. `Context` selects CPU, CUDA or HIP, device index,
+caller stream, CPU thread count and validation mode. Each GPU library includes
+CPU execution and its selected GPU backend. `supports(device)` reports build
+capability; it does not probe installed hardware. CPU buffers must be host
+accessible; GPU buffers must be accessible on the selected device.
+
+`Validation::Contents` is the default and checks finite/valid geometry, positive
+densities, fields and live CSR indices. These checks can copy GPU data to the
+host and synchronize the supplied stream. `Validation::Metadata` checks sizes,
+shapes, options and output/input overlap, assuming the contents have already
+been validated. It allows primal/VJP work to be enqueued without a final host
+synchronize. Callers must revalidate after changing geometry, densities or CSR
+contents. Numerical outputs must not overlap their input storage.
+
+For the existing all-pairs search, call `radius_count`, then `radius_scan` to
+produce int64 offsets and return the required edge capacity, allocate int64 IDs,
+and call `radius_collect`. Counts and collection run on the selected device.
+The initial scan uses a host prefix scan (including a counts download and offsets
+upload on GPU). Scan and collection synchronize; collection rejects stale counts
+and bounds its writes before reporting a mismatch. This provides correctness and
+standalone capability; scalable device search/scan remains future work.
+
+`adjoint(context, problem, cotangent, gradients)` exposes an explicit VJP for an
+individual operation. The caller retains the unmodified primal inputs and CSR,
+provides a cotangent matching the logical output, selects floating-point roles
+with `gradient_bit(QX)` etc., and supplies corresponding `Adjoints.slots` buffers.
+By default these buffers are zeroed before accumulation; `accumulate=true` adds
+to existing values. Exact aliases between gradient buffers combine role
+contributions; partial overlap is rejected. The same smooth-kernel restrictions
+apply as for Torch reverse mode. This interface does not record an AD graph,
+manage saved tensors, or implement a second graph engine.
+
+The standalone library supplies operations, not a complete solver or file-format
+runner. Initial conditions can be generated in Python and stored in HDF5 with a
+YAML configuration. Loading that state into owned C++ CPU/GPU buffers, solver
+steps and snapshot output belong to the application/frontend. HDF5 and YAML
+libraries are not required by the numerical core.
+
+The CPU/CUDA test bridge can be checked against independent Python oracles:
+
+```bash
+WARPSPHCORE_BACKEND=native \
+WARPSPHCORE_STANDALONE_LIBRARY=build/standalone-cuda/libnative_standalone_test.so \
+  pytest tests/native/test_standalone.py -q
+```
+
+Local qualification built and ran the standalone CPU and CUDA executables and an
+external installed-package consumer. Link dependencies contained no Torch,
+CPython or Warp libraries. The standalone ROCm library also compiled and linked
+for both gfx942 and gfx1100; actual AMD execution remains unqualified. CPU/GPU
+primal and explicit-adjoint tests cover all operator schemes, field ranks,
+precisions, kernels, support policies, CSR widths, empty populations, explicit
+accumulation, aliasing, bounds errors and caller streams. Parallel CPU tests use
+both one and four workers with shared reference-gradient scatters. The final
+standalone matrix passed 1,512 CPU/CUDA cases (756 applicable to the CPU-only
+build). The existing native Torch suite still passed 2,537 cases; its rebuilt
+CPU wheel passed 1,288 compiler-free checks and the stable-ABI audit. The ROCm
+consumer executed the CPU path successfully and skipped its unavailable AMD
+GPU test. No performance measurements were made.
+
 ## Supported contracts
 
 | Capability | Scope |

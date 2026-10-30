@@ -58,6 +58,12 @@ build requirements, HIP checks, supported interfaces and remaining work.
 Corrections, scalable search, higher-order AD and complete frontend simulations
 remain work in progress.
 
+The standalone C++17 library can also run all supported primals and explicit
+per-operation adjoints without Torch or Python. Build with
+`-DWARPSPHCORE_BUILD_STANDALONE=ON` and consume the installed CMake target
+`warpSPHCore::core`. See the [standalone C++ instructions](docs/docs/native-backend.md#standalone-c-execution)
+and [external application example](scripts/examples/standalone/main.cpp).
+
 ## Requirements
 
 Requirements for the default Warp backend:

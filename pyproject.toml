@@ -52,4 +52,4 @@ dev = [
 minimum-version = "build-system.requires"
 wheel.packages = ["src/warpSPHCore"]
 wheel.py-api = "py3"
-sdist.include = ["CMakeLists.txt", "scripts/packaging/*.py", "src/**"]
+sdist.include = ["CMakeLists.txt", "cmake/**", "scripts/packaging/*.py", "scripts/examples/standalone/**", "tests/native/*.cpp", "tests/native/*.cu", "src/**"]

@@ -1,3 +1,4 @@
+#include "torch/adjoint.h"
 #include "nt_laplacian_adjoint.h"
 #include "execution/cpu.h"
 #include "execution/dispatch.h"

@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.21)
+project(warpSPHCoreExample LANGUAGES CXX)
+find_package(warpSPHCore CONFIG REQUIRED)
+add_executable(sph_example main.cpp)
+target_link_libraries(sph_example PRIVATE warpSPHCore::core)

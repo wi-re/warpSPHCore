@@ -1,3 +1,4 @@
+#include "torch/adjoint.h"
 #include "execution/gpu.cuh"
 #include "execution/dispatch.h"
 #include "nt_interpolate_adjoint.h"
