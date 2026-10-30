@@ -77,6 +77,9 @@ class OutputSpec:
 
     dtype: Union[Any, Callable[["SPHContext", Dict[str, Any]], Any]]
     shape: Union[int, ShapeOf, Callable[["SPHContext", Dict[str, Any]], Any]] = ShapeOf.QUERY
+    #: Unread one-element output required by a shared kernel ABI. Chunk dispatch
+    #: discards local scratch and never treats it as a particle or pair result.
+    chunkScratch: bool = False
 
     def resolve(self, ctx: "SPHContext", extras: Dict[str, Any]) -> Tuple[Any, Any]:
         # Plain `callable(...)` misfires here: a literal Warp dtype (e.g.
@@ -102,6 +105,7 @@ class OutputSpec:
 class ExtraKind(Enum):
     TENSOR = 0
     SCALAR = 1
+    CHUNK_TENSOR = 2
 
 
 class RowRole(Enum):
@@ -110,6 +114,8 @@ class RowRole(Enum):
     QUERY = 0
     REFERENCE = 1
     REPLICATED = 2
+    CHUNK = 3
+    ROW_START = 4
 
 
 @dataclass(frozen=True)
@@ -506,6 +512,10 @@ def launchOperator(
             "same as structFor/getStateBundle reject it internally."
         )
 
+    # Lazy imports avoid the radius-search/autograd initialization cycle.
+    from ..radiusSearch.chunked import ChunkedAdjacency
+    from ..radiusSearch.pairField import ChunkedPairField
+    chunked = isinstance(ctx.adjacency, ChunkedAdjacency)
     declared = {e.name: e for e in spec.extras}
     missing = [name for name in declared if name not in extras]
     if missing:
@@ -518,12 +528,12 @@ def launchOperator(
         is_tensor = isinstance(value, torch.Tensor)
         if spec_extra.kind is ExtraKind.TENSOR and not is_tensor:
             raise TypeError(f"launchOperator: extra {name!r} declared TENSOR, got {type(value)}")
+        if spec_extra.kind is ExtraKind.CHUNK_TENSOR and not (is_tensor or (chunked and isinstance(value, ChunkedPairField))):
+            raise TypeError(f"launchOperator: extra {name!r} requires a tensor or an owned chunk pair field")
         if spec_extra.kind is ExtraKind.SCALAR and is_tensor:
             raise TypeError(f"launchOperator: extra {name!r} declared SCALAR, got a torch.Tensor")
 
-    # Lazy import avoids the radius-search/autograd initialization cycle.
-    from ..radiusSearch.chunked import ChunkedAdjacency
-    if isinstance(ctx.adjacency, ChunkedAdjacency):
+    if chunked:
         from .row_dispatch import launchRowChunks
         return launchRowChunks(spec, ctx, extras)
 

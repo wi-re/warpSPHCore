@@ -5,8 +5,8 @@ This sibling link assumes the documented paired checkout layout. In another
 layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
-Status, 2026-10-30: **Phase 3 shared operators and first eager Monaghan checkpoint
-qualified; native compatible W next**, in the paired `chunked-neighbor-planner` workspace,
+Status, 2026-10-30: **Phase 3 bounded native CRKSPH/CompSPH compatible work qualified;
+Phase 4 distributed scheduling next**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -18,7 +18,7 @@ int64; 186 distinct CUDA checks pass per offset configuration. Frontend focused
 CPU compatibility passes 73 checks. Runtime imports pass; the static scanner's
 pre-existing wp_alpha.computeAlpha crash also reproduces against base 04e126e.
 Commands, expected skips, evidence and limitations are in the canonical plan.
-Native compatible work and physical multi-GPU execution remain open; the shared-operator checkpoint below is now qualified.
+The native compatible-work checkpoint below is now qualified; physical multi-GPU execution remains open.
 
 Transport decision, 2026-10-30: production uses PyTorch `torch.distributed`/c10d
 with NCCL, one process per GPU; Gloo CPU tensors provide a multiprocess debugging
@@ -40,10 +40,30 @@ valid. AD/capture, partial-owner outputs and unported specs reject explicitly.
 Frontend support/dissipation integration and five tiny two-step eager Monaghan
 fixtures qualify stored-field, fresh-stage and source-budget parity. Select an
 explicit chunked Verlet list through a Python case build hook; defaults and CLI
-selection remain unchanged. Native CRK/CompSPH retained compatible W and full
-solver support, checkpoint/restart and physical distributed execution remain
-open. Per-side pressure and wall closure remain gated. The canonical plan has
+selection remain unchanged. The native W checkpoint followed this shared-operator work; checkpoint/restart
+and physical distributed execution remain open. Per-side pressure and wall closure remain gated. The canonical plan has
 the full CPU/CUDA/int32/int64/FP64 test matrix and evidence directory.
+
+## Native compatible-work checkpoint (2026-10-30)
+
+`ChunkedPairField` pins dedicated pair buffers to one adjacency generation/lease.
+The host operator ABI maps owned chunk extras and global query-row bases, with
+explicit bounded unread scratch outputs. Frontend native eager CRKSPH/CompSPH
+force -> half velocity -> owned W -> ordered final reduction now passes strict
+work/stage/field parity and forced changed-generation/layout replay on CPU/CUDA,
+including both local offset widths, CPU FP64 and fixed 32-lane CUDA controls.
+The test matrix also covers prepared fields, storage aliases/budgets, empty and
+padded storage, unsupported contexts and delayed CUDA producers. The discovered
+flat CRK-term/work-reduction stream dependency is repaired without changing
+floating kernels. Raw failure and successful rerun evidence remain available.
+
+No global J/W compatibility view or default/CLI change was added. Single-device
+total resident work is unchanged apart from padding; kernel output scratch is
+bounded while particle outputs remain O(N). See the canonical plan for measured
+storage/timing, exact qualifications and limitations. Native special controls,
+AD/graphs/walls/materials, checkpoint/restart and partial-owner output exchange
+remain gated. Next implement the NCCL/Gloo replicated-state process backend;
+physical multi-GPU and large-edge/capacity gates remain open.
 
 ## Integration order (completed history)
 
@@ -82,8 +102,8 @@ the full CPU/CUDA/int32/int64/FP64 test matrix and evidence directory.
 ## First deliverables and source anchors
 
 Metadata planning and direct single-device construction/lifecycle are qualified.
-Next: chunk-owned native compatible work, global force/half-velocity/work pass
-ordering, changed-list replay and CRKSPH/CompSPH solver parity. Physical two-/four-GPU
+Next: distributed count/collect, process groups and particle-field exchanges
+between dependent passes while J/W remain owned. Physical two-/four-GPU
 execution follows solver parity. Preserve all fresh
 stage/integrator/model/forcing choices. Flat APIs remain available; unsupported
 large AD/graph/wall paths fail clearly instead of making a monolithic allocation.

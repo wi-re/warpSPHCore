@@ -11,6 +11,7 @@ import torch.autograd.forward_ad as fwAD
 
 from ..dataTypes import CRKState, GradHState, ParticleState, RenormalizationState, ExecutionMode
 from ..radiusSearch.verlet.build import _DEFERRED_CHECKS
+from ..radiusSearch.pairField import ChunkedPairField
 from .launcher import _allocate_output
 from .operator_spec import Corrections, ExtraKind, RowRole, ShapeOf, SPHContext
 
@@ -18,6 +19,9 @@ from .operator_spec import Corrections, ExtraKind, RowRole, ShapeOf, SPHContext
 def _tensors(value):
     if isinstance(value, torch.Tensor):
         yield value
+    elif isinstance(value, ChunkedPairField):
+        for tensor in value.buffers:
+            yield from _tensors(tensor)
     elif is_dataclass(value):
         for f in fields(value):
             yield from _tensors(getattr(value, f.name))
@@ -108,7 +112,10 @@ def chunkContexts(ctx):
 
 
 def _validateSpec(spec, ctx, extras):
-    if not spec.rowChunked or spec.numThreads is not None or any(o.shape is not ShapeOf.QUERY for o in spec.outputs):
+    if (not spec.rowChunked or not spec.outputs or spec.outputs[0].shape is not ShapeOf.QUERY
+        or spec.outputs[0].chunkScratch or spec.numThreads is not None or
+        any(not (o.shape is ShapeOf.QUERY and not o.chunkScratch) and
+            not (o.chunkScratch and type(o.shape) is int and o.shape == 1) for o in spec.outputs)):
         raise NotImplementedError('This operator has not opted into row-chunk particle outputs.')
     declared = {e.name: e for e in spec.extras}
     if extras.keys() != declared.keys():
@@ -124,7 +131,11 @@ def _validateSpec(spec, ctx, extras):
     for name, e in declared.items():
         value = extras[name]
         role = roles[name]
-        if e.kind is ExtraKind.TENSOR:
+        if e.kind is ExtraKind.CHUNK_TENSOR and role is RowRole.CHUNK:
+            if not isinstance(value, ChunkedPairField):
+                raise TypeError(f'Extra {name} requires an owned ChunkedPairField.')
+            value.validate(ctx.adjacency)
+        elif e.kind in (ExtraKind.TENSOR, ExtraKind.CHUNK_TENSOR):
             if not isinstance(value, torch.Tensor):
                 raise TypeError(f'Extra {name} must be a tensor.')
             if value.device != ctx.query.positions.device:
@@ -136,6 +147,9 @@ def _validateSpec(spec, ctx, extras):
                        ctx.query.positions.device, name)
         elif isinstance(value, torch.Tensor):
             raise TypeError(f'Extra {name} must be a scalar.')
+        elif role is RowRole.ROW_START:
+            if type(value) is not int or value != 0:
+                raise ValueError('The chunk ROW_START placeholder must be integer zero; dispatch supplies the global row base.')
         elif role is not None:
             raise ValueError(f'Scalar extra {name} cannot declare a particle row role.')
     return roles
@@ -153,12 +167,17 @@ def launchRowChunks(spec, ctx, extras, prepared=None):
         del tensor._warp_array
         outputs.append(tensor)
     contexts = chunkContexts(ctx) if prepared is None else prepared
-    for interval, local in contexts:
-        localExtras = {e.name: extras[e.name][interval] if roles[e.name] is RowRole.QUERY else extras[e.name]
-                       for e in spec.extras}
+    for index, (interval, local) in enumerate(contexts):
+        localExtras = {}
+        for e in spec.extras:
+            role, value = roles[e.name], extras[e.name]
+            localExtras[e.name] = (value[interval] if role is RowRole.QUERY else
+                                  value.buffers[index] if role is RowRole.CHUNK else
+                                  interval.start if role is RowRole.ROW_START else value)
         result = launchOperator(spec, local, **localExtras) if prepared is None else local.launch(spec, **localExtras)
         localOutputs = (result,) if len(outputs) == 1 else result
-        for target, source in zip(outputs, localOutputs):
-            target[interval].copy_(source)
+        for out, target, source in zip(spec.outputs, outputs, localOutputs):
+            if not out.chunkScratch:
+                target[interval].copy_(source)
         del localOutputs, result, source
     return outputs[0] if len(outputs) == 1 else tuple(outputs)

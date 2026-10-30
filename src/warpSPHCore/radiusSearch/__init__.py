@@ -36,3 +36,5 @@ from . import chunked
 from .chunked import *
 __all__.extend(['RowChunk', 'RowChunkGeneration', 'RowChunkPlan', 'RowChunkPolicy', 'buildRowChunkPlan'])
 __all__.extend(chunked.__all__)
+from .pairField import ChunkedPairField
+__all__.append('ChunkedPairField')
