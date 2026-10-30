@@ -22,9 +22,11 @@ Native operators/compatible work and physical multi-GPU execution remain open.
 
 Transport decision, 2026-10-30: production uses PyTorch `torch.distributed`/c10d
 with NCCL, one process per GPU; Gloo CPU tensors provide a multiprocess debugging
-path. Local NCCL is 2.29.7. Experimental multiple ranks sharing one GPU require
-NCCL 2.30+ and explicit enablement; this does not replace physical multi-GPU gates.
-See the canonical plan's Phase4 transport section for sources and constraints.
+path. Shared base NCCL remains 2.29.7; the user-authorized isolated 2.32.3
+runtime now passes a two-process/one-GPU communication/Warp-stream smoke with
+experimental shared-GPU ranks enabled. The reusable launcher and provenance are
+under frontend `.tmp/nccl-shared-gpu-20261030/`. This does not replace physical
+multi-GPU gates. See the canonical plan's Phase4 transport section.
 
 ## Integration order (completed history)
 
