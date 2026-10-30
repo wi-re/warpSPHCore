@@ -143,6 +143,8 @@ cmake -S scripts/examples/standalone -B build/consumer \
   -DCMAKE_PREFIX_PATH="$PWD/install"
 cmake --build build/consumer -j2
 build/consumer/sph_example
+# Optional: explicit mass derivatives of sum(density).
+build/consumer/sph_example --mass-gradient
 
 # Standalone CUDA build (includes CPU execution):
 cmake -S . -B build/standalone-cuda \
@@ -154,6 +156,12 @@ cmake -S . -B build/standalone-hip \
   -DWARPSPHCORE_BUILD_STANDALONE=ON -DWARPSPHCORE_NATIVE_BACKEND=hip \
   -DCMAKE_HIP_ARCHITECTURES='gfx942;gfx1100' -DCMAKE_BUILD_TYPE=Release
 ```
+
+The commented example in `scripts/examples/standalone/main.cpp` shows input
+ownership and layouts, query/reference roles, CSR construction, density, and a
+scalar-field gradient that uses the computed density. The optional mass-gradient
+example is a separate function. Numerical smoke assertions live under
+`tests/native/standalone_smoke.cpp`.
 
 Build each GPU directory with `cmake --build <directory> -j2`. Sites can supply
 `CMAKE_CUDA_COMPILER`, `CMAKE_HIP_COMPILER`, `CMAKE_HIP_COMPILER_ROCM_ROOT` and
