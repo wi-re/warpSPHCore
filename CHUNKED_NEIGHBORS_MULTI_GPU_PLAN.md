@@ -5,8 +5,10 @@ This sibling link assumes the documented paired checkout layout. In another
 layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
-Status, 2026-10-29: planned, after a mergeable ACSPH/frontend integration checkpoint.
-No chunked backend, distributed simulation or new implementation worktree exists.
+Status, 2026-10-30: core feature integrated into shared `main`; the user has
+authorized integration after frontend ACSPH checkpoint `3d80e5e`. The canonical
+frontend plan records merged heads, validation and implementation workspace.
+No chunked backend or distributed simulation has been implemented.
 Core baseline is`3c56e2f` on`codex/compressible-csr-only` (version0.6.3), based on
 shared`main` at`98081c1`. This handoff adds documentation only.
 
@@ -17,8 +19,10 @@ shared`main` at`98081c1`. This handoff adds documentation only.
 2. Merge this core branch into the actual core integration branch (currently
    `main`), qualify bounded CSR-only/list/stream/offset controls, then merge the
    turbulence frontend branch into frontend`dev` against core>=0.6.3.
-3. Record paired integrated SHAs and create separate sibling implementation
-   worktrees (suggested branches`codex/chunked-neighbors-multigpu`). The existing
+3. Record paired integrated SHAs and create one paired implementation workspace:
+   one frontend checkout and one sibling core checkout (suggested branches
+   `codex/chunked-neighbors-multigpu`). Row chunks first, then multi-GPU execution
+   proceed sequentially in these same checkouts, not in separate phase worktrees. The existing
    turbulence checkout remains available for single-GPU physics up to128^3 after
    readiness checks. Do not alter shared installs or source-pinned live jobs.
 
