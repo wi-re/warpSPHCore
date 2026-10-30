@@ -17,7 +17,7 @@ from ..type_config import get_torch_precision
 from .chunked import ChunkedAdjacency, _config, _search
 from .rowChunks import RowChunkGeneration, RowChunkPolicy, buildRowChunkPlan
 
-__all__ = ['rowChunkCheckpointState', 'restoreRowChunkCheckpointState']
+__all__ = ['rowChunkCheckpointRecipe', 'rowChunkCheckpointState', 'restoreRowChunkCheckpointState']
 
 _ALGORITHM = 'compact-hash-input-split-v1'
 
@@ -30,30 +30,43 @@ def _digest(metadata, tensors):
     return digest.hexdigest()
 
 
+def rowChunkCheckpointRecipe(*, queryPositions, referencePositions, querySupports,
+        referenceSupports, counts, domain, policy, mode, storeI, verletScale,
+        orderingKey='input', generation=0, sourceOwners=1):
+    """Encode explicit frozen search inputs, e.g. from a legacy CSR checkpoint.
+
+    No pair arrays are accepted. Restore validates this recipe and recounts the
+    geometry before pair allocation; encoding alone is not validation.
+    """
+    metadata = dict(version=1, algorithm=_ALGORITHM, numRows=len(queryPositions),
+        numCols=len(referencePositions), dim=domain.dim, generation=generation,
+        totalEdges=int(counts.sum(dtype=torch.int64)), policy=asdict(policy), mode=mode.name,
+        storeI=storeI, verletScale=verletScale, orderingKey=orderingKey,
+        sourceOwners=sourceOwners, samePositions=queryPositions is referencePositions,
+        sameSupports=querySupports is referenceSupports)
+    tensors = dict(queryPositions=queryPositions, querySupports=querySupports,
+        counts=counts, domainMin=domain.min, domainMax=domain.max, periodic=domain.periodic)
+    if not metadata['samePositions']:
+        tensors['referencePositions'] = referencePositions
+    if not metadata['sameSupports']:
+        tensors['referenceSupports'] = referenceSupports
+    tensors = {name:t.detach().cpu().contiguous().clone() for name,t in tensors.items()}
+    return dict(metadata=metadata, tensors=tensors, checksum=_digest(metadata, tensors))
+
+
 def rowChunkCheckpointState(adjacency):
     """Independent CPU recipe; no per-edge allocation, transfer or serialization."""
     if not isinstance(adjacency, ChunkedAdjacency) or adjacency.kind != 'verlet':
         raise ValueError('Checkpoint history requires a resident chunked Verlet list.')
     adjacency.assertStorageValid()
     a = adjacency
-    metadata = dict(version=1, algorithm=_ALGORITHM, numRows=a.numRows, numCols=a.numCols,
-        dim=a.queryPositions.shape[1], generation=a.plan.generation.number,
-        totalEdges=a.numEdges, policy=asdict(a.plan.policy), mode=a.mode.name,
-        storeI=a.storeI, verletScale=a.verletScale, orderingKey=a.orderingKey,
-        sourceOwners=a.plan.numOwners, samePositions=a.queryPositions is a.referencePositions,
-        sameSupports=a.querySupports is a.referenceSupports)
-    tensors = dict(queryPositions=a.queryPositions, querySupports=a.querySupports,
-        counts=a.numNeighbors, domainMin=a.domain.min, domainMax=a.domain.max,
-        periodic=a.domain.periodic)
-    if not metadata['samePositions']:
-        tensors['referencePositions'] = a.referencePositions
-    if not metadata['sameSupports']:
-        tensors['referenceSupports'] = a.referenceSupports
-    tensors = {name:t.detach().cpu().contiguous().clone() for name,t in tensors.items()}
-    counts = tensors['counts'].tolist()
+    counts = a.numNeighbors.cpu().tolist()
     if tuple(counts) != tuple(stop-start for start,stop in zip(a.plan.prefix, a.plan.prefix[1:])):
         raise ValueError('Resident counts no longer match the immutable chunk plan.')
-    return dict(metadata=metadata, tensors=tensors, checksum=_digest(metadata, tensors))
+    return rowChunkCheckpointRecipe(queryPositions=a.queryPositions, referencePositions=a.referencePositions,
+        querySupports=a.querySupports, referenceSupports=a.referenceSupports, counts=a.numNeighbors,
+        domain=a.domain, policy=a.plan.policy, mode=a.mode, storeI=a.storeI, verletScale=a.verletScale,
+        orderingKey=a.orderingKey, generation=a.plan.generation.number, sourceOwners=a.plan.numOwners)
 
 
 def restoreRowChunkCheckpointState(state, *, device, policy=None, communication=None, storeI=None):

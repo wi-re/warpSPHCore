@@ -6,7 +6,7 @@ layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
 Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 native restart qualified; legacy import next**, in the paired `chunked-neighbor-planner` workspace,
+local L1 restart and L2 launcher qualified; L3 overhead next**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -164,3 +164,19 @@ Chunk-specific suites: `tests/radiusSearch/test_rowChunks.py` and
 with`warpSPHCore_OFFSET_DTYPE=int64`; keep particle IDs/counts int32. The canonical
 plan contains all phase acceptance gates and HPC/restart/AD/graph qualifications.
 Metadata/aliased high-address tests do not replace real large CUDA storage tests.
+
+## Local continuation update (2026-10-30)
+
+The recipe encoder now also accepts explicit frozen inputs/counts without pair
+arrays. The paired frontend imports legacy version-1 CSR/COO history, validates
+int64 scans and verifies each owned J/I slice before installation. Bounded CPU
+and shared-GPU NCCL controls preserve exact continuation under changed policies,
+ranks and local offsets. Legacy missing search-policy/checksum metadata and
+other limitations remain explicit in the canonical plan.
+
+The frontend local launcher/output adapter is qualified for the three driven
+native schemes; rank-zero accepted checkpoints/diagnostics, source/runtime/rank
+manifests, recoverable IO/capacity failures and a locally checked Slurm template
+are available. MPI/ROCm builds are explicitly deferred. L3 control/hash overhead
+is next; distributed filtering, broader compatibility, actual wide-edge access
+and physical multi-GPU/site/capacity/performance gates remain open.

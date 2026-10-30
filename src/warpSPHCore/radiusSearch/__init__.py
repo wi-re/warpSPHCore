@@ -39,5 +39,5 @@ __all__.extend(chunked.__all__)
 from .pairField import ChunkedPairField
 __all__.append('ChunkedPairField')
 
-from .chunkedState import rowChunkCheckpointState, restoreRowChunkCheckpointState
-__all__.extend(['rowChunkCheckpointState', 'restoreRowChunkCheckpointState'])
+from .chunkedState import rowChunkCheckpointRecipe, rowChunkCheckpointState, restoreRowChunkCheckpointState
+__all__.extend(['rowChunkCheckpointRecipe', 'rowChunkCheckpointState', 'restoreRowChunkCheckpointState'])
