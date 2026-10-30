@@ -408,6 +408,96 @@ def packingAudit(parent):
                 disabledWorkspaceBytes=disabled.summary()['particleWorkspaceBytes'],**comm.summary())
 
 
+def filteringAudit(comm):
+    """Real owner migration against independent tiny flat filtering oracles."""
+    from unittest.mock import patch
+    from warpSPHCore.radiusSearch import filterChunkedVerletList
+    from warpSPHCore.radiusSearch.verlet.build import buildVerletList_
+    from warpSPHCore.radiusSearch.verlet.filter import filterVerletList_
+    from warpSPHCore.type_config import get_torch_offset_dtype
+    import time
+    started=time.perf_counter();reports=[]
+    for number,(nq,nr,dim,mode,oldRows,newRows) in enumerate([
+        (19,None,dim,mode,oldRows,newRows) for dim in (2,3) for mode in SupportScheme
+        for oldRows,newRows in ((1,7),(7,1))]+[(0,5,2,SupportScheme.Gather,1,7),
+            (3,0,3,SupportScheme.Scatter,7,1),(1,None,2,SupportScheme.SuperSymmetric,1,80)]):
+        q,r,domain=sample(comm.device,nq,nr,dim)
+        if number%3==0:domain.periodic[0]=True
+        oldI=number%2==0;newI=not oldI
+        policy=RowChunkPolicy(edgeBudget=80,maxRows=oldRows,bytesPerEdge=8+dim*q.positions.element_size(),maxElementsPerEdge=dim)
+        args=(q.positions,r.positions,q.supports,r.supports,domain)
+        old=buildChunkedVerletList(q,domain,referenceParticles=r,policy=policy,verletScale=1.5,
+                                  supportMode=mode,storeI=oldI,communication=comm)
+        flat=buildVerletList_(*args,verletScale=1.5,mode=mode,storeI=oldI)
+        saved=[c.adjacency.paddedJ.clone() for c in old]
+        work=ChunkedPairField.empty(old,trailingShape=(dim,),dtype=q.positions.dtype)
+        for w in work.buffers:w.fill_(comm.rank+.125)
+        workSaved=[w.clone() for w in work.buffers]
+        q.positions.add_(.0001)
+        targetPolicy=replace(policy,maxRows=newRows)
+        expected=filterVerletList_(*args,flat,mode,capacity=None,storeI=newI)
+        def forbidden(*a,**kw):raise AssertionError('distributed filter used a global search/pair fallback')
+        module=importlib.import_module('warpSPHCore.radiusSearch.chunked')
+        before=comm.ownedTransfers
+        with patch.object(module,'_search',forbidden):
+            actual=filterChunkedVerletList(q,domain,old,referenceParticles=r,policy=targetPolicy,storeI=newI)
+        assert actual.communication is comm and actual.sourceSignature==old.plan.signature
+        assert actual.kind=='filtered' and actual.plan.generation.number==old.plan.generation.number
+        check_rows(actual,expected)
+        for chunk,j,w,want in zip(old,saved,work.buffers,workSaved):
+            equal(chunk.adjacency.paddedJ,j);equal(w,want)
+        work.validate(old)
+        try:work.validate(actual)
+        except ValueError as exc:assert 'replay or migrate' in str(exc)
+        else:raise AssertionError('old W accepted a changed filtered list')
+        # Live temporary J and local offsets fit one original source chunk.
+        offsetBytes=torch.empty((),dtype=get_torch_offset_dtype()).element_size()
+        bound=max((c.metadata.liveEdges*4+c.metadata.rowCount*offsetBytes for c in old),default=0)
+        assert actual.searchScratchBytes<=bound
+        reports.append(dict(rows=nq,references=len(r.positions),dim=dim,mode=mode.name,
+            sourceRanges=old.plan.ownerRanges,targetRanges=actual.plan.ownerRanges,
+            transfers=comm.ownedTransfers-before,scratchBytes=actual.searchScratchBytes,scratchBound=bound))
+        print(f'[distributed core rank {comm.rank}] filter {number}: passed',flush=True)
+    def rejected(function,text):
+        try:function()
+        except (DistributedContractError,ValueError) as exc:assert text in str(exc),str(exc)
+        else:raise AssertionError('expected filter rejection: '+text)
+    q,r,domain=sample(comm.device)
+    policy=RowChunkPolicy(edgeBudget=80,maxRows=1)
+    old=buildChunkedVerletList(q,domain,policy=policy,verletScale=1.5,
+                              supportMode=SupportScheme.SuperSymmetric,communication=comm)
+    rejected(lambda:filterChunkedVerletList(q,domain,old,policy=replace(policy,maxRows=1+comm.rank)),'disagree')
+    rejected(lambda:filterChunkedVerletList(q,domain,old,policy=replace(policy,edgeBudget=1)),'exceeds')
+    module=importlib.import_module('warpSPHCore.radiusSearch.chunked');allocate=module._allocateChunks
+    def fail(*a,**kw):
+        if comm.rank==comm.size-1:raise MemoryError('injected filter target allocation')
+        return allocate(*a,**kw)
+    def noPayload(*a,**kw):raise AssertionError('invalid filter entered owner transfer')
+    with patch.object(module,'_allocateChunks',fail),patch.object(dist,'send',noPayload),patch.object(dist,'recv',noPayload):
+        rejected(lambda:filterChunkedVerletList(q,domain,old),'injected filter target')
+    # One source rank fails its temporary allocation after targets exist.
+    empty=torch.empty
+    def failTemporary(*a,**kw):
+        import sys
+        caller=sys._getframe(1).f_code
+        if comm.rank==0 and caller.co_name=='prepare' and caller.co_filename.endswith('/radiusSearch/chunked.py'):
+            raise MemoryError('injected filter source allocation')
+        return empty(*a,**kw)
+    with patch.object(torch,'empty',failTemporary),patch.object(dist,'send',noPayload),patch.object(dist,'recv',noPayload):
+        rejected(lambda:filterChunkedVerletList(q,domain,old),'injected filter source')
+    rejected(lambda:filterChunkedVerletList(replace(q,positions=q.positions+2),domain,old),'stale')
+    send=torch.zeros(2 if comm.rank==0 else 1,device=comm.device,dtype=torch.int32) if comm.rank==0 else None
+    receive=torch.empty(1,device=comm.device,dtype=torch.int32) if comm.rank==comm.size-1 else None
+    with patch.object(dist,'send',noPayload),patch.object(dist,'recv',noPayload):
+        rejected(lambda:comm.transferOwned(send,receive,source=0,target=comm.size-1,count=1,dtype=torch.int32,
+                    tag='test:bad-owned-transfer',signature='same'),'agreed count/dtype')
+    actual=filterChunkedVerletList(q,domain,old,policy=replace(policy,maxRows=7))
+    old.assertStorageValid();comm.validateAdjacency(actual)
+    assert comm.ownedSendBytes+comm.ownedReceiveBytes>0
+    comm.agree('test:filter-recovered',True)
+    return dict(status='passed',fixtures=reports,coordinatedFailures=6,wallSeconds=time.perf_counter()-started)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--replica-checks',choices=('exact','contract'),default='exact')
@@ -435,9 +525,10 @@ def main():
             errors = failures(comm)
             protocol=protocolAudit(comm)
             packing=packingAudit(comm)
+            filtering=filteringAudit(comm)
         if stream is not None:
             stream.synchronize()
-        summary = dict(status='passed', pid=os.getpid(), checks=checks, coordinatedFailures=errors,protocol=protocol,packing=packing,
+        summary = dict(status='passed', pid=os.getpid(), checks=checks, coordinatedFailures=errors,protocol=protocol,packing=packing,filtering=filtering,
                        **comm.summary())
         if comm.device.type == 'cuda':
             import ctypes

@@ -52,6 +52,10 @@ class RowChunkProcessGroup:
         self.particleDirectFields = 0
         self.particleWorkspaceAllocations = 0
         self.particleWorkspaceWaits = 0
+        self.ownedTransfers = 0
+        self.ownedSendBytes = 0
+        self.ownedReceiveBytes = 0
+        self.ownedLocalCopyBytes = 0
         self.group = group
         self.device = torch.device(device)
         if self.device.type == 'cuda' and self.device.index is None:
@@ -254,6 +258,44 @@ class RowChunkProcessGroup:
         self._event(tag+':reduce',start,out.element_size())
         return out
 
+    def transferOwned(self,send,receive,*,source,target,count,dtype,tag,signature):
+        """Copy a bounded 1D owner interval directly to its new owner.
+
+        Every rank enters the contract; only source/target enter the payload.
+        Caller-owned storage and a deterministic schedule avoid pair gathers.
+        Source and destination may coincide. No allocation/object collective.
+        """
+        sizes={torch.float32:4,torch.float64:8,torch.int32:4,torch.int64:8,torch.uint8:1}
+        def validate():
+            if (type(source) is not int or type(target) is not int or not 0<=source<self.size
+                or not 0<=target<self.size or type(count) is not int or count<0 or dtype not in sizes):
+                raise ValueError('Owned transfer requires valid ranks, count and payload dtype.')
+            for tensor,owner in ((send,source),(receive,target)):
+                if self.rank==owner:
+                    self._tensor(tensor)
+                    if tensor.shape!=(count,) or tensor.dtype!=dtype:
+                        raise ValueError('Owned transfer tensor must match the agreed count/dtype.')
+                elif tensor is not None:
+                    raise ValueError('Only the participating owner may supply transfer storage.')
+            return signature,source,target,count,str(dtype)
+        self._checkedAgree(tag,validate)
+        start=time.perf_counter();size=count*sizes[dtype]
+        if count:
+            if source==target:
+                if self.rank==source:
+                    receive.copy_(send)
+                    self.ownedLocalCopyBytes+=size
+            elif self.rank==source:
+                peer=dist.get_global_rank(self.group,target) if self.group is not None else target
+                dist.send(send,dst=peer,group=self.group)
+                self.ownedSendBytes+=size
+            elif self.rank==target:
+                peer=dist.get_global_rank(self.group,source) if self.group is not None else source
+                dist.recv(receive,src=peer,group=self.group)
+                self.ownedReceiveBytes+=size
+        self.ownedTransfers+=1
+        self._event(tag+':owned-transfer',start,size)
+
     def any(self, flag, *, tag):
         flag = self.localPhase(tag + ':flag', lambda: torch.as_tensor(flag, device=self.device, dtype=torch.int32).reshape(()))
         return bool(self.reduceScalar(flag, operation='max', tag=tag).item())
@@ -382,5 +424,7 @@ class RowChunkProcessGroup:
                     particleWorkspaceBytes=0 if self._particleWorkspace is None else self._particleWorkspace.numel(),
                     particleWorkspaceAllocations=self.particleWorkspaceAllocations,
                     particleWorkspaceWaits=self.particleWorkspaceWaits,
+                    ownedTransfers=self.ownedTransfers,ownedSendBytes=self.ownedSendBytes,
+                    ownedReceiveBytes=self.ownedReceiveBytes,ownedLocalCopyBytes=self.ownedLocalCopyBytes,
                     replicaHashBytes=self.replicaHashBytes,replicaHashDeviceBytes=self.replicaHashDeviceBytes,
                     replicaFields=dict(self.replicaFields),recentEvents=list(self.events))

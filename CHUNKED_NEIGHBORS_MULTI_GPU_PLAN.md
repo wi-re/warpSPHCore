@@ -6,7 +6,7 @@ layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
 Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 next**, in the paired `chunked-neighbor-planner` workspace,
+local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 active**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -225,3 +225,24 @@ The canonical plan records the full matrix, source-pinned evidence and memory/AP
 limits. L3 is locally qualified; L4 distributed filtering/redistribution is next.
 Physical multi-GPU/site/capacity/performance and L5–L7 remain open; MPI/ROCm builds
 remain deferred. No shared sources or installed stack were changed.
+
+## L4 distributed filtering/redistribution checkpoint (2026-10-30)
+
+Resident filtering now counts only current owner rows, agrees the filtered plan
+and streams one bounded filtered source-chunk J interval at a time directly into
+new target chunks through explicit c10d send/recv/local copy. Whole-row traversal
+and optional global I are preserved, without a global pair gather or W migration.
+All ranks validate allocation/transfer contracts before payload. Old leases/J/W
+remain valid; changed list identity retains native fresh-stage replay semantics.
+Peak logical scratch is one source chunk's filtered J/local offsets, in addition
+to overlapping old/new owned lists and O(N) particle/row metadata.
+
+CPU2/3 ranks, exact/contract, all support modes,2D/3D, empty owners, split/merged
+chunks, stored-I changes, six recoverable failures and source/work retention pass.
+CPU FP64/int64 and shared-GPU NCCL FP32 with both offsets preserve exact native
+CRKSPH/CompSPH filtering/replay (8 fresh RHS per accepted step). Final core/search
+suite191 pass,187 expected skips;4 frontend replay drivers pass. Full frontend
+import scanner passes. The canonical plan/evidence records exact counts, timings,
+source variants and limits. L4 is locally qualified; L5 stress is active and L6
+compatibility follows, as authorized by the user. Physical devices/site/scaling,
+MPI/ROCm builds and large-memory L7 remain deferred.

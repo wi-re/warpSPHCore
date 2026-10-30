@@ -449,59 +449,123 @@ def buildChunkedVerletList_(queryPositions, referencePositions, querySupports, r
 
 
 def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, referenceSupports, domain,
-                             adjacency, *, policy=None, storeI=None, expectedSignature=None):
-    """Filter resident J directly into newly planned chunks, preserving row order.
+                             adjacency, *, policy=None, storeI=None, expectedSignature=None, communication=None):
+    """Filter resident rows, then redistribute bounded J slices to new owners.
 
-    Source/destination boundaries may differ. Each overlap uses local CSR slices
-    and global reference fields; no concatenated source or destination exists.
-    A stale source fails before collection. Filtering requires complete ownership;
-    distributed filtering/pair migration remains unsupported.
+    Local filtering preserves source traversal order. A distributed source chunk
+    uses one bounded temporary, copied directly into target chunks; neither pair
+    gathers nor work-buffer migration occur. The old source lease remains valid.
+    Changed list identity uses the native solver's existing fresh-stage replay.
     """
-    if not isinstance(adjacency, ChunkedAdjacency) or adjacency.kind != 'verlet' or adjacency.plan.numOwners != 1:
-        raise ValueError('Filtering requires a complete single-owner chunked Verlet list.')
-    policy = adjacency.plan.policy if policy is None else policy
-    storeI = adjacency.storeI if storeI is None else storeI
-    _checkInputs(queryPositions, referencePositions, querySupports, referenceSupports, domain, adjacency.mode, policy, storeI)
-    if bool(chunkedVerletStaleFlag_(queryPositions, referencePositions, querySupports, referenceSupports, domain, adjacency).item()):
-        raise ValueError('Rebuild the stale chunked Verlet list before filtering.')
-    q, r, qh, rh, domain = _snapshots(queryPositions, referencePositions, querySupports, referenceSupports, domain)
-    counts = torch.zeros(len(q), dtype=torch.int32, device=q.device)
-    def arguments(a, b, source):
-        adj, m = source.adjacency, source.metadata
-        return [castTorchToWarpAsBuiltins(q[a:b]), castTorchToWarpAsBuiltins(r),
-                castTorchToWarp(qh[a:b]), castTorchToWarp(rh), castTorchToWarp(domain.min),
-                castTorchToWarp(domain.max), castTorchToWarp(domain.periodic), wp.uint32(adjacency.mode.value),
-                castTorchToWarp(adj.paddedJ), castTorchToWarp(adj.edgeOffsets[a-m.rowStart:b-m.rowStart]),
+    communication=_bindCommunication(communication,adjacency)
+    local=(lambda tag,fn:fn()) if communication is None else communication.localPhase
+    def validate():
+        if not isinstance(adjacency,ChunkedAdjacency) or adjacency.kind!='verlet':
+            raise ValueError('Filtering requires a resident chunked Verlet list.')
+        if communication is None and adjacency.plan.numOwners!=1:
+            raise ValueError('Filtering requires a complete single-owner list or an explicit process group.')
+        selected=adjacency.plan.policy if policy is None else policy
+        stored=adjacency.storeI if storeI is None else storeI
+        _checkInputs(queryPositions,referencePositions,querySupports,referenceSupports,domain,adjacency.mode,selected,stored)
+        config=_config(queryPositions,referencePositions,domain,adjacency.mode,selected,stored,1.0,
+                       adjacency.orderingKey,adjacency.plan.numOwners,adjacency.owner,'filtered')
+        config=sha256((config+adjacency.plan.signature).encode()).hexdigest()
+        return selected,stored,config
+    policy,storeI,config=local('filter:inputs',validate)
+    if communication is not None:
+        communication.agree('filter:configuration',(config,adjacency.plan.signature,expectedSignature))
+        communication.assertReplicated('filter:replicas',dict(q=queryPositions,r=referencePositions,
+                                         qh=querySupports,rh=referenceSupports),exact=True)
+    stale=local('filter:validity',lambda:bool(chunkedVerletStaleFlag_(
+        queryPositions,referencePositions,querySupports,referenceSupports,domain,adjacency).item()))
+    if communication is not None:stale=communication.any(stale,tag='filter:global-stale')
+    if stale:raise ValueError('Rebuild the stale chunked Verlet list before filtering.')
+    q,r,qh,rh,domain=local('filter:snapshots',lambda:_snapshots(queryPositions,referencePositions,querySupports,referenceSupports,domain))
+    counts=local('filter:count-allocation',lambda:torch.zeros(len(q),dtype=torch.int32,device=q.device))
+    def arguments(a,b,source):
+        adj,m=source.adjacency,source.metadata
+        return [castTorchToWarpAsBuiltins(q[a:b]),castTorchToWarpAsBuiltins(r),
+                castTorchToWarp(qh[a:b]),castTorchToWarp(rh),castTorchToWarp(domain.min),
+                castTorchToWarp(domain.max),castTorchToWarp(domain.periodic),wp.uint32(adjacency.mode.value),
+                castTorchToWarp(adj.paddedJ),castTorchToWarp(adj.edgeOffsets[a-m.rowStart:b-m.rowStart]),
                 castTorchToWarp(adj.numNeighbors[a-m.rowStart:b-m.rowStart])]
-    for source in adjacency:
-        m = source.metadata
-        wp.launch(countNeighborsVerlet, dim=m.rowCount,
-                  inputs=[*arguments(m.rowStart, m.rowStop, source), castTorchToWarp(counts[m.rowStart:m.rowStop])],
-                  device=str(q.device), stream=_stream(q.device))
-    config = _config(q, r, domain, adjacency.mode, policy, storeI, 1.0, adjacency.orderingKey, 1, 0, 'filtered')
-    config = sha256((config + adjacency.plan.signature).encode()).hexdigest()
-    plan, prefix = _plan(counts, adjacency.plan.generation.number, config, policy, len(r), 1, expectedSignature)
-    chunks = _allocateChunks(plan, counts, prefix, 0, storeI, None, False)
-    first = 0
-    for target in chunks:
-        tm, ta = target.metadata, target.adjacency
-        while first < len(adjacency.chunks) and adjacency.chunks[first].metadata.rowStop <= tm.rowStart:
-            first += 1
-        cursor = first
-        while cursor < len(adjacency.chunks) and adjacency.chunks[cursor].metadata.rowStart < tm.rowStop:
-            source = adjacency.chunks[cursor]
-            a, b = max(tm.rowStart, source.metadata.rowStart), min(tm.rowStop, source.metadata.rowStop)
-            if a < b:
-                wp.launch(updateNeighborsVerlet, dim=b-a,
-                          inputs=[*arguments(a, b, source), castTorchToWarp(ta.edgeOffsets[a-tm.rowStart:b-tm.rowStart]),
-                                  castTorchToWarp(ta.numNeighbors[a-tm.rowStart:b-tm.rowStart]),
-                                  wp.array(dtype=index_t, device=str(q.device)), castTorchToWarp(ta.paddedJ), False],
-                          device=str(q.device), stream=_stream(q.device))
-            cursor += 1
-    _fillRows(chunks, q.device)
-    return ChunkedAdjacency(plan, chunks, 0, counts, prefix, q, r, qh, rh, domain, adjacency.mode,
-                            storeI, 1.0, adjacency.orderingKey, 'filtered', 'filtered resident chunks',
-                            sourceSignature=adjacency.plan.signature)
+    def count():
+        for source in adjacency:
+            m=source.metadata
+            if m.liveEdges:
+                wp.launch(countNeighborsVerlet,dim=m.rowCount,
+                          inputs=[*arguments(m.rowStart,m.rowStop,source),castTorchToWarp(counts[m.rowStart:m.rowStop])],
+                          device=str(q.device),stream=_stream(q.device))
+    local('filter:count-owned',count)
+    if communication is not None:
+        communication.exchangeRows(counts,adjacency.plan.ownerRanges,tag='filter:counts',signature=adjacency.plan.signature)
+    plan,prefix=local('filter:plan',lambda:_plan(counts,adjacency.plan.generation.number,config,policy,len(r),
+                                              adjacency.plan.numOwners,expectedSignature))
+    if communication is not None:communication.agree('filter:partition',plan.signature)
+    chunks=local('filter:allocate-owned',lambda:_allocateChunks(plan,counts,prefix,adjacency.owner,storeI,None,False))
+    def collect(a,b,source,target,base):
+        wp.launch(updateNeighborsVerlet,dim=b-a,
+                  inputs=[*arguments(a,b,source),castTorchToWarp(target.edgeOffsets[a-base:b-base]),
+                          castTorchToWarp(target.numNeighbors[a-base:b-base]),
+                          wp.array(dtype=index_t,device=str(q.device)),castTorchToWarp(target.paddedJ),False],
+                  device=str(q.device),stream=_stream(q.device))
+    scratch=0
+    if communication is None:
+        first=0
+        for target in chunks:
+            tm=target.metadata
+            while first<len(adjacency.chunks) and adjacency.chunks[first].metadata.rowStop<=tm.rowStart:first+=1
+            cursor=first
+            while cursor<len(adjacency.chunks) and adjacency.chunks[cursor].metadata.rowStart<tm.rowStop:
+                source=adjacency.chunks[cursor]
+                a,b=max(tm.rowStart,source.metadata.rowStart),min(tm.rowStop,source.metadata.rowStop)
+                if a<b and source.metadata.liveEdges:collect(a,b,source,target.adjacency,tm.rowStart)
+                cursor+=1
+    else:
+        sources={c.metadata.rowStart:c for c in adjacency}
+        targets={c.metadata.rowStart:c for c in chunks}
+        first=0
+        for number,sm in enumerate(adjacency.plan.chunks):
+            # All ranks share this deterministic schedule; only the source
+            # filters/allocates. Target storage was fully allocated above.
+            def prepare():
+                if communication.rank!=sm.owner:return None
+                live=plan.prefix[sm.rowStop]-plan.prefix[sm.rowStart]
+                offsets=(prefix[sm.rowStart:sm.rowStop]-prefix[sm.rowStart]).to(get_torch_offset_dtype())
+                result=AdjacencyList(None,torch.empty(live,dtype=get_torch_index_dtype(),device=q.device),
+                    counts[sm.rowStart:sm.rowStop],offsets,sm.rowCount,len(r),numEdges=live)
+                if live:collect(sm.rowStart,sm.rowStop,sources[sm.rowStart],result,sm.rowStart)
+                return result
+            temporary=local(f'filter:source:{number}',prepare)
+            if temporary is not None:scratch=max(scratch,_storageBytes([temporary.paddedJ,temporary.edgeOffsets]))
+            while first<len(plan.chunks) and plan.chunks[first].rowStop<=sm.rowStart:first+=1
+            cursor=first
+            while cursor<len(plan.chunks) and plan.chunks[cursor].rowStart<sm.rowStop:
+                tm=plan.chunks[cursor]
+                a,b=max(sm.rowStart,tm.rowStart),min(sm.rowStop,tm.rowStop)
+                live=plan.prefix[b]-plan.prefix[a]
+                if live:
+                    def views():
+                        send=receive=None
+                        if communication.rank==sm.owner:
+                            start=plan.prefix[a]-plan.prefix[sm.rowStart]
+                            send=temporary.paddedJ[start:start+live]
+                        if communication.rank==tm.owner:
+                            start=plan.prefix[a]-plan.prefix[tm.rowStart]
+                            receive=targets[tm.rowStart].adjacency.paddedJ[start:start+live]
+                        return send,receive
+                    send,receive=local(f'filter:views:{number}:{cursor}',views)
+                    communication.transferOwned(send,receive,source=sm.owner,target=tm.owner,count=live,
+                        dtype=get_torch_index_dtype(),tag=f'filter:rows:{a}:{b}',
+                        signature=(adjacency.plan.signature,plan.signature,a,b))
+                cursor+=1
+            # Release the previous temporary before allocating the next one.
+            # Send/receive run on the caller's current stream, as do consumers.
+            temporary=send=receive=None
+    local('filter:fill-I',lambda:_fillRows(chunks,q.device))
+    return ChunkedAdjacency(plan,chunks,adjacency.owner,counts,prefix,q,r,qh,rh,domain,adjacency.mode,
+                            storeI,1.0,adjacency.orderingKey,'filtered','filtered resident chunks',scratch,
+                            sourceSignature=adjacency.plan.signature,communication=communication)
 
 
 def _particleArgs(queryParticles, referenceParticles):

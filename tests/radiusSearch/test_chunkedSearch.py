@@ -275,7 +275,7 @@ def test_stale_filter_source_is_rejected_and_filter_can_change_i_layout(device):
     q, r, qh, rh, d = args
     with pytest.raises(ValueError, match='stale'):
         filterChunkedVerletList_(q+.4, r+.4, qh, rh, d, a)
-    with pytest.raises(ValueError, match='complete single-owner'):
+    with pytest.raises(ValueError, match='resident chunked Verlet'):
         filterChunkedVerletList_(*args, filtered)
 
 
