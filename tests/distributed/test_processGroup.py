@@ -61,3 +61,21 @@ def test_fatal_sender_or_receiver_after_transfer_contract_terminates_peers(tmp_p
     assert result.returncode!=0
     assert 'injected fatal participant after transfer contract' in result.stdout,result.stdout
     assert 'all stress checks passed' not in result.stdout
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(),reason='Gloo required')
+@pytest.mark.parametrize('ranks,offset',[(1,'int32'),(2,'int32'),(3,'int64')])
+def test_wide_access_worker_small_oracle_and_redistribution(tmp_path,ranks,offset):
+    import json
+    worker=Path(__file__).with_name('_wideRowChunkWorker.py')
+    env=dict(os.environ,CUDA_VISIBLE_DEVICES='',OMP_NUM_THREADS='2',PYTHONDONTWRITEBYTECODE='1',warpSPHCore_OFFSET_DTYPE=offset)
+    command=[sys.executable]
+    if ranks>1:command+=['-m','torch.distributed.run','--standalone',f'--nproc-per-node={ranks}']
+    command += [str(worker),'--device','cpu','--particles','17','--edge-budget','64','--filter','--output',str(tmp_path)]
+    result=subprocess.run(command,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=180)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode==0,result.stdout
+    reports=[json.loads(p.read_text()) for p in tmp_path.glob('wide-rank*.json')]
+    assert len(reports)==ranks and all(r['status']=='passed' and r['totalEdges']==289 for r in reports)
+    assert sum(r['original']['verifiedEdges'] for r in reports)==289
+    assert all(r['filtered']['sourceRetained'] and not r['aboveIntMax'] for r in reports)

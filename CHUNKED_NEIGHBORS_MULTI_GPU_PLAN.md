@@ -6,7 +6,7 @@ layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
 Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified**, in the paired `chunked-neighbor-planner` workspace,
+local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -289,3 +289,34 @@ L4–L6 meet their bounded local exits. The maintained support matrix is
 chunked AD/graphs, physical GPUs/site/scaling and large-edge capacity gates remain
 open. L7 and MPI/ROCm builds remain deferred; no shared installs or ACSPH sources
 were changed, and contended single-GPU timings remain diagnostic.
+
+## L7 real wide-edge debug access (2026-10-30)
+
+The user released the GPU and authorized large single-node/shared-GPU debug
+runs. After checking92,094 MiB free, a new durable opt-in worker physically
+collects2,209,000,000 neighbours for47,000 coincident particles into33 separate
+J chunks. It reads every J, stamps/verifies actual3-component owned work through
+prepared row dispatch and runs production density eager/prepared against an
+independent O(N) one-row flat oracle. Device probes verify global indices
+2^31−1,2^31 and the final edge; the global prefix is int64, local offsets are
+qualified separately at int32 and int64. No production library change was needed.
+
+Standalone and two shared-GPU NCCL2.32.3 cases pass. Filtering creates66 target
+chunks, preserves all old J/work and transfers137,240,000 bytes across changed
+owner boundaries. Standalone Torch allocated peak41.182 GiB; per-rank peaks in
+the NCCL cases are21.380/20.307 GiB. These are allocator/debug measurements.
+The complete core process suite passes14 drivers, including3 new small CPU/Gloo
+oracle cases. Full frontend imports pass. Commands, raw evidence, source pins
+and final paired heads are in frontend `.tmp/l7-wide-20261030/`.
+
+L1–L7 local exits are now qualified; consult the canonical plan/support guide.
+Realistic spatial/developed-flow capacity, wide-edge solver trajectories, large
+individual chunks, physical GPU/site/scaling, broader compatibility and MPI/ROCm
+remain separate gates. This capacity/addressing fixture has no flow integration.
+
+An additional50,000-particle fixture passes2,500,000,000 actual J/work entries
+across38 chunks, with final global chunk base2,482,700,000 above INT_MAX. Both
+offset widths and standalone/two NCCL ranks pass eager/prepared density, full
+audits and filtering. Standalone allocated peak46.578 GiB. In total8 large
+cohorts /12 rank reports qualify both crossing inside a chunk and whole chunks
+starting above the limit; full spatial/flow capacity remains open.
