@@ -32,12 +32,26 @@ class RowChunkProcessGroup:
     only O(N) particle storage is replicated. Timings include control/host waits
     and are diagnostics, not transport benchmarks.
     """
-    def __init__(self, group, device, *, replicaChecks='exact'):
+    def __init__(self, group, device, *, replicaChecks='exact', particleWorkspaceBytes=4*1024*1024):
         if not dist.is_initialized():
             raise RuntimeError('Initialize torch.distributed with a finite timeout first.')
         if replicaChecks not in ('exact','contract'):
             raise ValueError('replicaChecks must be exact or contract.')
+        if type(particleWorkspaceBytes) is not int or particleWorkspaceBytes<0:
+            raise ValueError('particleWorkspaceBytes must be a nonnegative integer.')
         self.replicaChecks = replicaChecks
+        # One lazy, fixed-capacity allocation, independent of tags/shapes/dtypes.
+        # Zero disables packing. Rows too wide for the budget use direct fields.
+        self._particleWorkspaceBytes = particleWorkspaceBytes
+        self._particleWorkspace = None
+        self._particleReady = None
+        self._particleRecorded = False
+        self.particleBroadcasts = 0
+        self.particlePackedBroadcasts = 0
+        self.particlePackedBatches = 0
+        self.particleDirectFields = 0
+        self.particleWorkspaceAllocations = 0
+        self.particleWorkspaceWaits = 0
         self.group = group
         self.device = torch.device(device)
         if self.device.type == 'cuda' and self.device.index is None:
@@ -69,6 +83,11 @@ class RowChunkProcessGroup:
                              if self.device.type=='cuda' else self._controlReceive)
         self._hostSendArray = self._hostSend.numpy()
         self._hostReceiveArray = self._hostReceive.numpy()
+
+    @property
+    def particleWorkspaceBytes(self):
+        """Fixed packing capacity; choose it when constructing the group."""
+        return self._particleWorkspaceBytes
 
     def _event(self, tag, start, payload=0):
         self.payloadBytes += payload
@@ -208,6 +227,8 @@ class RowChunkProcessGroup:
             if b>a and tensor[a:b].numel():
                 source=dist.get_global_rank(self.group,owner) if self.group is not None else owner
                 dist.broadcast(tensor[a:b],src=source,group=self.group)
+                self.particleBroadcasts+=1
+        self.particleDirectFields+=1
         self._event(tag+':rows',start,tensor.numel()*tensor.element_size())
         return tensor
 
@@ -247,15 +268,96 @@ class RowChunkProcessGroup:
             raise ValueError('Rank must hold exactly its planned chunks, including zero-edge rows.')
 
     def exchangeParticleOutputs(self, adjacency, tensors, *, tag):
-        def validate():
+        """Replicate outputs, packing compatible fields without arithmetic/casts.
+
+        All local validation/allocation precedes one control handshake. Scratch
+        is bounded by particleWorkspaceBytes, with whole-row tiles and direct
+        fallback for oversized rows. Outputs never borrow scratch storage.
+        Like controls, this API is serial eager, not concurrent-thread safe.
+        """
+        batches=[]
+        def prepare():
             self.validateAdjacency(adjacency)
-            return (adjacency.plan.signature,adjacency.plan.ownerRanges,
-                    [self._rowLayout(t,adjacency.plan.ownerRanges) for t in tensors])
-        # All outputs of this operator share a dependency boundary. Validate
-        # the complete ordered batch before any payload; preserve broadcasts.
-        self._checkedAgree(tag+':outputs',validate)
-        for index,tensor in enumerate(tensors):
-            self._broadcastRows(tensor,adjacency.plan.ownerRanges,f'{tag}:{index}')
+            ranges=adjacency.plan.ownerRanges
+            layouts=[self._rowLayout(t,ranges) for t in tensors]
+            # Contiguous address intervals permit disjoint views of one storage
+            # and exact aliases, but reject partial/cross-row or retyped overlap.
+            spans=[]
+            aliases=[]
+            groups={}
+            for index,t in enumerate(tensors):
+                aliases.append(index)
+                if not t.numel():continue
+                lo=t.data_ptr();hi=lo+t.numel()*t.element_size()
+                for begin,end,dtype,alias in spans:
+                    if lo<end and begin<hi:
+                        if lo!=begin or hi!=end or t.dtype!=dtype:
+                            raise ValueError('Particle outputs must not partially overlap or reinterpret storage.')
+                        aliases[-1]=alias
+                spans.append((lo,hi,t.dtype,aliases[-1]))
+                groups.setdefault(t.dtype,[]).append(index)
+            for indices in groups.values():
+                width=sum(tensors[i][0].numel() for i in indices)
+                rowBytes=width*tensors[indices[0]].element_size()
+                tileRows=self.particleWorkspaceBytes//rowBytes
+                # Very small budgets/large populations can need more tiled
+                # broadcasts than direct fields; pack only when calls decrease.
+                packed=(len(indices)>1 and tileRows>0 and
+                        sum((b-a+tileRows-1)//tileRows for a,b in ranges)<
+                        len(indices)*sum(b>a for a,b in ranges))
+                batches.append((indices,width,packed))
+            if any(packed for _,_,packed in batches) and self._particleWorkspace is None:
+                workspace=torch.empty(self.particleWorkspaceBytes,dtype=torch.uint8,device=self.device)
+                ready=torch.cuda.Event() if self.device.type=='cuda' else None
+                self._particleWorkspace=workspace
+                self._particleReady=ready
+                self.particleWorkspaceAllocations+=1
+            return (adjacency.plan.signature,ranges,layouts,self.particleWorkspaceBytes,aliases)
+        self._checkedAgree(tag+':outputs',prepare)
+        ranges=adjacency.plan.ownerRanges
+        for indices,width,packed in batches:
+            if not packed:
+                for index in indices:
+                    self._broadcastRows(tensors[index],ranges,f'{tag}:{index}')
+                continue
+            first=tensors[indices[0]]
+            rows=self.particleWorkspaceBytes//(width*first.element_size())
+            storage=self._particleWorkspace[:rows*width*first.element_size()].view(first.dtype).view(rows,width)
+            if self._particleReady is not None and self._particleRecorded:
+                # The prior unpack may still read scratch on another stream.
+                # A control's host read does not fence that stream's payload.
+                torch.cuda.current_stream(self.device).wait_event(self._particleReady)
+                self.particleWorkspaceWaits+=1
+            if self._particleReady is not None:
+                # Also protect allocator lifetime if the group is released
+                # before a non-creation stream finishes reading the workspace.
+                self._particleWorkspace.record_stream(torch.cuda.current_stream(self.device))
+            started=time.perf_counter()
+            try:
+                for owner,(a,b) in enumerate(ranges):
+                    source=dist.get_global_rank(self.group,owner) if self.group is not None else owner
+                    for start in range(a,b,rows):
+                        stop=min(start+rows,b);packet=storage[:stop-start]
+                        cursor=0
+                        if owner==self.rank:
+                            for index in indices:
+                                field=tensors[index][start:stop].reshape(stop-start,-1)
+                                packet[:,cursor:cursor+field.shape[1]].copy_(field)
+                                cursor+=field.shape[1]
+                        dist.broadcast(packet,src=source,group=self.group)
+                        self.particleBroadcasts+=1
+                        self.particlePackedBroadcasts+=1
+                        if owner!=self.rank:
+                            for index in indices:
+                                field=tensors[index][start:stop].reshape(stop-start,-1)
+                                field.copy_(packet[:,cursor:cursor+field.shape[1]])
+                                cursor+=field.shape[1]
+            finally:
+                if self._particleReady is not None:
+                    self._particleReady.record(torch.cuda.current_stream(self.device))
+                    self._particleRecorded=True
+            self.particlePackedBatches+=1
+            self._event(tag+':packed-rows',started,sum(tensors[i].numel()*tensors[i].element_size() for i in indices))
 
     def sumOwned(self, tensor, adjacency, *, tag):
         def local():
@@ -274,5 +376,11 @@ class RowChunkProcessGroup:
                     controlReceiveBytes=self.controlBytes,controlBufferAllocations=4 if self.device.type=='cuda' else 2,
                     controlBufferBytes=512*(self.size+1)*(2 if self.device.type=='cuda' else 1),
                     controlHostReadbacks=self.sequence if self.device.type=='cuda' else 0,
+                    particleBroadcasts=self.particleBroadcasts,particlePackedBroadcasts=self.particlePackedBroadcasts,
+                    particlePackedBatches=self.particlePackedBatches,particleDirectFields=self.particleDirectFields,
+                    particleWorkspaceLimitBytes=self.particleWorkspaceBytes,
+                    particleWorkspaceBytes=0 if self._particleWorkspace is None else self._particleWorkspace.numel(),
+                    particleWorkspaceAllocations=self.particleWorkspaceAllocations,
+                    particleWorkspaceWaits=self.particleWorkspaceWaits,
                     replicaHashBytes=self.replicaHashBytes,replicaHashDeviceBytes=self.replicaHashDeviceBytes,
                     replicaFields=dict(self.replicaFields),recentEvents=list(self.events))

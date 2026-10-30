@@ -6,7 +6,7 @@ layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
 Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 restart and L2 launcher qualified; L3 control/hash slice qualified; payload/workspaces next**, in the paired `chunked-neighbor-planner` workspace,
+local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 next**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -178,8 +178,8 @@ other limitations remain explicit in the canonical plan.
 The frontend local launcher/output adapter is qualified for the three driven
 native schemes; rank-zero accepted checkpoints/diagnostics, source/runtime/rank
 manifests, recoverable IO/capacity failures and a locally checked Slurm template
-are available. MPI/ROCm builds are explicitly deferred. L3 control/hash overhead
-is next; distributed filtering, broader compatibility, actual wide-edge access
+are available. MPI/ROCm builds are explicitly deferred. L3 control/hash and packed-payload work
+is qualified below; distributed filtering is next. Broader compatibility, actual wide-edge access
 and physical multi-GPU/site/capacity/performance gates remain open.
 
 ## L3 control/validation checkpoint (2026-10-30)
@@ -197,5 +197,31 @@ Matched frozen7c09724 controls6756→3288 per rank; FP32 hashed bytes7,860,720
 construction. CPU FP32/FP64 and shared-GPU NCCL exact stages/fields/W/time/OU
 controls pass, including nondefault/alternating streams, recoverable/fatal
 failures, long forced replay and changed-mode restart. See the canonical plan
-for precise scope, limitations and source-pinned evidence. Next L3 work is
+for precise scope, limitations and source-pinned evidence. The following checkpoint qualifies
 compatible particle payload packing and bounded workspace reuse.
+
+## L3 particle packing/workspace checkpoint (2026-10-30)
+
+Compatible same-dtype particle outputs now share bounded whole-row packets, using
+one lazy fixed-capacity workspace per group (default 4 MiB, constructor option
+`particleWorkspaceBytes`; zero disables packing). Singleton/oversized rows and
+packing that would increase broadcast calls use the direct path. Outputs retain
+their own storage, with no pair migration or arithmetic/dtype conversion. Complete
+layouts, alias topology, capacity and allocation agree before any payload;
+partial/retyped overlap and mismatched aliases/budgets reject coherently.
+
+A CUDA event fences the last unpack before scratch reuse on another stream;
+`record_stream` registers allocator lifetime, without an extra host wait. Mixed
+shape/type and NaN/signed-zero bit tests, tiled/empty owners, allocation failure,
+retained output and delayed stream reuse pass. The cache has one allocation and
+no per-shape/tag entries. Existing exact/contract semantics remain unchanged.
+
+Matched frozen 3742f10 → packed payload broadcasts 1424→968 per rank (32.0% fewer),
+with 3288 controls and unchanged logical payload bytes. CPU FP32/FP64 and shared-GPU
+NCCL qualifiers preserve exact fresh stages/owned W/fields/clock/forcing, including
+int64 offsets, 32 lanes, 16-step replay and changed-rank/mode restart. Full frontend
+runtime/static import checks pass. Timings remain diagnostic under ACSPH contention.
+The canonical plan records the full matrix, source-pinned evidence and memory/API
+limits. L3 is locally qualified; L4 distributed filtering/redistribution is next.
+Physical multi-GPU/site/capacity/performance and L5–L7 remain open; MPI/ROCm builds
+remain deferred. No shared sources or installed stack were changed.

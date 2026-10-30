@@ -256,6 +256,158 @@ def protocolAudit(comm):
                 coordinatedFailures=4,wholeBatchValidation=True)
 
 
+def packingAudit(parent):
+    """Bounded tiles, bitwise packing, aliases, allocation errors and scratch life."""
+    from unittest.mock import patch
+    comm=RowChunkProcessGroup(parent.group,parent.device,replicaChecks=parent.replicaChecks,
+                              particleWorkspaceBytes=127)
+    def rejected(function,text):
+        try:function()
+        except DistributedContractError as exc:assert text in str(exc),str(exc)
+        else:raise AssertionError('expected coordinated rejection: '+text)
+    def forbidden(*a,**kw):raise AssertionError('invalid packing batch entered payload')
+    address=None
+    retained=[]
+    totalBroadcasts=0
+    for n in (0,11,1):
+        q,r,domain=sample(comm.device,nq=n)
+        adj=radiusSearchRowChunks(q,domain,policy=RowChunkPolicy(edgeBudget=80,maxRows=2),communication=comm)
+        a,b=adj.plan.ownerRanges[comm.rank]
+        expected=[]
+        for dtype,shape in ((torch.float32,(2,)),(torch.float32,()),(torch.float32,(2,2)),
+                            (torch.float64,()),(torch.float64,(2,)),
+                            (torch.int32,()),(torch.int32,(2,)),
+                            (torch.int64,(2,)),(torch.int64,()),
+                            (torch.uint8,(3,)),(torch.uint8,())):
+            count=n
+            for width in shape:count*=width
+            expected.append(torch.arange(count,device=comm.device).to(dtype).reshape(n,*shape))
+        if n:
+            # Preserve signed zero and NaN payload bits, not only finite values.
+            expected[0].view(torch.int32).reshape(-1)[0]=-2147483648
+            expected[1].view(torch.int32)[0]=0x7fc00031
+        outputs=[t.clone() for t in expected]
+        # Exact aliases with different trailing shapes and disjoint views of
+        # one allocation are valid; partial/cross-row aliases are not.
+        expected.append(expected[0].reshape(n,1,2));outputs.append(outputs[0].reshape(n,1,2))
+        backing=torch.arange(n*4,device=comm.device,dtype=torch.float32)
+        expected.extend((backing[:n*2].reshape(n,2).clone(),backing[n*2:].reshape(n,2).clone()))
+        outputs.extend((backing[:n*2].reshape(n,2),backing[n*2:].reshape(n,2)))
+        expected.append(torch.empty((n,0,3),device=comm.device));outputs.append(expected[-1].clone())
+        for t in outputs:t[:a].fill_(99);t[b:].fill_(99)
+        if n==11:
+            empty=torch.empty
+            def fail(*args,**kw):
+                if args==(127,) and kw.get('dtype')==torch.uint8 and comm.rank==0:
+                    raise MemoryError('injected particle workspace allocation')
+                return empty(*args,**kw)
+            with patch.object(torch,'empty',fail),patch.object(dist,'broadcast',forbidden):
+                rejected(lambda:comm.exchangeParticleOutputs(adj,outputs,tag='test:packing-oom'),'injected particle')
+            comm.agree('test:after-packing-oom',True)
+        before=comm.particleBroadcasts
+        sequence=comm.sequence
+        comm.exchangeParticleOutputs(adj,outputs,tag='test:mixed-packed')
+        assert comm.sequence-sequence==1
+        for t,want in zip(outputs,expected):equal(t.reshape(-1).view(torch.uint8),want.reshape(-1).view(torch.uint8))
+        widths={}
+        if n:
+            for t in outputs:
+                if t.numel():widths[t.dtype]=widths.get(t.dtype,0)+t.numel()//n
+        count=sum((end-start+127//(width*torch.empty((),dtype=dtype).element_size())-1)//
+                  (127//(width*torch.empty((),dtype=dtype).element_size()))
+                  for dtype,width in widths.items() for start,end in adj.plan.ownerRanges)
+        assert comm.particleBroadcasts-before==count
+        totalBroadcasts+=count
+        if n:
+            assert comm._particleWorkspace.numel()==127
+            if address is None:address=comm._particleWorkspace.data_ptr()
+            assert address==comm._particleWorkspace.data_ptr()
+        else:assert comm._particleWorkspace is None
+        retained.extend((t,want.clone()) for t,want in zip(outputs,expected))
+        if n==11:
+            overlap=torch.empty(12,device=comm.device)
+            partial=overlap[1:] if comm.rank else overlap[:11]
+            with patch.object(dist,'broadcast',forbidden):
+                rejected(lambda:comm.exchangeParticleOutputs(adj,(overlap[:11],partial),tag='test:packing-overlap'),'overlap')
+                alias=overlap[:11] if comm.rank==0 else overlap[:11].clone()
+                rejected(lambda:comm.exchangeParticleOutputs(adj,(overlap[:11],alias),tag='test:packing-alias-contract'),'disagree')
+                rejected(lambda:comm.exchangeParticleOutputs(adj,(overlap[:11],overlap[:11].view(torch.int32)),
+                                                             tag='test:packing-retyped-alias'),'reinterpret')
+            # Oversized combined rows fall back directly without growing scratch.
+            wide=[torch.full((n,40),float(i),device=comm.device) for i in range(2)]
+            for t in wide:t[:a]=-99;t[b:]=-99
+            before=comm.particleBroadcasts
+            comm.exchangeParticleOutputs(adj,wide,tag='test:packing-wide-fallback')
+            assert comm.particleBroadcasts-before==2*sum(end>start for start,end in adj.plan.ownerRanges)
+            for i,t in enumerate(wide):equal(t,torch.full_like(t,float(i)))
+            # Warm the workspace, then reuse it with varied shapes repeatedly.
+            factories={name:getattr(torch,name) for name in ('empty','empty_like','tensor')}
+            def noFactory(*a,**kw):raise AssertionError('warm exchange allocated Tensor storage')
+            for name in factories:setattr(torch,name,noFactory)
+            try:
+                for _ in range(4):comm.exchangeParticleOutputs(adj,outputs,tag='test:packing-warm')
+            finally:
+                for name,function in factories.items():setattr(torch,name,function)
+    # A disabled budget has no retained particle workspace.
+    disabled=RowChunkProcessGroup(parent.group,parent.device,replicaChecks=parent.replicaChecks,particleWorkspaceBytes=0)
+    q,r,domain=sample(comm.device,nq=1)
+    adj=radiusSearchRowChunks(q,domain,policy=RowChunkPolicy(edgeBudget=80,maxRows=2),communication=disabled)
+    a,b=adj.plan.ownerRanges[disabled.rank]
+    fields=[torch.full((1,),float(i),device=comm.device) for i in range(2)]
+    for t in fields:t[:a]=-9;t[b:]=-9
+    disabled.exchangeParticleOutputs(adj,fields,tag='test:packing-disabled')
+    assert disabled._particleWorkspace is None
+    for i,t in enumerate(fields):equal(t,torch.full_like(t,float(i)))
+    # Budgets affect the payload schedule, so differing live-rank budgets
+    # must reject before any payload even when both locally fit the fields.
+    mismatch=RowChunkProcessGroup(parent.group,parent.device,replicaChecks=parent.replicaChecks,
+                                 particleWorkspaceBytes=127+int(parent.rank!=0))
+    adj=radiusSearchRowChunks(q,domain,policy=RowChunkPolicy(edgeBudget=80,maxRows=2),communication=mismatch)
+    with patch.object(dist,'broadcast',forbidden):
+        rejected(lambda:mismatch.exchangeParticleOutputs(adj,fields,tag='test:packing-budget-mismatch'),'disagree')
+    mismatch.agree('test:after-budget-mismatch',True)
+    guarded=RowChunkProcessGroup(parent.group,parent.device,replicaChecks=parent.replicaChecks,particleWorkspaceBytes=8)
+    q,r,domain=sample(comm.device,nq=11)
+    adj=radiusSearchRowChunks(q,domain,policy=RowChunkPolicy(edgeBudget=80,maxRows=2),communication=guarded)
+    a,b=adj.plan.ownerRanges[guarded.rank]
+    fields=[torch.full((11,),float(i),device=comm.device) for i in range(2)]
+    for t in fields:t[:a]=-9;t[b:]=-9
+    before=guarded.particleBroadcasts
+    guarded.exchangeParticleOutputs(adj,fields,tag='test:packing-call-count-guard')
+    assert guarded.particleBroadcasts-before==2*sum(end>start for start,end in adj.plan.ownerRanges)
+    assert guarded._particleWorkspace is None
+    for i,t in enumerate(fields):equal(t,torch.full_like(t,float(i)))
+    if comm.device.type=='cuda':
+        # Inputs are produced on each call's stream. A delayed unpack keeps old
+        # scratch reads outstanding while the next stream enters a new control.
+        streams=[torch.cuda.Stream(device=comm.device) for _ in range(2)]
+        for stream in streams:stream.wait_stream(torch.cuda.current_stream(comm.device))
+        q,r,domain=sample(comm.device,nq=11)
+        adj=radiusSearchRowChunks(q,domain,policy=RowChunkPolicy(edgeBudget=80,maxRows=2),communication=comm)
+        a,b=adj.plan.ownerRanges[comm.rank]
+        copy=torch.Tensor.copy_
+        def delayed(t,source,*args,**kw):
+            if source.untyped_storage().data_ptr()==address:torch.cuda._sleep(200000)
+            return copy(t,source,*args,**kw)
+        with patch.object(torch.Tensor,'copy_',delayed):
+            for index in range(12):
+                with torch.cuda.stream(streams[index%2]):
+                    torch.cuda._sleep(200000)
+                    fields=[torch.full((11,width),float(index+width),device=comm.device) for width in (1,2)]
+                    for t in fields:t[:a]=-1;t[b:]=-1
+                    comm.exchangeParticleOutputs(adj,fields,tag='test:packing-stream-switch')
+                    retained.extend((t,torch.full_like(t,float(index+t.shape[1]))) for t in fields)
+        for stream in streams:torch.cuda.current_stream(comm.device).wait_stream(stream)
+        assert comm.particleWorkspaceWaits>=12
+    for t,want in retained:equal(t.reshape(-1).view(torch.uint8),want.reshape(-1).view(torch.uint8))
+    assert comm.particleWorkspaceAllocations==1
+    assert comm._particleWorkspace.data_ptr()==address
+    comm.agree('test:after-packing-audit',True)
+    return dict(status='passed',mixedBatchBroadcasts=totalBroadcasts,retainedOutputs=len(retained),coordinatedFailures=5,
+                guardedWorkspaceBytes=guarded.summary()['particleWorkspaceBytes'],
+                disabledWorkspaceBytes=disabled.summary()['particleWorkspaceBytes'],**comm.summary())
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--replica-checks',choices=('exact','contract'),default='exact')
@@ -282,9 +434,10 @@ def main():
             checks = correctness(comm)
             errors = failures(comm)
             protocol=protocolAudit(comm)
+            packing=packingAudit(comm)
         if stream is not None:
             stream.synchronize()
-        summary = dict(status='passed', pid=os.getpid(), checks=checks, coordinatedFailures=errors,protocol=protocol,
+        summary = dict(status='passed', pid=os.getpid(), checks=checks, coordinatedFailures=errors,protocol=protocol,packing=packing,
                        **comm.summary())
         if comm.device.type == 'cuda':
             import ctypes
