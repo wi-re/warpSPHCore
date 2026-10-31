@@ -3,7 +3,7 @@
 #include "execution/fieldTraversal.h"
 #include "math/queryGeometry.h"
 namespace sph_native {
-template <int D, int Fields, int Operation> constexpr int field_outputs() {
+template <int D, int Fields, int Operation> SPH_HD constexpr int field_outputs() {
     if constexpr (Operation == 2)
         return Fields * D;
     if constexpr (Operation == 3)

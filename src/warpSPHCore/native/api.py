@@ -22,4 +22,5 @@ def nativeCapabilities():
                 autograd=True, autograd_order=1, forward_ad=False, higher_order=False,
                 reverse_kernels=tuple(k.name for k in KernelFunctions if k.value in REVERSE_KERNELS),
                 field_ranks=(0, 1, 2), deterministic_adjoint=False, radius_search='all_pairs', graph_capture=False,
+                graph_capture_fixed_adjacency=('interpolate_primal',),
                 warp_required=False)

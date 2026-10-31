@@ -6,8 +6,6 @@ def check_execution(*values, allow_reverse=False):
     for value in values:
         if not isinstance(value, torch.Tensor):
             continue
-        if value.is_cuda and torch.cuda.is_current_stream_capturing():
-            raise NotImplementedError('Native pilot does not support graph capture')
         if forward_ad.unpack_dual(value).tangent is not None:
             raise NotImplementedError('Native pilot does not support forward-mode AD')
         if not allow_reverse and torch.is_grad_enabled() and value.requires_grad:

@@ -1,6 +1,7 @@
 #pragma once
-#include "execution/cooperative.cuh"
 #include "dataTypes/state.h"
+#include "execution/cooperative.cuh"
+#include <type_traits>
 namespace sph_native {
 enum class PackedContent { Mass, WeightedField, VolumeAndField };
 template <int D, int Components>
@@ -8,9 +9,9 @@ constexpr int packed_reference_stride = ((D + Components + 3) / 4) * 4;
 
 // Reference-side work is performed once, then reused for every incident edge.
 // Padding is initialized so vector loads never read uninitialized storage.
-template <int D, int Fields, PackedContent Content> struct PreparePackedReference {
-    RowArgs<float, D> a;
-    float *packed;
+template <int D, int Fields, PackedContent Content, class T = float> struct PreparePackedReference {
+    RowArgs<T, D> a;
+    T *packed;
     __device__ void operator()(int64_t j, int lane) const {
         if (lane != 0)
             return;
@@ -22,7 +23,7 @@ template <int D, int Fields, PackedContent Content> struct PreparePackedReferenc
         if constexpr (Content == PackedContent::Mass) {
             packed[j * stride + D] = a.mass[j];
         } else {
-            const float volume = a.mass[j] / a.density[j];
+            const T volume = a.mass[j] / a.density[j];
             if constexpr (Content == PackedContent::VolumeAndField) {
                 packed[j * stride + D] = volume;
 #pragma unroll
@@ -47,15 +48,25 @@ template <bool Wide> __device__ int packed_reference_index(IndexView indices, in
     else
         return static_cast<const int32_t *>(indices.data)[edge];
 }
-template <int Stride>
-__device__ void load_packed_reference(const float *packed, int j, float (&record)[Stride]) {
+template <int Stride, class T>
+__device__ void load_packed_reference(const T *packed, int j, T (&record)[Stride]) {
+    if constexpr (std::is_same_v<T, float>) {
 #pragma unroll
-    for (int chunk = 0; chunk < Stride / 4; ++chunk) {
-        const float4 value = reinterpret_cast<const float4 *>(packed)[j * (Stride / 4) + chunk];
-        record[4 * chunk] = value.x;
-        record[4 * chunk + 1] = value.y;
-        record[4 * chunk + 2] = value.z;
-        record[4 * chunk + 3] = value.w;
+        for (int chunk = 0; chunk < Stride / 4; ++chunk) {
+            const float4 value = reinterpret_cast<const float4 *>(packed)[j * (Stride / 4) + chunk];
+            record[4 * chunk] = value.x;
+            record[4 * chunk + 1] = value.y;
+            record[4 * chunk + 2] = value.z;
+            record[4 * chunk + 3] = value.w;
+        }
+    } else {
+#pragma unroll
+        for (int chunk = 0; chunk < Stride / 2; ++chunk) {
+            const double2 value =
+                reinterpret_cast<const double2 *>(packed)[j * (Stride / 2) + chunk];
+            record[2 * chunk] = value.x;
+            record[2 * chunk + 1] = value.y;
+        }
     }
 }
 } // namespace sph_native

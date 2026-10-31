@@ -19,6 +19,7 @@ import sys
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--root', type=Path, required=True)
 parser.add_argument('--archive', type=Path, required=True)
+parser.add_argument('--native-artifact', type=Path)
 parser.add_argument('--precision', choices=['float32', 'float64'], required=True)
 parser.add_argument('--dims', type=int, nargs='+', default=[1, 2, 3])
 parser.add_argument('--n-h', type=float, nargs='+', default=[4., 2.57])
@@ -42,7 +43,7 @@ torch.set_num_threads(16)
 torch.set_num_interop_threads(1)
 wp.init()
 wp.set_module_options({'enable_backward': False}, module='warpSPHCore.coreOperations.native.wp_interpolate')
-native_artifact = args.archive/'artifacts/optimized-native-torch.so'
+native_artifact = args.native_artifact or args.archive/'artifacts/optimized-native-torch.so'
 cluster_artifact = args.archive/'artifacts/clusters-fixed.so'
 torch.ops.load_library(str(native_artifact))
 build._extension = torch.ops.warpsph_native

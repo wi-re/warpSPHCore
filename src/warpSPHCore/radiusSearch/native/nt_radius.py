@@ -5,6 +5,9 @@ from ...enumTypes import SupportScheme
 
 def radiusSearch(queryParticles: ParticleState, domain: DomainDescription,
                  referenceParticles=None, mode=SupportScheme.Gather):
+    import torch
+    if queryParticles.positions.is_cuda and torch.cuda.is_current_stream_capturing():
+        raise NotImplementedError('Native radius search allocates variable-sized lists; supply a fixed adjacency during graph capture')
     from ...native._build import build
     from ...native._inputs import prepare_geometry
     reference = referenceParticles if referenceParticles is not None else queryParticles

@@ -65,9 +65,11 @@ inline int field_components(const Tensors &t) {
         fields *= int(t[RVALUE].size(d));
     return fields;
 }
-inline int packed_reference_pitch(const Tensors &t, int support, int direction, int kernel,
+template <bool AllowDouble = false> inline int packed_reference_pitch(const Tensors &t, int support, int direction, int kernel,
                                   int components) {
-    if (t[QX].scalar_type() != ScalarType::Float || support != 11 || direction != 0 || kernel != 0)
+    if ((t[QX].scalar_type() != ScalarType::Float &&
+         !(AllowDouble && t[QX].scalar_type() == ScalarType::Double)) ||
+        support != 11 || direction != 0 || kernel != 0)
         return 0;
     const int64_t queries = t[QX].size(0), references = t[RX].size(0);
     const int pitch = (int(t[QX].size(1)) + components + 3) / 4 * 4;
