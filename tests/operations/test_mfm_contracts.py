@@ -206,3 +206,36 @@ def test_warp_rechecks_geometry_ad_metadata_after_build(device, method):
     kwargs = {} if method in ('close', 'gradients') else dict(gamma=1.4)
     with pytest.raises(NotImplementedError, match='forward-only'):
         fn(*args, **kwargs)
+
+
+@pytest.mark.parametrize('dim', [2, 3])
+@pytest.mark.parametrize('count', [0, 1, 17])
+@pytest.mark.parametrize('storeI', [False, True])
+def test_row_chunked_geometry_moments_preserve_self_identity(device, dim, count, storeI):
+    from warpSPHCore import OperationProperties, SupportScheme, buildVerletList
+    from warpSPHCore.radiusSearch import buildChunkedVerletList, RowChunkPolicy
+    from warpSPHCore.mfm.wp_mfm import mfmMomentsWarp
+    dtype = wp.dtype_to_torch(scalar_t)
+    generator = torch.Generator().manual_seed(413)
+    positions = (.8*torch.rand(count, dim, generator=generator, dtype=dtype)-.4).to(device)
+    p = ParticleState(positions=positions, supports=positions.new_full((count,), .37),
+        masses=positions.new_ones(count), densities=positions.new_ones(count),
+        kinds=torch.zeros(count, dtype=torch.int32, device=device))
+    domain = DomainDescription(positions.new_full((dim,), -.5), positions.new_full((dim,), .5),
+        torch.ones(dim, dtype=torch.bool, device=device), dim)
+    flat = buildVerletList(p, domain, supportMode=SupportScheme.SuperSymmetric, storeI=storeI, queryOrder='input')
+    chunks = buildChunkedVerletList(p, domain,
+        policy=RowChunkPolicy(edgeBudget=128, maxRows=3, bytesPerEdge=8),
+        supportMode=SupportScheme.SuperSymmetric, storeI=storeI)
+    props = OperationProperties(kernel=KERNEL, supportMode=SupportScheme.Gather)
+    expected = mfmMomentsWarp(p, props, domain, flat)
+    for a, b in zip(mfmMomentsWarp(p, props, domain, chunks), expected):
+        torch.testing.assert_close(a, b, rtol=0, atol=0)
+    # MeshlessWarp uses PreparedLauncher. This qualifies just moments/inversion:
+    # default closure, gradients, fluxes and their admission are separate gates.
+    with pytest.raises(NotImplementedError, match='face closure is not ported'):
+        MeshlessWarp.build(positions, p.supports, domain, KERNEL, adjacency=chunks)
+    control = MeshlessWarp.build(positions, p.supports, domain, KERNEL, adjacency=flat, closure='none')
+    chunked = MeshlessWarp.build(positions, p.supports, domain, KERNEL, adjacency=chunks, closure='none')
+    for name in ('omega', 'num_nbrs', 'Einv', 'cond', 'deficient', 'volume', 'condBad'):
+        torch.testing.assert_close(getattr(chunked, name), getattr(control, name), rtol=0, atol=0, msg=name)

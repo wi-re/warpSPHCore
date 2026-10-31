@@ -149,6 +149,26 @@ def correctness(comm):
     return checks
 
 
+def meshlessMoments(comm):
+    """The first MFM port: gather and self identity, not closure/flow admission."""
+    from warpSPHCore.mfm.wp_mfm import mfmMomentsWarp, _MOMENTS_SPEC
+    records = []
+    for dim, count in ((2, 0), (2, 1), (2, 19), (3, 11)):
+        q, _, domain = sample(comm.device, nq=count, dim=dim)
+        props = OperationProperties(kernel=KernelFunctions.Wendland2, supportMode=SupportScheme.Gather)
+        chunks = buildChunkedVerletList(q, domain,
+            policy=RowChunkPolicy(edgeBudget=128, maxRows=3, bytesPerEdge=8),
+            supportMode=SupportScheme.SuperSymmetric, communication=comm)
+        flat = radiusSearchCompactHashMap(q, domain, mode=SupportScheme.SuperSymmetric, storeI=False)
+        expected = mfmMomentsWarp(q, props, domain, flat)
+        equal(mfmMomentsWarp(q, props, domain, chunks), expected)
+        prepared = PreparedLauncher(SPHContext(q, props, domain, chunks))
+        equal(prepared.launch(_MOMENTS_SPEC, rowStart=0), expected)
+        records.append(dict(dim=dim, particles=count, prepared=True, exact=True))
+        print(f'[distributed core rank {comm.rank}] meshless moments {dim}D/{count}: passed', flush=True)
+    return records
+
+
 def failures(comm):
     def rejected(function, match):
         try:
@@ -536,13 +556,14 @@ def main():
         import contextlib
         with torch.cuda.stream(stream) if stream is not None else contextlib.nullcontext():
             checks = correctness(comm)
+            moments = meshlessMoments(comm)
             errors = failures(comm)
             protocol=protocolAudit(comm)
             packing=packingAudit(comm)
             filtering=filteringAudit(comm)
         if stream is not None:
             stream.synchronize()
-        summary = dict(status='passed', pid=os.getpid(), checks=checks, coordinatedFailures=errors,protocol=protocol,packing=packing,filtering=filtering,
+        summary = dict(status='passed', pid=os.getpid(), checks=checks, meshlessMoments=moments, coordinatedFailures=errors,protocol=protocol,packing=packing,filtering=filtering,
                        **comm.summary())
         if comm.device.type == 'cuda':
             import ctypes

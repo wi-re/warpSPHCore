@@ -345,6 +345,7 @@ def mfmMoments_Kernel(
     correctionData: Any, kernelProperties: kernelState,
     # canonical ABI prefix -- do not change
 
+    rowStart: wp.int32,
     output_omega: wp.array(dtype=scalar_t),  # type: ignore
     output_E: wp.array(dtype=Any),  # type: ignore
     output_count: wp.array(dtype=wp.int32),
@@ -362,7 +363,7 @@ def mfmMoments_Kernel(
         if beginIndex < 0:
             continue
         w, e, c = mfmMoments_Func_i(
-            i, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
+            i + rowStart, iPtcl, referenceState, domainState, kernelProperties, beginIndex, numIndices,
             adjacencyState.neighborList if useAdjacency else gridState.sortIndex, E)
         omega += w
         E += e
@@ -380,8 +381,10 @@ def kernel_self(iPtcl: Any, kernelProperties: kernelState):
 
 
 _MOMENTS_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=mfmMoments_Kernel,
     outputs=(OutputSpec(dtype=scalar_t), OutputSpec(dtype=_matDtype), OutputSpec(dtype=wp.int32)),
+    extras=(ExtraSpec('rowStart', ExtraKind.SCALAR, RowRole.ROW_START),),
 )
 
 
@@ -1117,7 +1120,7 @@ def _ctx(particles, props, domain, adjacency):
 
 def mfmMomentsWarp(particles, props, domain, adjacency=None):
     with record_function("warpSPH[MFMMoments]"):
-        return launchOperator(_MOMENTS_SPEC, _ctx(particles, props, domain, adjacency))
+        return launchOperator(_MOMENTS_SPEC, _ctx(particles, props, domain, adjacency), rowStart=0)
 
 
 def mfmGradientsWarp(particles, props, domain, adjacency, rho, vel, pres, Einv, deficient):

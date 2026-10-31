@@ -5,8 +5,10 @@ This sibling link assumes the documented paired checkout layout. In another
 layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
-Status, 2026-10-31: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified; overnight real-flow partial success; wide-flow memory guard failure**, in the paired `chunked-neighbor-planner` workspace,
+Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and launch geometry
+qualified; remaining scheme compatibility active. Native PESPH driving/checkpoints
+are qualified in the frontend; C2 starts with chunked MFM geometry moments.**
+Long-flow/physical multi-GPU/site/performance gates remain held. Active paired
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,

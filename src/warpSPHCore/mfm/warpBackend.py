@@ -158,6 +158,9 @@ class MeshlessWarp:
         _forwardOnly(positions, supports, domain.min, domain.max, lam0)
         if closure not in ("project", "none"):
             raise ValueError("closure must be 'project' or 'none'")
+        from ..radiusSearch import ChunkedAdjacency
+        if isinstance(adjacency, ChunkedAdjacency) and closure != 'none':
+            raise NotImplementedError('Chunked meshless geometry currently qualifies moments only; face closure is not ported.')
         N, dim = positions.shape
         ones = torch.ones(N, dtype=positions.dtype, device=positions.device)
         P = ParticleState(positions=positions, supports=supports, masses=ones, densities=ones,
@@ -169,7 +172,7 @@ class MeshlessWarp:
                                     operationMode=OperationDirection.AllToAll)
         self = cls(P, props, domain, adjacency, kernel, dim)
 
-        omega, Ehat, cnt = self._fast.launch(_MOMENTS_SPEC)
+        omega, Ehat, cnt = self._fast.launch(_MOMENTS_SPEC, rowStart=0)
         h = supports
         scale = (omega * h ** 2)[:, None, None]
         Es = Ehat / scale
