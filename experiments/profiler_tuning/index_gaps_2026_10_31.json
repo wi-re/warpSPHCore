@@ -1,0 +1,196 @@
+{
+  "particles": 1000000,
+  "sampled_rows": 32768,
+  "seed": 51031,
+  "precision": "float32",
+  "distribution": "uniform random; periodic unit box; refined Morton sorting",
+  "artifacts": "/home/lu26029/dev/warpSPHDevelopment/core/experiments/native-profiler-tuning-20261031/artifacts",
+  "cases": [
+    {
+      "dim": 1,
+      "nh": 4.0,
+      "edges": 9028976,
+      "mean_neighbors": 9.028976,
+      "sampled_edges": 295783,
+      "max_cell_occupancy": 15,
+      "cells_exceeding_256_particles": 0,
+      "query_distance_fits": {
+        "127": 1.0,
+        "255": 1.0,
+        "65535": 1.0
+      },
+      "successive_gap_fits": {
+        "1": 0.9956770526395833,
+        "15": 1.0,
+        "254": 1.0,
+        "255": 1.0,
+        "65535": 1.0
+      },
+      "maximum_sampled_gap": 4,
+      "independent_32_block_span_fits": {
+        "255": 1.0,
+        "65535": 1.0
+      },
+      "estimated_row_delta_payload_bytes_per_edge": 1.3323517578765514,
+      "estimated_block_offsets_bytes_per_edge": 1.8862713543374703,
+      "estimated_block_delta_bytes_per_edge": 1.7754874350452865,
+      "estimated_block_offsets_metadata": "uint32 base + uint32 byte offset + uint8 width per block",
+      "estimated_row_delta_metadata": "uint32 base per row; excludes row byte offsets/counts"
+    },
+    {
+      "dim": 1,
+      "nh": 2.57,
+      "edges": 6165636,
+      "mean_neighbors": 6.165636,
+      "sampled_edges": 202081,
+      "max_cell_occupancy": 12,
+      "cells_exceeding_256_particles": 0,
+      "query_distance_fits": {
+        "127": 1.0,
+        "255": 1.0,
+        "65535": 1.0
+      },
+      "successive_gap_fits": {
+        "1": 0.9889967102348904,
+        "15": 1.0,
+        "254": 1.0,
+        "255": 1.0,
+        "65535": 1.0
+      },
+      "maximum_sampled_gap": 5,
+      "independent_32_block_span_fits": {
+        "255": 1.0,
+        "65535": 1.0
+      },
+      "estimated_row_delta_payload_bytes_per_edge": 1.4864584003444163,
+      "estimated_block_offsets_bytes_per_edge": 2.2972224009184434,
+      "estimated_block_delta_bytes_per_edge": 2.135069600803638,
+      "estimated_block_offsets_metadata": "uint32 base + uint32 byte offset + uint8 width per block",
+      "estimated_row_delta_metadata": "uint32 base per row; excludes row byte offsets/counts"
+    },
+    {
+      "dim": 2,
+      "nh": 4.0,
+      "edges": 51252698,
+      "mean_neighbors": 51.252698,
+      "sampled_edges": 1679547,
+      "max_cell_occupancy": 34,
+      "cells_exceeding_256_particles": 0,
+      "query_distance_fits": {
+        "127": 0.8003098454523749,
+        "255": 0.8479363780828998,
+        "65535": 0.9892905646582084
+      },
+      "successive_gap_fits": {
+        "1": 0.8135523953123036,
+        "15": 0.9482031286529644,
+        "254": 0.9860406284024754,
+        "255": 0.9860460936166905,
+        "65535": 0.9990988469005252
+      },
+      "maximum_sampled_gap": 690499,
+      "independent_32_block_span_fits": {
+        "255": 0.6832514609340965,
+        "65535": 0.9782925473583006
+      },
+      "estimated_row_delta_payload_bytes_per_edge": 1.1132781636953297,
+      "estimated_block_offsets_bytes_per_edge": 1.6955339743395095,
+      "estimated_block_delta_bytes_per_edge": 1.3311589374992185,
+      "estimated_block_offsets_metadata": "uint32 base + uint32 byte offset + uint8 width per block",
+      "estimated_row_delta_metadata": "uint32 base per row; excludes row byte offsets/counts"
+    },
+    {
+      "dim": 2,
+      "nh": 2.57,
+      "edges": 21753848,
+      "mean_neighbors": 21.753848,
+      "sampled_edges": 712194,
+      "max_cell_occupancy": 20,
+      "cells_exceeding_256_particles": 0,
+      "query_distance_fits": {
+        "127": 0.8600620055771321,
+        "255": 0.9026824151846267,
+        "65535": 0.9937713600507727
+      },
+      "successive_gap_fits": {
+        "1": 0.746486004362506,
+        "15": 0.9280245383603218,
+        "254": 0.981671293120958,
+        "255": 0.9817301663462982,
+        "65535": 0.9987739650822901
+      },
+      "maximum_sampled_gap": 874818,
+      "independent_32_block_span_fits": {
+        "255": 0.633528206364513,
+        "65535": 0.9751084860173578
+      },
+      "estimated_row_delta_payload_bytes_per_edge": 1.2079714235166261,
+      "estimated_block_offsets_bytes_per_edge": 1.7786544115788676,
+      "estimated_block_delta_bytes_per_edge": 1.396055007483916,
+      "estimated_block_offsets_metadata": "uint32 base + uint32 byte offset + uint8 width per block",
+      "estimated_row_delta_metadata": "uint32 base per row; excludes row byte offsets/counts"
+    },
+    {
+      "dim": 3,
+      "nh": 4.0,
+      "edges": 269079094,
+      "mean_neighbors": 269.079094,
+      "sampled_edges": 8814101,
+      "max_cell_occupancy": 95,
+      "cells_exceeding_256_particles": 0,
+      "query_distance_fits": {
+        "127": 0.3729257243591831,
+        "255": 0.48951991814026186,
+        "65535": 0.9049133882173577
+      },
+      "successive_gap_fits": {
+        "1": 0.7680559432149994,
+        "15": 0.9406321340962699,
+        "254": 0.9840364782886607,
+        "255": 0.9840468411800349,
+        "65535": 0.9980958471794658
+      },
+      "maximum_sampled_gap": 769768,
+      "independent_32_block_span_fits": {
+        "255": 0.6268980477223427,
+        "65535": 0.9462780416815398
+      },
+      "estimated_row_delta_payload_bytes_per_edge": 1.0747697354500476,
+      "estimated_block_offsets_bytes_per_edge": 1.7336502043713817,
+      "estimated_block_delta_bytes_per_edge": 1.2932296782167574,
+      "estimated_block_offsets_metadata": "uint32 base + uint32 byte offset + uint8 width per block",
+      "estimated_row_delta_metadata": "uint32 base per row; excludes row byte offsets/counts"
+    },
+    {
+      "dim": 3,
+      "nh": 2.57,
+      "edges": 72097800,
+      "mean_neighbors": 72.0978,
+      "sampled_edges": 2363485,
+      "max_cell_occupancy": 39,
+      "cells_exceeding_256_particles": 0,
+      "query_distance_fits": {
+        "127": 0.5783679608713405,
+        "255": 0.6473732644802062,
+        "65535": 0.9350226466425638
+      },
+      "successive_gap_fits": {
+        "1": 0.6636305480244921,
+        "15": 0.8974590222665386,
+        "254": 0.969341623200071,
+        "255": 0.9694184236009777,
+        "65535": 0.9954773573968869
+      },
+      "maximum_sampled_gap": 846486,
+      "independent_32_block_span_fits": {
+        "255": 0.41620761680068397,
+        "65535": 0.8928583023993247
+      },
+      "estimated_row_delta_payload_bytes_per_edge": 1.1625261002291107,
+      "estimated_block_offsets_bytes_per_edge": 2.1736778528317293,
+      "estimated_block_delta_bytes_per_edge": 1.3916365028760496,
+      "estimated_block_offsets_metadata": "uint32 base + uint32 byte offset + uint8 width per block",
+      "estimated_row_delta_metadata": "uint32 base per row; excludes row byte offsets/counts"
+    }
+  ]
+}
