@@ -1,6 +1,7 @@
 #pragma once
 #include "kernels/kernel.h"
 #include "util/directionality.h"
+#include "math/queryGeometry.h"
 namespace sph_native {
 // Reusable CSR row traversal for core and frontend pair operators.
 // Pair supplies components and accumulate(...); scheduling is handled separately.
@@ -14,12 +15,13 @@ template <typename T, int D, class Pair> struct OperatorRow {
             return;
         const int64_t start = a.offsets[i];
         T sum[Pair::components] = {};
+        const QueryGeometry<T, D> geometry(a.qx + i * D, a.lo, a.hi, a.periodic);
         for (int32_t e = 0; e < a.counts[i]; ++e) {
             const int64_t j = a.neighbors[start + e];
             if (!reference_allowed(a.rkind[j], a.direction))
                 continue;
             T dx[D], value, gradient;
-            const T r = a.displacement(i, j, dx);
+            const T r = geometry.distance(a.rx + j * D, dx);
             pair_kernel(a, i, j, r, value, gradient);
             Pair::accumulate(a, i, j, dx, value, gradient, sum);
         }

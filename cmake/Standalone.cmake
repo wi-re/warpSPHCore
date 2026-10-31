@@ -60,7 +60,7 @@ install(FILES "${sph_headers}/config.h" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/
 foreach(folder dataTypes math util kernels)
   install(DIRECTORY "${sph_headers}/${folder}/" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/warpSPHCore/${folder} FILES_MATCHING PATTERN "*.h")
 endforeach()
-foreach(header compactTraversal.h scan.h atomic.h traversal.h fieldTraversal.h adjointTraversal.h)
+foreach(header compactTraversal.h scan.h atomic.h traversal.h fieldTraversal.h adjointTraversal.h valueTraversal.h rowSort.h)
   install(FILES "${sph_headers}/execution/${header}" DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/warpSPHCore/execution)
 endforeach()
 install(EXPORT warpSPHCoreTargets NAMESPACE warpSPHCore:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/warpSPHCore)

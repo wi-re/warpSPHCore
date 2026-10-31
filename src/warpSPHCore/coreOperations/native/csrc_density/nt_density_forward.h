@@ -1,5 +1,6 @@
 #pragma once
 #include "execution/traversal.h"
+#include "execution/valueTraversal.h"
 namespace sph_native {
 template <typename T, int D> struct DensityPair {
     static constexpr int components = 1;
@@ -12,7 +13,10 @@ template <typename T, int D> using DensityRow = OperatorRow<T, D, DensityPair<T,
 struct DensityRows {
     template <typename T, int D, class Launcher>
     void operator()(int64_t n, RowArgs<T, D> a, const Launcher &launch) const {
-        launch(n, DensityRow<T, D>{a});
+        if (a.kernel == 0 && a.support == 11)
+            launch(n, GatherValues<T, D, 1, true>{a});
+        else
+            launch(n, DensityRow<T, D>{a});
     }
 };
 } // namespace sph_native

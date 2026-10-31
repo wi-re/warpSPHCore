@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare fresh search and fixed-CSR primals across the three execution paths.
+"""Compare fresh search and fixed-CSR primals through Warp/Torch and native/Torch, with optional standalone paths.
 
 Compilation, fixture creation, CSR canonicalization and correctness checks are
 outside timings. The optional CMake bridge keeps standalone iteration loops in
@@ -132,7 +132,8 @@ def measure(sample, warmup, repeat):
                 median_submitted_ms=statistics.median(submitted))
 
 
-def fixture(n, dimension, device, neighbors):
+def fixture(n, dimension, device, neighbors, dtype=None):
+    dtype = torch.float64 if dtype is None else dtype
     generator = torch.Generator().manual_seed(2207 + n * 3 + dimension)
     positions = torch.rand((n, dimension), generator=generator, dtype=torch.float64)
     # Unit periodic box, uniform random points, approximately constant degree.
@@ -141,13 +142,13 @@ def fixture(n, dimension, device, neighbors):
     radius = min(.43, (neighbors / (n * unit_ball)) ** (1 / dimension))
     supports = radius * (.98 + .04 * torch.rand(n, generator=generator, dtype=torch.float64))
     values = torch.sin(positions * (2 * math.pi)) + .1 * positions
-    q = sph.ParticleState(positions.to(device), supports.to(device),
-                          torch.full((n,), 1 / n, dtype=torch.float64, device=device),
+    q = sph.ParticleState(positions.to(device=device, dtype=dtype), supports.to(device=device, dtype=dtype),
+                          torch.full((n,), 1 / n, dtype=dtype, device=device),
                           torch.zeros(n, dtype=torch.int32, device=device),
-                          torch.ones(n, dtype=torch.float64, device=device))
+                          torch.ones(n, dtype=dtype, device=device))
     domain = sph.DomainDescription(q.positions.new_zeros(dimension), q.positions.new_ones(dimension),
                                     torch.ones(dimension, dtype=torch.bool, device=device), dimension)
-    return q, domain, values.to(device)
+    return q, domain, values.to(device=device, dtype=dtype)
 
 
 def canonical(adjacency, n):
@@ -160,12 +161,55 @@ def canonical(adjacency, n):
                               numEdges=adjacency.numEdges)
 
 
+def qualify_search(query, domain, actual, expected):
+    """Check exact membership, or isolate only FP32 cutoff-rounding differences.
+
+    This is fixture qualification before timing, never an operator execution hook.
+    Every differing edge must lie within a scalar-rounding band of the support
+    boundary, measured independently in float64 on the rounded input geometry.
+    """
+    if (torch.equal(actual.numNeighbors, expected.numNeighbors)
+            and torch.equal(actual.paddedJ, expected.paddedJ)):
+        return dict(status='exact CSR agreement', differing_edges=0)
+    if query.positions.dtype != torch.float32:
+        raise AssertionError('Float64 neighborhood membership disagrees')
+    n = len(query.positions)
+    def keys(adjacency):
+        rows = torch.repeat_interleave(torch.arange(n, device=query.positions.device),
+                                      adjacency.numNeighbors.long(), output_size=adjacency.numEdges)
+        return rows * n + adjacency.paddedJ
+    left, right = keys(actual), keys(expected)
+    def missing(source, target):
+        if not len(target):
+            return source
+        index = torch.searchsorted(target, source).clamp(max=len(target)-1)
+        return source[target[index] != source]
+    difference = torch.cat([missing(left, right), missing(right, left)])
+    i, j = difference.div(n, rounding_mode='floor'), difference.remainder(n)
+    x = query.positions.double()
+    length = (domain.max - domain.min).double()
+    displacement = x[i] - x[j]
+    displacement = torch.where(domain.periodic,
+        displacement - length * torch.floor((displacement + length / 2) / length), displacement)
+    radius = displacement.norm(dim=-1)
+    support = query.supports.double()[i]  # This benchmark fixes Gather support.
+    band = 8 * torch.finfo(torch.float32).eps * (length.norm() + support)
+    gap = (radius - support).abs()
+    if not bool((gap <= band).all()):
+        raise AssertionError('Neighborhood differences extend beyond FP32 cutoff rounding')
+    return dict(status='FP32 cutoff-rounding equivalence', differing_edges=len(difference),
+                max_boundary_gap=gap.max().item(), max_rounding_band=band.max().item())
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--devices', nargs='+', choices=['cpu', 'cuda'], default=['cpu', 'cuda'])
     parser.add_argument('--dims', nargs='+', type=int, choices=[1, 2, 3], default=[1, 2, 3])
     parser.add_argument('--ns', nargs='+', type=int, default=[1, 16, 256, 4096, 32768, 131072, 262144, 524288, 1000000])
     parser.add_argument('--neighbors', type=int, default=32)
+    parser.add_argument('--precision', choices=['float32', 'float64'], default='float64')
+    parser.add_argument('--backends', nargs='+', choices=['warp', 'native_torch', 'standalone', 'standalone_reuse'],
+                        default=['warp', 'native_torch'])
     available_cpus = len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else (os.cpu_count() or 1)
     parser.add_argument('--threads', type=int, default=available_cpus,
                         help='CPU workers for native paths (default: CPUs available to this process)')
@@ -175,14 +219,16 @@ def main():
     parser.add_argument('--search-iterations', type=int, default=1)
     parser.add_argument('--large-case-threshold', type=int, default=65536,
                         help='At/above this N use one operator call per batch, three repeats and one warmup')
-    parser.add_argument('--native-library', required=True, type=Path)
+    parser.add_argument('--native-library', type=Path)
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     if (min(args.ns) < 1 or max(args.ns) > 1_000_000 or args.repeat < 2 or args.warmup < 1
             or min(args.threads, args.neighbors, args.operator_iterations, args.search_iterations, args.large_case_threshold) < 1):
         parser.error('positive sizes <= 1M, threads, iterations; repeat >= 2 and warmup >= 1 required')
+    if any(backend.startswith('standalone') for backend in args.backends) and args.native_library is None:
+        parser.error('--native-library is required for standalone measurements')
     os.environ['WARPSPHCORE_BACKEND'] = 'warp'
-    os.environ['warpSPHCore_PRECISION'] = 'float64'
+    os.environ['warpSPHCore_PRECISION'] = args.precision
     os.environ['warpSPHCore_INDEX_DTYPE'] = 'int64'
     os.environ['warpSPHCore_OFFSET_DTYPE'] = 'int64'
     global torch, sph
@@ -200,16 +246,16 @@ def main():
     for operation in operations:
         wp.set_module_options({'enable_backward': False},
                               module=f'warpSPHCore.coreOperations.native.wp_{operation.name.lower()}')
-    lib = native_library(args.native_library)
+    lib = native_library(args.native_library) if args.native_library else None
     source_paths = sorted(path for path in (ROOT / 'src').rglob('*')
                           if path.suffix in {'.py', '.h', '.cuh', '.cpp', '.cu'} and path.is_file())
     source_paths += [Path(__file__).resolve(), Path(__file__).parent / 'native/runner.cpp',
                      ROOT / 'cmake/Standalone.cmake', Path(__file__).parent / 'native/CMakeLists.txt']
     hashes = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
               for path in source_paths}
-    build_root = next((parent for parent in args.native_library.resolve().parents
+    build_root = next((parent for parent in (args.native_library.resolve().parents if args.native_library else [])
                        if (parent / 'CMakeCache.txt').exists()), None)
-    build_files = [args.native_library.resolve()]
+    build_files = [args.native_library.resolve()] if args.native_library else []
     if build_root:
         build_files += [(build_root / 'libwarpsph_core.so').resolve(), build_root / 'CMakeCache.txt']
     report = dict(schema_version=1, complete=False, source_sha256=hashes,
@@ -223,14 +269,14 @@ def main():
                          gpu=torch.cuda.get_device_name() if torch.cuda.is_available() else None,
                          native_build=os.environ.get('WARPSPHCORE_NATIVE_BUILD'),
                          torch_extensions_dir=os.environ.get('TORCH_EXTENSIONS_DIR')),
-        scope=dict(precision='float64', csr='int64 offsets and indices; int32 counts, all paths', fields='vector; scalar density; matrix covariance',
+        scope=dict(precision=args.precision, csr='int64 offsets and indices; int32 counts, all paths', fields='vector; scalar density; matrix covariance',
                    search='fresh compact index, count, scan, allocate, collect; Gather; periodic minimum image',
                    warp_search='fused collection, input query order, no COO rows, no capacity headroom; N hash buckets',
                    operators='fixed identical sorted CSR; Wendland2, Difference, Brookshaw, TrueAllToToAll',
                    large_sampling='At/above large_case_threshold: one operator call/batch, at most three repeats, one warmup',
                    timing='completed wall time per call; compilation, fixture setup and correctness excluded',
                    submitted='host submission interval; includes internal waits, excludes final stream wait; not pure kernel time',
-                   validation='normal execution only; debug content and CSR scans disabled in every timed path',
+                   validation='normal execution only; no numerical-content or CSR verification in timed paths',
                    standalone='fresh output allocation each call, C++ loop',
                    allocation='Torch/Warp use Torch caching allocator; standalone fresh allocations use malloc/cudaMalloc/hipMalloc',
                    standalone_reuse='metadata only, reused output, C++ loop',
@@ -248,7 +294,7 @@ def main():
                 warmup = 1 if large else args.warmup
                 operator_iterations = 1 if large else args.operator_iterations
                 report['activity'].append(activity())
-                q, domain, values = fixture(n, dimension, device, args.neighbors)
+                q, domain, values = fixture(n, dimension, device, args.neighbors, getattr(torch, args.precision))
                 warp_search = lambda: sph.radiusSearchCompactHashMap(
                     q, domain, sph.SupportScheme.Gather, sph.HashMapLengthMode.Fixed, n,
                     capacity=None, collection='fused', queryOrder='input', storeI=False)
@@ -256,26 +302,27 @@ def main():
                 # Qualify freshly constructed neighborhoods before any measurement.
                 adjacency = canonical(torch_search(), n)
                 warp_adjacency = canonical(warp_search(), n)
-                torch.testing.assert_close(adjacency.numNeighbors, warp_adjacency.numNeighbors, rtol=0, atol=0)
-                torch.testing.assert_close(adjacency.paddedJ, warp_adjacency.paddedJ, rtol=0, atol=0)
+                search_qualification = qualify_search(q, domain, adjacency, warp_adjacency)
                 shared = sph.AdjacencyList(None, adjacency.paddedJ.to(sph.get_torch_index_dtype()),
                     adjacency.numNeighbors, adjacency.edgeOffsets.to(sph.get_torch_offset_dtype()),
                     n, n, numEdges=adjacency.numEdges)
                 base = dict(device=device, dimension=dimension, n=n, edges=adjacency.numEdges,
                             mean_neighbors=adjacency.numEdges/n, warmup_batches=warmup)
-                dummy = q.positions.new_empty(n)
-                request = native_request(q, domain, values, adjacency, dummy,
-                                          sph.WarpOperation.Density, args.threads)
-                collected = torch.empty_like(adjacency.paddedJ)
-                if lib.native_benchmark_search(C.byref(request), collected.data_ptr()):
-                    raise RuntimeError(lib.native_benchmark_error().decode())
-                torch.testing.assert_close(collected, adjacency.paddedJ, rtol=0, atol=0)
                 searches = [('warp', lambda: python_sample(warp_search, device, args.search_iterations)),
-                            ('native_torch', lambda: python_sample(torch_search, device, args.search_iterations)),
-                            ('standalone', lambda: native_sample(lib, request, 1, args.search_iterations))]
+                            ('native_torch', lambda: python_sample(torch_search, device, args.search_iterations))]
+                if lib is not None:
+                    dummy = q.positions.new_empty(n)
+                    request = native_request(q, domain, values, adjacency, dummy,
+                                              sph.WarpOperation.Density, args.threads)
+                    collected = torch.empty_like(adjacency.paddedJ)
+                    if lib.native_benchmark_search(C.byref(request), collected.data_ptr()):
+                        raise RuntimeError(lib.native_benchmark_error().decode())
+                    torch.testing.assert_close(collected, adjacency.paddedJ, rtol=0, atol=0)
+                    searches.append(('standalone', lambda: native_sample(lib, request, 1, args.search_iterations)))
+                searches = [(backend, sample) for backend, sample in searches if backend in args.backends]
                 for backend, sample in searches:
                     report['records'].append(base | dict(operation='search', backend=backend,
-                        iterations=args.search_iterations, correctness='exact CSR agreement',
+                        iterations=args.search_iterations, correctness=search_qualification['status'], correctness_details=search_qualification,
                         **measure(sample, warmup, repeats)))
                 if large:
                     save(args.output, report)
@@ -288,25 +335,40 @@ def main():
                     warp_call = lambda: sph.warpOperation(q, properties, domain, values, adjacency=shared)
                     torch_call = lambda: native_operation(q, properties, domain, values, adjacency=shared)
                     expected, actual = warp_call(), torch_call()
-                    torch.testing.assert_close(actual, expected, rtol=3e-9, atol=3e-9)
-                    out = torch.empty_like(actual)
-                    request = native_request(q, domain, values, adjacency, out, operation, args.threads)
-                    native_sample(lib, request, 2, 1)
-                    torch.testing.assert_close(out, actual, rtol=3e-9, atol=3e-9)
+                    tolerance = 3e-4 if args.precision == "float32" else 3e-9
+                    difference = (actual - expected).double()
+                    scale = max(1., expected.abs().max().item()) if expected.numel() else 1.
+                    error = dict(max_abs=difference.abs().max().item() if difference.numel() else 0.,
+                                 relative_l2=(difference.norm() / expected.double().norm().clamp_min(1e-30)).item())
+                    # Derivative fields cross zero. FP32 qualification uses a
+                    # global amplitude scale plus relative L2, avoiding an
+                    # arbitrarily strict per-element relative test at zeros.
+                    absolute = tolerance * scale if args.precision == 'float32' else tolerance
+                    torch.testing.assert_close(actual, expected, rtol=tolerance, atol=absolute)
+                    if args.precision == 'float32' and error['relative_l2'] > tolerance:
+                        raise AssertionError(f"FP32 relative L2 error exceeds tolerance: {error}")
+                    if lib is not None:
+                        out = torch.empty_like(actual)
+                        request = native_request(q, domain, values, adjacency, out, operation, args.threads)
+                        native_sample(lib, request, 2, 1)
+                        torch.testing.assert_close(out, actual, rtol=tolerance, atol=tolerance)
                     # Qualify normal standalone execution before timing.
                     samples = [('warp', lambda: python_sample(warp_call, device, operator_iterations)),
                                ('native_torch', lambda: python_sample(torch_call, device, operator_iterations))]
+                    samples = [(backend, sample) for backend, sample in samples if backend in args.backends]
                     for backend, sample in samples:
                         report['records'].append(base | dict(operation=operation.name.lower(), backend=backend,
-                            iterations=operator_iterations, correctness='qualified',
+                            iterations=operator_iterations, correctness='qualified', correctness_details=error,
                             **measure(sample, warmup, repeats)))
                     for backend, task in [('standalone', 0), ('standalone_reuse', 2)]:
+                        if lib is None or backend not in args.backends:
+                            continue
                         sample = lambda: native_sample(lib, request, task, operator_iterations)
                         report['records'].append(base | dict(operation=operation.name.lower(), backend=backend,
-                            iterations=operator_iterations, correctness='qualified',
+                            iterations=operator_iterations, correctness='qualified', correctness_details=error,
                             **measure(sample, warmup, repeats)))
+                    save(args.output, report)
                     if large:
-                        save(args.output, report)
                         print(f'{device} D={dimension} N={n}: {operation.name} qualified and timed', flush=True)
                 synchronize(device)
                 save(args.output, report)

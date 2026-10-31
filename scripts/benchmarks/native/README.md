@@ -1,13 +1,24 @@
 # Backend performance comparison
 
 `bench_backends.py` qualifies and measures fresh compact-hash search and all seven
-core SPH primals through Warp/Torch, native/Torch, and the standalone C++ API. It
+core SPH primals through Warp/Torch and native/Torch by default. The standalone
+C++ API remains available through explicit `--backends` choices. It
 uses CPU and CUDA by default, dimensions 1/2/3, and N = 1/16/256/4096/32768/131072/262144/524288/1000000. The
-initial sweep uses float64 data, vector fields, 64-bit CSR indices/offsets and
+default uses float64 data (`--precision float32` selects single precision), vector fields, 64-bit CSR indices/offsets and
 32-bit counts. Approximately 32 other neighbors plus self (about 33 entries per particle)
 keep work proportional to N once the fixture is large enough. Actual degrees are recorded.
 
-Build the optional timing bridge from the repository root:
+The primary comparison needs no standalone build or `--native-library`:
+
+```bash
+WARPSPHCORE_NATIVE_BUILD=gpu TORCH_CUDA_ARCH_LIST=12.0 \
+python scripts/benchmarks/bench_backends.py \
+  --devices cuda --dims 2 3 --ns 32768 1000000 --precision float32 \
+  --output /path/to/development/core/experiments/backend-comparison/results.json
+```
+
+Build the optional timing bridge from the repository root to include the older
+standalone comparison:
 
 ```bash
 cmake -S . -B /tmp/warpsph-perf \
@@ -22,6 +33,7 @@ cmake --build /tmp/warpsph-perf --target native_benchmark -j2
 # A native wheel can supply the Torch operators; otherwise they are built by JIT.
 WARPSPHCORE_NATIVE_BUILD=gpu TORCH_CUDA_ARCH_LIST=12.0 \
 python scripts/benchmarks/bench_backends.py \
+  --backends warp native_torch standalone standalone_reuse \
   --native-library /tmp/warpsph-perf/scripts/benchmarks/native/libnative_benchmark.so \
   --output /path/to/development/core/experiments/backend-comparison/results.json
 
@@ -39,9 +51,19 @@ The bridge and standalone library link neither Torch nor Python.
 
 A short smoke run is `--ns 16 --repeat 2 --operator-iterations 2`. Compilation and
 module loading occur during untimed qualification/warmup. Each measured case
-checks exact CSR membership against independently built Warp and native searches,
-then checks native Torch and standalone outputs against Warp with float64
-`rtol=atol=3e-9`. No backward or adjoint work is timed.
+qualifies CSR membership against independently built Warp and native searches.
+FP64 requires exact membership and operator `rtol=atol=3e-9`. FP32 search may
+include/exclude edges at the rounded cutoff; every differing edge is independently
+checked in FP64 against an eight-epsilon, box/support-scaled boundary band.
+FP32 operators require relative L2 error at most `3e-4` and elementwise
+`rtol=3e-4`, `atol=3e-4 * max(1, reference amplitude)`. Error statistics are saved.
+These are untimed benchmark qualifications; unit tests retain their own tighter
+tolerances. No backward or adjoint work is timed.
+
+High resolution 1D FP32 derivative fields are particularly sensitive to the
+minimum-image rounding sequence. The October 31 comparison measures 1D in FP64
+and 2D/3D in both precisions; it does not hide this conditioning by relaxing the
+1D qualification.
 
 The measurement scopes are deliberately explicit:
 
@@ -84,8 +106,8 @@ interpreting small throughput differences.
 
 This is a basic latency/scaling pass on fixed resident inputs. It does not cover
 transfers, changing topology, index reuse, workspaces for search, Verlet lists,
-CUDA graphs, corrected operators, AD, precision variants, variable supports,
-multiple field ranks, isolated GPU kernel profiling, or an
+CUDA graphs, corrected operators, AD, variable supports,
+multiple field ranks, or an
 entire simulation timestep. Background activity and clocks are not controlled.
 Recheck close results on an idle system before making optimization decisions.
 Optional input verification belongs under `tests/verify` and is never called by

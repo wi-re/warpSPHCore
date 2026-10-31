@@ -1,14 +1,21 @@
 #include "nt_compact_backend.h"
 #include "execution/device_runtime.cuh"
 #include "execution/scan.h"
+#include "execution/rowSort.cuh"
 #include <algorithm>
 #include <stdexcept>
+#if !defined(__HIPCC__) && !defined(SPH_NATIVE_HIP) && !defined(USE_ROCM)
+#include <cub/device/device_merge_sort.cuh>
+#endif
 
 namespace sph_native::compact {
 using runtime::check;
 using runtime::Guard;
 namespace {
 constexpr int block_size = 256;
+struct ParticleLess {
+    SPH_HD bool operator()(const ParticleKey &a, const ParticleKey &b) const { return a < b; }
+};
 template <class Row> __global__ void rows(int64_t count, Row row) {
     for (int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x; i < count;
          i += int64_t(blockDim.x) * gridDim.x)
@@ -131,6 +138,14 @@ void gpu_build(const Context &context, const Problem &problem, Data &data) {
                                                                         data.particles},
                    stream);
         });
+#if !defined(__HIPCC__) && !defined(SPH_NATIVE_HIP) && !defined(USE_ROCM)
+        size_t temporary_bytes = 0;
+        check(cub::DeviceMergeSort::SortKeys(nullptr, temporary_bytes, data.particles,
+                                             data.references, ParticleLess{}, stream));
+        void *temporary = scratch.allocate(std::max<size_t>(1, temporary_bytes));
+        check(cub::DeviceMergeSort::SortKeys(temporary, temporary_bytes, data.particles,
+                                             data.references, ParticleLess{}, stream));
+#else
         auto *temporary = static_cast<ParticleKey *>(
             scratch.allocate(size_t(data.references) * sizeof(ParticleKey)));
         auto *input = data.particles, *output = temporary;
@@ -142,6 +157,7 @@ void gpu_build(const Context &context, const Problem &problem, Data &data) {
             check(GPU(MemcpyAsync)(data.particles, input,
                                    size_t(data.references) * sizeof(ParticleKey),
                                    GPU(MemcpyDeviceToDevice), stream));
+#endif
         auto *heads =
             static_cast<int32_t *>(scratch.allocate(size_t(data.references) * sizeof(int32_t)));
         auto *offsets =
@@ -168,8 +184,11 @@ void gpu_search(const Context &context, const Problem &problem, const Data &data
         else
             args.counts = static_cast<int32_t *>(output.data);
         launch(problem.query.count,
-               SearchRow<decltype(scalar), decltype(dimension)::value>{args, data.view(), collect},
+               SearchRow<decltype(scalar), decltype(dimension)::value, false>{args, data.view(),
+                                                                              collect},
                stream);
+        if (collect)
+            sort_csr_rows(problem.query.count, args.offsets, args.counts, args.collected, stream);
     });
 }
 } // namespace sph_native::compact

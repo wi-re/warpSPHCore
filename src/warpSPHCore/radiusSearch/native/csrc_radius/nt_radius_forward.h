@@ -1,43 +1,22 @@
 #pragma once
 #include "radiusSearch/native/csrc_compact/nt_compact.h"
+#include "math/queryGeometry.h"
+#include "execution/rowSort.h"
 namespace sph_native::compact {
-// Keep the existing native CSR contract: each row contains original reference
-// IDs in ascending order. Heap sorting needs no per-row scratch allocation.
-SPH_HD inline void sift_down(int64_t *values, int64_t root, int64_t count) {
-    while (root < count / 2) {
-        int64_t child = 2 * root + 1;
-        if (child + 1 < count && values[child] < values[child + 1])
-            ++child;
-        if (values[root] >= values[child])
-            break;
-        const auto saved = values[root];
-        values[root] = values[child];
-        values[child] = saved;
-        root = child;
-    }
-}
-SPH_HD inline void sort_row(int64_t *values, int64_t count) {
-    for (int64_t root = count / 2; root > 0; --root)
-        sift_down(values, root - 1, count);
-    for (int64_t end = count; end > 1; --end) {
-        const auto saved = values[0];
-        values[0] = values[end - 1];
-        values[end - 1] = saved;
-        sift_down(values, 0, end - 1);
-    }
-}
-template <class T, int D> struct SearchRow {
+template <class T, int D, bool Ordered = true> struct SearchRow {
     RowArgs<T, D> args;
     View index;
     bool collect;
     SPH_HD void operator()(int64_t i) const {
         CellTraversal<T, D> traversal(args.qx + i * D, index);
+        const QueryGeometry<T, D> geometry(args.qx + i * D, args.lo, args.hi, args.periodic);
         Cell cell{};
         int64_t found = 0;
         while (traversal.next(cell)) {
             for (int64_t k = cell.begin; k < cell.end; ++k) {
                 const auto j = index.particles[k].original;
-                if (args.candidate(i, j)) {
+                T dx[D];
+                if (geometry.distance(args.rx + j * D, dx) < args.radius(i, j)) {
                     if (collect && found < args.counts[i])
                         args.collected[args.offsets[i] + found] = j;
                     ++found;
@@ -46,7 +25,7 @@ template <class T, int D> struct SearchRow {
         }
         if (!collect)
             args.counts[i] = int32_t(found);
-        else {
+        else if constexpr (Ordered) {
             const auto written = found < args.counts[i] ? found : args.counts[i];
             if (written > 1)
                 sort_row(args.collected + args.offsets[i], written);

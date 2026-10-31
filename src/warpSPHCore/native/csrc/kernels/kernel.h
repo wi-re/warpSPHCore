@@ -8,6 +8,10 @@ SPH_HD void kernel_pair_value(T r, T h, int kernel, T &value, T &gradient) {
     value = gradient = T(0);
     if (h <= T(0) || r > h)
         return;
+    if (kernel == 0) {
+        Wendland2Primal<T, D>(h).evaluate(r, value, gradient);
+        return;
+    }
     auto f = radial_shape<T, D>(r / h, kernel);
     T C = normalization<T, D>(kernel), hd = power<T, D>(h, D);
     value = C * f.v / hd;

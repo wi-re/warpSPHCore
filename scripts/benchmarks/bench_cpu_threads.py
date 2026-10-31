@@ -34,7 +34,7 @@ for threads in args.threads:
     command = ['taskset', '--cpu-list', ','.join(map(str, cpus)), sys.executable,
                str(args.root / 'scripts/benchmarks/bench_backends.py'),
                '--devices', 'cpu', '--dims', '2', '--ns', '1000000',
-               '--threads', str(threads), '--native-library', str(args.native_library),
+               '--threads', str(threads), '--backends', 'warp', 'native_torch', 'standalone', 'standalone_reuse', '--native-library', str(args.native_library),
                '--output', str(output)]
     environment = os.environ | dict(OMP_NUM_THREADS=str(threads), OMP_PROC_BIND='close', OMP_PLACES='cores', MKL_NUM_THREADS=str(threads))
     manifest['runs'].append(dict(threads=threads, cpus=cpus, command=command, environment={k:environment[k] for k in ['OMP_NUM_THREADS', 'OMP_PROC_BIND', 'OMP_PLACES', 'MKL_NUM_THREADS']}, output=str(output)))

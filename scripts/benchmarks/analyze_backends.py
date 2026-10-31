@@ -101,24 +101,26 @@ def main():
         writer.writerows(record | {'measured_batches': len(record['completed_ms'])}
                          for record in records)
     devices, dims = report['configuration']['devices'], report['configuration']['dims']
+    precision = {'float32': 'FP32', 'float64': 'FP64'}[report['scope']['precision']]
     plot(records, ['search'], devices, dims, args.output_dir / 'search.png',
-         'Fresh compact-hash search · medians and sample ranges · FP64')
+         f'Fresh compact-hash search · medians and sample ranges · {precision}')
     plot(records, ['interpolate'], devices, dims, args.output_dir / 'interpolate.png',
-         'Interpolation scaling · normal execution · FP64 · fixed CSR')
+         f'Interpolation scaling · normal execution · {precision} · fixed CSR')
     plot(records, ['density', 'gradient'], devices, dims, args.output_dir / 'overview.png',
-         'Fixed-CSR SPH · medians and sample ranges · FP64')
+         f'Fixed-CSR SPH · medians and sample ranges · {precision}')
     for device in devices:
         plot(records, OPERATIONS, [device], dims, args.output_dir / f'operators-{device}.png',
-             f'All seven SPH primals · {device.upper()} · FP64 · fixed CSR')
+             f'All seven SPH primals · {device.upper()} · {precision} · fixed CSR')
     lines = ['# Native backend scaling graphs', '',
              f"{len(records)} qualified timing records. Curves show median completed wall time; bands show sample min/max.", '',
              'Compilation, input generation, correctness checks and CSR canonicalization are excluded.',
              'Every path uses ordinary execution, with no numerical-content or CSR verification.',
              'The smallest cases bound calling overhead and also include computation.', '',
              '## Fresh neighborhood search', '', '![Fresh search](search.png)', '',
-             '## Interpolation', '', '![Interpolation](interpolate.png)', '',
-             '## All CPU operators', '', '![All CPU operators](operators-cpu.png)', '',
-             '## All GPU operators', '', '![All GPU operators](operators-cuda.png)', '']
+             '## Interpolation', '', '![Interpolation](interpolate.png)', '']
+    for device in devices:
+        lines += [f'## All {device.upper()} operators', '',
+                  f'![All {device.upper()} operators](operators-{device}.png)', '']
     lines += ['## Measurement scopes', '']
     for name, description in report['scope'].items():
         lines += [f'- **{name}:** {description}']

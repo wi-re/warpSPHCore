@@ -14,7 +14,7 @@ void launch_radius(RadiusTask task, const Tensors &t, int support, compact::View
                                "WARPSPHCORE_NATIVE_BUILD=gpu and rebuild");
 #endif
     } else
-        execute(RadiusRows{task, index}, t, support, 0, 6, CpuLauncher{});
+        execute(RadiusRows<>{task, index}, t, support, 0, 6, CpuLauncher{});
 }
 std::tuple<Tensor, Tensor, Tensor> radius(const Tensor &qx, const Tensor &rx, const Tensor &qh,
                                           const Tensor &rh, const Tensor &lo, const Tensor &hi,

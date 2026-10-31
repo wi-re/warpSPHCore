@@ -1,5 +1,6 @@
 #pragma once
 #include "execution/traversal.h"
+#include "math/queryGeometry.h"
 namespace sph_native {
 template <class T, int D>
 SPH_HD T field_weight(const RowArgs<T, D> &a, int64_t i, int64_t j, int c, bool lap = false) {
@@ -24,12 +25,18 @@ template <class T, int D, class Pair> struct FieldOperatorRow {
             return;
         T sum[D * D * D] = {};
         int64_t start = a.offsets[i];
+        const QueryGeometry<T, D> geometry(a.qx + i * D, a.lo, a.hi, a.periodic);
+        const bool prepared = a.kernel == 0 && a.support == 11;
+        const Wendland2Primal<T, D> kernel(a.qh[i]);
         for (int32_t e = 0; e < a.counts[i]; ++e) {
             int64_t j = a.neighbors[start + e];
             if (!reference_allowed(a.rkind[j], a.direction))
                 continue;
-            T dx[D], w, g, r = a.displacement(i, j, dx);
-            pair_kernel(a, i, j, r, w, g);
+            T dx[D], w, g, r = geometry.distance(a.rx + j * D, dx);
+            if (prepared)
+                kernel.evaluate(r, w, g);
+            else
+                pair_kernel(a, i, j, r, w, g);
             Pair::accumulate(a, i, j, dx, r, w, g, sum);
         }
         for (int c = 0; c < a.outputs; ++c)

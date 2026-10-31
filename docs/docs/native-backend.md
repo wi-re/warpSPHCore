@@ -673,3 +673,13 @@ CSR and CPU counts of 16/24 workers. Its graph and measurements are in
 `core/experiments/native-backend-20261030-float32/`; reproduction uses
 `scripts/benchmarks/bench_interpolation_precision.py`. The timing-only bridge
 supports both precisions and checks its private descriptor ABI before execution.
+
+
+The [2026-10-31 optimization pass](../regression/native_backend_optimization_2026_10_31.md)
+keeps Warp as the readable reference and optimizes native/Torch scheduling,
+prepared kernel math, periodic geometry and compact-hash sorting. In the measured
+million-particle 2D case, FP64 GPU primals improve by 2.36–2.96× over the saved
+checkpoint and GPU fresh search by 2.83×. FP32 GPU interpolation is essentially
+unchanged, and CPU fresh search needs further work. The report records numerical
+qualification, including FP32 cutoff rounding, and retains all timing ranges.
+Graphs and raw evidence live in `core/experiments/native-performance-20261031/`.
