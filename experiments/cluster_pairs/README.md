@@ -104,6 +104,9 @@ done
 python experiments/cluster_pairs/analyze.py "$archive"
 ```
 
+Throughput plots use **higher is faster**; fresh execution time plots use
+**lower is faster**. Both directions are stated in the figure titles and axes.
+
 The primary load is `n_h=4`; `2.57` is included in every sweep. This means
 compact support radius divided by mean particle spacing, not half-support.
 Random fixtures reproduce the previous study's seeds and physical attributes.
