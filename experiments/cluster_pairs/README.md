@@ -137,3 +137,12 @@ reported explicitly; those unqualified Warp curves are omitted from plots.
 The complete study archive, including raw samples, exact timed sources, binary
 artifacts, plots, sanitizer logs and checksums, is at
 `/home/lu26029/dev/warpSPHDevelopment/core/experiments/native-cluster-pairs-20261031/`.
+
+## Executed FLOPs and device comparison
+
+The [hardware-counter study](../../docs/regression/native_backend_flops_2026_10_31.md)
+counts FP32/FP64 add, multiply and FMA instructions for the existing CSR, cell
+and super-cluster paths in 1D/2D/3D at both neighborhood sizes. It retains
+separate ordinary event timings, per-kernel counters and a scalar FMA reference.
+`profile_flops.py`, `analyze_flops.py` and `fma_ceiling.cu` reproduce this study;
+no production kernel is modified.
