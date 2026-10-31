@@ -79,3 +79,15 @@ def test_wide_access_worker_small_oracle_and_redistribution(tmp_path,ranks,offse
     assert len(reports)==ranks and all(r['status']=='passed' and r['totalEdges']==289 for r in reports)
     assert sum(r['original']['verifiedEdges'] for r in reports)==289
     assert all(r['filtered']['sourceRetained'] and not r['aboveIntMax'] for r in reports)
+
+
+@pytest.mark.skipif(not dist.is_gloo_available(), reason='Gloo required')
+def test_meshless_native_closure_and_flux(tmp_path):
+    worker = Path(__file__).with_name('_meshlessWorker.py')
+    env = dict(os.environ, CUDA_VISIBLE_DEVICES='', OMP_NUM_THREADS='2', PYTHONDONTWRITEBYTECODE='1')
+    result = subprocess.run([sys.executable, '-m', 'torch.distributed.run', '--standalone',
+        '--nproc-per-node=2', str(worker), '--device', 'cpu', '--output', str(tmp_path)],
+        env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=240)
+    (tmp_path/'run.log').write_text(result.stdout)
+    assert result.returncode == 0, result.stdout
+    assert result.stdout.count('meshless core rank') == 2, result.stdout

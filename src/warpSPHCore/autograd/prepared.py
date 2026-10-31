@@ -47,6 +47,9 @@ class PreparedLauncher:
         self.ctx = ctx
         from ..radiusSearch.chunked import ChunkedAdjacency
         self._chunks = None
+        # Traversal metadata also belongs to chunked/AD fallback contexts.
+        self.useAdjacency = ctx.adjacency is not None and not isinstance(ctx.adjacency, CompactHashMap)
+        self.cuda = ctx.query.positions.is_cuda
         if isinstance(ctx.adjacency, ChunkedAdjacency):
             from .row_dispatch import chunkContexts, validateContext
             if ctx.adjacency.communication is None:
@@ -74,10 +77,6 @@ class PreparedLauncher:
                 wa.append(a)
             self._wa = wa
             self.prefix = build_fn(wa, use_bundle=False)
-        # Topology stays available when an AD-capable context uses the ordinary
-        # launch fallback; it is independent of fast-path eligibility.
-        self.useAdjacency = ctx.adjacency is not None and not isinstance(ctx.adjacency, CompactHashMap)
-        self.cuda = ctx.query.positions.is_cuda
 
     def launch(self, spec, **extras):
         if self._chunks is not None:

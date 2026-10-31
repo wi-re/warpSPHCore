@@ -158,9 +158,6 @@ class MeshlessWarp:
         _forwardOnly(positions, supports, domain.min, domain.max, lam0)
         if closure not in ("project", "none"):
             raise ValueError("closure must be 'project' or 'none'")
-        from ..radiusSearch import ChunkedAdjacency
-        if isinstance(adjacency, ChunkedAdjacency) and closure != 'none':
-            raise NotImplementedError('Chunked meshless geometry currently qualifies moments only; face closure is not ported.')
         N, dim = positions.shape
         ones = torch.ones(N, dtype=positions.dtype, device=positions.device)
         P = ParticleState(positions=positions, supports=supports, masses=ones, densities=ones,
@@ -206,6 +203,13 @@ class MeshlessWarp:
         the moments). Lets a geometry built with ``closure="none"`` -- e.g. for the timestep, which never reads
         ``lam`` -- be reused as the step's geometry at the same positions and supports instead of rebuilt."""
         self._checkForwardOnly(lam0)
+        from ..radiusSearch import ChunkedAdjacency, ChunkedPairField
+        if isinstance(self.adjacency, ChunkedAdjacency):
+            validate = lambda: ChunkedPairField._checkLayout(self.adjacency, (), self.volume.dtype)
+            if self.adjacency.communication is None:
+                validate()
+            else:
+                self.adjacency.communication.localPhase('meshless:closure:layout', validate)
         self.closure_power = closure_power
         N = self.volume.shape[0]
         useMg = closure_solver == "mg" or (closure_solver == "auto" and N >= mg_min_particles)
@@ -236,18 +240,24 @@ class MeshlessWarp:
         """Per CSR entry ``min(1, cap / |lam_j - lam_i|)`` (symmetric in the pair) and the fraction of entries
         whose potential difference exceeds ``cap``."""
         adj = self.adjacency
+        from ..radiusSearch import ChunkedAdjacency
+        if isinstance(adj, ChunkedAdjacency):
+            from .chunked import capScale
+            return capScale(adj, lam, cap)
         N = lam.shape[0]
         i = torch.repeat_interleave(torch.arange(N, device=lam.device), adj.numNeighbors.long())
         mag = (lam[adj.paddedJ[:adj.numEdges].long()] - lam[i]).norm(dim=-1)
         scale = torch.clamp(cap / mag.clamp_min(1e-30), max=1.0).to(lam.dtype)
-        return scale, (mag > cap).to(lam.dtype).mean()
+        padded = torch.ones(adj.paddedJ.shape[0], dtype=lam.dtype, device=lam.device)
+        padded[:adj.numEdges] = scale
+        return padded, ((mag > cap).to(lam.dtype).mean() if mag.numel() else lam.new_zeros(()))
 
     # ------------------------------------------------------------------
     def residual(self):
         """``(sum_j A_ij, face norm)`` of the paper's face vector: the ``(N, dim)`` closure residual and the global
         norm ``sqrt(sum_pairs |A|^2)`` it is measured against."""
         a, a2 = self._fast.launch(_CLOSURE_RES_SPEC, vol=self.volume, Einv=self.Einv, condBad=self.condBad,
-                                  centred=int(self.centred), areaCap=int(self.areaCap))
+                                  centred=int(self.centred), areaCap=int(self.areaCap), rowStart=0)
         return a, torch.sqrt(a2.sum() / 2.0)
 
     def _solveClosure(self, tol: Optional[float], iters: int, lam0: Optional[torch.Tensor] = None,
@@ -273,10 +283,17 @@ class MeshlessWarp:
         if not bool(bnorm > floor * faceNorm):
             return torch.zeros_like(a)
         target = tol * bnorm
-        kappa = self._fast.launch(_CLOSURE_W_SPEC, vol=self.volume, Einv=self.Einv, condBad=self.condBad,
-                                  centred=int(self.centred), areaCap=int(self.areaCap), power=scalar_t(self.closure_power))
+        from ..radiusSearch import ChunkedAdjacency
+        chunked = isinstance(self.adjacency, ChunkedAdjacency)
+        options = dict(vol=self.volume, Einv=self.Einv, condBad=self.condBad,
+                       centred=int(self.centred), areaCap=int(self.areaCap), power=scalar_t(self.closure_power))
+        if chunked:
+            from .chunked import closureWeights, multiply
+            kappa = closureWeights(self, **options)
+        else:
+            kappa = self._fast.launch(_CLOSURE_W_SPEC, **options, rowStart=0)
         if capScale is not None:
-            kappa = kappa * capScale
+            kappa = multiply(kappa, capScale) if chunked else kappa * capScale
         # preconditioned CG; the diagonal sum_j kappa_ij comes out of the first matvec. The preconditioner is
         # Jacobi, or one V-cycle of the cell-aggregation multigrid (multigrid.py) for large N
         # (a warm start `lam0`, e.g. the previous step's potential, removes part of the work in a time loop).
@@ -290,7 +307,7 @@ class MeshlessWarp:
                                maxCoarse=mgMaxCoarse)
             n, per = mg.ncells, mg.periodic
             S = self._fast.launch(_COARSE_STENCIL_SPEC, kappa=kappa, cellId=mg.cellId, n0=int(n[0]), n1=int(n[1]),
-                                  n2=int(n[2]), p0=int(per[0]), p1=int(per[1]), p2=int(per[2]))
+                                  n2=int(n[2]), p0=int(per[0]), p1=int(per[1]), p2=int(per[2]), rowStart=0)
             mg.setWeights(S)
             self.multigridLevels = mg.nLevels
             if csr and a.is_cuda and _CG_GRAPH_AFTER is not None:
@@ -431,7 +448,7 @@ class MeshlessWarp:
         """Matrix least-squares gradients ``(grad rho (N,d), grad v (N,d,d), grad P (N,d))``."""
         self._checkForwardOnly(rho, vel, pres)
         return self._fast.launch(_GRADIENTS_SPEC, rho=rho.contiguous(), vel=vel.contiguous(), pres=pres.contiguous(),
-                                 Einv=self.Einv, deficient=self.deficient.to(torch.int32))
+                                 Einv=self.Einv, deficient=self.deficient.to(torch.int32), rowStart=0)
 
     def rates(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor, gamma: float, dt: float = 0.0,
               mode: str = "MFM", order: int = 2, beta_min: float = 1.0, beta_max: float = 2.0,
@@ -448,7 +465,7 @@ class MeshlessWarp:
             gRho, gVel, gP = self.gradients(rho, vel, pres)
             beta = conditionBeta(self.cond, beta_min, beta_max, cond_crit)
             aRho, aVel, aP = self._fast.launch(_LIMITER_SPEC, rho=rho, vel=vel, pres=pres, gRho=gRho, gVel=gVel,
-                                               gP=gP, beta=beta)
+                                               gP=gP, beta=beta, rowStart=0)
         else:
             gRho = torch.zeros(N, dim, dtype=rho.dtype, device=rho.device)
             gVel = torch.zeros(N, dim, dim, dtype=rho.dtype, device=rho.device)
@@ -461,11 +478,11 @@ class MeshlessWarp:
             mode=int(0 if mode.upper() == "MFM" else 1), order=int(order), psi1=scalar_t(psi1), psi2=scalar_t(psi2),
             power=scalar_t(self.closure_power), timeCentred=int(timeCentredFrame), centred=int(self.centred),
             areaCap=int(self.areaCap), retry=int(retry), massLimit=scalar_t(massFluxLimit),
-            faceGuard=int(faceGuard), closureCap=scalar_t(self.closure_cap))
+            faceGuard=int(faceGuard), closureCap=scalar_t(self.closure_cap), rowStart=0)
         return torch.cat([dm[:, None], dp, de[:, None]], dim=-1)
 
     def timestep(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor, gamma: float, cfl: float = 0.2):
         """Per-particle CFL time step ``2 C h_i / v_sig,i`` (Eq. 24-25)."""
         self._checkForwardOnly(rho, vel, pres)
         return self._fast.launch(_TIMESTEP_SPEC, rho=rho.contiguous(), vel=vel.contiguous(), pres=pres.contiguous(),
-                                 gamma=scalar_t(gamma), cfl=scalar_t(cfl))
+                                 gamma=scalar_t(gamma), cfl=scalar_t(cfl), rowStart=0)

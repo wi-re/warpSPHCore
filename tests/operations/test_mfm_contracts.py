@@ -231,11 +231,39 @@ def test_row_chunked_geometry_moments_preserve_self_identity(device, dim, count,
     expected = mfmMomentsWarp(p, props, domain, flat)
     for a, b in zip(mfmMomentsWarp(p, props, domain, chunks), expected):
         torch.testing.assert_close(a, b, rtol=0, atol=0)
-    # MeshlessWarp uses PreparedLauncher. This qualifies just moments/inversion:
-    # default closure, gradients, fluxes and their admission are separate gates.
-    with pytest.raises(NotImplementedError, match='face closure is not ported'):
-        MeshlessWarp.build(positions, p.supports, domain, KERNEL, adjacency=chunks)
     control = MeshlessWarp.build(positions, p.supports, domain, KERNEL, adjacency=flat, closure='none')
     chunked = MeshlessWarp.build(positions, p.supports, domain, KERNEL, adjacency=chunks, closure='none')
     for name in ('omega', 'num_nbrs', 'Einv', 'cond', 'deficient', 'volume', 'condBad'):
         torch.testing.assert_close(getattr(chunked, name), getattr(control, name), rtol=0, atol=0, msg=name)
+
+
+@pytest.mark.parametrize('dim', [2, 3])
+@pytest.mark.parametrize('closure,solver,cap', [('none', 'auto', 0.), ('project', 'cg', 0.),
+    ('project', 'mg', 0.), ('project', 'cg', .02)])
+def test_row_chunked_meshless_native_closure_and_flux(device, dim, closure, solver, cap):
+    from warpSPHCore import SupportScheme, buildVerletList
+    from warpSPHCore.radiusSearch import buildChunkedVerletList, RowChunkPolicy
+    dtype = wp.dtype_to_torch(scalar_t)
+    axis = torch.linspace(-.4, .4, 4, dtype=dtype, device=device)
+    positions = torch.stack(torch.meshgrid(*([axis]*dim), indexing='ij'), -1).reshape(-1, dim)
+    positions += .012*torch.sin(torch.arange(positions.numel(), device=device).reshape_as(positions)*1.7)
+    p = ParticleState(positions=positions, supports=positions.new_full((len(positions),), .41),
+        masses=positions.new_ones(len(positions)), densities=positions.new_ones(len(positions)),
+        kinds=torch.zeros(len(positions), dtype=torch.int32, device=device))
+    domain = DomainDescription(positions.new_full((dim,), -.5), positions.new_full((dim,), .5),
+        torch.ones(dim, dtype=torch.bool, device=device), dim)
+    flat = buildVerletList(p, domain, supportMode=SupportScheme.SuperSymmetric, storeI=False, queryOrder='input')
+    chunks = buildChunkedVerletList(p, domain, policy=RowChunkPolicy(edgeBudget=4096, maxRows=3,
+        bytesPerEdge=4+positions.element_size()), supportMode=SupportScheme.SuperSymmetric, storeI=False)
+    options = dict(closure=closure, closure_solver=solver, closure_cap=cap, mg_max_coarse=16)
+    a = MeshlessWarp.build(positions, p.supports, domain, KERNEL, adjacency=flat, **options)
+    b = MeshlessWarp.build(positions, p.supports, domain, KERNEL, adjacency=chunks, **options)
+    tol = 3e-5 if dtype == torch.float32 else 1e-11
+    torch.testing.assert_close(a.lam, b.lam, rtol=tol, atol=tol)
+    rho, vel, pressure = 1+.1*positions[:, 0].sin(), .2*positions.cos(), 1+.15*positions[:, -1].cos()
+    for mode in ('MFM', 'MFV'):
+        ra = a.rates(rho, vel, pressure, 1.4, mode=mode, dt=.001)
+        rb = b.rates(rho, vel, pressure, 1.4, mode=mode, dt=.001)
+        torch.testing.assert_close(ra, rb, rtol=tol, atol=tol)
+        assert bool((rb.sum(0).abs() / rb.abs().sum(0).clamp_min(1) < tol).all())
+    torch.testing.assert_close(a.timestep(rho, vel, pressure, 1.4), b.timestep(rho, vel, pressure, 1.4), rtol=tol, atol=tol)
