@@ -8,7 +8,10 @@ one indexed row in frontend`PLANS.md`; do not maintain competing checklists here
 Status, 2026-10-31: **Bounded local L1–L7, allocation recovery and launch geometry
 qualified; remaining scheme compatibility active. Native PESPH driving/checkpoints
 are qualified in the frontend. C2 now includes row-owned MFM/MFV geometry,
-projected CG/MG closure, gradients, canonical fluxes and native continuation.**
+projected CG/MG closure, gradients, canonical fluxes and native continuation.
+Frontend W1 delta/Sun2017 now qualifies bounded periodic stages, managed2D
+restart/recovery and native3D Gloo/NCCL controls (`warpSPH` commit`7fa1ba7`).
+Incompressible compatibility is next; ACSPH remains excluded.**
 Long-flow/physical multi-GPU/site/performance gates remain held. Active paired
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
