@@ -7,47 +7,28 @@
 namespace sph_native::compact {
 // Only occupied cells are stored. The conceptual Cartesian grid never allocates
 // its full volume, even for sparse 3D domains.
+// Support maxima are required to choose the search cell width. No geometry or
+// index verification is folded into this reduction.
 struct Summary {
     double query_max = 0, reference_max = 0;
-    int invalid = 0;
 };
 template <class T, int D>
-SPH_HD Summary inspect_row(RowArgs<T, D> args, int64_t queries, int64_t i, const Grid &grid,
-                           const int64_t *old_keys) {
-    Summary result{};
-    int64_t cell[D];
-    if (i < queries) {
-        const T support = args.qh[i];
-        result.query_max = support;
-        result.invalid |=
-            !finite(support) || support < 0 || !coordinates<T, D>(args.qx + i * D, grid, cell);
-    }
-    if (i < args.references) {
-        const T support = args.rh[i];
-        result.reference_max = support;
-        const bool valid = coordinates<T, D>(args.rx + i * D, grid, cell);
-        result.invalid |= !finite(support) || support < 0 || !valid;
-        if (valid && old_keys && linear_key(cell, grid) != old_keys[i])
-            result.invalid |= 2;
-    }
-    return result;
+SPH_HD Summary support_bounds(RowArgs<T, D> args, int64_t queries, int64_t i) {
+    return {i < queries ? double(args.qh[i]) : 0, i < args.references ? double(args.rh[i]) : 0};
 }
 SPH_HD inline Summary combine(Summary left, Summary right) {
     return {left.query_max > right.query_max ? left.query_max : right.query_max,
-            left.reference_max > right.reference_max ? left.reference_max : right.reference_max,
-            left.invalid | right.invalid};
+            left.reference_max > right.reference_max ? left.reference_max : right.reference_max};
 }
 template <class T, int D> struct KeyRow {
     RowArgs<T, D> args;
     Grid grid;
     ParticleKey *keys;
-    int64_t *original_keys;
     SPH_HD void operator()(int64_t i) const {
         int64_t cell[D];
-        coordinates<T, D>(args.rx + i * D, grid, cell); // validated before construction
+        coordinates<T, D>(args.rx + i * D, grid, cell);
         const auto key = linear_key(cell, grid);
         keys[i] = {hash_key(cell, grid), key, i};
-        original_keys[i] = key;
     }
 };
 // Portable bottom-up merge sorting. Each element binary-searches its rank in the

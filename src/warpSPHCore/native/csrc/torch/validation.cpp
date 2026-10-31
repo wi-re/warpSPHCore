@@ -1,4 +1,3 @@
-#include "torch/ops.h"
 #include <limits>
 #include "torch/validation.h"
 
@@ -15,9 +14,7 @@ void vector(const Tensor &x, const Tensor &example, ScalarType dtype, int64_t n,
     tensor(x, example, dtype, name);
     STD_TORCH_CHECK(x.dim() == 1 && x.size(0) == n, name, " has an incompatible shape");
 }
-void finite(const Tensor &x, const char *name) {
-    STD_TORCH_CHECK(all(call<Tensor>("aten::isfinite", "", x)), name, " must be finite");
-}
+
 void geometry(const Tensors &t, int support) {
     const auto &q = t[QX];
     const auto &r = t[RX];
@@ -41,14 +38,9 @@ void geometry(const Tensors &t, int support) {
     STD_TORCH_CHECK(support >= 11 && support <= 15,
                     "Native pilot supports Gather, Scatter, MeanSymmetric, KernelMeanSymmetric and "
                     "SuperSymmetric");
-    for (auto slot : {QX, RX, QH, RH, LO, HI})
-        finite(t[slot], "geometry");
-    STD_TORCH_CHECK(all(ge_zero(t[QH])) && all(ge_zero(t[RH])), "supports must be nonnegative");
-    STD_TORCH_CHECK(all(call<Tensor>("aten::gt", "Tensor", t[HI], t[LO])),
-                    "domain max must exceed domain min");
 }
 
-Tensors prepare_operator(const Tensors &inputs, int support, int direction, bool gradient) {
+Tensors prepare_operator(const Tensors &inputs, int support, int direction) {
     STD_TORCH_CHECK(inputs.size() == OUTPUT, "invalid native operator tensor layout");
     Tensors t = inputs;
     t.resize(SLOTS);
@@ -57,7 +49,7 @@ Tensors prepare_operator(const Tensors &inputs, int support, int direction, bool
     const auto n = q.size(0), nr = t[RX].size(0);
     STD_TORCH_CHECK(direction >= 0 && direction <= 14, "invalid operation direction");
     vector(t[MASS], q, q.scalar_type(), nr, "reference masses");
-    finite(t[MASS], "reference masses");
+
     vector(t[QKIND], q, ScalarType::Int, n, "query kinds");
     vector(t[RKIND], q, ScalarType::Int, nr, "reference kinds");
     vector(t[COUNTS], q, ScalarType::Int, n, "neighbor counts");
@@ -69,45 +61,18 @@ Tensors prepare_operator(const Tensors &inputs, int support, int direction, bool
         STD_TORCH_CHECK(t[slot].dim() == 1, "CSR storage must be one dimensional");
     }
     STD_TORCH_CHECK(t[OFFSETS].size(0) == n, "CSR offsets must have one entry per query");
-    STD_TORCH_CHECK(all(ge_zero(t[COUNTS])), "CSR counts must be nonnegative");
-    const auto counts = wide(t[COUNTS]);
-    STD_TORCH_CHECK(call<bool>("aten::equal", "", wide(t[OFFSETS]), exclusive_scan(counts)),
-                    "CSR offsets must be the exclusive scan of counts");
-    const auto edges = sum_int(counts);
-    STD_TORCH_CHECK(edges <= t[NEIGHBORS].numel(), "CSR capacity does not cover live entries");
-    const auto live =
-        call<Tensor>("aten::slice", "Tensor", t[NEIGHBORS], int64_t(0), std::optional<int64_t>(0),
-                     std::optional<int64_t>(edges), int64_t(1));
-    STD_TORCH_CHECK(all(ge_zero(live)) &&
-                        all(call<Tensor>("aten::lt", "Tensor", live,
-                                         stable::fill_(stable::new_empty(live, {}), double(nr)))),
-                    "CSR contains an invalid live reference index");
-    if (gradient) {
-        vector(t[QVALUE], q, q.scalar_type(), n, "query values");
-        vector(t[RVALUE], q, q.scalar_type(), nr, "reference values");
-        vector(t[DENSITY], q, q.scalar_type(), nr, "reference densities");
-        finite(t[QVALUE], "query values");
-        finite(t[RVALUE], "reference values");
-        finite(t[DENSITY], "reference densities");
-        STD_TORCH_CHECK(
-            all(call<Tensor>("aten::gt", "Tensor", t[DENSITY], stable::new_zeros(t[DENSITY], {}))),
-            "reference densities must be positive");
-    }
     return t;
 }
 Tensors prepare_field_operator(const Tensors &inputs, int support, int direction, int op,
                                int scheme, int lap, bool dot) {
-    Tensors t = prepare_operator(inputs, support, direction, false);
+    Tensors t = prepare_operator(inputs, support, direction);
     STD_TORCH_CHECK(op >= 1 && op <= 7 && op != 6, "Unknown field operator");
     STD_TORCH_CHECK(scheme >= 1 && scheme <= 4, "Unknown gradient scheme");
     STD_TORCH_CHECK(lap >= 1 && lap <= 4, "Unknown Laplacian scheme");
     const auto &x = t[QX];
     const auto n = x.size(0), nr = t[RX].size(0), D = x.size(1);
     vector(t[DENSITY], x, x.scalar_type(), nr, "reference densities");
-    finite(t[DENSITY], "reference densities");
-    STD_TORCH_CHECK(
-        all(call<Tensor>("aten::gt", "Tensor", t[DENSITY], stable::new_zeros(t[DENSITY], {}))),
-        "reference densities must be positive");
+
     std::vector<int64_t> shape;
     if (op == 7)
         shape = {D, D};
@@ -119,7 +84,7 @@ Tensors prepare_field_operator(const Tensors &inputs, int support, int direction
             STD_TORCH_CHECK(t[RVALUE].size(d) == D, "field axes must match spatial dimension");
             shape.push_back(D);
         }
-        finite(t[RVALUE], "reference values");
+
         if (op != 1) {
             tensor(t[QVALUE], x, x.scalar_type(), "query values");
             STD_TORCH_CHECK(t[QVALUE].dim() == t[RVALUE].dim() && t[QVALUE].size(0) == n,
@@ -127,7 +92,6 @@ Tensors prepare_field_operator(const Tensors &inputs, int support, int direction
             for (int d = 1; d < t[QVALUE].dim(); ++d)
                 STD_TORCH_CHECK(t[QVALUE].size(d) == D,
                                 "query field axes must match spatial dimension");
-            finite(t[QVALUE], "query values");
         }
         if (op == 2)
             shape.push_back(D);
@@ -151,10 +115,6 @@ Tensors prepare_field_operator(const Tensors &inputs, int support, int direction
     }
     if (scheme == 2 && op != 1 && op != 7) {
         vector(t[QDENSITY], x, x.scalar_type(), n, "query densities");
-        finite(t[QDENSITY], "query densities");
-        STD_TORCH_CHECK(all(call<Tensor>("aten::gt", "Tensor", t[QDENSITY],
-                                         stable::new_zeros(t[QDENSITY], {}))),
-                        "query densities must be positive");
     }
     shape.insert(shape.begin(), n);
     t[OUTPUT] = stable::new_empty(x, shape);

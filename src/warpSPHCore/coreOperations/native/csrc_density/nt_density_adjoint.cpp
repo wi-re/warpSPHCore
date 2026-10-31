@@ -8,7 +8,7 @@ void density_adjoint_gpu(const Tensors &, const Tensor &, const Tensors &, int64
 Tensors density_adjoint(const Tensors &inputs, const Tensor &cot, int64_t mask, int64_t support,
                         int64_t direction, int64_t kernel, int64_t scheme, int64_t lap, bool dot) {
     STD_TORCH_CHECK(valid_kernel(kernel), "Unknown native kernel");
-    auto t = prepare_operator(inputs, support, direction, false);
+    auto t = prepare_operator(inputs, support, direction);
     t[OUTPUT] = stable::new_empty(t[QX], {t[QX].size(0)});
     tensor(cot, t[QX], t[QX].scalar_type(), "cotangent");
     STD_TORCH_CHECK(cot.dim() == t[OUTPUT].dim() && cot.numel() == t[OUTPUT].numel(),

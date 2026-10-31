@@ -21,7 +21,6 @@ struct Access;
 } // namespace compact
 enum class Precision { Float32, Float64 };
 enum class Device { CPU, CUDA, HIP };
-enum class Validation { Contents, Metadata };
 enum class Operation {
     Interpolate = 1,
     Gradient,
@@ -97,7 +96,6 @@ struct Context {
     int device_index = 0;
     void *stream = nullptr; // native CUDA/HIP stream; null means the default stream
     int cpu_threads = 0;    // OpenMP default, or explicit positive thread count
-    Validation validation = Validation::Contents;
 };
 struct Adjoints {
     // Slots use dataTypes/slots.h. Only floating-point input slots are legal.
@@ -150,10 +148,10 @@ SPH_NATIVE_API void forward(const Context &, const Problem &, Buffer output);
 SPH_NATIVE_API void adjoint(const Context &, const Problem &, ConstBuffer cotangent,
                             const Adjoints &);
 // Compact-hash search: count -> scan/allocate -> collect. The overloads without
-// an index build a temporary one; retain a CompactHash to reuse it. Scan and collect
-// synchronize on GPU; forward and adjoint launches remain stream-ordered.
+// an index build a temporary one; retain a CompactHash to reuse it. Scan returns
+// the total to host; indexed count/collect and operator launches are stream-ordered.
 SPH_NATIVE_API void radius_count(const Context &, const Problem &, Buffer counts);
-// GPU scans keep prefixes on device; only the total and error status return to host.
+// GPU scans keep prefixes on device; only the total and overflow status return to host.
 SPH_NATIVE_API int64_t radius_scan(const Context &, int64_t rows, ConstBuffer counts,
                                    Buffer offsets);
 SPH_NATIVE_API void radius_collect(const Context &, const Problem &, Buffer indices);

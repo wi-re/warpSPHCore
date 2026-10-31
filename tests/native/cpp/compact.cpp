@@ -48,43 +48,18 @@ static void reuse_and_errors(Context context) {
     for (auto &position : fixture.query)
         position += .37;
     compare(context, fixture.problem(Support::Gather), moved, oracle(fixture, Support::Gather));
-    std::vector<int32_t> counts(17);
     rejects([&] {
         radius_count(context, problem, moved,
-                     {const_cast<int64_t *>(moved.view().reference_keys), 17});
+                     {const_cast<compact::ParticleKey *>(moved.view().particles), 17});
     });
-    const double saved_support = fixture.query_support[0];
-    const auto stats = moved.statistics();
-    fixture.query_support[0] = std::nextafter(stats.radius_bound, stats.cell_width);
-    rejects(
-        [&] { radius_count(context, fixture.problem(Support::Gather), moved, output(counts)); });
-    fixture.query_support[0] = saved_support;
-    const double saved = fixture.reference[0];
     fixture.reference[0] += .51;
-    context.validation = Validation::Metadata; // stale-cell checks also apply here
-    rejects(
-        [&] { radius_count(context, fixture.problem(Support::Gather), moved, output(counts)); });
-    fixture.reference[0] = saved;
-    fixture.query_support[0] = 100;
-    rejects(
-        [&] { radius_count(context, fixture.problem(Support::Gather), moved, output(counts)); });
-    fixture.query_support[0] = .01;
-    fixture.lower[0] -= .1;
-    rejects(
-        [&] { radius_count(context, fixture.problem(Support::Gather), moved, output(counts)); });
-    fixture.lower[0] += .1;
-    fixture.reference_support[0] = -1;
-    rejects([&] { build_compact_hash(context, fixture.problem(Support::Gather)); });
-    fixture.reference_support[0] = .01;
-    rejects([&] { build_compact_hash(context, fixture.problem(Support::Gather), {-1}); });
+    fixture.query_support[0] = 2;
     problem = fixture.problem(Support::Gather);
+    auto rebuilt = build_compact_hash(context, problem);
+    compare(context, problem, rebuilt, oracle(fixture, Support::Gather));
+    rejects([&] { build_compact_hash(context, problem, {-1}); });
     problem.query.positions.size = 1;
     rejects([&] { build_compact_hash(context, problem); });
-    fixture.query[0] = std::numeric_limits<double>::quiet_NaN();
-    rejects([&] { build_compact_hash(context, fixture.problem(Support::Gather)); });
-    fixture.query[0] = 0;
-    fixture.upper[0] = fixture.lower[0];
-    rejects([&] { build_compact_hash(context, fixture.problem(Support::Gather)); });
 }
 static void boundaries_and_empty(const Context &context) {
     for (int periodic = 0; periodic < 2; ++periodic) {

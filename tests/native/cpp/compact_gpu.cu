@@ -72,50 +72,15 @@ static void reuse_and_errors() {
         position += .37;
     problem.query.positions = storage.upload(fixture.query.data(), fixture.query.size());
     compare(storage, context, problem, index, oracle(fixture, Support::Gather));
-    const Buffer counts{storage.allocate(17 * sizeof(int32_t)), 17};
     rejects([&] {
         radius_count(context, problem, index,
-                     {const_cast<int64_t *>(index.view().reference_keys), 17});
+                     {const_cast<compact::ParticleKey *>(index.view().particles), 17});
     });
-    const double saved_support = fixture.query_support[0];
-    const auto stats = index.statistics();
-    fixture.query_support[0] = std::nextafter(stats.radius_bound, stats.cell_width);
-    problem.query.supports =
-        storage.upload(fixture.query_support.data(), fixture.query_support.size());
-    rejects([&] { radius_count(context, problem, index, counts); });
-    fixture.query_support[0] = saved_support;
-    problem.query.supports =
-        storage.upload(fixture.query_support.data(), fixture.query_support.size());
     fixture.reference[0] += .51;
-    problem.reference.positions =
-        storage.upload(fixture.reference.data(), fixture.reference.size());
-    context.validation = Validation::Metadata;
-    rejects([&] { radius_count(context, problem, index, counts); });
-    fixture.reference[0] -= .51;
-    problem.reference.positions =
-        storage.upload(fixture.reference.data(), fixture.reference.size());
-    fixture.query_support[0] = 100;
-    problem.query.supports =
-        storage.upload(fixture.query_support.data(), fixture.query_support.size());
-    rejects([&] { radius_count(context, problem, index, counts); });
-    fixture.query_support[0] = .01;
-    problem.query.supports =
-        storage.upload(fixture.query_support.data(), fixture.query_support.size());
-    fixture.lower[0] -= .1;
-    problem.domain.min = storage.upload(fixture.lower.data(), 2);
-    rejects([&] { radius_count(context, problem, index, counts); });
-    fixture.lower[0] += .1;
-    problem.domain.min = storage.upload(fixture.lower.data(), 2);
-    fixture.reference_support[0] = -1;
-    problem.reference.supports =
-        storage.upload(fixture.reference_support.data(), fixture.reference_support.size());
-    rejects([&] { build_compact_hash(context, problem); });
-    fixture.reference_support[0] = .01;
-    problem.reference.supports =
-        storage.upload(fixture.reference_support.data(), fixture.reference_support.size());
-    fixture.query[0] = std::numeric_limits<double>::quiet_NaN();
-    problem.query.positions = storage.upload(fixture.query.data(), fixture.query.size());
-    rejects([&] { build_compact_hash(context, problem); });
+    fixture.query_support[0] = 2;
+    problem = upload(storage, fixture, Support::Gather);
+    auto rebuilt = build_compact_hash(context, problem);
+    compare(storage, context, problem, rebuilt, oracle(fixture, Support::Gather));
 }
 static void boundaries_and_empty() {
     Storage storage;

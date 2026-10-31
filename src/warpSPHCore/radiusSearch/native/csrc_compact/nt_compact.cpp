@@ -44,18 +44,14 @@ void domain(const Context &context, const Problem &problem, Grid &grid) {
         }
     });
 }
-Summary summary(const Context &context, const Problem &problem, const Grid &grid,
-                const int64_t *keys = nullptr) {
+Summary summary(const Context &context, const Problem &problem) {
     Summary result{};
     if (context.device == Device::CPU)
-        result = cpu_summary(problem, grid, keys);
+        result = cpu_summary(problem);
 #ifdef SPH_COMPACT_HAS_GPU
     else
-        result = gpu_summary(context, problem, grid, keys);
+        result = gpu_summary(context, problem);
 #endif
-    require(!(result.invalid & 2), "Reference cells changed; rebuild the compact hash");
-    require(!result.invalid, "Nonfinite or invalid scalar contents, or unrepresentable periodic "
-                             "coordinates in compact hash");
     return result;
 }
 double radius_bound(const Problem &problem, Summary maxima) {
@@ -73,10 +69,7 @@ double radius_bound(const Problem &problem, Summary maxima) {
 } // namespace
 
 void validate_geometry(const Context &context, const Problem &problem) {
-    require(context.device_index >= 0 && context.cpu_threads >= 0 &&
-                (context.validation == Validation::Contents ||
-                 context.validation == Validation::Metadata),
-            "Invalid execution context");
+    require(context.device_index >= 0 && context.cpu_threads >= 0, "Invalid execution context");
     bool available = context.device == Device::CPU;
 #ifdef SPH_COMPACT_HAS_GPU
 #if defined(SPH_NATIVE_HIP) || defined(USE_ROCM)
@@ -153,16 +146,6 @@ void validate_index(const Context &context, const Problem &problem, const Data &
                 problem.precision == data.precision && problem.dimension == data.dimension &&
                 problem.reference.count == data.references,
             "Compact hash device, shape or precision mismatch");
-    Grid current{};
-    domain(context, problem, current);
-    for (int axis = 0; axis < problem.dimension; ++axis)
-        require(current.lower[axis] == data.grid.lower[axis] &&
-                    current.upper[axis] == data.grid.upper[axis] &&
-                    current.periodic[axis] == data.grid.periodic[axis],
-                "Domain changed; rebuild the compact hash");
-    const auto maxima = summary(context, problem, data.grid, data.reference_keys);
-    require(radius_bound(problem, maxima) <= data.radius_bound,
-            "Search support exceeds indexed radius bound; rebuild the compact hash");
 }
 void search(const Context &context, const Problem &problem, const CompactHash &index, Buffer output,
             bool collect) {
@@ -177,15 +160,12 @@ void search(const Context &context, const Problem &problem, const CompactHash &i
         return left <= right ? right - left < written_bytes : left - right < bytes;
     };
     require(!overlaps(data.particles, size_t(data.references) * sizeof(ParticleKey)) &&
-                !overlaps(data.reference_keys, size_t(data.references) * sizeof(int64_t)) &&
                 !overlaps(data.cells, size_t(data.occupied) * sizeof(Cell)) &&
                 !overlaps(data.buckets, size_t(data.grid.buckets) * sizeof(Bucket)),
             "Search output overlaps compact hash storage");
 
     if (context.device == Device::CPU) {
-        int32_t error = 0;
-        cpu_search(context, problem, data, output, collect, &error);
-        require(!error, "Radius counts no longer match the geometry; recount before collection");
+        cpu_search(context, problem, data, output, collect);
     }
 #ifdef SPH_COMPACT_HAS_GPU
     else
@@ -221,7 +201,7 @@ CompactHash build_compact_hash(const Context &context, const Problem &problem,
     data.dimension = problem.dimension;
     data.references = problem.reference.count;
     domain(context, problem, data.grid);
-    const auto maxima = summary(context, problem, data.grid);
+    const auto maxima = summary(context, problem);
     double width = radius_bound(problem, maxima), largest_extent = 0;
     for (int axis = 0; axis < problem.dimension; ++axis)
         largest_extent = std::max(largest_extent, data.grid.upper[axis] - data.grid.lower[axis]);
@@ -249,8 +229,6 @@ CompactHash build_compact_hash(const Context &context, const Problem &problem,
             "Compact hash allocation overflow");
     data.particles =
         static_cast<ParticleKey *>(data.allocate(size_t(data.references) * sizeof(ParticleKey)));
-    data.reference_keys =
-        static_cast<int64_t *>(data.allocate(size_t(data.references) * sizeof(int64_t)));
     data.buckets = static_cast<Bucket *>(data.allocate(size_t(data.grid.buckets) * sizeof(Bucket)));
     if (context.device == Device::CPU)
         cpu_build(context, problem, data);

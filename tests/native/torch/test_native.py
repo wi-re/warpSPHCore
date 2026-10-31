@@ -155,7 +155,7 @@ def test_superset_csr_padding_self_pairs_and_constant_gradient(device, index_dty
     assert (a.cooRows()[-7:] == -1).all()
 
 
-def test_failures_are_explicit_and_csr_is_validated(device):
+def test_metadata_failures_are_explicit(device):
     q, r, d, qf, rf = case(device)
     prop = sph.OperationProperties(sph.KernelFunctions.Wendland2, operation=sph.WarpOperation.Density)
     with pytest.raises(TypeError, match='kernel'):
@@ -169,20 +169,9 @@ def test_failures_are_explicit_and_csr_is_validated(device):
         dual = torch.autograd.forward_ad.make_dual(q.positions, torch.zeros_like(q.positions))
         with pytest.raises(NotImplementedError, match='forward-mode'):
             sph.warpOperation(replace(q, positions=dual), prop, d)
-    a = sph.radiusSearch(q, d, r)
-    a.paddedJ[0] = -1
-    with pytest.raises(RuntimeError, match='invalid live reference'):
-        sph.warpOperation(q, prop, d, adjacency=a, referenceParticles=r)
-    with pytest.raises(RuntimeError, match='nonnegative'):
-        sph.radiusSearch(replace(q, supports=-q.supports), d)
-    with pytest.raises(RuntimeError, match='finite'):
-        sph.radiusSearch(replace(q, positions=q.positions * float('nan')), d)
     with pytest.raises(RuntimeError, match='contiguous'):
         sph.radiusSearch(replace(q, positions=q.positions.T.contiguous().T), d)
-    a = sph.radiusSearch(q, d, r)
-    a.edgeOffsets[0] = 1
-    with pytest.raises(RuntimeError, match='exclusive scan'):
-        sph.warpOperation(q, prop, d, adjacency=a, referenceParticles=r)
+
 
 
 @pytest.mark.gpu

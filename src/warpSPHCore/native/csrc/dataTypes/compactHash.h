@@ -31,7 +31,6 @@ struct View {
     const ParticleKey *particles = nullptr;
     const Cell *cells = nullptr;
     const Bucket *buckets = nullptr;
-    const int64_t *reference_keys = nullptr;
     int64_t occupied = 0;
 };
 } // namespace sph_native::compact

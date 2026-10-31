@@ -23,31 +23,27 @@ template <class Row> void launch(int64_t count, Row row, NativeStream stream) {
 }
 __device__ Summary block_summary(Summary value) {
     __shared__ double query[block_size], reference[block_size];
-    __shared__ int invalid[block_size];
     const int lane = threadIdx.x;
     query[lane] = value.query_max;
     reference[lane] = value.reference_max;
-    invalid[lane] = value.invalid;
     __syncthreads();
     for (int stride = block_size / 2; stride; stride /= 2) {
         if (lane < stride) {
             query[lane] = query[lane] > query[lane + stride] ? query[lane] : query[lane + stride];
             reference[lane] = reference[lane] > reference[lane + stride] ? reference[lane]
                                                                          : reference[lane + stride];
-            invalid[lane] |= invalid[lane + stride];
         }
         __syncthreads();
     }
-    return {query[0], reference[0], invalid[0]};
+    return {query[0], reference[0]};
 }
 template <class T, int D>
-__global__ void summarize_inputs(RowArgs<T, D> args, int64_t queries, Grid grid,
-                                 const int64_t *keys, Summary *partials) {
+__global__ void summarize_inputs(RowArgs<T, D> args, int64_t queries, Summary *partials) {
     Summary value{};
     const int64_t count = queries > args.references ? queries : args.references;
     for (int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x; i < count;
          i += int64_t(blockDim.x) * gridDim.x)
-        value = combine(value, inspect_row(args, queries, i, grid, keys));
+        value = combine(value, support_bounds(args, queries, i));
     const auto result = block_summary(value);
     if (!threadIdx.x)
         partials[blockIdx.x] = result;
@@ -98,8 +94,7 @@ void gpu_domain(const Context &context, const Problem &problem, double *lower, d
         }
     });
 }
-Summary gpu_summary(const Context &context, const Problem &problem, const Grid &grid,
-                    const int64_t *keys) {
+Summary gpu_summary(const Context &context, const Problem &problem) {
     Guard guard(context.device_index);
     const auto stream = static_cast<NativeStream>(context.stream);
     const auto count = std::max(problem.query.count, problem.reference.count);
@@ -112,8 +107,7 @@ Summary gpu_summary(const Context &context, const Problem &problem, const Grid &
     auto *result = static_cast<Summary *>(scratch.allocate(sizeof(Summary)));
     numeric(problem, [&](auto scalar, auto dimension) {
         const auto args = arguments<decltype(scalar), decltype(dimension)::value>(problem);
-        summarize_inputs<<<blocks, block_size, 0, stream>>>(args, problem.query.count, grid, keys,
-                                                            partials);
+        summarize_inputs<<<blocks, block_size, 0, stream>>>(args, problem.query.count, partials);
         check(GPU(GetLastError)());
     });
     summarize_partials<<<1, block_size, 0, stream>>>(partials, blocks, result);
@@ -133,8 +127,8 @@ void gpu_build(const Context &context, const Problem &problem, Data &data) {
         numeric(problem, [&](auto scalar, auto dimension) {
             const auto args = arguments<decltype(scalar), decltype(dimension)::value>(problem);
             launch(data.references,
-                   KeyRow<decltype(scalar), decltype(dimension)::value>{
-                       args, data.grid, data.particles, data.reference_keys},
+                   KeyRow<decltype(scalar), decltype(dimension)::value>{args, data.grid,
+                                                                        data.particles},
                    stream);
         });
         auto *temporary = static_cast<ParticleKey *>(
@@ -167,11 +161,6 @@ void gpu_search(const Context &context, const Problem &problem, const Data &data
                 bool collect) {
     Guard guard(context.device_index);
     const auto stream = static_cast<NativeStream>(context.stream);
-    Data scratch{};
-    scratch.context = context;
-    auto *error = collect ? static_cast<int32_t *>(scratch.allocate(sizeof(int32_t))) : nullptr;
-    if (error)
-        check(GPU(MemsetAsync)(error, 0, sizeof(int32_t), stream));
     numeric(problem, [&](auto scalar, auto dimension) {
         auto args = arguments<decltype(scalar), decltype(dimension)::value>(problem);
         if (collect)
@@ -179,17 +168,8 @@ void gpu_search(const Context &context, const Problem &problem, const Data &data
         else
             args.counts = static_cast<int32_t *>(output.data);
         launch(problem.query.count,
-               SearchRow<decltype(scalar), decltype(dimension)::value>{args, data.view(), collect,
-                                                                       error},
+               SearchRow<decltype(scalar), decltype(dimension)::value>{args, data.view(), collect},
                stream);
     });
-    if (collect) {
-        int32_t host = 0;
-        check(GPU(MemcpyAsync)(&host, error, sizeof(host), GPU(MemcpyDeviceToHost), stream));
-        check(GPU(StreamSynchronize)(stream));
-        if (host)
-            throw std::invalid_argument(
-                "Radius counts no longer match the geometry; recount before collection");
-    }
 }
 } // namespace sph_native::compact

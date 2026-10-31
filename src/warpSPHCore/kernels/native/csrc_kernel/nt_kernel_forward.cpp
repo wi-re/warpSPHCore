@@ -1,6 +1,5 @@
 #include "nt_kernel_forward.h"
 #include "torch/validation.h"
-#include "torch/ops.h"
 #include "execution/cpu.h"
 namespace sph_native {
 void kernel_forward_gpu(const Tensors &, int);
@@ -13,9 +12,6 @@ Tensors kernel_forward(const Tensor &x, const Tensor &h, int64_t kernel) {
     STD_TORCH_CHECK(valid_kernel(kernel), "Unknown native kernel");
     tensor(x, x, x.scalar_type(), "displacement");
     vector(h, x, x.scalar_type(), x.size(0), "supports");
-    finite(x, "displacement");
-    finite(h, "supports");
-    STD_TORCH_CHECK(all(ge_zero(h)), "supports must be nonnegative");
     const auto n = x.size(0), d = x.size(1);
     Tensors t{x,
               h,

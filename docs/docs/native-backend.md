@@ -192,18 +192,18 @@ forward(context, problem, result);
 
 All seven standard primals, 15 kernels, precisions, dimensions and field contracts
 listed below are available. `Context` selects CPU, CUDA or HIP, device index,
-caller stream, CPU thread count and validation mode. Each GPU library includes
+caller stream and CPU thread count. Each GPU library includes
 CPU execution and its selected GPU backend. `supports(device)` reports build
 capability; it does not probe installed hardware. CPU buffers must be host
 accessible; GPU buffers must be accessible on the selected device.
 
-`Validation::Contents` is the default and checks finite/valid geometry, positive
-densities, fields and live CSR indices. These checks can copy GPU data to the
-host and synchronize the supplied stream. `Validation::Metadata` checks sizes,
-shapes, options and output/input overlap, assuming the contents have already
-been validated. It allows primal/VJP work to be enqueued without a final host
-synchronize. Callers must revalidate after changing geometry, densities or CSR
-contents. Numerical outputs must not overlap their input storage.
+Operator entry points check argument metadata (sizes, dtypes, options and storage
+compatibility). They do not scan numerical contents or CSR data. There is no
+validation mode, debug flag, or verification parameter in the execution API.
+Callers own input validity and topology updates. Optional, synchronizing input
+verifiers live separately under `tests/verify`; the runtime imports none of them.
+Numerical outputs must not overlap their input storage. Primal/VJP launches on
+GPU remain stream-ordered without host content-check synchronization.
 
 Radius search uses a compact hash of occupied reference cells. Cells are grouped
 by the existing uint32 prime hash, retain full int64 Cartesian keys to resolve
@@ -240,11 +240,10 @@ reference IDs using an in-place heap sort.
 An index owns its buffers, is movable, and stays bound to its build device,
 precision, dimensionality, reference count and domain. Queries may move or be
 replaced within `statistics().radius_bound`. Reference motion within the same cells and
-support changes within that bound are valid. Indexed API calls check current cell
-membership and radius bounds, including in `Validation::Metadata`; changes across
-cells, domain changes or wider support require rebuilding and raise explicitly.
-These checks reduce device geometry to a small status/maxima record; they do not
-download positions or supports. `statistics()` reports occupied-cell counts,
+support changes within that bound are valid. The caller rebuilds the index when
+references cross cells, the domain changes, or the support exceeds its build
+bound. Indexed calls check device/shape metadata, without rescanning geometry.
+`statistics()` reports occupied-cell counts,
 conceptual grid dimensions, cell width and the reusable radius bound. The floating-
 point padding is reserved for traversal correctness and cannot be consumed by
 support growth. Periodic coordinates whose image count cannot be represented
@@ -355,12 +354,12 @@ Smooth kernels use analytic origin limits and a near-origin derivative expansion
 Cusp/singular force-kernel Hessians may be undefined at the origin. The legacy
 Laplacian estimator retains its regularization and zero result below its epsilon.
 
-C++ checks metadata, finite geometry, support/density validity, CSR offsets,
-capacity and live indices. Conservative content checks and exact-sized search
-allocation read device results on the host. Therefore native execution does not yet
-provide the existing Warp launch path's no-host-sync or capture contract.
-Future prepared execution must amortize validation without overlooking tensor
-mutation or storage replacement. No performance claim is made for this pass.
+C++ checks dispatch metadata without scanning numerical values or CSR contents.
+No operation carries a debug mode or verification parameter. Optional diagnostics
+live separately under `tests/verify`, and callers explicitly invoke them when
+investigating input data. Exact-sized search still returns counts needed for
+allocation to the host; that is part of search construction rather than operator
+verification. Graph capture remains unsupported by the Torch wrapper.
 
 ## Source ownership and common wrappers
 
@@ -645,9 +644,32 @@ stream are covered.
 1. Scalable native spatial search and Verlet/capacity lifecycle.
 2. Corrections, remaining field contracts and nonsmooth kernel adjoints.
 3. JVP, reverse-over-JVP and explicit supported HVP contracts.
-4. Prepared validation/workspaces, capture and compiler integration.
+4. Reusable workspaces, capture and compiler integration.
 5. Public manylinux wheel release automation; AMD runtime qualification when hardware is available.
 6. Frontend-owned Warp kernels needed by a selected complete simulation.
 
-Performance work follows those capability and correctness gates. Concurrent
-simulation use makes isolated operator timing unsuitable for this pass.
+## Performance comparison
+
+The [corrected 2026-10-30 comparison](../regression/native_backend_production_performance_2026_10_30.md)
+uses the same normal execution policy for Warp/Torch, native/Torch and standalone
+C++: no particle-content or CSR verification inside operation calls. It covers
+fresh search and all seven primals on CPU/CUDA in 1D/2D/3D through one million particles.
+Standalone allocation and output reuse are measured separately. The earlier
+comparison included inappropriate per-call verification and is superseded.
+
+Build and run instructions are in
+[`scripts/benchmarks/native/README.md`](../../scripts/benchmarks/native/README.md).
+Raw results and scaling plots live in the external development archive at
+`core/experiments/native-backend-20261030-million/`.
+
+The [CPU worker-count follow-up](../regression/native_backend_cpu_threads_2026_10_30.md)
+compares 4, 8, 16 and 24 workers on the 24-core local machine, with controlled
+CPU placements. The earlier four-worker setting is a benchmark choice, not a
+runtime limit. Its graph, raw samples and topology manifest live in
+`core/experiments/native-backend-20261030-cpu-threads/`.
+
+The paired FP32/FP64 interpolation follow-up uses a common million-particle 2D
+CSR and CPU counts of 16/24 workers. Its graph and measurements are in
+`core/experiments/native-backend-20261030-float32/`; reproduction uses
+`scripts/benchmarks/bench_interpolation_precision.py`. The timing-only bridge
+supports both precisions and checks its private descriptor ABI before execution.

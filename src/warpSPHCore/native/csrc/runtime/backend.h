@@ -19,17 +19,12 @@ struct Prepared {
     Properties properties;
 };
 Prepared prepare(const Problem &, Task);
-void validate_contents(const Context &, const Prepared &, Task);
 void check_buffer(ConstBuffer, int64_t, size_t, const char *);
 void check_context(const Context &);
-void read(const Context &, void *, const void *, size_t);
-void write(const Context &, void *, const void *, size_t);
 void zero(const Context &, void *, size_t);
 void cpu_run(Task, const Context &, const Prepared &, Buffer, ConstBuffer, const Adjoints &);
 #ifdef SPH_NATIVE_HAS_GPU
 void gpu_run(Task, const Context &, const Prepared &, Buffer, ConstBuffer, const Adjoints &);
-void gpu_read(const Context &, void *, const void *, size_t);
-void gpu_write(const Context &, void *, const void *, size_t);
 void gpu_zero(const Context &, void *, size_t);
 #endif
 inline bool floating(int slot) {

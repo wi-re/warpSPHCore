@@ -18,11 +18,10 @@ struct Data {
     ParticleKey *particles = nullptr;
     Cell *cells = nullptr;
     Bucket *buckets = nullptr;
-    int64_t *reference_keys = nullptr;
     std::vector<void *> allocations;
     ~Data();
     void *allocate(size_t bytes);
-    View view() const { return {grid, particles, cells, buckets, reference_keys, occupied}; }
+    View view() const { return {grid, particles, cells, buckets, occupied}; }
 };
 struct Access {
     static Data &get(const CompactHash &);
@@ -30,11 +29,11 @@ struct Access {
 void validate_geometry(const Context &, const Problem &);
 void validate_index(const Context &, const Problem &, const Data &);
 View view(const CompactHash &);
-Summary cpu_summary(const Problem &, const Grid &, const int64_t *keys);
+Summary cpu_summary(const Problem &);
 void cpu_build(const Context &, const Problem &, Data &);
-void cpu_search(const Context &, const Problem &, const Data &, Buffer, bool, int32_t *);
+void cpu_search(const Context &, const Problem &, const Data &, Buffer, bool);
 #ifdef SPH_COMPACT_HAS_GPU
-Summary gpu_summary(const Context &, const Problem &, const Grid &, const int64_t *keys);
+Summary gpu_summary(const Context &, const Problem &);
 void gpu_domain(const Context &, const Problem &, double *, double *, bool *);
 void *gpu_allocate(const Context &, size_t);
 void gpu_free(const Context &, void *) noexcept;

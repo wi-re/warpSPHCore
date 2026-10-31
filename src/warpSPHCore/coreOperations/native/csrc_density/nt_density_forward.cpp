@@ -7,7 +7,7 @@ namespace sph_native {
 void density_forward_gpu(const Tensors &, int, int, int);
 Tensor density_forward(const Tensors &inputs, int64_t support, int64_t direction, int64_t kernel) {
     STD_TORCH_CHECK(valid_kernel(kernel), "Unknown native kernel");
-    Tensors t = prepare_operator(inputs, support, direction, false);
+    Tensors t = prepare_operator(inputs, support, direction);
     t[OUTPUT] = stable::new_empty(t[QX], {t[QX].size(0)});
     if (t[QX].is_cuda()) {
 #ifdef WITH_CUDA

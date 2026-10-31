@@ -14,7 +14,7 @@ if not path:pytest.skip('set WARPSPHCORE_STANDALONE_LIBRARY to qualify standalon
 
 N=17
 class Request(C.Structure):
-    _fields_=[*( (name,C.c_int) for name in ('task','device','precision','dimension','rank','operation','kernel','support','scheme','lap','direction','dot','offset_bits','index_bits','validation','threads')),
+    _fields_=[*( (name,C.c_int) for name in ('task','device','precision','dimension','rank','operation','kernel','support','scheme','lap','direction','dot','offset_bits','index_bits','threads')),
         ('queries',C.c_int64),('references',C.c_int64),('inputs',C.c_void_p*N),('sizes',C.c_int64*N),
         ('output',C.c_void_p),('output_size',C.c_int64),('cotangent',C.c_void_p),('cotangent_size',C.c_int64),
         ('gradients',C.c_void_p*N),('gradient_sizes',C.c_int64*N),('mask',C.c_uint64),('accumulate',C.c_int),('stream',C.c_void_p),('result',C.c_int64)]

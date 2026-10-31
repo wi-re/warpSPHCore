@@ -1,0 +1,11 @@
+# Optional timing bridge, never installed and never linked to Torch or Python.
+add_library(native_benchmark SHARED runner.cpp)
+target_link_libraries(native_benchmark PRIVATE warpSPHCore::core)
+if(WARPSPHCORE_NATIVE_BACKEND STREQUAL "cuda")
+  target_compile_definitions(native_benchmark PRIVATE BENCH_CUDA)
+  target_link_libraries(native_benchmark PRIVATE CUDA::cudart)
+elseif(WARPSPHCORE_NATIVE_BACKEND STREQUAL "hip")
+  set_source_files_properties(runner.cpp PROPERTIES LANGUAGE HIP)
+  set_target_properties(native_benchmark PROPERTIES HIP_STANDARD 17)
+  target_compile_definitions(native_benchmark PRIVATE BENCH_HIP)
+endif()

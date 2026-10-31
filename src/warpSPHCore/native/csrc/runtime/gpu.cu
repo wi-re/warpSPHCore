@@ -29,18 +29,6 @@ void gpu_run(Task task, const Context &c, const Prepared &p, Buffer out, ConstBu
     });
 }
 
-void gpu_read(const Context &c, void *dest, const void *src, size_t n) {
-    Guard guard(c.device_index);
-    auto stream = static_cast<NativeStream>(c.stream);
-    check(GPU(MemcpyAsync)(dest, src, n, GPU(MemcpyDeviceToHost), stream));
-    check(GPU(StreamSynchronize)(stream));
-}
-void gpu_write(const Context &c, void *dest, const void *src, size_t n) {
-    Guard guard(c.device_index);
-    auto stream = static_cast<NativeStream>(c.stream);
-    check(GPU(MemcpyAsync)(dest, src, n, GPU(MemcpyHostToDevice), stream));
-    check(GPU(StreamSynchronize)(stream));
-}
 void gpu_zero(const Context &c, void *dest, size_t n) {
     Guard guard(c.device_index);
     check(GPU(MemsetAsync)(dest, 0, n, static_cast<NativeStream>(c.stream)));

@@ -1,15 +1,6 @@
 #pragma once
 #include "radiusSearch/native/csrc_compact/nt_compact.h"
 namespace sph_native::compact {
-SPH_HD inline void mark_error(int32_t *error) {
-    if (!error)
-        return;
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    atomicOr(error, 1);
-#else
-    __atomic_fetch_or(error, 1, __ATOMIC_RELAXED);
-#endif
-}
 // Keep the existing native CSR contract: each row contains original reference
 // IDs in ascending order. Heap sorting needs no per-row scratch allocation.
 SPH_HD inline void sift_down(int64_t *values, int64_t root, int64_t count) {
@@ -39,7 +30,6 @@ template <class T, int D> struct SearchRow {
     RowArgs<T, D> args;
     View index;
     bool collect;
-    int32_t *error = nullptr;
     SPH_HD void operator()(int64_t i) const {
         CellTraversal<T, D> traversal(args.qx + i * D, index);
         Cell cell{};
@@ -57,8 +47,6 @@ template <class T, int D> struct SearchRow {
         if (!collect)
             args.counts[i] = int32_t(found);
         else {
-            if (found != args.counts[i])
-                mark_error(error);
             const auto written = found < args.counts[i] ? found : args.counts[i];
             if (written > 1)
                 sort_row(args.collected + args.offsets[i], written);

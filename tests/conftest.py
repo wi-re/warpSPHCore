@@ -20,6 +20,8 @@ def suite_for(path):
         return None
     if not parts:
         return None
+    if parts[0] == 'verify':
+        return 'python'
     if parts[0] in ('python', 'warp', 'parity'):
         return parts[0]
     if len(parts) > 1 and parts[0] == 'native' and parts[1] in ('torch', 'standalone'):

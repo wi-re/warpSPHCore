@@ -16,12 +16,12 @@ template <class Row> void parallel(const Context &context, int64_t rows, Row row
         row(i);
 }
 } // namespace
-Summary cpu_summary(const Problem &problem, const Grid &grid, const int64_t *keys) {
+Summary cpu_summary(const Problem &problem) {
     Summary summary{};
     numeric(problem, [&](auto scalar, auto dimension) {
         const auto args = arguments<decltype(scalar), decltype(dimension)::value>(problem);
         for (int64_t i = 0; i < std::max(problem.query.count, problem.reference.count); ++i)
-            summary = combine(summary, inspect_row(args, problem.query.count, i, grid, keys));
+            summary = combine(summary, support_bounds(args, problem.query.count, i));
     });
     return summary;
 }
@@ -31,9 +31,9 @@ void cpu_build(const Context &context, const Problem &problem, Data &data) {
         return;
     numeric(problem, [&](auto scalar, auto dimension) {
         const auto args = arguments<decltype(scalar), decltype(dimension)::value>(problem);
-        parallel(context, data.references,
-                 KeyRow<decltype(scalar), decltype(dimension)::value>{
-                     args, data.grid, data.particles, data.reference_keys});
+        parallel(
+            context, data.references,
+            KeyRow<decltype(scalar), decltype(dimension)::value>{args, data.grid, data.particles});
     });
     std::sort(data.particles, data.particles + data.references);
     for (int64_t i = 0; i < data.references; ++i)
@@ -55,16 +55,16 @@ void cpu_build(const Context &context, const Problem &problem, Data &data) {
              FinishCellRow{data.cells, data.buckets, data.occupied, data.references});
 }
 void cpu_search(const Context &context, const Problem &problem, const Data &data, Buffer output,
-                bool collect, int32_t *error) {
+                bool collect) {
     numeric(problem, [&](auto scalar, auto dimension) {
         auto args = arguments<decltype(scalar), decltype(dimension)::value>(problem);
         if (collect)
             args.collected = static_cast<int64_t *>(output.data);
         else
             args.counts = static_cast<int32_t *>(output.data);
-        parallel(context, problem.query.count,
-                 SearchRow<decltype(scalar), decltype(dimension)::value>{args, data.view(), collect,
-                                                                         error});
+        parallel(
+            context, problem.query.count,
+            SearchRow<decltype(scalar), decltype(dimension)::value>{args, data.view(), collect});
     });
 }
 } // namespace sph_native::compact

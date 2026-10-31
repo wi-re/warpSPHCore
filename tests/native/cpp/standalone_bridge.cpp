@@ -5,7 +5,7 @@ using namespace sph_native;
 struct Request {
     int task, device, precision, dimension, rank, operation, kernel, support, scheme, lap,
         direction, dot;
-    int offset_bits, index_bits, validation, threads;
+    int offset_bits, index_bits, threads;
     int64_t queries, references;
     const void *inputs[OUTPUT];
     int64_t sizes[OUTPUT];
@@ -40,7 +40,7 @@ extern "C" int standalone_run(Request *r) {
         p.properties = {
             Operation(r->operation), Kernel(r->kernel), Support(r->support), Scheme(r->scheme),
             Laplacian(r->lap),       r->direction,      bool(r->dot)};
-        Context c{Device(r->device), 0, r->stream, r->threads, Validation(r->validation)};
+        Context c{Device(r->device), 0, r->stream, r->threads};
         Buffer out{r->output, r->output_size};
         if (r->task == 0)
             forward(c, p, out);

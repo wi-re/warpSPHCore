@@ -118,33 +118,9 @@ Prepared prepare(const Problem &v, Task task) {
 }
 void check_context(const Context &c) {
     require(c.cpu_threads >= 0 && c.device_index >= 0, "Invalid execution context");
-    require(c.validation == Validation::Contents || c.validation == Validation::Metadata,
-            "Unknown validation mode");
     require(supports(c.device), "Device backend is not compiled into this standalone library");
     if (c.device == Device::CPU)
         require(c.stream == nullptr, "CPU context cannot carry a GPU stream");
-}
-void read(const Context &c, void *dest, const void *src, size_t n) {
-    if (!n)
-        return;
-    if (c.device == Device::CPU) {
-        std::memcpy(dest, src, n);
-        return;
-    }
-#ifdef SPH_NATIVE_HAS_GPU
-    gpu_read(c, dest, src, n);
-#endif
-}
-void write(const Context &c, void *dest, const void *src, size_t n) {
-    if (!n)
-        return;
-    if (c.device == Device::CPU) {
-        std::memcpy(dest, src, n);
-        return;
-    }
-#ifdef SPH_NATIVE_HAS_GPU
-    gpu_write(c, dest, src, n);
-#endif
 }
 void zero(const Context &c, void *dest, size_t n) {
     if (!n)
@@ -156,75 +132,6 @@ void zero(const Context &c, void *dest, size_t n) {
 #ifdef SPH_NATIVE_HAS_GPU
     gpu_zero(c, dest, n);
 #endif
-}
-template <class T>
-static void values(const Context &c, ConstBuffer input, int64_t n, bool positive,
-                   bool nonnegative) {
-    std::vector<T> host(size_t(n), T{});
-    read(c, host.data(), input.data, bytes(n, sizeof(T)));
-    for (T x : host)
-        require(std::isfinite(x) && (!positive || x > T(0)) && (!nonnegative || x >= T(0)),
-                "Nonfinite or invalid scalar contents");
-}
-void validate_contents(const Context &c, const Prepared &p, Task task) {
-    if (c.validation == Validation::Contents) {
-        for (int slot = 0; slot < OUTPUT; ++slot)
-            if (floating(slot) && (p.required & (uint64_t(1) << slot))) {
-                bool positive = slot == DENSITY || slot == QDENSITY,
-                     nonnegative = slot == QH || slot == RH;
-                if (p.precision == Precision::Float32)
-                    values<float>(c, p.inputs[slot], p.sizes[slot], positive, nonnegative);
-                else
-                    values<double>(c, p.inputs[slot], p.sizes[slot], positive, nonnegative);
-            }
-        numeric(p, [&](auto value, auto dim) {
-            using T = decltype(value);
-            constexpr int D = decltype(dim)::value;
-            T lo[D], hi[D];
-            uint8_t periodic[D];
-            read(c, lo, p.inputs[LO].data, sizeof(lo));
-            read(c, hi, p.inputs[HI].data, sizeof(hi));
-            static_assert(sizeof(bool) == 1);
-            read(c, periodic, p.inputs[PERIODIC].data, sizeof(periodic));
-            for (int d = 0; d < D; ++d)
-                require(hi[d] > lo[d] && periodic[d] <= 1, "Invalid domain extent or periodicity");
-        });
-    }
-    if (task == Task::Count)
-        return;
-    if (c.validation == Validation::Metadata && task != Task::Collect)
-        return;
-    std::vector<int32_t> counts(size_t(p.rows), 0);
-    read(c, counts.data(), p.inputs[COUNTS].data, bytes(p.rows, 4));
-    std::vector<int64_t> offsets(size_t(p.rows), 0);
-    if (p.offsets_bits == 64)
-        read(c, offsets.data(), p.inputs[OFFSETS].data, bytes(p.rows, 8));
-    else {
-        std::vector<int32_t> narrow(size_t(p.rows), 0);
-        read(c, narrow.data(), p.inputs[OFFSETS].data, bytes(p.rows, 4));
-        std::copy(narrow.begin(), narrow.end(), offsets.begin());
-    }
-    int64_t total = 0;
-    for (int64_t i = 0; i < p.rows; ++i) {
-        require(counts[i] >= 0 && offsets[i] == total, "Invalid CSR counts or exclusive offsets");
-        require(total <= std::numeric_limits<int64_t>::max() - counts[i], "CSR size overflow");
-        total += counts[i];
-    }
-    require(total <= p.inputs[NEIGHBORS].size, "CSR capacity does not cover live entries");
-    if (task == Task::Collect)
-        return;
-    check_buffer(p.inputs[NEIGHBORS], total, p.indices_bits / 8, "CSR indices");
-    if (p.indices_bits == 64) {
-        std::vector<int64_t> ids(size_t(total), 0);
-        read(c, ids.data(), p.inputs[NEIGHBORS].data, bytes(total, 8));
-        for (auto j : ids)
-            require(j >= 0 && j < p.references, "Invalid live CSR reference index");
-    } else {
-        std::vector<int32_t> ids(size_t(total), 0);
-        read(c, ids.data(), p.inputs[NEIGHBORS].data, bytes(total, 4));
-        for (auto j : ids)
-            require(j >= 0 && j < p.references, "Invalid live CSR reference index");
-    }
 }
 static bool overlaps(const void *a, size_t an, const void *b, size_t bn) {
     if (!an || !bn)
@@ -273,7 +180,6 @@ void forward(const Context &c, const Problem &view, Buffer out) {
     size_t item = element_size(p, QX);
     check_buffer({out.data, out.size}, p.output_size, item, "output");
     no_input_alias(p, out, bytes(p.output_size, item));
-    validate_contents(c, p, Task::Forward);
     run(Task::Forward, c, p, out);
 }
 void adjoint(const Context &c, const Problem &view, ConstBuffer cot, const Adjoints &bars) {
@@ -303,7 +209,6 @@ void adjoint(const Context &c, const Problem &view, ConstBuffer cot, const Adjoi
                             "Gradient buffers may alias exactly, but not partially");
                 }
         }
-    validate_contents(c, p, Task::Adjoint);
     if (!bars.accumulate)
         for (int s = 0; s < OUTPUT; ++s)
             if (bars.requested & (uint64_t(1) << s))
@@ -346,10 +251,6 @@ void radius_collect(const Context &c, const Problem &view, const CompactHash &in
     p.inputs[NEIGHBORS] = {out.data, out.size};
     p.required |= gradient_bit(NEIGHBORS);
     p.indices_bits = 64;
-    // Output capacity is validated before any writes, even in Metadata mode.
-    auto csr_context = c;
-    csr_context.validation = Validation::Metadata;
-    validate_contents(csr_context, p, Task::Collect);
     auto inputs = p;
     inputs.required &= ~gradient_bit(NEIGHBORS);
     no_input_alias(inputs, out, bytes(out.size, 8));

@@ -55,14 +55,13 @@ def test_standalone_kernel_families(device,kernel,op):
 
 
 @pytest.mark.parametrize('bits',[(32,32),(32,64),(64,32),(64,64)])
-def test_csr_widths_metadata_and_stream(device,bits):
+def test_csr_widths_and_stream(device,bits):
     stream=torch.cuda.Stream() if device=='cuda' else None
     with torch.cuda.stream(stream) if stream else __import__('contextlib').nullcontext():
         q,r,d,qf,rf=fixture(device,3,2)
         prop=sph.OperationProperties(sph.KernelFunctions.Wendland2,operation=sph.WarpOperation.Gradient)
         a=search(q,r,d,qf,rf,prop);a=(a[0].to(torch.int32 if bits[0]==32 else torch.int64),a[1],a[2].to(torch.int32 if bits[1]==32 else torch.int64))
         req=request(q,r,d,qf,rf,prop,a);expected=dense(q,r,d,prop,qf,rf)
-        req.validation=1
         torch.testing.assert_close(output(req,torch.empty_like(expected)),expected,rtol=3e-10,atol=3e-10)
     if stream:torch.cuda.current_stream().wait_stream(stream)
 
@@ -92,14 +91,7 @@ def test_standalone_errors_and_collection_bounds(device):
     req=request(q,r,d,qf,rf,prop,a)
     req.output=q.positions.data_ptr();req.output_size=out.numel();req.task=0
     with pytest.raises(RuntimeError,match='overlap'):run(req)
-    bad=q.supports.clone();bad[0]=-1;req.inputs[2]=bad.data_ptr()
-    with pytest.raises(RuntimeError,match='contents'):output(req,out)
-    req=request(q,r,d,qf,rf,prop,a);badids=a[2].clone();badids[0]=len(r.positions);req.inputs[12]=badids.data_ptr()
-    with pytest.raises(RuntimeError,match='reference index'):output(req,out)
-    req=request(q,r,d,qf,rf,prop,a);counts=torch.zeros_like(a[1]);offsets=torch.zeros_like(a[0]);req.inputs[10]=offsets.data_ptr();req.inputs[11]=counts.data_ptr()
-    canary=torch.tensor([123,456],device=device,dtype=torch.int64);req.task=4;req.output=canary.data_ptr();req.output_size=0
-    with pytest.raises(RuntimeError,match='recount'):run(req)
-    torch.testing.assert_close(canary,torch.tensor([123,456],device=device,dtype=torch.int64))
+
 
 
 @pytest.mark.cpu

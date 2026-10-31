@@ -15,7 +15,7 @@ def select(paths):
             continue
         if path in ('pyproject.toml', 'CMakeLists.txt') or path.startswith(('.github/', 'cmake/', 'scripts/testing/', 'tests/conftest.py')):
             selected.update(KEYS)
-        elif path.startswith('tests/python/'):
+        elif path.startswith(('tests/python/', 'tests/verify/')):
             selected.add('python')
         elif path.startswith('tests/warp/'):
             selected.add('warp')

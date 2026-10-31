@@ -81,9 +81,7 @@ int main(int argc, char **argv) {
         sph::Context context;
         context.device = sph::Device::CPU;
         context.cpu_threads = 2;
-        context.validation = sph::Validation::Contents;
-        // CPU calls complete before returning. Contents validation checks the
-        // borrowed data as well as buffer sizes before launching an operation.
+        // CPU calls complete before returning. Normal calls check buffer metadata.
 
         // 3. Build a CSR neighbour list: count, scan, allocate, collect.
         //
