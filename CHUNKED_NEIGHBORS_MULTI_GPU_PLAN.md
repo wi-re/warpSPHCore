@@ -6,7 +6,7 @@ layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
 Status, 2026-10-31: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified; overnight real-flow queue active**, in the paired `chunked-neighbor-planner` workspace,
+local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified; overnight real-flow partial success; wide-flow memory guard failure**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -336,3 +336,17 @@ numerical sources were changed. The canonical frontend plan and live evidence
 `.tmp/crksph-3d-overnight-20261030/status.json` record the queue/continuation rules.
 The queue is ongoing; larger flow capacity and statistical qualification are
 not yet established. Runtime snapshots are isolated from subsequent edits.
+
+## Overnight outcome (2026-10-31)
+
+32³/64³/96³/128³ reach t4 with clean RHS/energy/mass gates, in39s/8min/41min/
+2h18min loop time. Their native checkpoints pass independent finite/positive/
+endpoint/continuation-dt audits and all941 frozen hashes remain unchanged.
+164³ builds2,271,636,160 neighbours and executes245 full wide RHS evaluations,
+then hits the campaign work-allocation headroom guard at t0.1038 after122
+accepted steps. Peak allocated60.014 GiB; no invalid RHS was observed. The
+process also exitsSIGSEGV after the recorded Python guard error. There is no
+wide endpoint/checkpoint; the queue stopped03:17UTC and did not launch t40.
+Next investigation: work-buffer lifetime, guard free/cache accounting and safe
+cleanup, without assuming actual OOM/overflow/leak from the current trace.
+Canonical frontend plan and ignored campaign outcome.json contain exact results.
