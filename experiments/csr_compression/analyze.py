@@ -56,7 +56,7 @@ for precision in ('float32','float64'):
                     ax.errorbar(sizes,rates,yerr=[low,high],color=colors[encoding],label=labels[encoding],
                                 marker='o',markersize=4,capsize=2,linewidth=1.6)
                 ax.set_xscale('log',base=2)
-                ax.set_xticks(sizes,[f'{n/1000:g}k' if n<1000000 else '1M' for n in sizes])
+                ax.set_xticks(sizes,[f'{n/1000:g}k' if n<1000000 else f'{n/1e6:g}M' for n in sizes])
                 ax.set_ylim(bottom=0)
                 ax.grid(alpha=.2)
                 ax.set_title(f'{dimension}D, n_h={nh:g}')
@@ -69,18 +69,21 @@ for precision in ('float32','float64'):
         fig.tight_layout(rect=(0,.05,1,.91))
         fig.savefig(args.archive/f'throughput-{precision}-{"public" if public else "matched"}.png',dpi=180)
         plt.close(fig)
+    largest=max(case['particles'] for case in cases)
+    scale=1e9 if largest>1000000 else 1e6
+    unit='GB' if largest>1000000 else 'MB'
     fig,axes=plt.subplots(1,3,figsize=(12,4))
     for ax,dimension in zip(axes,(1,2,3)):
-        cases_at_size=[c for c in cases if c['dimension']==dimension and c['particles']==1000000]
+        cases_at_size=[c for c in cases if c['dimension']==dimension and c['particles']==largest]
         for i,nh in enumerate((4.,2.57)):
             case=next(c for c in cases_at_size if c['nh']==nh)
             sizes=[case['csr64_bytes'],case['csr32_bytes']]+[
                 sum(next(p for p in case['planning'] if p['format']==encoding)['storage'].values())
                 for encoding in ('delta','cell')]
-            ax.bar(np.arange(4)+(i-.5)*.35,np.array(sizes)/1e6,width=.35,label=f'n_h={nh:g}')
+            ax.bar(np.arange(4)+(i-.5)*.35,np.array(sizes)/scale,width=.35,label=f'n_h={nh:g}')
         ax.set_xticks(np.arange(4),['CSR64','CSR32','Deltas','Cell bytes'],rotation=15)
-        ax.set_title(f'{dimension}D, 1M particles')
-        ax.set_ylabel('Retained adjacency MB (decimal)')
+        ax.set_title(f'{dimension}D, {largest/1e6:g}M particles')
+        ax.set_ylabel(f'Retained adjacency {unit} (decimal)')
         ax.grid(axis='y',alpha=.2)
     axes[0].legend(frameon=False)
     fig.suptitle(f'{precision}: actual retained tensors, including padding and row metadata\nDifferent screened chunk sizes may be selected in each case.')

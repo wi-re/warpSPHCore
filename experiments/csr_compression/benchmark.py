@@ -6,6 +6,8 @@ before interpolation timings. Matched raw controls use the same private launch
 path. Public native/Torch controls provide context for wrapper/allocator cost.
 """
 import argparse
+from dataclasses import replace
+from types import SimpleNamespace
 import hashlib
 import importlib.util
 import itertools
@@ -32,6 +34,7 @@ parser.add_argument('--dims', type=int, nargs='+', default=[1,2,3])
 parser.add_argument('--n-h', type=float, nargs='+', default=[4.,2.57])
 parser.add_argument('--repeat', type=int, default=9)
 parser.add_argument('--iterations', type=int, default=5)
+parser.add_argument('--target-ms', type=float, help='Calibrate 1..100 calls per timing batch from a native64 pilot')
 parser.add_argument('--plan-repeat', type=int, default=3)
 parser.add_argument('--profile', help='Comma-separated selected private paths; skips timing')
 args = parser.parse_args()
@@ -104,8 +107,24 @@ for dimension, nh, n in itertools.product(args.dims,args.n_h,args.ns):
     values = torch.sin(x*2*math.pi)+.1*x
     domain = sph.DomainDescription(x.new_zeros(dimension),x.new_ones(dimension),
                                   torch.ones(dimension,device='cuda',dtype=torch.bool),dimension)
-    cells = planner.build_cells(cells_library,state,values,float(h[0]),8)
+    print(json.dumps(dict(phase='sorting',dimension=dimension,nh=nh,n=n)),flush=True)
+    if dimension == 1:
+        # Coordinate order is exact Morton order in 1D. Bypass the toy key
+        # encoder's 21-bit limit and retain the physical support-sized cells.
+        order = torch.argsort(state.positions[:,0],stable=True)
+        ordered = replace(state,**{name:getattr(state,name)[order] for name in
+                                   ('positions','supports','masses','densities','kinds')})
+        grid = math.floor(1/float(h[0]))
+        cell_keys = (ordered.positions[:,0]*grid).clamp(max=grid-1).long()
+        _,cell_counts = torch.unique_consecutive(cell_keys,return_counts=True)
+        cell_offsets = torch.cat((cell_counts.new_zeros(1),cell_counts.cumsum(0)))
+        cells = SimpleNamespace(state=ordered,values=values[order],order=order,counts=cell_counts,
+                                offsets=cell_offsets,grid=grid,refinement='exact coordinate order')
+    else:
+        cells = planner.build_cells(cells_library,state,values,float(h[0]),8)
+    print(json.dumps(dict(phase='search',dimension=dimension,nh=nh,n=n)),flush=True)
     adjacency = radiusSearch(cells.state,domain)
+    print(json.dumps(dict(phase='encoding',edges=adjacency.numEdges,torch_allocated_bytes=torch.cuda.memory_allocated())),flush=True)
     indices32 = adjacency.paddedJ.int()
     adjacency32 = sph.AdjacencyList(None,indices32,adjacency.numNeighbors,adjacency.edgeOffsets,n,n,numEdges=adjacency.numEdges)
     native64 = lambda:sphOperation(cells.state,properties,domain,cells.values,adjacency=adjacency)
@@ -170,6 +189,12 @@ for dimension, nh, n in itertools.product(args.dims,args.n_h,args.ns):
         torch.testing.assert_close(result,expected,rtol=tolerance,atol=tolerance)
         max_abs[name] = float((result-expected).abs().max())
         function(2)
+    iterations = args.iterations
+    calibration = None
+    if args.target_ms:
+        calibration = measure(functions['native64_public'],min(3,args.iterations))
+        iterations = min(100,max(1,round(args.target_ms/calibration['event_ms'])))
+    print(json.dumps(dict(phase='timing',dimension=dimension,nh=nh,n=n,iterations=iterations)),flush=True)
     if args.profile:
         for name in args.profile.split(','):
             torch.cuda.nvtx.range_push(name)
@@ -185,7 +210,7 @@ for dimension, nh, n in itertools.product(args.dims,args.n_h,args.ns):
             names = list(functions)
             random.Random(51031+repeat).shuffle(names)
             for name in names:
-                samples[name].append(measure(functions[name],args.iterations))
+                samples[name].append(measure(functions[name],iterations))
     records = [dict(name=name,configuration=config_by_name.get(name),samples=data,
                     event_ms=statistics.median(p['event_ms'] for p in data),
                     wall_ms=statistics.median(p['wall_ms'] for p in data),max_abs=max_abs[name])
@@ -196,6 +221,8 @@ for dimension, nh, n in itertools.product(args.dims,args.n_h,args.ns):
             key=lambda record:record['event_ms'])['configuration'] for encoding in NAMES}
     report['cases'].append(dict(dimension=dimension,nh=nh,particles=n,edges=adjacency.numEdges,
         mean_neighbors=adjacency.numEdges/n,planning=planning,records=records,
+        iterations=iterations,calibration=calibration,sorting_grid=cells.grid,sorting_refinement=cells.refinement,
+        torch_peak_allocated_bytes=torch.cuda.max_memory_allocated(),
         csr32_bytes=indices32.numel()*4+adjacency.numNeighbors.numel()*4+adjacency.edgeOffsets.numel()*8,
         csr64_bytes=adjacency.paddedJ.numel()*8+adjacency.numNeighbors.numel()*4+adjacency.edgeOffsets.numel()*8))
     report['activity'].append(activity())

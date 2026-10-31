@@ -86,3 +86,36 @@ Measured results and profiling interpretation: [study report](../../docs/regress
 Additional `selection-chunk32-*` / `chunk32-*` archive files hold the compressed
 chunk size at 32 for the 3D memory/performance comparison. Their batch/thread/vector
 choices are selected from the same independent screen under that constraint.
+
+## Large fixtures and comparison with published codecs
+
+The [extended study](../../docs/regression/native_backend_csr_compression_scaling_2026_10_31.md)
+measures 1M/2M/4M/8M/16M particles. Run each fixture in a fresh process to avoid
+retaining a previous large topology. `--target-ms 30` selects 1..100 calls per
+batch from a native64 pilot; selected iteration counts and pilot measurements
+are recorded. For example:
+
+```sh
+python experiments/csr_compression/benchmark.py \
+  --library /path/to/artifacts/compression-v2.so --artifacts /path/to/artifacts \
+  --precision float32 --selection /path/to/screen-float32.json \
+  --dims 3 --n-h 4 --ns 16000000 --repeat 9 --iterations 3 \
+  --target-ms 30 --plan-repeat 1 --output /tmp/float32-d3-h4-n16000000.json
+```
+
+`aggregate_scale.py ARCHIVE` expects files named
+`{precision}-d{dimension}-h{nh}-n{particles}.json` for the 60-fixture grid, then
+writes aggregate inputs for `analyze.py`. Sorting in 1D uses exact coordinate
+order, equivalent to the 1D Morton order, without the toy key encoder's 21-bit
+limit. Dimensions 2/3 retain the previous refined Morton planner.
+
+`codec_models.py` contains offline size formulas for row-stream byte escapes,
+Stream VByte, Band-style controls and nibble coding of full lists. These models
+include identical row metadata and do not implement or time GPU consumers.
+`model_sizes.py` samples query rows against the full sorted reference state,
+avoiding an unused full CSR for this separate analysis:
+
+```sh
+python experiments/csr_compression/model_sizes.py --artifacts /path/to/artifacts \
+  --ns 1000000 16000000 --output /tmp/codec-models.json
+```

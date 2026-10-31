@@ -92,8 +92,8 @@ def build_plan(library, indices, counts, offsets, width, encoding, cell_offsets=
     library.codec(request, encoding, width, 0)
     meta_offsets = prefix(temporary['meta_counts'])
     payloads = int(meta_offsets[-1])
-    # These private formats use uint32 directories. The benchmark's largest
-    # streams are well below 4 GiB; wider directories are a future extension.
+    # uint32 directories index extras elements, not code bytes. The code
+    # buffer can exceed 4 GiB; directories require fewer than 2^32 payloads.
     if payloads >= 2**32:
         raise OverflowError('Experiment requires a wider payload directory')
     buffers = dict(counts=counts, row_blocks=row_blocks,
