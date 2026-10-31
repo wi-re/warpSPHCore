@@ -70,7 +70,9 @@ the checkpoint. Fresh search improves 6.15 → 2.78 ms. The detailed report is
 
 Save each compatible Torch artifact before switching source revisions. A fresh
 process loads exactly one artifact. The wrapper records its SHA-256 and supplied
-revision separately from the current checkout's source hashes. It sets precision
+revision separately from the current checkout's source hashes. This historical
+study uses `--neighbors 32` explicitly; future primary benchmarks default to
+`--n-h 4`, with `--n-h 2.57` as comparison. It sets precision
 and CSR64 before importing the package, and asserts the selected index dtypes.
 
 ```bash
@@ -78,7 +80,7 @@ and CSR64 before importing the package, and asserts the selected index dtypes.
 # Repeat for the checkpoint artifact, float64, and the dimensions of interest.
 python experiments/native_gpu/bench_public.py \
   --artifact /path/to/optimized-native-torch.so --revision FINAL_COMMIT -- \
-  --devices cuda --dims 2 3 --ns 32768 1000000 --precision float32 \
+  --devices cuda --dims 2 3 --ns 32768 1000000 --precision float32 --neighbors 32 \
   --threads 16 --repeat 7 --warmup 2 --operator-iterations 10 \
   --large-case-threshold 1000001 --output /path/to/paired-packed-gpu-float32.json
 

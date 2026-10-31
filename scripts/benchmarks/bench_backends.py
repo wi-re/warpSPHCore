@@ -132,14 +132,17 @@ def measure(sample, warmup, repeat):
                 median_submitted_ms=statistics.median(submitted))
 
 
-def fixture(n, dimension, device, neighbors, dtype=None):
+def fixture(n, dimension, device, neighbors=None, dtype=None, *, n_h=4.0):
     dtype = torch.float64 if dtype is None else dtype
     generator = torch.Generator().manual_seed(2207 + n * 3 + dimension)
     positions = torch.rand((n, dimension), generator=generator, dtype=torch.float64)
     # Unit periodic box, uniform random points, approximately constant degree.
     # The cap prevents excessive radius in tiny cases; actual degree is recorded.
     unit_ball = (2., math.pi, 4 * math.pi / 3)[dimension - 1]
-    radius = min(.43, (neighbors / (n * unit_ball)) ** (1 / dimension))
+    # n_h is support radius / mean particle spacing. Keep the explicit degree
+    # override for reproducing historical fixed-degree measurements.
+    radius = min(.43, n_h * n ** (-1 / dimension) if neighbors is None
+                 else (neighbors / (n * unit_ball)) ** (1 / dimension))
     supports = radius * (.98 + .04 * torch.rand(n, generator=generator, dtype=torch.float64))
     values = torch.sin(positions * (2 * math.pi)) + .1 * positions
     q = sph.ParticleState(positions.to(device=device, dtype=dtype), supports.to(device=device, dtype=dtype),
@@ -206,7 +209,11 @@ def main():
     parser.add_argument('--devices', nargs='+', choices=['cpu', 'cuda'], default=['cpu', 'cuda'])
     parser.add_argument('--dims', nargs='+', type=int, choices=[1, 2, 3], default=[1, 2, 3])
     parser.add_argument('--ns', nargs='+', type=int, default=[1, 16, 256, 4096, 32768, 131072, 262144, 524288, 1000000])
-    parser.add_argument('--neighbors', type=int, default=32)
+    neighborhood = parser.add_mutually_exclusive_group()
+    neighborhood.add_argument('--n-h', type=float, default=4.0,
+        help='Support radius / mean spacing (default: 4; comparison: 2.57)')
+    neighborhood.add_argument('--neighbors', type=int,
+        help='Historical fixed expected degree override; otherwise use --n-h')
     parser.add_argument('--precision', choices=['float32', 'float64'], default='float64')
     parser.add_argument('--backends', nargs='+', choices=['warp', 'native_torch', 'standalone', 'standalone_reuse'],
                         default=['warp', 'native_torch'])
@@ -223,8 +230,10 @@ def main():
     parser.add_argument('--output', required=True, type=Path)
     args = parser.parse_args()
     if (min(args.ns) < 1 or max(args.ns) > 1_000_000 or args.repeat < 2 or args.warmup < 1
-            or min(args.threads, args.neighbors, args.operator_iterations, args.search_iterations, args.large_case_threshold) < 1):
-        parser.error('positive sizes <= 1M, threads, iterations; repeat >= 2 and warmup >= 1 required')
+            or min(args.threads, args.operator_iterations, args.search_iterations, args.large_case_threshold) < 1
+            or (args.neighbors is not None and args.neighbors < 1)
+            or not math.isfinite(args.n_h) or args.n_h <= 0):
+        parser.error('positive sizes <= 1M, n_h, threads, iterations; repeat >= 2 and warmup >= 1 required')
     if any(backend.startswith('standalone') for backend in args.backends) and args.native_library is None:
         parser.error('--native-library is required for standalone measurements')
     os.environ['WARPSPHCORE_BACKEND'] = 'warp'
@@ -294,7 +303,7 @@ def main():
                 warmup = 1 if large else args.warmup
                 operator_iterations = 1 if large else args.operator_iterations
                 report['activity'].append(activity())
-                q, domain, values = fixture(n, dimension, device, args.neighbors, getattr(torch, args.precision))
+                q, domain, values = fixture(n, dimension, device, args.neighbors, getattr(torch, args.precision), n_h=args.n_h)
                 warp_search = lambda: sph.radiusSearchCompactHashMap(
                     q, domain, sph.SupportScheme.Gather, sph.HashMapLengthMode.Fixed, n,
                     capacity=None, collection='fused', queryOrder='input', storeI=False)
@@ -307,7 +316,8 @@ def main():
                     adjacency.numNeighbors, adjacency.edgeOffsets.to(sph.get_torch_offset_dtype()),
                     n, n, numEdges=adjacency.numEdges)
                 base = dict(device=device, dimension=dimension, n=n, edges=adjacency.numEdges,
-                            mean_neighbors=adjacency.numEdges/n, warmup_batches=warmup)
+                            mean_neighbors=adjacency.numEdges/n, warmup_batches=warmup,
+                            nominal_n_h=args.n_h if args.neighbors is None else None)
                 searches = [('warp', lambda: python_sample(warp_search, device, args.search_iterations)),
                             ('native_torch', lambda: python_sample(torch_search, device, args.search_iterations))]
                 if lib is not None:

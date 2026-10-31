@@ -5,8 +5,12 @@ core SPH primals through Warp/Torch and native/Torch by default. The standalone
 C++ API remains available through explicit `--backends` choices. It
 uses CPU and CUDA by default, dimensions 1/2/3, and N = 1/16/256/4096/32768/131072/262144/524288/1000000. The
 default uses float64 data (`--precision float32` selects single precision), vector fields, 64-bit CSR indices/offsets and
-32-bit counts. Approximately 32 other neighbors plus self (about 33 entries per particle)
-keep work proportional to N once the fixture is large enough. Actual degrees are recorded.
+32-bit counts. The default is `--n-h 4`, with `--n-h 2.57` as the comparison.
+Here `n_h = support radius / mean spacing`; in a uniform distribution the expected
+other-neighbor counts are roughly 8/50/268 in 1D/2D/3D for 4, versus 5/21/71 for
+2.57, plus the self entry. Supports vary by ±2%; actual degrees are recorded.
+`--neighbors 32` reproduces the historical degree choice. Small fixtures cap the
+support radius at 0.43 of the unit periodic box.
 
 The primary comparison needs no standalone build or `--native-library`:
 

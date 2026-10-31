@@ -695,3 +695,14 @@ queries upward, adding a preparation launch and typically 16–32 MB of scratch
 per million references. Smaller and other supported cases retain the existing
 path. FP64 SPH and CPU implementations remain unchanged. The report covers
 limits, independent primal/VJP tests, offline HIP compilation and raw evidence.
+
+
+The [cell-to-cell interpolation study](../regression/native_backend_cell_tiles_2026_10_31.md)
+implements a separate Morton-sorted CUDA toy with bounded tasks and shared-memory
+reference tiles. At 1M particles and n_h=4, FP32 interpolation improves 1.58× in
+2D and 1.47× in 3D over already-sorted native CSR. Fresh 3D planning plus
+interpolation improves much more by avoiding particle CSR construction; the
+report separates that result from operator throughput. Sparse neighborhoods,
+1D and FP64 often favor CSR. Production kernels are unchanged. The primary
+benchmark now defaults to n_h=4, with n_h=2.57 as comparison and --neighbors 32
+for reproducing historical runs.
