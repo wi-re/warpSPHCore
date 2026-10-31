@@ -350,3 +350,57 @@ wide endpoint/checkpoint; the queue stopped03:17UTC and did not launch t40.
 Next investigation: work-buffer lifetime, guard free/cache accounting and safe
 cleanup, without assuming actual OOM/overflow/leak from the current trace.
 Canonical frontend plan and ignored campaign outcome.json contain exact results.
+
+## Accepted-state allocation recovery (2026-10-31)
+
+Failure-only J/pair-field receipts report requested batch capacity, completed
+chunks and CUDA live/reserved/free memory; partial new buffers are released.
+Distributed local-phase allocation errors use the existing512byte control
+packet and reach every live peer as DistributedAllocationError (also a
+DistributedContractError/MemoryError). Other contract faults retain their type.
+Core search/recipe/planner/pair-field CPU regressions270pass/212skip; focused
+failure/control tests6pass/2skip including two/three Gloo ranks in both modes.
+
+Frontend recovery now retains and atomically saves the accepted particle state
+after an eager chunked integrator allocation failure, with forcing rollback
+and safe progress/renderer/output cleanup. The former164³ headroom failure
+is reproduced as raw-free-only guard accounting:42.08GB cached was ignored;
+projected live53.53GB was below the78GiB cap. No allocator OOM/leak was seen.
+The oldSIGSEGV reproduces in tqdm.__del__ at shutdown; explicit progress close
+fixes the injected CUDA/video failure. A new bounded164³ run passes the old
+rejection, saves on injected failure after124accepted steps, and resumes to130;
+29 native datasets match the earlier-checkpoint control exactly. No numerical
+method/stage-reuse change. Full large t4 and96³→t40 are held for overnight
+while development work remains. Canonical frontend plan/evidence under
+`.tmp/allocation-recovery-20261031/` track the remaining GPU/profile gates.
+
+## Scalar work launch occupancy (2026-10-31)
+
+Matched single-process64³ profiling isolates the CRK work slowdown to block
+geometry:149registers/thread at256threads admits one block/SM. A one-chunk
+control matches flat work time; smaller chunks waste the last scheduling wave.
+Explicit128threads admits three blocks/SM and reduces work51.47→30.47ms/step
+without changing arithmetic or row traversal. Steady total185.08→163.90ms/step
+on this early-flow fixture; full late-flow/site performance is unqualified.
+
+Core OperatorSpec adds optional validated blockDim, forwarded through ordinary,
+prepared and autograd launch paths. None retains historical256 scalar threads;
+cooperating tiled lanes and CPU behavior stay fixed. Distributed contracts
+include the effective kernel/lane/block selection and reject differing CUDA
+blocks before payload launches. Only frontend CRK work selects128. Prototype
+module-option-only trials were ineffective and remain excluded from conclusions.
+
+All saved64³ tensors/source budgets match the old256-thread endpoint bitwise.
+Production wide failure/restart to step132 at164³ matches29 native datasets
+exactly against the old launch geometry. CPU declared/prepared/block/reverse
+checks pass; final CUDA FP64/NCCL admission is tracked in the canonical front
+plan and `.tmp/allocation-recovery-20261031/`. Long flow gates remain overnight.
+
+Final local admission passes: CUDA block ABI17tests including prepared/reverse,
+FP32/FP64 native compatible work/replay8tests each and nondefault-stream/32lane
+controls2each. Two shared-GPU NCCL ranks pass core operators/errors including
+block mismatch; native failure/checkpoint/restart passes with128-thread work.
+Scanner:568runtime modules/6105imports/1317files. Wide production recovery
+step132 remains exact against256-thread control. No full-duration large run
+is launched; those are held for overnight. Physical multi-GPU and other site
+backends remain separate gates.

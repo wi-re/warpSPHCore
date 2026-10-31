@@ -108,3 +108,88 @@ def test_field_budget_and_inplace_rebuild_lease(device, monkeypatch):
     radiusSearchRowChunks(p, d, policy=a.plan.policy, reuse=a, inPlace=True)
     with pytest.raises(ValueError, match='overwritten'):
         field.validate(a)
+
+
+@pytest.mark.parametrize('site', ['neighbors', 'work'])
+def test_bulk_allocation_failure_releases_partial_storage_and_records_receipt(device, monkeypatch, site):
+    import importlib, json, weakref
+    p, d, adjacency = sample(device)
+    before = tuple(c.adjacency.paddedJ.clone() for c in adjacency)
+    original = torch.empty; refs = []; calls = 0
+    error = torch.OutOfMemoryError('injected third bulk buffer')
+    def empty(*args, **kwargs):
+        nonlocal calls
+        bulk = (args and isinstance(args[0], tuple)) if site=='work' else (args and isinstance(args[0], int) and args[0]>1 and kwargs.get('dtype')==torch.int32)
+        if bulk:
+            calls += 1
+            if calls == 3:
+                raise error
+        value = original(*args, **kwargs)
+        if bulk:
+            refs.append(weakref.ref(value))
+        return value
+    monkeypatch.setattr(torch, 'empty', empty)
+    with pytest.raises(torch.OutOfMemoryError) as caught:
+        if site=='work':
+            ChunkedPairField.empty(adjacency, trailingShape=(2,), dtype=p.positions.dtype)
+        else:
+            chunk = importlib.import_module('warpSPHCore.radiusSearch.chunked')
+            chunk._allocateChunks(adjacency.plan, adjacency.numNeighbors, adjacency.globalPrefix,
+                0, False, adjacency, False)
+    assert caught.value is error
+    receipt = json.loads(error.__notes__[-1].split(': ',1)[1])
+    assert receipt['kind']==('pair-field' if site=='work' else 'neighbors')
+    assert receipt['completedChunks']==2 and receipt['requestedBytes']>0
+    assert all(ref() is None for ref in refs)
+    adjacency.assertStorageValid()
+    for chunk, saved in zip(adjacency, before):
+        torch.testing.assert_close(chunk.adjacency.paddedJ, saved, rtol=0, atol=0)
+
+
+@pytest.mark.parametrize('prepared', [False, True])
+@pytest.mark.parametrize('block', [64, 128])
+def test_explicit_scalar_block_reaches_eager_and_prepared_chunk_launches(device, monkeypatch, prepared, block):
+    p, domain, adjacency = sample(device)
+    work = ChunkedPairField.empty(adjacency, trailingShape=(2,), dtype=p.positions.dtype)
+    context = SPHContext(p, OperationProperties(kernel=KernelFunctions.Wendland2), domain, adjacency)
+    launch = wp.launch
+    seen = []
+    def observed(kernel, *args, **kwargs):
+        if kernel.key.startswith('_stamp'):
+            seen.append(kwargs.get('block_dim'))
+        return launch(kernel, *args, **kwargs)
+    monkeypatch.setattr(wp, 'launch', observed)
+    spec = replace(SPEC, blockDim=block)
+    values, _ = (PreparedLauncher(context).launch(spec, work=work, rowStart=0) if prepared else
+                 launchOperator(spec, context, work=work, rowStart=0))
+    assert seen and all(value==block for value in seen)
+    torch.testing.assert_close(values,torch.arange(len(p.positions),device=device,dtype=p.positions.dtype),rtol=0,atol=0)
+
+
+@pytest.mark.parametrize('block', [True, 0, -1, 1025, 64.0])
+def test_invalid_scalar_block_size_is_rejected_when_declared(block):
+    with pytest.raises(ValueError, match='blockDim'):
+        replace(SPEC, blockDim=block)
+
+
+@wp.kernel
+def _blockSquare(query: Any, reference: Any, domain: Any, useAdjacency: wp.bool,
+                 adjacency: Any, grid: Any, correction: Any, properties: Any,
+                 values: wp.array(dtype=scalar_t), output: wp.array(dtype=scalar_t)):
+    i=wp.tid()
+    output[i]=values[i]*values[i]
+
+
+@pytest.mark.parametrize('block', [64, 128])
+def test_explicit_scalar_block_preserves_reverse_mode(device, block):
+    from warpSPHCore import radiusSearchCompactHashMap
+    p, domain, _ = sample(device)
+    adjacency=radiusSearchCompactHashMap(p,domain)
+    context=SPHContext(p,OperationProperties(kernel=KernelFunctions.Wendland2),domain,adjacency)
+    values=torch.linspace(-1.,1.,len(p.positions),device=device,dtype=p.positions.dtype,requires_grad=True)
+    spec=OperatorSpec(kernel=_blockSquare,blockDim=block,outputs=(OutputSpec(dtype=scalar_t),),
+        extras=(ExtraSpec('values',ExtraKind.TENSOR),))
+    output=launchOperator(spec,context,values=values)
+    output.sum().backward()
+    torch.testing.assert_close(output,values.square(),rtol=0,atol=0)
+    torch.testing.assert_close(values.grad,2*values,rtol=0,atol=0)

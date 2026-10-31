@@ -179,7 +179,8 @@ def launchRowChunks(spec, ctx, extras, prepared=None):
             lanes=neighborLanes(default=spec.defaultNeighborLanes)
             if lanes>1:kernel=spec.tiledKernel
         return (ctx.adjacency.plan.signature, spec.kernel.key, str(ctx.properties), scalars, tensors, outputs,
-                (kernel.key,lanes))
+                (kernel.key, lanes, (lanes if lanes>1 else (spec.blockDim or 256))
+                 if ctx.query.positions.is_cuda else 1))
     communication._checkedAgree('operator:contract',validate)
     # Exact mode fingerprints every reference input. Contract mode checks layouts
     # here and retains exact checks at search/accepted/checkpoint boundaries.

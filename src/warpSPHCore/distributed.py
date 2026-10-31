@@ -17,11 +17,15 @@ import torch
 import torch.distributed as dist
 import torch.autograd.forward_ad as fwAD
 
-__all__ = ['RowChunkProcessGroup', 'DistributedContractError']
+__all__ = ['RowChunkProcessGroup', 'DistributedContractError', 'DistributedAllocationError']
 
 
 class DistributedContractError(RuntimeError):
     """A local phase failed, or ranks disagreed on the collective contract."""
+
+
+class DistributedAllocationError(DistributedContractError, MemoryError):
+    """All reporting ranks failed allocation, at a coordinated local phase."""
 
 
 class RowChunkProcessGroup:
@@ -117,6 +121,8 @@ class RowChunkProcessGroup:
         # Fixed-size diagnostics let peers report a local validation/kernel
         # failure without entering a differently shaped payload collective.
         message = b'' if error is None else (type(error).__name__ + ': ' + str(error)).encode()[:479]
+        if isinstance(error, (MemoryError, torch.OutOfMemoryError)):
+            message = b'AllocationFailure: ' + message[:460]
         record = digest + message + bytes(480-len(message))
         self._hostSendArray[:] = np.frombuffer(record,dtype=np.uint8)
         if self.device.type=='cuda':
@@ -134,7 +140,9 @@ class RowChunkProcessGroup:
         self._event(tag, start)
         if failures:
             detail = '; '.join(f'rank {rank}: {message}' for rank, message in failures)
-            raise DistributedContractError(f'{tag}: {detail}') from error
+            failure = (DistributedAllocationError if all(message.startswith('AllocationFailure: ')
+                       for _, message in failures) else DistributedContractError)
+            raise failure(f'{tag}: {detail}') from error
         if len({p[:32] for p in records}) != 1:
             raise DistributedContractError(
                 f'{tag}: ranks disagree on collective sequence, operation, generation or layout (sequence {self.sequence-1}).')

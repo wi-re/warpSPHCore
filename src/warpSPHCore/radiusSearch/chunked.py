@@ -26,6 +26,7 @@ from .compactHash.buildHashmap import buildCompactHashMap
 from .compactHash.wp_countNeighbors import radiusSearchCountNeighborsCompactHashMap
 from .compactHash.wp_collectNeighbors import radiusSearchCollectJOnly
 from .csr import validateParticleCounts
+from .allocation import noteAllocationFailure
 from .rowChunks import RowChunk, RowChunkGeneration, RowChunkPlan, RowChunkPolicy, buildRowChunkPlan
 from .verlet.build import _DEFERRED_CHECKS
 from .verlet.wp_countVerlet import countNeighborsVerlet
@@ -209,33 +210,43 @@ def _plan(counts, generationNumber, config, policy, numReferences, numOwners, ex
 def _allocateChunks(plan, counts, prefix, owner, storeI, reuse, inPlace):
     old = {(c.metadata.rowStart, c.metadata.rowStop): c.adjacency for c in reuse} if reuse is not None else {}
     chunks = []
-    for metadata in plan.chunks:
-        if metadata.owner != owner:
-            continue
-        a, b = metadata.rowStart, metadata.rowStop
-        # Always subtract the GLOBAL base in int64 before narrowing local offsets.
-        offsets = (prefix[a:b] - prefix[a]).to(get_torch_offset_dtype())
-        prior = old.get((a, b))
-        compatible = (inPlace and prior is not None and prior.paddedJ.numel() == metadata.capacity
-                      and prior.paddedJ.device == counts.device and prior.paddedJ.dtype == get_torch_index_dtype()
-                      and (prior.paddedI is not None) == storeI
-                      and (not storeI or (prior.paddedI.shape == prior.paddedJ.shape
-                                          and prior.paddedI.device == counts.device
-                                          and prior.paddedI.dtype == get_torch_index_dtype()))
-                      and prior.edgeOffsets.shape == offsets.shape and prior.edgeOffsets.dtype == offsets.dtype
-                      and prior.edgeOffsets.device == counts.device)
-        if compatible:
-            reuse._storageLease.valid = False
-        j = prior.paddedJ if compatible else torch.empty(metadata.capacity, dtype=get_torch_index_dtype(), device=counts.device)
-        i = (prior.paddedI if compatible else torch.empty_like(j)) if storeI else None
-        j.fill_(-1)
-        if i is not None:
-            i.fill_(-1)
-        if compatible:
-            prior.edgeOffsets.copy_(offsets)
-            offsets = prior.edgeOffsets
-        chunks.append(OwnedRowChunk(metadata, AdjacencyList(i, j, counts[a:b], offsets,
-                                                          b - a, plan.generation.numReferences, numEdges=metadata.liveEdges)))
+    try:
+        for metadata in plan.chunks:
+            if metadata.owner != owner:
+                continue
+            a, b = metadata.rowStart, metadata.rowStop
+            # Always subtract the GLOBAL base in int64 before narrowing local offsets.
+            offsets = (prefix[a:b] - prefix[a]).to(get_torch_offset_dtype())
+            prior = old.get((a, b))
+            compatible = (inPlace and prior is not None and prior.paddedJ.numel() == metadata.capacity
+                          and prior.paddedJ.device == counts.device and prior.paddedJ.dtype == get_torch_index_dtype()
+                          and (prior.paddedI is not None) == storeI
+                          and (not storeI or (prior.paddedI.shape == prior.paddedJ.shape
+                                              and prior.paddedI.device == counts.device
+                                              and prior.paddedI.dtype == get_torch_index_dtype()))
+                          and prior.edgeOffsets.shape == offsets.shape and prior.edgeOffsets.dtype == offsets.dtype
+                          and prior.edgeOffsets.device == counts.device)
+            if compatible:
+                reuse._storageLease.valid = False
+            j = prior.paddedJ if compatible else torch.empty(metadata.capacity, dtype=get_torch_index_dtype(), device=counts.device)
+            i = (prior.paddedI if compatible else torch.empty_like(j)) if storeI else None
+            j.fill_(-1)
+            if i is not None:
+                i.fill_(-1)
+            if compatible:
+                prior.edgeOffsets.copy_(offsets)
+                offsets = prior.edgeOffsets
+            chunks.append(OwnedRowChunk(metadata, AdjacencyList(i, j, counts[a:b], offsets,
+                                                              b - a, plan.generation.numReferences, numEdges=metadata.liveEdges)))
+    except (MemoryError, torch.OutOfMemoryError) as error:
+        requested = sum(c.capacity for c in plan.chunks if c.owner == owner) * 4 * (1 + storeI)
+        noteAllocationFailure(error, counts.device, kind='neighbors', requestedBytes=requested,
+                              completedChunks=len(chunks), generation=plan.generation.number)
+        # Partial new buffers are not published. The previous immutable
+        # generation remains available to the accepted state.
+        chunks.clear()
+        j = i = None
+        raise
     return tuple(chunks)
 
 

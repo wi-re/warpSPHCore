@@ -10,6 +10,7 @@ from math import prod
 import torch
 
 from .chunked import ChunkedAdjacency
+from .allocation import noteAllocationFailure
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,8 +34,18 @@ class ChunkedPairField:
     @classmethod
     def empty(cls, adjacency, *, trailingShape, dtype):
         cls._checkLayout(adjacency, trailingShape, dtype)
-        return cls(adjacency, tuple(torch.empty((c.metadata.capacity, *trailingShape),
-                   dtype=dtype, device=adjacency.queryPositions.device) for c in adjacency), trailingShape, dtype)
+        buffers = []
+        try:
+            for chunk in adjacency:
+                buffers.append(torch.empty((chunk.metadata.capacity, *trailingShape),
+                    dtype=dtype, device=adjacency.queryPositions.device))
+        except (MemoryError, torch.OutOfMemoryError) as error:
+            requested = sum(c.metadata.capacity for c in adjacency) * prod(trailingShape) * torch.empty(0, dtype=dtype).element_size()
+            noteAllocationFailure(error, adjacency.queryPositions.device, kind='pair-field',
+                requestedBytes=requested, completedChunks=len(buffers), generation=adjacency.plan.generation.number)
+            buffers.clear()
+            raise
+        return cls(adjacency, tuple(buffers), trailingShape, dtype)
 
     def validate(self, adjacency):
         if self.adjacency is not adjacency:

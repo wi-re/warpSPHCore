@@ -117,5 +117,6 @@ class PreparedLauncher:
             nLanes = neighborLanes(default=spec.defaultNeighborLanes)
             if nLanes > 1:
                 kernel, lanes = spec.tiledKernel, nLanes
-        _launchMaybeTiled(kernel, n, list(self.prefix) + args + outs_w, device, lanes)
+        _launchMaybeTiled(kernel, n, list(self.prefix) + args + outs_w, device, lanes,
+                          **({'blockDim': spec.blockDim} if spec.blockDim is not None else {}))
         return outs_t[0] if len(outs_t) == 1 else tuple(outs_t)

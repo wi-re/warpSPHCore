@@ -21,7 +21,7 @@ from warpSPHCore import (DomainDescription, ParticleState, OperationProperties,
     radiusSearchCompactHashMap, setNeighborLanes, get_torch_precision)
 from warpSPHCore.autograd import SPHContext, PreparedLauncher
 from warpSPHCore.coreOperations.wp_density import _DENSITY_SPEC
-from warpSPHCore.distributed import RowChunkProcessGroup, DistributedContractError
+from warpSPHCore.distributed import RowChunkProcessGroup, DistributedContractError, DistributedAllocationError
 from warpSPHCore.radiusSearch import (radiusSearchRowChunks, RowChunkPolicy,
     buildChunkedVerletList, ChunkedPairField, chunkedVerletStaleFlag_)
 from warpSPHCore.crk import computeCRKFactors
@@ -163,6 +163,16 @@ def failures(comm):
         if comm.rank == comm.size-1:
             raise ValueError('injected local failure')
     rejected(lambda: comm.localPhase('test:injected', broken), 'injected local failure')
+    for allocationType in (MemoryError, torch.OutOfMemoryError):
+        def allocation():
+            if comm.rank == comm.size-1:
+                raise allocationType('injected bulk allocation')
+        try:
+            comm.localPhase('test:allocation-failure', allocation)
+        except DistributedAllocationError as exc:
+            assert isinstance(exc, MemoryError) and 'injected bulk allocation' in str(exc)
+        else:
+            raise AssertionError('allocation classification must reach healthy peers')
     bad = torch.zeros(2 if comm.rank == 0 else 3, device=comm.device, dtype=torch.int32)
     ranges = ((0,1),(1,2)) if comm.size == 2 else ((0,1),(1,2),(2,2))
     rejected(lambda: comm.exchangeRows(bad, ranges, tag='test:bad-shape', signature='same'), 'cover all')
@@ -178,6 +188,10 @@ def failures(comm):
     adj = radiusSearchRowChunks(q, domain, referenceParticles=r,
         policy=RowChunkPolicy(edgeBudget=80,maxRows=3), communication=comm)
     props = OperationProperties(kernel=KernelFunctions.Wendland2, operation=WarpOperation.Density)
+    if comm.device.type=='cuda':
+        from warpSPHCore.autograd import launchOperator
+        rejected(lambda:launchOperator(replace(_DENSITY_SPEC,tiledKernel=None,blockDim=64 if comm.rank==0 else 128),
+            SPHContext(q,props,domain,adj,r)), 'disagree')
     # Divergent reference data must fail BEFORE outputs can hide the discrepancy
     # by broadcasting a mixture of owner results.
     q.masses[0] += comm.rank*.01

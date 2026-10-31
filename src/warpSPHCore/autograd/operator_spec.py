@@ -214,6 +214,13 @@ class OperatorSpec:
     rowChunked: bool = False
     #: Query-only CRK estimators never dereference reference correction arrays.
     queryOnlyCRK: bool = False
+    #: Optional scalar CUDA threads per block. Cooperating tiled kernels keep
+    #: block_dim=lanes. None preserves Warp's historical 256-thread default.
+    blockDim: Optional[int] = None
+
+    def __post_init__(self):
+        if self.blockDim is not None and (type(self.blockDim) is not int or not 1 <= self.blockDim <= 1024):
+            raise ValueError('OperatorSpec.blockDim must be None or an integer in [1, 1024].')
 
 
 @dataclass
@@ -580,4 +587,5 @@ def launchOperator(
         numThreads=spec.numThreads(ctx, extras) if spec.numThreads is not None else None,
         jvp_fn=jvp_fn,
         lanes=lanes,
+        blockDim=spec.blockDim,
     )
