@@ -5,8 +5,8 @@ This sibling link assumes the documented paired checkout layout. In another
 layout, obtain the canonical file from the frontend repository. Progress has
 one indexed row in frontend`PLANS.md`; do not maintain competing checklists here.
 
-Status, 2026-10-30: **Phase 4 bounded replicated-state process proof of concept qualified;
-local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified**, in the paired `chunked-neighbor-planner` workspace,
+Status, 2026-10-31: **Phase 4 bounded replicated-state process proof of concept qualified;
+local L1 restart and L2 launcher qualified; L3 control/hash and bounded particle packing qualified locally; L4 qualified locally; L5 bounded stress qualified; L6 bounded compatibility matrix qualified; L7 actual wide-edge debug access qualified; overnight real-flow queue active**, in the paired `chunked-neighbor-planner` workspace,
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
 `radiusSearch/chunked.py` adds opt-in row-chunk search, resident Verlet reuse,
@@ -320,3 +320,19 @@ offset widths and standalone/two NCCL ranks pass eager/prepared density, full
 audits and filtering. Standalone allocated peak46.578 GiB. In total8 large
 cohorts /12 rank reports qualify both crossing inside a chunk and whole chunks
 starting above the limit; full spatial/flow capacity remains open.
+
+## Overnight real3D CRKSPH flow (2026-10-31; running)
+
+User authorizes32³/64³/96³/128³ and a measured >INT_MAX flow to t4, sparse
+checkpoints, and a conditional96³/128³ continuation to t40 if measured runtimes
+fit10–12+hours. A detached serial supervisor launched00:01UTC31Oct with a
+12.5hour budget and frozen copies of frontend/core/integrators/plotting. Native
+fresh midpoint/B7/nh4/OU/bath choices match the established pilot. The single
+GPU runs one process with owned chunks/int64 offsets and normal lane defaults.
+Small3D flat/chunked/restart/endpoint/video gates pass.32³ has completed t4;64³
+is active. Initial515 stored neighbours per particle imply164³ is the likely
+wide target; actual count/memory and full RHS gates will confirm it. No library
+numerical sources were changed. The canonical frontend plan and live evidence
+`.tmp/crksph-3d-overnight-20261030/status.json` record the queue/continuation rules.
+The queue is ongoing; larger flow capacity and statistical qualification are
+not yet established. Runtime snapshots are isolated from subsequent edits.
