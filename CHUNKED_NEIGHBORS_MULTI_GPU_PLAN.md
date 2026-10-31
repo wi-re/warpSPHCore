@@ -11,7 +11,9 @@ are qualified in the frontend. C2 now includes row-owned MFM/MFV geometry,
 projected CG/MG closure, gradients, canonical fluxes and native continuation.
 Frontend W1 delta/Sun2017 now qualifies bounded periodic stages, managed2D
 restart/recovery and native3D Gloo/NCCL controls (`warpSPH` commit`7fa1ba7`).
-Incompressible compatibility is next; ACSPH remains excluded.**
+Frontend I1 now qualifies bounded IISPH/DFSPH/predictor/shift, exact native
+pressure histories/checkpoints and accepted-state recovery (frontend`ab5bae4`).
+ACSPH remains excluded.**
 Long-flow/physical multi-GPU/site/performance gates remain held. Active paired
 branch `codex/chunked-neighbor-planner`. Integrated core base is `04e126e`
 (version 0.6.3), with Phase1 planner checkpoint `9a1057e`.
@@ -410,3 +412,29 @@ Scanner:568runtime modules/6105imports/1317files. Wide production recovery
 step132 remains exact against256-thread control. No full-duration large run
 is launched; those are held for overnight. Physical multi-GPU and other site
 backends remain separate gates.
+
+## Native projection frontend continuation (2026-10-31)
+
+The paired frontend ports native C/F, total/wall gradients and exact pressure
+coefficients with explicit global row origins/reference fields. Native Jacobi,
+pressure budgets/stopping norms, independent DF/CD warm impulses and all three
+projection orders are fixed. Each dependent particle output is exchanged before
+use; replicated means/norms are not summed a second time across ranks. No core
+numerical or transport changes are required in this continuation.
+
+Frontend admission is eager periodic one-fluid material, managed2D tgv with
+separate native3D maps.58 Gloo +66 shared-GPU NCCL2.32.3 jobs pass, including
+active FP32/FP64 pressure, changed rank/row/local offset layouts, empty owners
+and dependent-pass/post-drift-shift allocation faults with exact replay.
+CPU/CUDA primal/reverse and import checks pass. A restored seed's I-storage
+mismatch was forcing a fresh search: projection and delta adapters now select
+the next native RHS contract and preserve frozen J reduction order exactly.
+The nominal/next timestep clocks and physical pressure histories also persist.
+
+The native relaxed nx8 CUDA FP64 IISPH stress timestep stop reproduces on
+pre-port source and is retained; it is not a storage regression or a pressure
+accuracy qualification. See canonical frontend I1 receipt and local evidence
+`.tmp/projection-20261031/`. Walls/free surfaces/materials, Band geometry,
+AD/graphs, other case adapters, physical multi-GPU/site/capacity/performance and
+deferred MPI/ROCm builds remain gates. Long flow runs stay overnight-only;
+ACSPH is untouched. No competing checklist is maintained in this companion.
