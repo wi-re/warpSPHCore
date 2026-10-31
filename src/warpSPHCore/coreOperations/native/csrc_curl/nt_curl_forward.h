@@ -3,8 +3,9 @@
 #include "kernels/evaluation.h"
 namespace sph_native {
 template <class T, int D> struct CurlPair {
-    SPH_HD static void accumulate(const RowArgs<T, D> &a, int64_t i, int64_t j, const T (&dx)[D],
-                                  T r, T w, T g, T (&sum)[D * D * D]) {
+    template <class Args>
+    SPH_HD static void accumulate(const Args &a, int64_t i, int64_t j, const T (&dx)[D], T r, T w,
+                                  T g, T (&sum)[D * D * D]) {
         if constexpr (D == 2) {
             for (int c = 0; c < a.outputs; ++c)
                 sum[c] += g * (dx[0] * field_weight(a, i, j, a.outputs + c) -

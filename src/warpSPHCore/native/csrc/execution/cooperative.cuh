@@ -32,6 +32,18 @@ template <int Width, class T> __device__ T group_xor(T value, int partner) {
 #endif
 }
 
+// Return a ballot relative to this query's subgroup, including HIP wave64.
+template <int Width> __device__ unsigned group_ballot(bool predicate) {
+    constexpr unsigned bits = 0xffffffffu >> (32 - Width);
+#if defined(__HIPCC__) || defined(SPH_NATIVE_HIP) || defined(USE_ROCM)
+    const int first = (threadIdx.x % warpSize) & ~(Width - 1);
+    return unsigned(__ballot(predicate) >> first) & bits;
+#else
+    const int first = (threadIdx.x & 31) & ~(Width - 1);
+    return (__ballot_sync(bits << first, predicate) >> first) & bits;
+#endif
+}
+
 template <int Width, class Row> __global__ void cooperative_rows(int64_t n, Row row) {
     const int lane = threadIdx.x & (Width - 1);
     const int64_t first = (int64_t(blockIdx.x) * blockDim.x + threadIdx.x) / Width;

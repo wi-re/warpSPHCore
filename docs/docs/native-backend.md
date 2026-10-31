@@ -683,3 +683,15 @@ checkpoint and GPU fresh search by 2.83×. FP32 GPU interpolation is essentially
 unchanged, and CPU fresh search needs further work. The report records numerical
 qualification, including FP32 cutoff rounding, and retains all timing ranges.
 Graphs and raw evidence live in `core/experiments/native-performance-20261031/`.
+
+
+The [FP32 GPU exploration](../regression/native_backend_fp32_2026_10_31.md)
+profiles and reduces repeated reference-side gathers with aligned packed records,
+and uses four-lane, cell-ordered radius search. At one million particles in 2D,
+FP32 native/Torch primals improve 3.14–5.24× over `0560de5`; interpolation takes
+0.332 ms versus 1.487 ms before and 1.493 ms for Warp. Fresh search improves
+6.15 → 2.78 ms. Packing applies to the common Wendland2/Gather path from 32K
+queries upward, adding a preparation launch and typically 16–32 MB of scratch
+per million references. Smaller and other supported cases retain the existing
+path. FP64 SPH and CPU implementations remain unchanged. The report covers
+limits, independent primal/VJP tests, offline HIP compilation and raw evidence.

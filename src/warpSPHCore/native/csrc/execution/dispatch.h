@@ -57,40 +57,54 @@ void execute_typed(const Task &task, const Tensors &t, int support, int directio
     const auto n = t[QX].size(0);
     task(n, a, launch);
 }
+// Metadata-only cost decision for the FP32 packed-reference path. The edge
+// count is a storage-size estimate; no CSR/particle-content pass is performed.
+inline int field_components(const Tensors &t) {
+    int fields = 1;
+    for (int d = 1; d < t[RVALUE].dim(); ++d)
+        fields *= int(t[RVALUE].size(d));
+    return fields;
+}
+inline int packed_reference_pitch(const Tensors &t, int support, int direction, int kernel,
+                                  int components) {
+    if (t[QX].scalar_type() != ScalarType::Float || support != 11 || direction != 0 || kernel != 0)
+        return 0;
+    const int64_t queries = t[QX].size(0), references = t[RX].size(0);
+    const int pitch = (int(t[QX].size(1)) + components + 3) / 4 * 4;
+    if (queries < 32768 || references == 0 || references > INT32_MAX / pitch ||
+        references > 4 * queries || t[NEIGHBORS].numel() / 4 < references)
+        return 0;
+    return pitch;
+}
+
+template <class T, class Task, class Launcher>
+void execute_precision(const Task &task, const Tensors &t, int support, int direction,
+                       int operation, const Launcher &launch, int kernel = 0, int scheme = 3,
+                       int laplacian = 2, bool dot = false) {
+    switch (t[QX].size(1)) {
+    case 1:
+        execute_typed<T, 1>(task, t, support, direction, operation, launch, kernel, scheme,
+                            laplacian, dot);
+        break;
+    case 2:
+        execute_typed<T, 2>(task, t, support, direction, operation, launch, kernel, scheme,
+                            laplacian, dot);
+        break;
+    case 3:
+        execute_typed<T, 3>(task, t, support, direction, operation, launch, kernel, scheme,
+                            laplacian, dot);
+        break;
+    }
+}
 template <class Task, class Launcher>
 void execute(const Task &task, const Tensors &t, int support, int direction, int operation,
              const Launcher &launch, int kernel = 0, int scheme = 3, int laplacian = 2,
              bool dot = false) {
-    if (t[QX].scalar_type() == ScalarType::Float) {
-        switch (t[QX].size(1)) {
-        case 1:
-            execute_typed<float, 1>(task, t, support, direction, operation, launch, kernel, scheme,
-                                    laplacian, dot);
-            break;
-        case 2:
-            execute_typed<float, 2>(task, t, support, direction, operation, launch, kernel, scheme,
-                                    laplacian, dot);
-            break;
-        case 3:
-            execute_typed<float, 3>(task, t, support, direction, operation, launch, kernel, scheme,
-                                    laplacian, dot);
-            break;
-        }
-    } else {
-        switch (t[QX].size(1)) {
-        case 1:
-            execute_typed<double, 1>(task, t, support, direction, operation, launch, kernel, scheme,
-                                     laplacian, dot);
-            break;
-        case 2:
-            execute_typed<double, 2>(task, t, support, direction, operation, launch, kernel, scheme,
-                                     laplacian, dot);
-            break;
-        case 3:
-            execute_typed<double, 3>(task, t, support, direction, operation, launch, kernel, scheme,
-                                     laplacian, dot);
-            break;
-        }
-    }
+    if (t[QX].scalar_type() == ScalarType::Float)
+        execute_precision<float>(task, t, support, direction, operation, launch, kernel, scheme,
+                                 laplacian, dot);
+    else
+        execute_precision<double>(task, t, support, direction, operation, launch, kernel, scheme,
+                                  laplacian, dot);
 }
 } // namespace sph_native

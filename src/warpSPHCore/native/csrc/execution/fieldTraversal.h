@@ -2,10 +2,27 @@
 #include "execution/traversal.h"
 #include "math/queryGeometry.h"
 namespace sph_native {
+// A packed forward row retains the original query and support metadata while
+// providing a register-resident reference record and cached query field.
+// Only the Difference/Gather path constructs this adapter.
+template <class T, int D> struct PackedFieldArgs : RowArgs<T, D> {
+    const T *reference;
+    const T *query_field;
+};
+template <class T, int D> SPH_HD T reference_volume(const RowArgs<T, D> &a, int64_t j) {
+    return a.mass[j] / a.density[j];
+}
+template <class T, int D> SPH_HD T reference_volume(const PackedFieldArgs<T, D> &a, int64_t) {
+    return a.reference[D];
+}
+template <class T, int D>
+SPH_HD T field_weight(const PackedFieldArgs<T, D> &a, int64_t, int64_t, int c, bool = false) {
+    return (a.reference[D + 1 + c] - a.query_field[c]) * a.reference[D];
+}
 template <class T, int D>
 SPH_HD T field_weight(const RowArgs<T, D> &a, int64_t i, int64_t j, int c, bool lap = false) {
     T fi = a.qvalue[i * a.fields + c], fj = a.rvalue[j * a.fields + c],
-      volume = a.mass[j] / a.density[j];
+      volume = reference_volume(a, j);
     if (lap)
         return (fj - fi) *
                (a.scheme == 2 ? a.mass[j] * a.qdensity[i] / (a.density[j] * a.density[j]) : volume);

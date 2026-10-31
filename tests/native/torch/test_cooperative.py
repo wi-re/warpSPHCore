@@ -7,7 +7,7 @@ if sph.backend != 'native':
     pytest.skip('native process only', allow_module_level=True)
 
 from _support.kernels import shape
-from _support.operators import normalization
+from _support.operators import normalization, OPS
 
 @pytest.mark.gpu
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
@@ -15,11 +15,12 @@ from _support.operators import normalization
 @pytest.mark.parametrize('rank', [0, 1, 2])
 @pytest.mark.parametrize('index_dtype', [torch.int32, torch.int64])
 @pytest.mark.parametrize('policy', ['gather', 'symmetric', 'filtered'])
-def test_ragged_interpolation_values_and_adjoints(device, dtype, dimension, rank, index_dtype, policy):
+@pytest.mark.parametrize('nq', [67,32769])
+def test_ragged_interpolation_values_and_adjoints(device, dtype, dimension, rank, index_dtype, policy, nq):
     if device == 'cpu':
         pytest.skip('cooperative device execution')
     generator = torch.Generator().manual_seed(9021)
-    nq, nr = 67, 97  # Partial final thread block and multiple neighbor tiles.
+    nr = 97  # Partial final thread block and multiple neighbor tiles.
 
     def random(*sizes):
         return torch.rand(sizes, generator=generator, dtype=torch.float64).to(device=device, dtype=dtype)
@@ -40,6 +41,9 @@ def test_ragged_interpolation_values_and_adjoints(device, dtype, dimension, rank
                                   torch.tensor([True] + [False] * (dimension-1), device=device), dimension)
     pattern = torch.tensor([0, 1, 7, 8, 9, 31, 32, 33, 65, 97], device=device, dtype=torch.int32)
     counts = pattern[torch.arange(nq, device=device) % len(pattern)]
+    # A partial set of populated rows exercises the large dispatch regime
+    # without growing the independent edge oracle's work with every padded row.
+    counts[1057:] = 0
     offsets = counts.long().cumsum(0) - counts
     edges = int(counts.sum())
     rows = torch.repeat_interleave(torch.arange(nq, device=device), counts.long(), output_size=edges)
@@ -98,19 +102,26 @@ def test_ragged_interpolation_values_and_adjoints(device, dtype, dimension, rank
 
 @pytest.mark.gpu
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
-def test_interpolation_uses_nondefault_stream(device, dtype):
+@pytest.mark.parametrize('n', [133,32769])
+def test_interpolation_uses_nondefault_stream(device, dtype, n):
     if device == 'cpu':
         pytest.skip('CUDA/HIP stream contract')
     stream = torch.cuda.Stream()
     with torch.cuda.stream(stream):
-        x = torch.linspace(-.4, .4, 133, device=device, dtype=dtype)[:, None]
+        x = torch.linspace(-.4, .4, n, device=device, dtype=dtype)[:, None]
         state = sph.ParticleState(x, x.new_full((len(x),), .2), x.new_ones(len(x)),
                                   torch.zeros(len(x), device=device, dtype=torch.int32), x.new_ones(len(x)))
         domain = sph.DomainDescription(x.new_tensor([-1]), x.new_tensor([1]),
                                        torch.tensor([True], device=device), 1)
         prop = sph.OperationProperties(sph.KernelFunctions.Wendland2,
                                        operation=sph.WarpOperation.Interpolate)
-        actual = sph.warpOperation(state, prop, domain, torch.ones_like(x))
+        adjacency = None
+        if n >= 32768:
+            # Bounded degree keeps this stream-lifetime test linear in n.
+            adjacency = sph.AdjacencyList(None,torch.arange(8,device=device).repeat(n),
+                torch.full((n,),8,device=device,dtype=torch.int32),
+                torch.arange(n,device=device)*8,n,n,numEdges=n*8)
+        actual = sph.warpOperation(state, prop, domain, torch.ones_like(x),adjacency=adjacency)
         assert torch.isfinite(actual).all()
     torch.cuda.current_stream().wait_stream(stream)
 
@@ -176,3 +187,66 @@ def test_search_preserves_sorted_rows_across_sort_thresholds(device, dtype):
         start = int(adjacency.edgeOffsets[row])
         torch.testing.assert_close(adjacency.paddedJ[start:start+count].long(),
                                    torch.arange(count, device=device), rtol=0, atol=0)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize('dimension', [1, 2, 3])
+@pytest.mark.parametrize('rank', [0, 1, 2])
+@pytest.mark.parametrize('operation', OPS)
+@pytest.mark.parametrize('index_dtype', [torch.int32,torch.int64])
+@pytest.mark.parametrize('offset_dtype', [torch.int32,torch.int64])
+def test_packed_primal_and_vjp_against_dense_oracle(device, dimension, rank, operation, index_dtype, offset_dtype):
+    """Exercise the packed-size regime against independent FP64 Torch equations."""
+    if device == 'cpu':
+        pytest.skip('packed device execution')
+    if rank == 0 and (operation == sph.WarpOperation.Divergence or
+                      (dimension > 1 and operation == sph.WarpOperation.Curl)):
+        pytest.skip('operator requires vector or matrix field')
+    from _support.operators import dense
+    generator = torch.Generator().manual_seed(7039)
+    nq, nr, active = 32769, 17, 1057
+
+    def random(*sizes):
+        return torch.rand(sizes, generator=generator, dtype=torch.float32).to(device)
+
+    # Separate the clouds from coincident-pair/near-zero-distance conditioning.
+    # This gate checks packed execution; the original stress geometry and its
+    # identical checkpoint discrepancies are retained in the experiment archive.
+    qx, rx = random(nq, dimension)*.2-.4, random(nr, dimension)*.2+.2
+    qx[:, 0] += 6
+    rx[:, 0] -= 4
+    tensors = [qx, rx, random(nq)*.4+1.4, random(nr)*.4+.7, random(nr)+.3,
+               random(nr)+.8, random(nq, *([dimension]*rank))-.5,
+               random(nr, *([dimension]*rank))-.5]
+    inputs = [value.detach().requires_grad_() for value in tensors]
+    qx, rx, qh, rh, mass, density, qf, rf = inputs
+    query = sph.ParticleState(qx, qh, torch.ones_like(qh),
+        torch.arange(nq, device=device, dtype=torch.int32)%4, torch.ones_like(qh))
+    reference = sph.ParticleState(rx, rh, mass,
+        torch.arange(nr, device=device, dtype=torch.int32)%4, density)
+    domain = sph.DomainDescription(qx.new_full((dimension,),-1),qx.new_full((dimension,),1),
+        torch.tensor([True]+[False]*(dimension-1),device=device),dimension)
+    counts=torch.zeros(nq,device=device,dtype=torch.int32)
+    counts[:active]=nr
+    offsets=(counts.long().cumsum(0)-counts).to(offset_dtype)
+    adjacency = sph.AdjacencyList(None,torch.arange(nr,device=device,dtype=index_dtype).repeat(active),
+        counts,offsets,nq,nr,numEdges=active*nr)
+    prop = sph.OperationProperties(sph.KernelFunctions.Wendland2,operation=operation,
+        gradientMode=sph.GradientScheme.Difference,laplacianMode=sph.LaplacianScheme.Brookshaw,
+        operationMode=sph.OperationDirection.TrueAllToToAll)
+    actual = sph.warpOperation(query,prop,domain,qf,rf,referenceParticles=reference,adjacency=adjacency)
+    from dataclasses import replace
+    q64 = replace(query,positions=qx[:active].double(),supports=qh[:active].double(),masses=query.masses[:active].double(),
+                  densities=query.densities[:active].double())
+    r64 = replace(reference,positions=rx.double(),supports=rh.double(),masses=mass.double(),densities=density.double())
+    d64 = replace(domain,min=domain.min.double(),max=domain.max.double())
+    small = dense(q64,r64,d64,prop,qf[:active].double(),rf.double(),differentiable=True)
+    expected = torch.cat([small,small.new_zeros((nq-active,*small.shape[1:]))])
+    torch.testing.assert_close(actual.double(),expected,rtol=3e-4,atol=3e-4)
+    cotangent = random(*actual.shape)-.5
+    got = torch.autograd.grad(actual,inputs,cotangent,allow_unused=True)
+    want = torch.autograd.grad(expected,inputs,cotangent.double(),allow_unused=True) if expected.requires_grad else [None]*len(inputs)
+    for source, left, right in zip(inputs,got,want):
+        left = torch.zeros_like(source) if left is None else left
+        right = torch.zeros_like(source) if right is None else right
+        torch.testing.assert_close(left,right,rtol=5e-4,atol=5e-4)
