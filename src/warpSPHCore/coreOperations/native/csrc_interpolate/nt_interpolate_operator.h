@@ -35,10 +35,10 @@ struct Interpolate : SphOperation<T, D, Fields> {
     SPH_HD void interact(const Query& q, const Record& r, Neighbor, State& sum) const {
         T dx[D];
         const T distance = q.geometry.distance(r.data, dx);
-        const T weighted = r.weight() * q.kernel.value(distance);
+        const T w = q.kernel.value(distance);
         for (int c = 0; c < Fields; ++c)
-            sum.values[c] += r.value(c) * weighted;
-        if constexpr (Normalize) sum.values[Fields] += weighted;
+            sum.values[c] += (r.value(c) * r.weight()) * w;
+        if constexpr (Normalize) sum.values[Fields] += r.weight() * w;
     }
     SPH_HD void finish(const Query& q, const State& sum) const {
         if (this->fields.cache)
@@ -54,4 +54,5 @@ struct Interpolate : SphOperation<T, D, Fields> {
         }
     }
 };
+template <class T, int D, int Fields> using InterpolatePolicy = Interpolate<T, D, Fields>;
 } // namespace sph_native::neighborhood

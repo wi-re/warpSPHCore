@@ -107,7 +107,42 @@ struct ReferenceLoader {
     }
 };
 
+// A CPU pair can read source fields in place. Keeping a pointer and one scalar
+// avoids copying/padding a whole field record for each edge, particularly for
+// matrix inputs. Packed GPU records retain their separate loader above.
+template <class T, Weight Kind> struct ReferenceView {
+    const T* data;
+    const T* values;
+    T scale;
+
+    SPH_HD T weight() const { return Kind == Weight::WeightedField ? T(1) : scale; }
+    SPH_HD T value(int c) const {
+        if constexpr (Kind == Weight::WeightedField) return values[c] * scale;
+        else return values[c];
+    }
+};
+
+template <class T, int D, int Fields, Weight Kind> struct BorrowedReferenceLoader {
+    SphFields<T, D, Fields> fields;
+
+    SPH_HD bool allowed(int64_t j) const {
+        return !fields.reference_kinds || reference_allowed(fields.reference_kinds[j], fields.direction);
+    }
+
+    SPH_HD ReferenceView<T, Kind> load(int64_t j) const {
+        T scale = T(0);
+        if constexpr (Kind == Weight::Mass) scale = fields.mass[j];
+        else if constexpr (Kind == Weight::Volume || Kind == Weight::WeightedField)
+            scale = fields.volumes ? fields.volumes[j] : fields.mass[j] / fields.density[j];
+        const T* values = nullptr;
+        if constexpr (Fields > 0) values = fields.reference_values + j * Fields;
+        return {fields.reference_positions + j * D, values, scale};
+    }
+};
+
 template <class T, int D, int Fields> struct SphOperation {
+    static constexpr int field_count = Fields;
+    static constexpr bool uses_query_values = false;
     SphFields<T, D, Fields> fields;
     using Query = PreparedQuery<T, D, Fields>;
     using Reference = ReferenceRecord<T, D, Fields>;

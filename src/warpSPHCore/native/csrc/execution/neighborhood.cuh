@@ -54,6 +54,56 @@ template <int Width, class PortableRow> struct CooperativeRow {
     }
 };
 
+// Load independent neighbor records before consuming them. Each batch keeps a
+// separate accumulator to expose instruction-level parallelism, then combines
+// through the operation's declared reduction contract before finalization.
+template <int Batch, class Operation, class Query, class Loader, class State>
+struct AccumulateBatch {
+    const Operation& operation;
+    const Query& query;
+    const Loader& loader;
+    State (&states)[Batch];
+
+    SPH_HD void operator()(const NeighborBatch<Batch>& neighbors) const {
+        using Record = decltype(loader.load(int64_t(0)));
+        Record records[Batch];
+        bool active[Batch];
+#pragma unroll
+        for (int u = 0; u < Batch; ++u)
+            active[u] = neighbors.valid[u] && loader.allowed(neighbors.entries[u].reference);
+#pragma unroll
+        for (int u = 0; u < Batch; ++u)
+            if (active[u]) records[u] = loader.load(neighbors.entries[u].reference);
+#pragma unroll
+        for (int u = 0; u < Batch; ++u)
+            if (active[u]) operation.interact(query, records[u], neighbors.entries[u], states[u]);
+    }
+};
+
+template <int Batch, class Operation, class Traversal, class Loader> struct BatchedRow {
+    static_assert(Batch > 1);
+    Operation operation;
+    Traversal traversal;
+    Loader loader;
+
+    template <class Reduction>
+    __device__ void run(int64_t i, int lane, int lanes, const Reduction& reduction) const {
+        const auto query = operation.prepare(i);
+        using State = decltype(operation.identity(query));
+        State states[Batch];
+#pragma unroll
+        for (int u = 0; u < Batch; ++u) states[u] = operation.identity(query);
+        if (operation.allowed(i))
+            traversal.template each_batch<Batch>(i, lane, lanes,
+                AccumulateBatch<Batch, Operation, decltype(query), Loader, State>{
+                    operation, query, loader, states});
+#pragma unroll
+        for (int u = 1; u < Batch; ++u) states[0].combine(states[u]);
+        states[0].reduce(reduction);
+        if (lane == 0) operation.finish(query, states[0]);
+    }
+};
+
 // All queries in a tile own their output for its entire source-range sweep.
 // The loader's record is staged once per source tile and reused by every query.
 // Inactive query groups still participate in block barriers.

@@ -2,12 +2,19 @@
 #include "execution/gpu.cuh"
 #include "execution/packedValues.cuh"
 #include "execution/valueTraversal.cuh"
+#include "execution/rowNeighborhood.cuh"
+#include "nt_interpolate_operator.h"
 namespace sph_native {
 namespace {
+template <class T, int Batch = 1, bool Packed = false>
+using InterpolateNeighborhoodRows = neighborhood::CooperativeSphRows<
+    neighborhood::InterpolatePolicy, T, Packed ? neighborhood::Weight::WeightedField : neighborhood::Weight::Volume,
+    Packed, Batch>;
+
 template <class T, int Width, int Batch>
 void packed_interpolate(const Tensors &t, int pitch, int support, int direction, int kernel) {
     const Tensor packed = stable::new_empty(t[RX], {t[RX].size(0), pitch});
-    execute_precision<T>(PackedValuesRows<false, T, Batch>{packed.mutable_data_ptr<T>()}, t,
+    execute_precision<T>(InterpolateNeighborhoodRows<T, Batch, true>{packed.mutable_data_ptr<T>()}, t,
                          support, direction, 1,
                          CooperativeGpuLauncher<Width>{current_stream(t[QX])}, kernel);
 }
@@ -29,7 +36,14 @@ void interpolate_forward_gpu(const Tensors &t, int support, int direction, int k
                 packed_interpolate<double, 4, 2>(t, pitch, support, direction, kernel);
             else if (dense_3d)
                 packed_interpolate<double, 8, 1>(t, pitch, support, direction, kernel);
-            else
+            else if (dimension == 3 && components == dimension) {
+                // Keep the existing low-degree FP64 vector executor: the
+                // generic packed row is slower for this measured shape.
+                const Tensor packed = stable::new_empty(t[RX], {t[RX].size(0), pitch});
+                execute_precision<double>(PackedValuesRows<false, double>{packed.mutable_data_ptr<double>()},
+                    t, support, direction, 1,
+                    CooperativeGpuLauncher<4>{current_stream(t[QX])}, kernel);
+            } else
                 packed_interpolate<double, 4, 1>(t, pitch, support, direction, kernel);
         } else if (!scalar_or_vector || (dimension == 3 && !dense_3d)) {
             packed_interpolate<float, 8, 1>(t, pitch, support, direction, kernel);
@@ -40,7 +54,16 @@ void interpolate_forward_gpu(const Tensors &t, int support, int direction, int k
         }
         return;
     }
-    execute(ValueGpuRows<false>{}, t, support, direction, 1,
-            CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
+    if (kernel == 0 && support == 11) {
+        if (t[QX].scalar_type() == ScalarType::Float)
+            execute_precision<float>(InterpolateNeighborhoodRows<float>{}, t, support, direction, 1,
+                CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel);
+        else
+            execute_precision<double>(InterpolateNeighborhoodRows<double>{}, t, support, direction, 1,
+                CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel);
+    } else {
+        execute(ValueGpuRows<false>{}, t, support, direction, 1,
+                CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
+    }
 }
 } // namespace sph_native

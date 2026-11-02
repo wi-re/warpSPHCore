@@ -2,6 +2,8 @@
 #include "execution/fieldTraversal.h"
 #include "kernels/evaluation.h"
 #include "execution/valueTraversal.h"
+#include "execution/rowNeighborhood.h"
+#include "nt_interpolate_operator.h"
 namespace sph_native {
 template <class T, int D> struct InterpolatePair {
     SPH_HD static void accumulate(const RowArgs<T, D> &a, int64_t i, int64_t j, const T (&dx)[D],
@@ -15,12 +17,15 @@ struct InterpolateRows {
     template <class T, int D, class Launcher>
     void operator()(int64_t n, RowArgs<T, D> a, const Launcher &launch) const {
         if (a.kernel == 0 && a.support == 11) {
-            if (a.fields == 1)
-                launch(n, GatherValues<T, D, 1, false>{a});
-            else if (a.fields == D)
-                launch(n, GatherValues<T, D, D, false>{a});
-            else
-                launch(n, GatherValues<T, D, D * D, false>{a});
+            // The established CPU matrix loop still wins in the paired 3D
+            // measurements. Keep that executor while sharing the other shapes.
+            if constexpr (D == 3) {
+                if (a.fields == D * D) {
+                    launch(n, GatherValues<T, D, D * D, false>{a});
+                    return;
+                }
+            }
+            neighborhood::SerialSphRows<neighborhood::InterpolatePolicy, neighborhood::Weight::Volume>{}(n, a, launch);
         } else {
             launch(n, InterpolateRow<T, D>{a});
         }

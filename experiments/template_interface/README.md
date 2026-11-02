@@ -1,7 +1,10 @@
 # Native neighborhood template prototype
 
-This is an opt-in experiment. Production Python dispatch and the existing Warp
-and native operators are unchanged. Common traversal/execution types live in
+Wendland2/Gather density, interpolation and Difference gradient now use these
+operation policies in the production native CSR path, through the existing
+stable-ABI registrations and JIT/CMake builds. Other kernels, support schemes
+and gradient modes retain their established fallbacks. The scripts here also
+exercise experimental policies and derivative executors. Common types live in
 `src/warpSPHCore/native/csrc/execution`; operation policies live alongside each
 function in its module's `native/csrc_<function>` directory.
 
@@ -12,7 +15,9 @@ function in its module's `native/csrc_<function>` directory.
 1. `operation.prepare(i)` makes query-local state (geometry, support/kernel
    coefficients and any query values). `operation.allowed(i)` applies the
    query-direction predicate.
-2. `operation.identity(query)` initializes the accumulator.
+2. `operation.identity(query)` initializes a reduction-neutral accumulator.
+   Terms that should appear once per query belong in finalization, rather than
+   in a seed that would be repeated by every lane/batch.
 3. `traversal.each(i, lane, lanes, visit)` supplies `{reference, edge}`. An edge
    ordinal is traversal-local and can be -1 without stored edges. A future
    transpose reader using cached original-edge values must map that ordinal
@@ -23,12 +28,22 @@ function in its module's `native/csrc_<function>` directory.
 5. `state.reduce(reduction)` declares each sum, count, maximum or selection
    reduction. This declaration supports mixed accumulator types without a
    fixed-size array of floats masquerading as every possible reduction.
+   `state.combine(other)` merges partial accumulators when a batched executor
+   overlaps independent reference loads.
 6. Lane zero calls `operation.finish(query, state)`, which owns nonlinear
    postprocessing and stores. Output, saved state and diagnostic pointers can
    independently be null.
 
+Production adapters in `rowNeighborhood.h/.cuh` translate the established
+borrowed `RowArgs` once per launch. A policy declares `field_count` and
+`uses_query_values`; interpolation therefore loads no unused query field. The
+CPU loader reads position, volume and field arrays directly. GPU interpolation
+packs preweighted values and preserves the tuned group widths and two-edge
+batching. Index width is resolved at launch; an offset accessor supports int32
+and int64 offsets independently, without scanning CSR contents.
+
 CPU uses the existing Torch stable-ABI `parallel_for` launcher. GPU execution
-uses 8/16/32-lane groups. The shared-cell executor stages source records and
+uses 4/8/16/32-lane groups. The shared-cell executor stages source records and
 feeds the same operation directly: it is an execution policy, not a fake CSR
 iterator. Padding groups participate in every block barrier.
 
@@ -48,13 +63,19 @@ in 3D. The selector breaks ties by lowest reference storage index; this is an
 explicit prototype convention, not a promise to match traversal-dependent Warp
 tie breaking.
 
-CSR uses int32 or int64 neighbor IDs, int64 offsets and int32 counts. Contiguous
+Production CSR supports int32/int64 neighbor IDs and offsets independently,
+with int32 counts. The private prototype ABI uses int64 offsets. Contiguous
 source ranges and shared query/source cell tiles are implemented. Compressed
 neighbors can later implement the traversal contract; two-bit decoding is not
 implemented here. The private experiment ABI uses int32 particle counts and
 range bounds, so counts must fit int32.
 
 ## Derivatives and implicit solves
+
+Production primal integration retains the existing manual backward registrations.
+The explicit JVP and owned CSR/transpose VJP described below remain prototype
+APIs; this integration does not add a public AD API or build transposes during
+ordinary production calls.
 
 Manual first derivatives are implemented for Wendland2/Gather density,
 interpolation, Difference gradient/Jacobian and normalized interpolation. JVP
@@ -98,8 +119,9 @@ python experiments/template_interface/implicit_demo.py --cpu /tmp/template-cpu.s
 ```
 
 CPU links Torch's stable scheduler API; CUDA/HIP arithmetic is a borrowed-pointer
-C ABI with no Torch headers. This experiment does not add wheel/CMake targets or
-register public operators. HIP has compile qualification only on this machine.
+C ABI with no Torch headers. The production adapters compile through the existing module source manifests
+in both JIT and CMake/wheel builds; they need no new registration or target.
+The commands above build the separate borrowed-buffer qualification driver. HIP has compile qualification only on this machine.
 
 `template_runtime.py` is a private test wrapper, not a general tensor-validation
 API. It requires correctly typed, contiguous, same-device buffers and valid,
@@ -117,3 +139,30 @@ those frozen V2 binaries. `analyze.py` generates graphs from the saved JSONs.
 Sorting, radius search, transpose construction and correctness checks are
 outside operation timings. Packing and output allocation are included in normal
 forward timings; resident direct/template controls exclude them.
+
+
+## Public-API paired measurements
+
+`production_study.py` compares immutable baseline/candidate shared libraries in
+separate worker processes, through `sph.warpOperation` with the native backend.
+The controller alternates workers serially; passive OpenMP waiting prevents an
+idle worker from spinning on the other's cores. Normal calls include allocation,
+packing and Python/native dispatch. Morton sorting, radius search, graph transfer,
+and sampled output comparisons occur before measurements. Neighbors are CSR32
+by default; `--both-indices` adds CSR64. The benchmark checks for other GPU
+compute processes and retains both event/wall samples and all repetitions.
+
+```sh
+python experiments/template_interface/production_study.py \
+  --core "$PWD" --planner /path/to/exploration-v2.so \
+  --baseline /path/to/previous-native.so --candidate /path/to/current-native.so \
+  --output /tmp/native-production-study.json
+```
+
+Measured fast cases retain their existing executors inside normal dispatch:
+CPU 3D matrix interpolation, low-degree GPU 3D FP64 vector interpolation, and
+packed GPU 2D FP32 density.
+They require no caller option; other qualified shapes use the shared policies.
+
+The supplied planner library contributes only Morton keys; the production
+radius search builds the CSR. No shared-cell plan is needed for this study.

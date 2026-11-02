@@ -12,8 +12,15 @@ struct Neighbor {
     int64_t edge;
 };
 
-template <class Index, class Offset = int64_t> struct Csr {
-    const Offset* offsets;
+template <int Size> struct NeighborBatch {
+    Neighbor entries[Size];
+    bool valid[Size];
+};
+
+// Offsets can be a typed pointer or a borrowed accessor such as IndexView.
+// Resolve neighbor-ID width at launch; read offset width once per query.
+template <class Index, class Offsets = const int64_t*> struct Csr {
+    Offsets offsets;
     const int32_t* counts;
     const Index* indices;
 
@@ -22,6 +29,23 @@ template <class Index, class Offset = int64_t> struct Csr {
         const auto begin = offsets[query];
         for (int32_t local = lane; local < counts[query]; local += lanes)
             visit(Neighbor{int64_t(indices[begin + local]), int64_t(begin + local)});
+    }
+
+    template <int Size, class Visit>
+    SPH_HD void each_batch(int64_t query, int lane, int lanes, Visit visit) const {
+        const auto begin = offsets[query];
+        const int32_t count = counts[query];
+        for (int64_t base = lane; base < count; base += lanes * Size) {
+            NeighborBatch<Size> batch{};
+#pragma unroll
+            for (int u = 0; u < Size; ++u) {
+                const auto local = base + u * lanes;
+                batch.valid[u] = local < count;
+                if (batch.valid[u])
+                    batch.entries[u] = {int64_t(indices[begin + local]), begin + local};
+            }
+            visit(batch);
+        }
     }
 };
 
@@ -53,6 +77,10 @@ struct LocalReduction {
 template <class T, int Components> struct Sums {
     T values[Components] = {};
 
+    SPH_HD void combine(const Sums& other) {
+        for (int c = 0; c < Components; ++c) values[c] += other.values[c];
+    }
+
     template <class Reduction> SPH_HD void reduce(const Reduction& reduction) {
         for (int c = 0; c < Components; ++c)
             reduction.sum(values[c]);
@@ -62,6 +90,11 @@ template <class T, int Components> struct Sums {
 template <class T, int Components> struct CountedSums {
     T values[Components] = {};
     int32_t count = 0;
+
+    SPH_HD void combine(const CountedSums& other) {
+        for (int c = 0; c < Components; ++c) values[c] += other.values[c];
+        count += other.count;
+    }
 
     template <class Reduction> SPH_HD void reduce(const Reduction& reduction) {
         for (int c = 0; c < Components; ++c)
@@ -73,6 +106,10 @@ template <class T, int Components> struct CountedSums {
 template <class T> struct Maximum {
     T value = T(0);
     int32_t index = -1;
+
+    SPH_HD void combine(const Maximum& other) {
+        if (other.index >= 0) consider(other.value, other.index);
+    }
 
     SPH_HD void consider(T candidate, int32_t candidate_index) {
         if (index < 0 || candidate > value ||
