@@ -179,8 +179,9 @@ def test_remaining_ad_guards(device, operation, slot):
     if slot == 'field' and operation == sph.WarpOperation.Covariance:
         sph.warpOperation(q, properties, domain, fi, fj, **options)  # field is not consumed
     else:
-        with pytest.raises(NotImplementedError, match='autograd'):
-            sph.warpOperation(q, properties, domain, fi, fj, **options)
+        result = sph.warpOperation(q, properties, domain, fi, fj, **options)
+        assert result.requires_grad
+        result.sum().backward()
     with torch.no_grad():
         assert not sph.warpOperation(q, properties, domain, fi, fj, **options).requires_grad
 
@@ -192,9 +193,9 @@ def test_remaining_forward_ad_guard(device, operation):
     properties = sph.OperationProperties(sph.KernelFunctions.Wendland2, operation=operation)
     with torch.autograd.forward_ad.dual_level():
         volume = torch.autograd.forward_ad.make_dual(volume, torch.ones_like(volume))
-        with pytest.raises(NotImplementedError, match='forward-mode'):
-            sph.warpOperation(q, properties, domain, fi, fj, referenceParticles=r,
-                               referenceVolumes=volume, crkState=state)
+        result = sph.warpOperation(q, properties, domain, fi, fj, referenceParticles=r,
+                                   referenceVolumes=volume, crkState=state)
+        assert torch.isfinite(torch.autograd.forward_ad.unpack_dual(result).tangent).all()
 
 
 def test_unused_naive_laplacian_and_covariance_inputs(device):
@@ -269,9 +270,10 @@ def test_query_omega_ad_policy_and_scalar_divergence(device):
     for operation in (sph.WarpOperation.Divergence, sph.WarpOperation.Curl, sph.WarpOperation.Laplacian):
         properties = sph.OperationProperties(sph.KernelFunctions.Wendland2, operation=operation,
                                              gradientMode=sph.GradientScheme.Difference)
-        with pytest.raises(NotImplementedError, match='autograd'):
-            sph.warpOperation(q, properties, domain, fi, fj, referenceParticles=r,
-                referenceVolumes=volume, crkState=state, gradHState=omega)
+        result = sph.warpOperation(q, properties, domain, fi, fj, referenceParticles=r,
+            referenceVolumes=volume, crkState=state, gradHState=omega)
+        derivative, = torch.autograd.grad(result.sum(), omega.queryOmegas)
+        assert torch.isfinite(derivative).all()
     # Scalar 1D divergence is the ordinary scalar derivative; its existing
     # uncorrected reverse path should match the scalar gradient's pullback.
     properties = replace(properties, operation=sph.WarpOperation.Divergence)

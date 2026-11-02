@@ -232,23 +232,23 @@ def test_empty_queries_and_unused_fields(device):
     assert torch.isfinite(moments[0]).all()
 
 
-def test_preparation_ad_guards(device):
+def test_preparation_ad_contract(device):
     q, r, domain = cloud(device, 2, torch.float64)
     q.positions.requires_grad_()
-    with pytest.raises(NotImplementedError, match='forward-only'):
-        sph.prepareCRK(q, domain, sph.KernelFunctions.Wendland2, referenceState=r)
+    result = sph.prepareCRK(q, domain, sph.KernelFunctions.Wendland2, referenceState=r)
+    assert torch.isfinite(torch.autograd.grad(result.crkState.A.sum(), q.positions)[0]).all()
     with torch.no_grad():
         result = sph.prepareCRK(q, domain, sph.KernelFunctions.Wendland2, referenceState=r)
     assert not result.crkState.A.requires_grad
     q.positions = q.positions.detach()
     volumes = torch.ones_like(r.supports, requires_grad=True)
-    with pytest.raises(NotImplementedError, match='forward-only'):
-        sph.computeCRKMoments(q, sph.OperationProperties(sph.KernelFunctions.Wendland2),
-                              domain, None, volumes, referenceParticles=r)
+    result = sph.computeCRKMoments(q, sph.OperationProperties(sph.KernelFunctions.Wendland2),
+                                  domain, None, volumes, referenceParticles=r)
+    assert torch.isfinite(torch.autograd.grad(result[0].sum(), volumes)[0]).all()
     with torch.autograd.forward_ad.dual_level():
         q.supports = torch.autograd.forward_ad.make_dual(q.supports, torch.ones_like(q.supports))
-        with pytest.raises(NotImplementedError, match='forward-mode'):
-            sph.prepareCRK(q, domain, sph.KernelFunctions.Wendland2, referenceState=r)
+        result = sph.prepareCRK(q, domain, sph.KernelFunctions.Wendland2, referenceState=r)
+        assert torch.isfinite(torch.autograd.forward_ad.unpack_dual(result.crkState.A).tangent).all()
 
 
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])

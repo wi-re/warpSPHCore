@@ -107,8 +107,8 @@ def linearizeFields(queryParticles, operationProperties, domain, queryValues=Non
     Pass CSRTopology as adjacency to share its lazy CSC across operators/solves.
     AdjacencyList or omitted adjacency also work. Construction requires fixed
     non-differentiable coefficients, or an explicit torch.no_grad() scope to
-    freeze differentiable geometry/corrections. The ordinary warpOperation API
-    retains its existing derivative behavior.
+    freeze differentiable geometry/corrections. The ordinary corrected warpOperation API
+    has a separate full first-order derivative path.
     """
     if not isinstance(operationProperties, OperationProperties):
         raise TypeError('operationProperties must be an OperationProperties')

@@ -3,19 +3,20 @@
 Tensor shape/device/content validation remains in C++; operator-specific field
 requirements and derivative policy belong to each nt_<operator> entry point.
 """
+from dataclasses import replace
 from .._models import AdjacencyList
 from ..enumTypes import KernelFunctions
 import torch
 from ._checks import check_execution
 
 
-def prepare_geometry(query, reference, domain, *, allow_reverse=False):
+def prepare_geometry(query, reference, domain, *, allow_reverse=False, allow_forward=False):
     """Pack particle/domain geometry shared by search and pair operators."""
     if domain.dim != query.positions.shape[-1]:
         raise ValueError('domain.dim must match the positions dimension')
     tensors = (query.positions, reference.positions, query.supports, reference.supports,
                domain.min, domain.max, domain.periodic)
-    check_execution(*tensors, allow_reverse=allow_reverse)
+    check_execution(*tensors, allow_reverse=allow_reverse, allow_forward=allow_forward)
     return tensors
 
 
@@ -45,10 +46,15 @@ def prepare_operator_inputs(query, reference, domain, properties, adjacency,
 def prepare_adjacency(query, reference, domain, properties, adjacency):
     """Resolve only discrete topology; callers own their AD/input policy."""
     from ..radiusSearch.native import radiusSearch
+    from ._topology import CSRTopology
+    if isinstance(adjacency, CSRTopology): adjacency = adjacency.adjacency
     if adjacency is None:
         # Neighbour topology is discrete; differentiate the fixed CSR primal.
         with torch.no_grad():
-            adjacency = radiusSearch(query, domain, reference, properties.supportMode, backend='native')
+            query_geometry = replace(query, positions=query.positions.detach(), supports=query.supports.detach())
+            reference_geometry = replace(reference, positions=reference.positions.detach(), supports=reference.supports.detach())
+            fixed_domain = replace(domain, min=domain.min.detach(), max=domain.max.detach())
+            adjacency = radiusSearch(query_geometry, fixed_domain, reference_geometry, properties.supportMode, backend='native')
     if not isinstance(adjacency, AdjacencyList):
         raise TypeError('Native pilot requires a Torch CSR AdjacencyList')
     if adjacency.numRows != len(query.positions) or adjacency.numCols != len(reference.positions):

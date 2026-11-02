@@ -6,9 +6,9 @@ def computeCRKMoments(queryParticles, operationProperties, domain, queryVolumes,
                       referenceVolumes, adjacency=None, referenceParticles=None):
     # queryVolumes remains part of the shared module ABI. These directed
     # moment equations consume only the reference population's volumes.
-    inputs, options = prepare(queryParticles, referenceParticles, domain,
+    inputs, options, topology = prepare(queryParticles, referenceParticles, domain,
                               operationProperties, adjacency, referenceVolumes)
     if referenceVolumes is None:
         raise ValueError('CRK moments require referenceVolumes')
-    from ...native._build import build
-    return tuple(build().crk_moments_forward(inputs, referenceVolumes, *options))
+    from ...native._differential import apply_preparation
+    return apply_preparation(9, inputs, options, topology, referenceVolumes)

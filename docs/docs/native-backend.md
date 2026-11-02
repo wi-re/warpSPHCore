@@ -8,10 +8,11 @@ The native backend builds neighbourhoods, evaluates all 15 radial kernel familie
 and runs the seven standard SPH operators without installing or importing Warp.
 It includes manual first-order adjoints for smooth kernels. CPU, CUDA and HIP
 share the same numerical headers; Warp remains the default backend. Native CRK
-preparation and all six applicable corrected core primals are available. Fixed-geometry
-field JVP/VJP products and first-order field backwards are available through
-`native.linearizeFields`. Derivatives of correction coefficients, corrected geometry,
-higher-order native derivatives and complete frontend simulations remain unported.
+preparation and all six applicable corrected core operations support first-order
+Torch backwards and forward AD, including derivatives through the prepared CRK
+coefficients. Fixed-geometry solver products remain available through
+`native.linearizeFields`. Nonsmooth/singular geometry contracts, higher-order native
+derivatives and complete frontend simulations remain unported.
 
 ## Install and select
 
@@ -355,10 +356,13 @@ and grad-h weighting. These are the existing Warp equations.
 `consistentDivergence=True` selects density-consistent divergence weighting.
 `covarianceReturnNumNeighbors=True` returns `(covariance, counts)`, counting
 positive corrected-kernel values rather than CSR degree. These flags route to
-primal-only native policies, including when no other correction is supplied.
+corrected native policies, including when no other correction is supplied. Counts
+are discrete and have no derivative.
 Density ignores common correction bundles, matching its unchanged Warp equation.
-The ordinary corrected `warpOperation` paths and CRK preparation reject AD requests;
-use `torch.no_grad()` with differentiable input states. For field-only derivatives,
+The corrected `warpOperation` paths and CRK preparation support first-order
+backwards and Torch forward AD (`torch.autograd.forward_ad`). Correction inputs
+and field-only products support all kernels; geometry derivatives retain the
+11 smooth-kernel restriction. For repeated field-only products on fixed geometry,
 use the explicit linearization below. Calibration, positive divergence,
 partial support policies, capacity/rebuild reuse and general graph capture remain
 unsupported. Dot Laplacian requires a vector or matrix field outside 1D.
@@ -546,8 +550,11 @@ All particle-pair passes use the shared prepare/accumulate/finalize interface;
 volume reciprocals and diagnostic ratios run once per query. CPU scheduling and
 GPU stream/device ownership use Torch. No CSR scans, host readbacks or primal
 scatter atomics are added. The factor algebra retains its numerical limiter and
-Torch derivatives, but native volume/moment/density derivatives are not yet
-ported, so the complete preparation API explicitly rejects AD requests.
+Torch derivatives. The native volume/moment/diagnostic passes now provide manual
+first-order JVP/VJP, so the complete preparation pipeline is differentiable.
+The determinant/count/Schur limiter masks are fixed decisions for AD. Inactive
+identity-correction branches have zero coefficient derivative; crossing a limiter
+threshold or changing rank is not a smooth derivative contract.
 
 Run `scripts/examples/native_corrected.py --device cpu` (or `cuda`) with the
 native backend selected for preparation and all six corrected core primals.
@@ -558,8 +565,8 @@ and [remaining corrected primals](../regression/native_corrected_core_2026_11_02
 
 ## Forward, backward and adjoint file boundaries
 
-The implementation uses one primal calculation for inference and a grad-enabled
-forward. A Torch `autograd.Function` bridge saves inputs with version checks,
+The uncorrected implementation uses one primal calculation for inference and a
+grad-enabled forward. A Torch `autograd.Function` bridge saves inputs with version checks,
 prunes unrequested input gradients, and calls module-owned numerical adjoints.
 Backward orchestration and the adjoint are two layers of the same reverse pass;
 there is no second derivative formula in Python.
@@ -574,7 +581,7 @@ there is no second derivative formula in Python.
 | `native/csrc/execution/adjointTraversal.h` | Shared CSR reverse traversal and scatter accumulation |
 | `native/csrc/kernels/adjoint.h` | Spatial/support kernel VJPs |
 
-All seven operators follow this layout. Gradients cover positions, supports,
+All seven uncorrected operators follow this layout. Gradients cover positions, supports,
 reference masses, relevant query/reference densities and fields, and periodic
 domain bounds. Aliased query/reference roles return separate contributions for
 Torch to accumulate. Radius search runs outside the differentiation graph;
@@ -582,8 +589,8 @@ neighbour membership, periodic winding and cutoff transitions are discrete.
 
 Reverse mode supports Wendland2/4/6, cubic/quartic/quintic, B7/B8, Gaussian,
 Poly6 and Cohesion. HOCT4, Spiky, Viscosity and Adhesion reverse mode remains
-explicitly unsupported pending nonsmooth/singular contracts. JVP, HVP and higher
-orders are unsupported; the backward bridge is once-differentiable. Reference
+explicitly unsupported pending nonsmooth/singular contracts. On this uncorrected
+bridge, JVP, HVP and higher orders are unsupported; the backward bridge is once-differentiable. Reference
 scatter uses CPU atomic compare/exchange or GPU atomic addition. Strict Torch
 deterministic mode rejects this path; warn-only mode warns and executes.
 
@@ -781,7 +788,7 @@ multi-threaded topology manager; finish changing the graph before linearizing.
 
 Sorted CSC rows and owned reductions give repeatable execution on a fixed backend
 and launch layout; CPU/GPU or precision changes need not be bitwise identical.
-Ordinary `warpOperation` reverse mode retains its prior scatter-atomic behavior.
+Uncorrected `warpOperation` reverse mode retains its prior scatter-atomic behavior.
 These products do not add graph-capture or compilation support. There is no
 runtime CSR validation mode or debug flag.
 
@@ -792,11 +799,78 @@ Independent dense equations are used only afterwards for verification. See the
 [field-linearization qualification](../regression/native_field_linearization_2026_11_02.md)
 for test coverage, distribution checks and remaining integration work.
 
+## Complete corrected and preparation derivatives
+
+Ordinary corrected calls now support first-order Torch backwards and forward AD:
+
+```python
+query.positions.requires_grad_()
+preparation = prepareCRK(query, domain, kernel, referenceState=reference)
+value = warpOperation(
+    query, properties, domain, query_values, reference_values,
+    referenceParticles=reference, referenceVolumes=preparation.referenceVolumes,
+    crkState=preparation.crkState)
+position_gradient, = torch.autograd.grad(value.sum(), query.positions)
+
+# Other input tensors can be made dual in the same way, including supports,
+# volumes, CRK A/B/gradA/gradB, omegas and renormalization matrices.
+with torch.autograd.forward_ad.dual_level():
+    dual_positions = torch.autograd.forward_ad.make_dual(positions, direction)
+    # Build a ParticleState with dual_positions and call preparation/operators.
+```
+
+These derivatives include query/reference fields, explicit or fallback volumes,
+masses/densities used by the chosen weighting, CRK A/B/gradA/gradB, both applicable
+grad-h roles, query renormalization, positions/supports and periodic domain bounds.
+Unused inputs retain their primal meaning: interpolation ignores query fields and
+spatial CRK coefficients, covariance ignores fields/grad-h, and Naive Laplacian
+ignores CRK/renormalization. Field-only requests reuse the existing optimized field
+policies. Geometry requests support the same 11 smooth-origin kernels as ordinary
+native reverse mode; coefficient and field requests support all 15 kernels.
+Density continues using its existing uncorrected derivative path.
+
+The common bridge is `native/_differential.py`; native pair preparation, directional
+products and analytic pullbacks live under `coreOperations/native/csrc_differential`.
+JVP uses a first-order scalar direction inside each pair; there is no tape or
+custom C++ graph across operations. Manual VJP uses CSR query ownership and CSC
+reference ownership. Per-query domain-bound contributions are reduced with Torch.
+No floating scatter atomics or per-edge Jacobians are used by these pair passes.
+The corrected primal operator policies remain the reference for their equations.
+
+CRK volume saves its scalar kernel sum per query for reciprocal finalization;
+consistency density saves numerator/denominator for ratio finalization. Moment
+VJPs consume cotangents of the six existing moment tensors. The factor solve uses
+its existing Torch algebra and active limiter branch. Preparation shares one query
+`CSRTopology` across volume, moments and diagnostic passes, with a separate reference
+self-topology when required. The backward bridge saves borrowed inputs with Torch
+version checks; mutating geometry, coefficients or CSR before backwards is rejected.
+
+Topology, categories, positive-weight counts, periodic winding, support-selection
+branches and limiter masks are discrete. At a max-support tie the native query
+branch is retained. Gradient-based Laplacians retain the exact-self zero branch
+and its zero branch derivative, including with nonzero CRK gradients. Geometry at
+force-kernel cusps, branch transitions or limiter/rank changes is not covered by a
+smooth derivative claim. Inactive CRK identity-limiter outputs have zero derivative.
+Higher-order differentiation, HVP and `torch.func` transforms are unsupported;
+backwards is once-differentiable, and JVPs are first-order numerical products.
+Reverse-over-JVP and dual inputs to backwards are rejected explicitly, so the
+Torch factor algebra cannot hide missing native higher-order terms.
+
+This extends the corrected dispatch and CRK APIs. Uncorrected calls retain the
+legacy reverse bridge and its forward-AD limitations. The fixed-geometry
+`linearizeFields` API deliberately still freezes geometry/corrections for repeated
+solver products. Use `torch.no_grad()` when only a primal result is required.
+
+Run `scripts/examples/native_crk_autograd.py --device cpu` (or `cuda`). It computes
+a nonlinear-field loss through complete preparation and a corrected gradient,
+then checks the JVP/VJP identity and finite differences. See the
+[corrected AD qualification](../regression/native_corrected_ad_2026_11_02.md).
+
 ## Remaining milestones
 
 1. Verlet/capacity lifecycle and integration with upstream sorted neighbourhoods.
-2. Corrected geometry/coefficient derivatives and nonsmooth geometry adjoint contracts.
-3. General JVP, reverse-over-JVP and explicit supported HVP contracts beyond fixed fields.
+2. Frontend operator ports and nonsmooth/singular geometry adjoint contracts.
+3. General uncorrected JVP, reverse-over-JVP and explicit supported HVP contracts.
 4. Reusable workspaces, capture and compiler integration.
 5. Public manylinux wheel release automation; AMD runtime qualification when hardware is available.
 6. Frontend-owned Warp kernels needed by a selected complete simulation.

@@ -130,8 +130,9 @@ def test_corrected_ad_is_explicit(device, operation, slot):
     elif slot == 'volume':kw['referenceVolumes'].requires_grad_()
     elif slot == 'omega':kw['gradHState'].referenceOmegas.requires_grad_()
     else:kw['renormalizationState'].renormalizationMatrices.requires_grad_()
-    with pytest.raises(NotImplementedError, match='Corrected native primals do not support autograd'):
-        sph.warpOperation(q, prop, d, qf, rf, referenceParticles=r, **kw)
+    out = sph.warpOperation(q, prop, d, qf, rf, referenceParticles=r, **kw)
+    assert out.requires_grad
+    out.sum().backward()
     with torch.no_grad():
         out = sph.warpOperation(q, prop, d, qf, rf, referenceParticles=r, **kw)
     assert not out.requires_grad
@@ -176,8 +177,8 @@ def test_corrected_forward_ad_is_explicit(device, slot):
         elif slot == 'volume':kw['referenceVolumes'] = dual(kw['referenceVolumes'])
         elif slot == 'omega':kw['gradHState'].referenceOmegas = dual(kw['gradHState'].referenceOmegas)
         else:kw['renormalizationState'] = dual(kw['renormalizationState'].renormalizationMatrices)
-        with pytest.raises(NotImplementedError, match='forward-mode'):
-            sph.warpOperation(q, prop, d, qf, rf, referenceParticles=r, **kw)
+        result = sph.warpOperation(q, prop, d, qf, rf, referenceParticles=r, **kw)
+        assert torch.isfinite(torch.autograd.forward_ad.unpack_dual(result).tangent).all()
 
 
 def test_corrected_module_local_gradient(device):

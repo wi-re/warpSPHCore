@@ -14,9 +14,7 @@ def computeCRKDensity(queryParticles, operationProperties, domain, crkState,
         raise ValueError('CRK density requires referenceVolumes, A and B')
     reference = queryParticles if referenceParticles is None else referenceParticles
     operationProperties = replace(operationProperties, supportMode=SupportScheme.Scatter)
-    inputs, options = prepare(queryParticles, reference, domain, operationProperties,
+    inputs, options, topology = prepare(queryParticles, reference, domain, operationProperties,
                               adjacency, referenceVolumes, reference.masses, crkState.A, crkState.B)
-    from ...native._build import build
-    # The reference diagnostic hardcodes Scatter, independently of its input
-    # properties. Preserve that numerical behavior, including on fixed CSR.
-    return build().crk_density_forward(inputs, referenceVolumes, crkState.A, crkState.B, *options)
+    from ...native._differential import apply_preparation
+    return apply_preparation(10, inputs, options, topology, referenceVolumes, crkState.A, crkState.B)

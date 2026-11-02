@@ -4,7 +4,7 @@ from .nt_preparation import prepare
 
 def computeCRKVolume(queryParticles, operationProperties, domain, adjacency=None,
                      referenceParticles=None):
-    inputs, options = prepare(queryParticles, referenceParticles, domain,
+    inputs, options, topology = prepare(queryParticles, referenceParticles, domain,
                               operationProperties, adjacency)
-    from ...native._build import build
-    return build().crk_volume_forward(inputs, *options)
+    from ...native._differential import apply_preparation
+    return apply_preparation(8, inputs, options, topology)

@@ -9,7 +9,7 @@ from ...native._checks import check_execution
 def _prepare(query, reference, domain, properties, adjacency, query_values, reference_values,
             query_volumes=None, reference_volumes=None, crk_state=None,
             grad_h_state=None, renormalization_state=None, *, consistent_divergence=False,
-            return_neighbor_counts=False):
+            return_neighbor_counts=False, allow_forward=False):
     operation = properties.operation
     interpolation = operation == WarpOperation.Interpolate
     covariance = operation == WarpOperation.Covariance
@@ -85,8 +85,8 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
         used.append(query.densities)
     if consistent_divergence:
         used.extend((query.densities, reference.densities))
-    check_execution(*used, allow_reverse=True)
-    geometry = prepare_geometry(query, reference, domain, allow_reverse=True)
+    check_execution(*used, allow_reverse=True, allow_forward=allow_forward)
+    geometry = prepare_geometry(query, reference, domain, allow_reverse=True, allow_forward=allow_forward)
     adjacency = prepare_adjacency(query, reference, domain, properties, adjacency)
     inputs = [*geometry[:4], reference.masses, query.kinds, reference.kinds,
               *geometry[4:], adjacency.edgeOffsets, adjacency.numNeighbors, adjacency.paddedJ,
@@ -97,31 +97,20 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
 
 def _check_primal(used):
     if torch.is_grad_enabled() and any(isinstance(value, torch.Tensor) and value.requires_grad for value in used):
-        raise NotImplementedError('Corrected native primals do not support autograd yet; use torch.no_grad() for primal execution')
+        raise NotImplementedError('Field linearization requires fixed geometry/corrections; use torch.no_grad() to freeze autograd inputs')
 
 
 def compute(query, reference, domain, properties, adjacency, query_values, reference_values,
             query_volumes=None, reference_volumes=None, crk_state=None,
             grad_h_state=None, renormalization_state=None, *, consistent_divergence=False,
             return_neighbor_counts=False):
-    inputs, corrections, used = _prepare(query, reference, domain, properties, adjacency,
+    from ...native._differential import apply_corrected
+    from ...native._topology import CSRTopology
+    topology = adjacency if isinstance(adjacency, CSRTopology) else None
+    inputs, corrections, used = _prepare(query, reference, domain, properties,
+        topology.adjacency if topology is not None else adjacency,
         query_values, reference_values, query_volumes, reference_volumes, crk_state,
         grad_h_state, renormalization_state, consistent_divergence=consistent_divergence,
-        return_neighbor_counts=return_neighbor_counts)
-    _check_primal(used)
-    operation = properties.operation
-    covariance = operation == WarpOperation.Covariance
-    from ...native._build import build
-    name = operation.name.lower()
-    options = (properties.supportMode.value, properties.operationMode.value,
-               properties.kernel.value, properties.gradientMode.value)
-    function = getattr(build(), name + '_corrected_forward')
-    if operation in (WarpOperation.Interpolate, WarpOperation.Gradient):
-        return function(inputs, corrections, *options)
-    options += (properties.laplacianMode.value, properties.divergenceDotMode)
-    if operation == WarpOperation.Divergence:
-        return function(inputs, corrections, *options, consistent_divergence)
-    if covariance:
-        result = function(inputs, corrections, *options, return_neighbor_counts)
-        return tuple(result) if return_neighbor_counts else result[0]
-    return function(inputs, corrections, *options)
+        return_neighbor_counts=return_neighbor_counts, allow_forward=True)
+    return apply_corrected(inputs, corrections, properties, consistent=consistent_divergence,
+                           counts=return_neighbor_counts, topology=topology)
