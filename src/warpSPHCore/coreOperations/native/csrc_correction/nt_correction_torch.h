@@ -3,14 +3,9 @@
 #include <optional>
 
 namespace sph_native {
-using OptionalTensors = std::vector<std::optional<Tensor>>;
 enum CorrectionSlot { QUERY_VOLUME, REFERENCE_VOLUME, CRK_A, CRK_B,
                       CRK_GRAD_A, CRK_GRAD_B, REFERENCE_OMEGA, RENORMALIZATION,
                       CORRECTION_SLOTS };
-
-inline const Tensor* optional_tensor(const OptionalTensors& values, int slot) {
-    return values[slot] ? &*values[slot] : nullptr;
-}
 
 // These checks concern tensor metadata only. In particular, no adjacency or
 // coefficient contents are scanned and no device buffers are read on the CPU.

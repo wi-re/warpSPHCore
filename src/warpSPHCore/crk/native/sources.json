@@ -1,4 +1,12 @@
 {
-  "cpu": [],
-  "gpu": []
+  "cpu": [
+    "csrc_volume/nt_volume_forward.cpp",
+    "csrc_moments/nt_moments_forward.cpp",
+    "csrc_density/nt_density_forward.cpp"
+  ],
+  "gpu": [
+    "csrc_volume/nt_volume_forward.cu",
+    "csrc_moments/nt_moments_forward.cu",
+    "csrc_density/nt_density_forward.cu"
+  ]
 }

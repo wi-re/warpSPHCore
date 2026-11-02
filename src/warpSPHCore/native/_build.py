@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 import threading
 import platform
-from ._sources import discover_sources, prepare_hip_sources
+from ._sources import discover_sources, prepare_hip_sources, jit_source_paths
 
 _extension = None
 _lock = threading.Lock()
@@ -38,6 +38,8 @@ def load_extension(name, cpu_sources, gpu_sources=(), *, include_paths=()):
         workspace = Path(os.environ.get('TORCH_EXTENSIONS_DIR', get_default_build_root())) / (name + '_hip_sources')
         cpu_sources, gpu_sources, include_paths = prepare_hip_sources(
             list(cpu_sources), list(gpu_sources), [get_include(), *include_paths], workspace)
+    workspace = Path(os.environ.get('TORCH_EXTENSIONS_DIR', get_default_build_root())) / (name + '_sources')
+    cpu_sources, gpu_sources = jit_source_paths(cpu_sources, gpu_sources, workspace)
     version = tuple(int(v) for v in torch.__version__.split('+')[0].split('.')[:2])
     if version < (2, 10):
         raise RuntimeError('The native backend requires Torch >= 2.10 (stable LibTorch ABI)')

@@ -7,8 +7,10 @@ title: Experimental native backend
 The native backend builds neighbourhoods, evaluates all 15 radial kernel families,
 and runs the seven standard SPH operators without installing or importing Warp.
 It includes manual first-order adjoints for smooth kernels. CPU, CUDA and HIP
-share the same numerical headers; Warp remains the default backend. Corrections,
-higher-order derivatives and complete frontend simulations remain unported.
+share the same numerical headers; Warp remains the default backend. Native CRK
+preparation and corrected interpolation/gradient primals are available. Derivatives
+through those corrections, higher-order native derivatives and complete frontend
+simulations remain unported.
 
 ## Install and select
 
@@ -341,9 +343,12 @@ large-radius queries can still visit every reference. Native search emits int64
 IDs/offsets regardless of Warp import-time type settings.
 CSR tensors supplied by another producer may use either integer width.
 
-Corrections (including volume overrides, CRK, grad-h, renormalization, calibration,
-positive divergence and consistent divergence), covariance counts, partial support
-policies, capacity/rebuild reuse and graph capture are unsupported. Dot Laplacian
+Corrected interpolation supports CRK A/B and explicit volumes. Corrected gradient
+also supports gradA/gradB, grad-h and query gradient renormalization. These corrected
+paths and CRK preparation are primal-only; use `torch.no_grad()` with differentiable
+input states. Calibration, positive/consistent divergence, corrections on the
+remaining operators, covariance counts, partial support policies, capacity/rebuild
+reuse and general graph capture remain unsupported. Dot Laplacian
 requires a vector or matrix field outside 1D. Unsupported requests raise explicitly.
 
 `warpSPHCore.kernels.evaluateKernel(displacements, supports, kernel)` returns value,
@@ -468,14 +473,72 @@ include_paths=...)` can build a frontend's own source group and registration
 namespace, automatically adding the shared core header root. A frontend need not move its solver kernels into the core package.
 Parent package initialisers must also avoid eager Warp imports on a native path.
 
-For CRK, the intended ownership is `crk/native/{wrapper.py, wp_*.py, nt_*.py,
-sources.json}`, with compiled sources under `crk/native/csrc_<function>/`. Its existing
-high-level correction pipeline should call exports from `crk.native`. CRK
-implementations have not been moved or ported.
+CRK preparation exports live in `crk.native`, with `nt_volume.py`, `nt_moments.py`,
+`nt_density.py` and `nt_factors.py` wrapping module-owned `csrc_<function>` policies.
+The small batched factor solve is shared Torch algebra in `crk/crk_terms.py`.
+`crk` selects its native exports without importing Warp when the native backend is
+selected. The historical Warp implementation remains the numerical reference.
+
+Torch JIT derives object names from source basenames. The shared loader stages
+small include wrappers for colliding names across modules, preserving original
+relative-header lookup and compiler dependencies. Frontends can therefore retain
+names such as `nt_density_forward.cpp` in their own module directories.
 
 Tensor ownership stays with Torch. GPU execution uses Torch's current stream
 and device guard. `scripts/diagnostics/native_kernel_smoke.cpp` includes the
 module-local primal headers directly and builds them without Torch.
+
+## Native CRK preparation and frontend integration
+
+```python
+# Select WARPSPHCORE_BACKEND=native before importing warpSPHCore.
+prepared = sph.prepareCRK(
+    query, domain, kernel,
+    operationMode=sph.OperationDirection.TrueAllToToAll,
+    adjacency=query_to_reference_csr,
+    referenceState=reference,
+    referenceAdjacency=reference_to_reference_csr,
+)
+# Existing corrected operators consume these arrays directly:
+options = dict(referenceParticles=reference,
+               adjacency=query_to_reference_csr,
+               referenceVolumes=prepared.referenceVolumes,
+               crkState=prepared.crkState)
+```
+
+`prepared` contains `queryVolumes`, `referenceVolumes`, `consistencyDensity` and
+`crkState`. `computeCRKFactors(...)` preserves the existing three-value tuple
+(query volumes, diagnostic density, CRKState); use `prepareCRK` when distinct
+reference volumes are also needed. The standalone pass exports are
+`computeCRKVolume`, `computeCRKMoments` and `computeCRKDensity`. The latter is the
+CRK consistency ratio, not the ordinary SPH density operator.
+
+The frontend owns particle ordering and topology lifetime. All outputs retain
+input order; sorting requires applying the corresponding permutation to particle
+fields and producing CSR in that same order. Supplied lists accept independent
+int32/int64 IDs and offsets. No additional search runs when both required lists
+are supplied. If lists are omitted, native compact hashing constructs them.
+A distinct reference cloud needs a reference-to-reference list for its volumes;
+a query-to-reference list cannot substitute for it. `referenceVolumeMode` selects
+that volume interaction rule independently, including for aliased populations.
+
+The query/reference list must cover both Gather volume and Scatter moment pairs.
+A union/SuperSymmetric search is suitable for unequal supports. Coefficients and
+volumes depend on current positions, supports and interaction categories; reuse
+of CSR alone does not justify reusing old correction values. The existing
+identity limiter is retained for degenerate systems. Moment counts follow Warp's
+admitted-edge convention, including zero-weight edges in a supplied broad list.
+
+All particle-pair passes use the shared prepare/accumulate/finalize interface;
+volume reciprocals and diagnostic ratios run once per query. CPU scheduling and
+GPU stream/device ownership use Torch. No CSR scans, host readbacks or primal
+scatter atomics are added. The factor algebra retains its numerical limiter and
+Torch derivatives, but native volume/moment/density derivatives are not yet
+ported, so the complete preparation API explicitly rejects AD requests.
+
+Run `scripts/examples/native_corrected.py --device cpu` (or `cuda`) with the
+native backend selected for a complete preparation/interpolation/gradient example.
+See [qualification and remaining work](../regression/native_crk_preparation_2026_11_02.md).
 
 ## Forward, backward and adjoint file boundaries
 
@@ -642,7 +705,7 @@ stream are covered.
 ## Remaining milestones
 
 1. Scalable native spatial search and Verlet/capacity lifecycle.
-2. Corrections, remaining field contracts and nonsmooth kernel adjoints.
+2. Remaining corrected primals, correction derivatives and nonsmooth kernel adjoints.
 3. JVP, reverse-over-JVP and explicit supported HVP contracts.
 4. Reusable workspaces, capture and compiler integration.
 5. Public manylinux wheel release automation; AMD runtime qualification when hardware is available.

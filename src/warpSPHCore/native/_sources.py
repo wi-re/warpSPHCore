@@ -105,3 +105,42 @@ def prepare_hip_sources(cpu, gpu, include_paths, workspace):
     if not marker.is_file():
         raise RuntimeError('Concurrent HIP preprocessing failed; retry the native build')
     return json.loads(marker.read_text())
+
+
+def jit_source_paths(cpu, gpu, workspace):
+    """Disambiguate Torch JIT's basename-derived object names across modules.
+
+    A wrapper includes the original translation unit so its relative header
+    lookup and compiler dependency tracking retain the original directory.
+    Only colliding names need wrappers. Source bytes enter the wrapper's hash
+    comment as well, so Torch's in-process versioner sees source changes.
+    """
+    import tempfile
+    groups = [list(cpu), list(gpu)]
+    result = []
+    for sources in groups:
+        stems = [Path(filename).stem for filename in sources]
+        repeated = {stem for stem in stems if stems.count(stem) > 1}
+        rewritten = []
+        for filename in sources:
+            path = Path(filename).resolve()
+            if path.stem not in repeated:
+                rewritten.append(str(path))
+                continue
+            if any(character in str(path) for character in ('"', '\n', '\r')):
+                raise ValueError('JIT source paths cannot contain quotes or newlines')
+            digest = hashlib.sha256(str(path).encode()).hexdigest()[:16]
+            destination = Path(workspace) / f'{path.stem}_{digest}{path.suffix}'
+            content = ('// Original source SHA256: ' + hashlib.sha256(path.read_bytes()).hexdigest()
+                       + '\n#include "' + path.as_posix() + '"\n')
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if not destination.is_file() or destination.read_text() != content:
+                # Atomic publication also handles concurrent builders staging
+                # the same source before Torch acquires its compilation lock.
+                with tempfile.NamedTemporaryFile(mode='w', dir=destination.parent,
+                                                 delete=False) as temporary:
+                    temporary.write(content)
+                Path(temporary.name).replace(destination)
+            rewritten.append(str(destination))
+        result.append(rewritten)
+    return tuple(result)

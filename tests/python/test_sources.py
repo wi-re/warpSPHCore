@@ -58,3 +58,32 @@ def test_header_only_module_participates_in_build_digest(tmp_path):
     header.write_text('// changed coefficient formula')
     assert discover_sources(tmp_path) == ([], [])
     assert source_digest(tmp_path) != before
+
+
+def test_jit_module_basename_collisions_preserve_relative_headers(tmp_path):
+    from warpSPHCore.native._sources import jit_source_paths
+    sources = []
+    for module in ('core', 'crk'):
+        folder = tmp_path / module
+        folder.mkdir()
+        (folder / 'local.h').write_text(f'// {module} header')
+        path = folder / 'nt_density_forward.cpp'
+        path.write_text('#include "local.h"\n// ' + module)
+        sources.append(str(path))
+    unique = tmp_path / 'unique.cpp'
+    unique.write_text('// no collision')
+    cpu, gpu = jit_source_paths([*sources, str(unique)], [], tmp_path / 'staged')
+    assert not gpu
+    assert len({Path(path).stem for path in cpu}) == 3
+    assert cpu[-1] == str(unique)
+    for staged, original in zip(cpu[:2], sources):
+        # Including the original unit, rather than copying its body, retains
+        # the correct local.h directory and the compiler's header dependencies.
+        assert f'#include "{original}"' in Path(staged).read_text()
+    before = Path(cpu[0]).read_text()
+    timestamp = Path(cpu[0]).stat().st_mtime_ns
+    assert jit_source_paths([*sources, str(unique)], [], tmp_path / 'staged')[0] == cpu
+    assert Path(cpu[0]).stat().st_mtime_ns == timestamp
+    Path(sources[0]).write_text('#include "local.h"\n// updated source')
+    assert jit_source_paths([*sources, str(unique)], [], tmp_path / 'staged')[0] == cpu
+    assert Path(cpu[0]).read_text() != before

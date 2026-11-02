@@ -13,3 +13,16 @@ __all__ = list(_enums) + ['ParticleState', 'ParticleTangentState', 'PointCloud',
     'DEFAULT_CAPACITY', 'warpOperation', 'sphOperation', 'radiusSearch',
     'nativeCapabilities', 'build', 'get_include', 'CRKState', 'CRKTangentState',
     'GradHState', 'RenormalizationState', 'RenormalizationTangentState']
+
+# Resolve module-owned APIs lazily so importing crk.native under the Warp
+# backend can use native infrastructure without re-entering its own exports.
+_CRK_EXPORTS = ['computeCRKVolume', 'computeCRKMoments', 'computeCRKDensity',
+                'computeCRKTerms', 'computeCRKFactors', 'CRKPreparation', 'prepareCRK']
+__all__ += _CRK_EXPORTS
+
+
+def __getattr__(name):
+    if name in _CRK_EXPORTS:
+        from importlib import import_module
+        return getattr(import_module('..crk.native', __name__), name)
+    raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
