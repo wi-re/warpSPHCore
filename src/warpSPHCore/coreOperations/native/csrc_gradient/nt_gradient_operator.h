@@ -29,6 +29,19 @@ struct Gradient : SphOperation<T, D, Fields, General> {
         }
     }
     template <class Record>
+    SPH_HD FieldScales<T> field_scales(const Query& q, const Record& r, Neighbor edge) const {
+        if constexpr (!General) return {-r.weight(), r.weight()};
+        else {
+            if (this->scheme == 1) return {T(0), r.weight()};
+            if (this->scheme == 2) {
+                const T rhoi = this->query_density[q.index], rhoj = this->fields.density[edge.reference];
+                const T mass = this->fields.mass[edge.reference];
+                return {mass / rhoi, mass * rhoi / (rhoj * rhoj)};
+            }
+            return {this->scheme == 3 ? -r.weight() : r.weight(), r.weight()};
+        }
+    }
+    template <class Record>
     SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
         T dx[D], w, g;
         this->evaluate(q, r, edge, dx, w, g);
@@ -58,6 +71,15 @@ template <class T, int D, int Fields> struct CorrectedGradient
     using typename Base::Query;
     using typename Base::State;
     SPH_HD State identity(const Query&) const { return {}; }
+    template <class Record>
+    SPH_HD void field_contract(const Query& q, const Record& r, Neighbor edge,
+                              const T* cotangent, T* result) const {
+        T dx[D], w, gradient[D];
+        this->kernel_gradient(q, r, edge, dx, w, gradient);
+        for (int c = 0; c < Fields; ++c)
+            for (int d = 0; d < D; ++d) result[c] += cotangent[c * D + d] * gradient[d];
+    }
+
     template <class Record>
     SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
         T dx[D], w, gradient[D];

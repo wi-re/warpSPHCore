@@ -5,6 +5,8 @@
 namespace sph_native::neighborhood {
 // Only corrected operations carry these pointers. Ordinary operation/loader
 // layouts and their tuned dispatch remain untouched.
+template <class T> struct FieldScales { T query, reference; };
+
 template <class T> struct CorrectionFields {
     crk::Fields<T> crk;
     const T* reference_omega = nullptr;
@@ -47,6 +49,16 @@ template <class T, int D, class Base, bool ScaleQueryOmega = false> struct Corre
                     transformed[d] += q.renormalization[d * D + c] * gradient[c];
             for (int d = 0; d < D; ++d) gradient[d] = transformed[d];
         }
+    }
+    SPH_HD FieldScales<T> scale_fields(int64_t i, Neighbor edge, FieldScales<T> result) const {
+        if constexpr (ScaleQueryOmega)
+            if (corrections.query_omega) result.query /= corrections.query_omega[i];
+        if (corrections.reference_omega) result.reference /= corrections.reference_omega[edge.reference];
+        return result;
+    }
+    template <class Record>
+    SPH_HD FieldScales<T> field_scales(const Query& q, const Record& r, Neighbor edge) const {
+        return scale_fields(q.index, edge, Base::field_scales(q, r, edge));
     }
     template <class Record>
     SPH_HD T reference_value(const Record& r, Neighbor edge, int c) const {

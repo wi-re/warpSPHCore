@@ -26,3 +26,7 @@ def __getattr__(name):
         from importlib import import_module
         return getattr(import_module('..crk.native', __name__), name)
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
+
+from ._topology import CSRTopology
+from ._field import linearizeFields, FieldLinearization, FieldCotangents
+__all__ += ['CSRTopology', 'linearizeFields', 'FieldLinearization', 'FieldCotangents']

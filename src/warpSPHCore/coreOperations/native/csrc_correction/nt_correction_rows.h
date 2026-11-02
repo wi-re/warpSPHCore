@@ -23,6 +23,7 @@ template <template <class, int, int> class Policy, class Executor,
 struct CorrectedRows {
     const OptionalTensors& corrections;
     Options options{};
+    Executor executor{};
 
     template <class T> const T* pointer(int slot) const {
         const auto* value = optional_tensor(corrections, slot);
@@ -44,9 +45,9 @@ struct CorrectedRows {
                           pointer<T>(REFERENCE_OMEGA), pointer<T>(RENORMALIZATION), pointer<T>(QUERY_OMEGA)};
         options(op);
         if constexpr (Executor::device) {
-            Executor{}(n, op, ReferenceLoader<T, D, stored, Weight::Volume>{input}, a, launch);
+            executor(n, op, ReferenceLoader<T, D, stored, Weight::Volume>{input}, a, launch);
         } else {
-            Executor{}(n, op, BorrowedReferenceLoader<T, D, stored, Weight::Volume>{input}, a, launch);
+            executor(n, op, BorrowedReferenceLoader<T, D, stored, Weight::Volume>{input}, a, launch);
         }
     }
 

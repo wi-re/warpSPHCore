@@ -8,9 +8,10 @@ The native backend builds neighbourhoods, evaluates all 15 radial kernel familie
 and runs the seven standard SPH operators without installing or importing Warp.
 It includes manual first-order adjoints for smooth kernels. CPU, CUDA and HIP
 share the same numerical headers; Warp remains the default backend. Native CRK
-preparation and all six applicable corrected core primals are available. Derivatives
-through those corrections, higher-order native derivatives and complete frontend
-simulations remain unported.
+preparation and all six applicable corrected core primals are available. Fixed-geometry
+field JVP/VJP products and first-order field backwards are available through
+`native.linearizeFields`. Derivatives of correction coefficients, corrected geometry,
+higher-order native derivatives and complete frontend simulations remain unported.
 
 ## Install and select
 
@@ -356,8 +357,9 @@ and grad-h weighting. These are the existing Warp equations.
 positive corrected-kernel values rather than CSR degree. These flags route to
 primal-only native policies, including when no other correction is supplied.
 Density ignores common correction bundles, matching its unchanged Warp equation.
-The new corrected paths and CRK preparation reject AD requests; use
-`torch.no_grad()` with differentiable input states. Calibration, positive divergence,
+The ordinary corrected `warpOperation` paths and CRK preparation reject AD requests;
+use `torch.no_grad()` with differentiable input states. For field-only derivatives,
+use the explicit linearization below. Calibration, positive divergence,
 partial support policies, capacity/rebuild reuse and general graph capture remain
 unsupported. Dot Laplacian requires a vector or matrix field outside 1D.
 Unsupported requests raise explicitly.
@@ -716,11 +718,85 @@ stream, neighbor-lane and dual-wrapper regressions passed another 56. The final
 source/JIT suite passed 2,537 checks; empty-population VJPs and a nondefault CUDA
 stream are covered.
 
+## Fixed-geometry field products for implicit solves
+
+```python
+from warpSPHCore.native import CSRTopology, linearizeFields
+
+# Share this object across operators on one topology. The native CSR transpose
+# is constructed lazily on the first reference pullback, then reused.
+topology = CSRTopology(adjacency)
+linear = linearizeFields(
+    query, properties, domain, query_values, reference_values,
+    referenceParticles=reference, adjacency=topology,
+    referenceVolumes=volumes, crkState=coefficients)
+value = linear.value
+jv = linear.jvp(query=query_direction, reference=reference_direction)
+query_bar, reference_bar = linear.vjp(output_cotangent)
+# Evaluate other fields and use ordinary first-order Torch backwards:
+value = linear.apply(new_query_values, new_reference_values)
+```
+
+This API supports interpolation, gradient, divergence, curl and Laplacian,
+including their supported volume, CRK, grad-h, renormalization and consistent
+divergence options. All 15 kernels, dimensions 1–3, both precisions, field ranks
+and mixed CSR integer widths follow the primal contracts. Density and covariance
+have no differentiated field input and are excluded. `jvp` and `vjp` are numerical
+products without a derivative graph. `apply` supports first-order Torch backwards;
+higher-order derivatives and `torch.func`/dual-tensor integration are not supplied.
+
+The map is linear in the supplied fields. Geometry, masses, densities, volumes,
+CRK coefficients and their spatial derivatives, grad-h and renormalization are
+fixed coefficients. This is a partial derivative, not differentiation through
+CRK preparation or a moving-particle residual. Construction rejects differentiable
+fixed coefficients unless called inside `torch.no_grad()` to freeze them explicitly.
+Changes to a borrowed fixed tensor or CSR array invalidate existing maps. Replacing
+an external state attribute does not update an existing map; construct a new map
+for the new state. Version tracking requires ordinary versioned tensors, including
+when constructing under `no_grad`; inference-mode tensors must be cloned outside
+`torch.inference_mode()` first.
+
+Query and reference roles are independent. An omitted `jvp` role is exactly zero
+and uses a native null pointer. If one physical field occupies both roles, pass
+its tangent to both roles and sum the two VJP results. Interpolation has no query
+field dependency, so its query cotangent is `None`. If `referenceValues` was omitted
+at construction, `apply(field)` uses that field in both roles; Torch autograd then
+adds their gradients for the shared tensor. `vjp(..., query=False)` or
+`reference=False` omits that output and its ownership pass. A query-only VJP does
+not construct CSC. No primal field values, edge Jacobians or solver trajectory
+are needed for these pullbacks; borrowed exemplar tensors retain shape metadata.
+
+The shared traversal owns query cotangents through CSR and reference cotangents
+through CSC. Both evaluate the original directed i,j interaction, preserving
+query corrections, asymmetric supports, masks and density weights. No floating
+atomics are used. Construction uses integer count/fill atomics, a device prefix
+sum and sorted CSC rows; no CSR value validation scan or GPU-to-CPU readback is
+introduced. Prefixes, gaps, duplicate edges and unused capacity are supported.
+Transpose capacity equals CSR ID capacity. Reference VJPs therefore retain an
+additional int64 ID buffer plus int64 offsets/int32 counts until the topology is
+released. Cached CSC tensors are version guarded; cross-stream reuse waits on its
+construction event and records the consuming stream. Usual Torch stream ordering
+for the caller's input arrays is still required. A `CSRTopology` is not a mutable
+multi-threaded topology manager; finish changing the graph before linearizing.
+
+Sorted CSC rows and owned reductions give repeatable execution on a fixed backend
+and launch layout; CPU/GPU or precision changes need not be bitwise identical.
+Ordinary `warpOperation` reverse mode retains its prior scatter-atomic behavior.
+These products do not add graph-capture or compilation support. There is no
+runtime CSR validation mode or debug flag.
+
+Run `scripts/examples/native_field_implicit.py --device cpu` (or `cuda`) with the
+native backend selected. It solves a nonlinear residual with Newton/GMRES Jv
+products, then solves the transposed implicit adjoint at the converged state.
+Independent dense equations are used only afterwards for verification. See the
+[field-linearization qualification](../regression/native_field_linearization_2026_11_02.md)
+for test coverage, distribution checks and remaining integration work.
+
 ## Remaining milestones
 
-1. Scalable native spatial search and Verlet/capacity lifecycle.
-2. Remaining corrected primals, correction derivatives and nonsmooth kernel adjoints.
-3. JVP, reverse-over-JVP and explicit supported HVP contracts.
+1. Verlet/capacity lifecycle and integration with upstream sorted neighbourhoods.
+2. Corrected geometry/coefficient derivatives and nonsmooth geometry adjoint contracts.
+3. General JVP, reverse-over-JVP and explicit supported HVP contracts beyond fixed fields.
 4. Reusable workspaces, capture and compiler integration.
 5. Public manylinux wheel release automation; AMD runtime qualification when hardware is available.
 6. Frontend-owned Warp kernels needed by a selected complete simulation.

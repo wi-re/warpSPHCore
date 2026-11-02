@@ -13,7 +13,8 @@
     "csrc_divergence/nt_divergence_adjoint.cpp",
     "csrc_curl/nt_curl_adjoint.cpp",
     "csrc_covariance/nt_covariance_adjoint.cpp",
-    "csrc_laplacian/nt_laplacian_adjoint.cpp"
+    "csrc_laplacian/nt_laplacian_adjoint.cpp",
+    "csrc_field/nt_field_forward.cpp"
   ],
   "gpu": [
     "csrc_density/nt_density_forward.cu",
@@ -29,6 +30,7 @@
     "csrc_divergence/nt_divergence_adjoint.cu",
     "csrc_curl/nt_curl_adjoint.cu",
     "csrc_covariance/nt_covariance_adjoint.cu",
-    "csrc_laplacian/nt_laplacian_adjoint.cu"
+    "csrc_laplacian/nt_laplacian_adjoint.cu",
+    "csrc_field/nt_field_forward.cu"
   ]
 }

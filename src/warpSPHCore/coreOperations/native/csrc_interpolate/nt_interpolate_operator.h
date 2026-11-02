@@ -69,6 +69,20 @@ template <class T, int D, int Fields> struct CorrectedInterpolate
     }
     SPH_HD State identity(const Query&) const { return {}; }
     template <class Record>
+    SPH_HD FieldScales<T> field_scales(const Query&, const Record& r, Neighbor) const {
+        return {T(0), r.weight()};
+    }
+    template <class Record>
+    SPH_HD void field_contract(const Query& q, const Record& r, Neighbor edge,
+                              const T* cotangent, T* result) const {
+        T dx[D];
+        const T distance = q.geometry.distance(r.data, dx);
+        const T raw = this->value_at_distance(q, edge, distance);
+        const T weight = crk::value(q.correction, dx, raw);
+        for (int c = 0; c < Fields; ++c) result[c] += cotangent[c] * weight;
+    }
+
+    template <class Record>
     SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
         T w;
         if (corrections.crk.A) {

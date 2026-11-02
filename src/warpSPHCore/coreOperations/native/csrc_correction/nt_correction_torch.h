@@ -11,7 +11,7 @@ enum CorrectionSlot { QUERY_VOLUME, REFERENCE_VOLUME, CRK_A, CRK_B,
 // coefficient contents are scanned and no device buffers are read on the CPU.
 inline Tensors prepare_corrected_operator(const OptionalTensors& inputs,
         const OptionalTensors& corrections, int support, int direction,
-        int operation, int scheme, int lap = 2, bool dot = false, bool consistent = false) {
+        int operation, int scheme, int lap = 2, bool dot = false, bool consistent = false, const Tensor* output = nullptr) {
     STD_TORCH_CHECK(inputs.size() == OUTPUT, "invalid corrected operator tensor layout");
     STD_TORCH_CHECK(corrections.size() == CORRECTION_SLOTS,
                     "invalid native correction tensor layout");
@@ -61,6 +61,6 @@ inline Tensors prepare_corrected_operator(const OptionalTensors& inputs,
         vector(t[QDENSITY], x, x.scalar_type(), n, "query densities");
         vector(t[DENSITY], x, x.scalar_type(), nr, "reference densities");
     }
-    return prepare_field_output(std::move(t), operation, scheme, lap, dot);
+    return prepare_field_output(std::move(t), operation, scheme, lap, dot, output);
 }
 } // namespace sph_native

@@ -29,4 +29,8 @@ def nativeCapabilities():
                 crk_factor_construction=True, crk_preparation_autograd=False,
                 grad_h_primals=('gradient', 'divergence', 'curl', 'laplacian'),
                 renormalized_primals=('gradient', 'divergence', 'curl', 'laplacian', 'covariance'),
-                consistent_divergence_primal=True, covariance_neighbor_counts_primal=True)
+                consistent_divergence_primal=True, covariance_neighbor_counts_primal=True,
+                field_linearization_operations=('interpolate', 'gradient', 'divergence', 'curl', 'laplacian'),
+                field_jvp=True, field_vjp=True, field_backward_order=1,
+                field_geometry_derivatives=False, field_adjoint_ownership='csr_csc',
+                field_adjoint_floating_atomics=False, field_adjoint_cached_topology=True)

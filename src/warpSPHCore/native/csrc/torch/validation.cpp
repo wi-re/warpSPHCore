@@ -72,7 +72,7 @@ Tensors prepare_field_operator(const Tensors &inputs, int support, int direction
     vector(t[DENSITY], t[QX], t[QX].scalar_type(), t[RX].size(0), "reference densities");
     return prepare_field_output(std::move(t), op, scheme, lap, dot);
 }
-Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot) {
+Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot, const Tensor* output) {
     STD_TORCH_CHECK(op >= 1 && op <= 7 && op != 6, "Unknown field operator");
     STD_TORCH_CHECK(scheme >= 1 && scheme <= 4, "Unknown gradient scheme");
     STD_TORCH_CHECK(lap >= 1 && lap <= 4, "Unknown Laplacian scheme");
@@ -123,7 +123,13 @@ Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot) {
         vector(t[QDENSITY], x, x.scalar_type(), n, "query densities");
     }
     shape.insert(shape.begin(), n);
-    t[OUTPUT] = stable::new_empty(x, shape);
+    if (output) {
+        tensor(*output, x, x.scalar_type(), "field cotangent");
+        STD_TORCH_CHECK(output->dim() == int64_t(shape.size()), "field cotangent has an incompatible shape");
+        for (int d = 0; d < output->dim(); ++d)
+            STD_TORCH_CHECK(output->size(d) == shape[d], "field cotangent has an incompatible shape");
+        t[OUTPUT] = *output;
+    } else t[OUTPUT] = stable::new_empty(x, shape);
     return t;
 }
 } // namespace sph_native

@@ -10,6 +10,29 @@ template <class T, int D, int Fields> struct CorrectedCurl
     using State = Sums<T, components>;
     SPH_HD State identity(const Query&) const { return {}; }
     template <class Record>
+    SPH_HD void field_contract(const Query& q, const Record& r, Neighbor edge,
+                              const T* cotangent, T* result) const {
+        if constexpr (D > 1) {
+            T dx[D], w, gradient[D];
+            this->kernel_gradient(q, r, edge, dx, w, gradient);
+            if constexpr (D == 2) {
+                for (int c = 0; c < components; ++c) {
+                    result[c] -= gradient[1] * cotangent[c];
+                    result[components + c] += gradient[0] * cotangent[c];
+                }
+            } else {
+                constexpr int stride = Fields / 3;
+                for (int c = 0; c < stride; ++c) {
+                    const T x = cotangent[c], y = cotangent[stride + c], z = cotangent[2 * stride + c];
+                    result[c] += gradient[2] * y - gradient[1] * z;
+                    result[stride + c] += gradient[0] * z - gradient[2] * x;
+                    result[2 * stride + c] += gradient[1] * x - gradient[0] * y;
+                }
+            }
+        }
+    }
+
+    template <class Record>
     SPH_HD T weighted(const Query& q, const Record& r, Neighbor edge, int c) const {
         return this->weighted_value(q, r, edge, c, this->reference_value(r, edge, c));
     }

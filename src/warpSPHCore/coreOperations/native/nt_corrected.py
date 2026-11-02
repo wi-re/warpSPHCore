@@ -6,7 +6,7 @@ from ...native._inputs import prepare_geometry, prepare_adjacency
 from ...native._checks import check_execution
 
 
-def compute(query, reference, domain, properties, adjacency, query_values, reference_values,
+def _prepare(query, reference, domain, properties, adjacency, query_values, reference_values,
             query_volumes=None, reference_volumes=None, crk_state=None,
             grad_h_state=None, renormalization_state=None, *, consistent_divergence=False,
             return_neighbor_counts=False):
@@ -86,14 +86,31 @@ def compute(query, reference, domain, properties, adjacency, query_values, refer
     if consistent_divergence:
         used.extend((query.densities, reference.densities))
     check_execution(*used, allow_reverse=True)
-    if torch.is_grad_enabled() and any(isinstance(value, torch.Tensor) and value.requires_grad for value in used):
-        raise NotImplementedError('Corrected native primals do not support autograd yet; use torch.no_grad() for primal execution')
     geometry = prepare_geometry(query, reference, domain, allow_reverse=True)
     adjacency = prepare_adjacency(query, reference, domain, properties, adjacency)
     inputs = [*geometry[:4], reference.masses, query.kinds, reference.kinds,
               *geometry[4:], adjacency.edgeOffsets, adjacency.numNeighbors, adjacency.paddedJ,
               query_values if not interpolation and not covariance else None,
               None if covariance else reference_values, reference.densities, query.densities]
+    return inputs, corrections, used
+
+
+def _check_primal(used):
+    if torch.is_grad_enabled() and any(isinstance(value, torch.Tensor) and value.requires_grad for value in used):
+        raise NotImplementedError('Corrected native primals do not support autograd yet; use torch.no_grad() for primal execution')
+
+
+def compute(query, reference, domain, properties, adjacency, query_values, reference_values,
+            query_volumes=None, reference_volumes=None, crk_state=None,
+            grad_h_state=None, renormalization_state=None, *, consistent_divergence=False,
+            return_neighbor_counts=False):
+    inputs, corrections, used = _prepare(query, reference, domain, properties, adjacency,
+        query_values, reference_values, query_volumes, reference_volumes, crk_state,
+        grad_h_state, renormalization_state, consistent_divergence=consistent_divergence,
+        return_neighbor_counts=return_neighbor_counts)
+    _check_primal(used)
+    operation = properties.operation
+    covariance = operation == WarpOperation.Covariance
     from ...native._build import build
     name = operation.name.lower()
     options = (properties.supportMode.value, properties.operationMode.value,

@@ -24,7 +24,8 @@ template <class T, int D, int Fields> struct CorrectedLaplacian
         return delta * r.weight();
     }
     template <class Record>
-    SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
+    SPH_HD void field_contract(const Query& q, const Record& r, Neighbor edge,
+                              const T* values, T* result) const {
         T dx[D], w, gradient[D];
         const T distance = q.geometry.distance(r.data, dx);
         const T hi = q.support, hj = this->reference_supports[edge.reference];
@@ -36,7 +37,7 @@ template <class T, int D, int Fields> struct CorrectedLaplacian
                 (evaluate_kernel<T, D>(dx, hi, this->kernel).laplacian +
                  evaluate_kernel<T, D>(dx, hj, this->kernel).laplacian) / T(2) :
                  evaluate_kernel<T, D>(dx, h, this->kernel).laplacian;
-            for (int c = 0; c < Fields; ++c) sum.values[c] += difference(q, r, edge, c) * factor;
+            for (int c = 0; c < Fields; ++c) result[c] += values[c] * factor;
             return;
         }
         // Every gradient-based variant has an exact zero self contribution,
@@ -51,16 +52,33 @@ template <class T, int D, int Fields> struct CorrectedLaplacian
             for (int base = 0; base < Fields; base += D) {
                 T field_projection = T(0);
                 for (int d = 0; d < D; ++d)
-                    field_projection += difference(q, r, edge, base + d) * dx[d] / regularized;
+                    field_projection += values[base + d] * dx[d] / regularized;
                 for (int d = 0; d < D; ++d)
-                    sum.values[base + d] += (difference(q, r, edge, base + d) -
+                    result[base + d] += (values[base + d] -
                         T(D + 2) * field_projection * dx[d] / regularized) * factor;
             }
         } else {
             const T denominator = mode == 4 ? distance + T(1e-12) * h : regularized;
             const T factor = -T(2) * projection / denominator;
-            for (int c = 0; c < Fields; ++c) sum.values[c] += difference(q, r, edge, c) * factor;
+            for (int c = 0; c < Fields; ++c) result[c] += values[c] * factor;
         }
+    }
+    template <class Record>
+    SPH_HD FieldScales<T> field_scales(const Query& q, const Record& r, Neighbor edge) const {
+        T scale = r.weight();
+        if (this->scheme == 2) {
+            const T rhoj = this->fields.density[edge.reference];
+            scale = this->fields.mass[edge.reference] * this->query_density[q.index] / (rhoj * rhoj);
+        }
+        return this->scale_fields(q.index, edge, {-scale, scale});
+    }
+    template <class Record>
+    SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
+        T values[Fields];
+        for (int c = 0; c < Fields; ++c) values[c] = difference(q, r, edge, c);
+        // The blockwise Dot matrix is symmetric; the same contraction is its
+        // field transpose. Other schemes are scalar multiples of identity.
+        field_contract(q, r, edge, values, sum.values);
     }
     SPH_HD void finish(const Query& q, const State& sum) const {
         for (int c = 0; c < Fields; ++c) this->fields.output[q.index * Fields + c] = sum.values[c];
