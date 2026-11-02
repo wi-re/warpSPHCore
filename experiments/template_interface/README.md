@@ -16,6 +16,21 @@ for qualification and paired measurements of the general policies. Exhaustive
 kernel/support and gradient-scheme tests carry the `extended` marker, so focused
 backend/device runs can exclude them with `-m "not extended"`.
 
+## Public corrected primal coverage
+
+The production interface now also supplies corrected interpolation, gradient,
+divergence, curl, Laplacian and covariance policies, alongside native CRK
+preparation. Their physics shares corrected-kernel query preparation and the
+existing CSR loaders/executors. Divergence consistency and optional covariance
+counts are operator-specific host configuration; no debug flags enter the pair
+contract. Query grad-h scaling is a compile-time choice because gradient uses
+only reference scaling while divergence/curl/Laplacian scale both roles.
+
+Existing tuned ordinary CSR paths remain available. Cell/range/cluster policies
+and owned JVP/VJP below are still experimental; this extension does not turn
+those neighborhood formats or derivatives into public APIs. See the
+[corrected core report](../../docs/regression/native_corrected_core_2026_11_02.md).
+
 ## Contract
 
 `Row<Operation, Traversal, Loader>` executes the following contract:

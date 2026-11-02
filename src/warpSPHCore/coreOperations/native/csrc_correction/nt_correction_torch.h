@@ -5,13 +5,13 @@
 namespace sph_native {
 enum CorrectionSlot { QUERY_VOLUME, REFERENCE_VOLUME, CRK_A, CRK_B,
                       CRK_GRAD_A, CRK_GRAD_B, REFERENCE_OMEGA, RENORMALIZATION,
-                      CORRECTION_SLOTS };
+                      QUERY_OMEGA, CORRECTION_SLOTS };
 
 // These checks concern tensor metadata only. In particular, no adjacency or
 // coefficient contents are scanned and no device buffers are read on the CPU.
 inline Tensors prepare_corrected_operator(const OptionalTensors& inputs,
         const OptionalTensors& corrections, int support, int direction,
-        int operation, int scheme) {
+        int operation, int scheme, int lap = 2, bool dot = false, bool consistent = false) {
     STD_TORCH_CHECK(inputs.size() == OUTPUT, "invalid corrected operator tensor layout");
     STD_TORCH_CHECK(corrections.size() == CORRECTION_SLOTS,
                     "invalid native correction tensor layout");
@@ -21,7 +21,7 @@ inline Tensors prepare_corrected_operator(const OptionalTensors& inputs,
     auto t = prepare_pair_geometry(borrowed, support, direction);
     const auto& x = t[QX];
     const auto n = x.size(0), nr = t[RX].size(0), dimension = x.size(1);
-    for (auto slot : {QUERY_VOLUME, REFERENCE_VOLUME, CRK_A, REFERENCE_OMEGA}) {
+    for (auto slot : {QUERY_VOLUME, REFERENCE_VOLUME, CRK_A, REFERENCE_OMEGA, QUERY_OMEGA}) {
         if (const auto* value = optional_tensor(corrections, slot))
             vector(*value, x, x.scalar_type(),
                 slot == REFERENCE_VOLUME || slot == REFERENCE_OMEGA ? nr : n,
@@ -41,21 +41,26 @@ inline Tensors prepare_corrected_operator(const OptionalTensors& inputs,
     };
     if (crk) {
         shaped(CRK_B, 1);
-        if (operation == 2) { shaped(CRK_GRAD_A, 1); shaped(CRK_GRAD_B, 2); }
+        if (operation != 1) { shaped(CRK_GRAD_A, 1); shaped(CRK_GRAD_B, 2); }
     } else {
         STD_TORCH_CHECK(!corrections[CRK_GRAD_A] && !corrections[CRK_GRAD_B],
                         "CRK gradient coefficients require A and B");
     }
     if (corrections[RENORMALIZATION]) shaped(RENORMALIZATION, 2);
-    STD_TORCH_CHECK(operation == 2 ||
+    STD_TORCH_CHECK(operation != 1 ||
         (!corrections[REFERENCE_OMEGA] && !corrections[RENORMALIZATION]),
         "grad-h and renormalization are gradient corrections");
     // Symmetric weighting uses masses/densities even with explicit volumes,
     // matching the reference implementation. Other schemes can omit them.
-    if (!corrections[REFERENCE_VOLUME] || (operation == 2 && scheme == 2)) {
+    if (!corrections[REFERENCE_VOLUME] || (operation != 1 && operation != 7 && scheme == 2)) {
         vector(t[MASS], x, x.scalar_type(), nr, "reference masses");
         vector(t[DENSITY], x, x.scalar_type(), nr, "reference densities");
     }
-    return prepare_field_output(std::move(t), operation, scheme, 2, false);
+    if (consistent) {
+        STD_TORCH_CHECK(operation == 3, "consistentDivergence requires divergence");
+        vector(t[QDENSITY], x, x.scalar_type(), n, "query densities");
+        vector(t[DENSITY], x, x.scalar_type(), nr, "reference densities");
+    }
+    return prepare_field_output(std::move(t), operation, scheme, lap, dot);
 }
 } // namespace sph_native

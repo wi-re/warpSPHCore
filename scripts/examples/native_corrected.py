@@ -1,4 +1,4 @@
-"""Warp-free CRK preparation, interpolation and gradient.
+"""Warp-free CRK preparation and corrected core operators.
 
 Run WARPSPHCORE_BACKEND=native python scripts/examples/native_corrected.py
 --device cuda (or cpu). Particle initialization and the small batched factor
@@ -61,8 +61,31 @@ def main():
     torch.testing.assert_close(interpolation, query_values, rtol=2e-12, atol=2e-12)
     torch.testing.assert_close(gradient, gradient.new_tensor([2., -3.]).expand_as(gradient),
                                rtol=2e-12, atol=2e-12)
+    # The same prepared state drives vector contractions and geometric
+    # covariance. This affine velocity has divergence 6 and 2D curl 4.
+    def velocity(positions):
+        x, y = positions.unbind(dim=1)
+        return torch.stack((2 * x - y, 3 * x + 4 * y), dim=1)
+
+    query_velocity, reference_velocity = velocity(query.positions), velocity(reference.positions)
+    divergence = sph.warpOperation(query, replace(properties, operation=sph.WarpOperation.Divergence),
+        domain, query_velocity, reference_velocity, **options)
+    curl = sph.warpOperation(query, replace(properties, operation=sph.WarpOperation.Curl),
+        domain, query_velocity, reference_velocity, **options)
+    covariance, counts = sph.warpOperation(query, replace(properties, operation=sph.WarpOperation.Covariance),
+        domain, covarianceReturnNumNeighbors=True, **options)
+    # A constant field has zero Laplacian under all four gradient weightings.
+    constant_query, constant_reference = torch.ones_like(query_values), torch.ones_like(reference_values)
+    laplacian = sph.warpOperation(query, replace(properties, operation=sph.WarpOperation.Laplacian),
+        domain, constant_query, constant_reference, **options)
+    torch.testing.assert_close(divergence, torch.full_like(divergence, 6.), rtol=2e-12, atol=2e-12)
+    torch.testing.assert_close(curl, torch.full_like(curl, 4.), rtol=2e-12, atol=2e-12)
+    torch.testing.assert_close(covariance, torch.eye(2).to(covariance).expand_as(covariance),
+                               rtol=2e-12, atol=2e-12)
+    torch.testing.assert_close(laplacian, torch.zeros_like(laplacian), rtol=0, atol=0)
+    assert counts.shape == (len(query.positions),)
     assert not any(name == 'warp' or name.startswith('warp.') for name in sys.modules)
-    print(f'Native CRK {args.device}: preparation, linear interpolation and gradient passed; Warp not imported')
+    print(f'Native CRK {args.device}: preparation and all six corrected core primals passed; Warp not imported')
 
 
 if __name__ == '__main__':

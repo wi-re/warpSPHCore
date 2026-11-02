@@ -8,7 +8,7 @@ The native backend builds neighbourhoods, evaluates all 15 radial kernel familie
 and runs the seven standard SPH operators without installing or importing Warp.
 It includes manual first-order adjoints for smooth kernels. CPU, CUDA and HIP
 share the same numerical headers; Warp remains the default backend. Native CRK
-preparation and corrected interpolation/gradient primals are available. Derivatives
+preparation and all six applicable corrected core primals are available. Derivatives
 through those corrections, higher-order native derivatives and complete frontend
 simulations remain unported.
 
@@ -343,13 +343,24 @@ large-radius queries can still visit every reference. Native search emits int64
 IDs/offsets regardless of Warp import-time type settings.
 CSR tensors supplied by another producer may use either integer width.
 
-Corrected interpolation supports CRK A/B and explicit volumes. Corrected gradient
-also supports gradA/gradB, grad-h and query gradient renormalization. These corrected
-paths and CRK preparation are primal-only; use `torch.no_grad()` with differentiable
-input states. Calibration, positive/consistent divergence, corrections on the
-remaining operators, covariance counts, partial support policies, capacity/rebuild
-reuse and general graph capture remain unsupported. Dot Laplacian
-requires a vector or matrix field outside 1D. Unsupported requests raise explicitly.
+Corrected interpolation supports CRK A/B and explicit volumes. Gradient,
+divergence, curl and covariance support CRK spatial derivatives and query gradient
+renormalization; the three gradient-based Laplacian schemes do as well. Grad-h
+scales the reference field for gradient, and both query and reference fields for
+divergence, curl and Laplacian. Covariance does not consume grad-h. Naive Laplacian
+uses the raw kernel Laplacian, ignoring CRK/renormalization while retaining volume
+and grad-h weighting. These are the existing Warp equations.
+
+`consistentDivergence=True` selects density-consistent divergence weighting.
+`covarianceReturnNumNeighbors=True` returns `(covariance, counts)`, counting
+positive corrected-kernel values rather than CSR degree. These flags route to
+primal-only native policies, including when no other correction is supplied.
+Density ignores common correction bundles, matching its unchanged Warp equation.
+The new corrected paths and CRK preparation reject AD requests; use
+`torch.no_grad()` with differentiable input states. Calibration, positive divergence,
+partial support policies, capacity/rebuild reuse and general graph capture remain
+unsupported. Dot Laplacian requires a vector or matrix field outside 1D.
+Unsupported requests raise explicitly.
 
 `warpSPHCore.kernels.evaluateKernel(displacements, supports, kernel)` returns value,
 gradient, Hessian, support derivative, gradient-support derivative, regularized
@@ -537,8 +548,11 @@ Torch derivatives, but native volume/moment/density derivatives are not yet
 ported, so the complete preparation API explicitly rejects AD requests.
 
 Run `scripts/examples/native_corrected.py --device cpu` (or `cuda`) with the
-native backend selected for a complete preparation/interpolation/gradient example.
-See [qualification and remaining work](../regression/native_crk_preparation_2026_11_02.md).
+native backend selected for preparation and all six corrected core primals.
+The example checks linear interpolation/gradient/divergence/curl, identity
+covariance and zero constant-field Laplacian.
+See [preparation qualification](../regression/native_crk_preparation_2026_11_02.md)
+and [remaining corrected primals](../regression/native_corrected_core_2026_11_02.md).
 
 ## Forward, backward and adjoint file boundaries
 

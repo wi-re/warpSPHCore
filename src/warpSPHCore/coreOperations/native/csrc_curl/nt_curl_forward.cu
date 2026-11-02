@@ -3,6 +3,8 @@
 #include "nt_curl_forward.h"
 #include "execution/fieldTraversal.cuh"
 #include "execution/packedFieldTraversal.cuh"
+#include "nt_curl_operator.h"
+#include "coreOperations/native/csrc_correction/nt_correction_rows.cuh"
 namespace sph_native {
 void curl_forward_gpu(const Tensors &t, int support, int direction, int kernel, int scheme, int lap,
                       bool dot) {
@@ -20,5 +22,12 @@ void curl_forward_gpu(const Tensors &t, int support, int direction, int kernel, 
     }
     execute(CooperativeFieldRows<CurlPair, 4>{}, t, support, direction, 4,
             CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
+}
+void curl_corrected_forward_gpu(const Tensors& t, const OptionalTensors& corrections, int support, int direction, int kernel, int scheme, int lap, bool dot) {
+    const stable::accelerator::DeviceGuard guard(t[QX].get_device_index());
+    using Rows = neighborhood::CorrectedRows<neighborhood::CorrectedCurl,
+        neighborhood::CooperativeCorrectionExecutor>;
+    execute(Rows{corrections}, t, support, direction, 4,
+        CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
 }
 } // namespace sph_native

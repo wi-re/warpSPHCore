@@ -15,9 +15,14 @@ struct SerialCorrectionExecutor {
 
 // Adapt nullable Torch handles once per launch. Optional coefficients become
 // nullptr; reference volumes enter the existing reference loader directly.
-template <template <class, int, int> class Policy, class Executor>
+struct NoCorrectionOptions {
+    template <class Operation> void operator()(Operation&) const {}
+};
+template <template <class, int, int> class Policy, class Executor,
+          class Options = NoCorrectionOptions>
 struct CorrectedRows {
     const OptionalTensors& corrections;
+    Options options{};
 
     template <class T> const T* pointer(int slot) const {
         const auto* value = optional_tensor(corrections, slot);
@@ -26,20 +31,22 @@ struct CorrectedRows {
 
     template <class T, int D, int Fields, class Launch>
     void fields(int64_t n, RowArgs<T, D> a, const Launch& launch) const {
-        auto input = sph_fields<T, D, Fields>(a);
-        input.volumes = pointer<T>(REFERENCE_VOLUME);
         using Operation = Policy<T, D, Fields>;
+        constexpr int stored = Operation::field_count;
+        auto input = sph_fields<T, D, stored>(a);
+        input.volumes = pointer<T>(REFERENCE_VOLUME);
         if constexpr (!Operation::uses_query_values) input.query_values = nullptr;
         Operation op{};
         op.fields = input;
         op.configure(a);
         op.corrections = {{pointer<T>(CRK_A), pointer<T>(CRK_B),
                            pointer<T>(CRK_GRAD_A), pointer<T>(CRK_GRAD_B)},
-                          pointer<T>(REFERENCE_OMEGA), pointer<T>(RENORMALIZATION)};
+                          pointer<T>(REFERENCE_OMEGA), pointer<T>(RENORMALIZATION), pointer<T>(QUERY_OMEGA)};
+        options(op);
         if constexpr (Executor::device) {
-            Executor{}(n, op, ReferenceLoader<T, D, Fields, Weight::Volume>{input}, a, launch);
+            Executor{}(n, op, ReferenceLoader<T, D, stored, Weight::Volume>{input}, a, launch);
         } else {
-            Executor{}(n, op, BorrowedReferenceLoader<T, D, Fields, Weight::Volume>{input}, a, launch);
+            Executor{}(n, op, BorrowedReferenceLoader<T, D, stored, Weight::Volume>{input}, a, launch);
         }
     }
 

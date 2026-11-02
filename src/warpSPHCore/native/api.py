@@ -24,6 +24,9 @@ def nativeCapabilities():
                 field_ranks=(0, 1, 2), deterministic_adjoint=False, radius_search='compact_hash', graph_capture=False,
                 graph_capture_fixed_adjacency=('interpolate_primal',),
                 warp_required=False,
-                corrected_primals=('interpolate', 'gradient'), corrected_autograd=False,
+                corrected_primals=('interpolate', 'gradient', 'divergence', 'curl', 'laplacian', 'covariance'), corrected_autograd=False,
                 corrections=('crk', 'volume', 'grad_h_gradient', 'renormalization_gradient'),
-                crk_factor_construction=True, crk_preparation_autograd=False)
+                crk_factor_construction=True, crk_preparation_autograd=False,
+                grad_h_primals=('gradient', 'divergence', 'curl', 'laplacian'),
+                renormalized_primals=('gradient', 'divergence', 'curl', 'laplacian', 'covariance'),
+                consistent_divergence_primal=True, covariance_neighbor_counts_primal=True)

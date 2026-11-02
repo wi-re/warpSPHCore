@@ -50,19 +50,22 @@ def sphOperation(queryParticles: ParticleState, operationProperties: OperationPr
             consistentDivergence, covarianceReturnNumNeighbors)
     if not isinstance(operationProperties, OperationProperties):
         raise TypeError('operationProperties must be an OperationProperties')
-    if (preScatteredQuantities is not None
-            or consistentDivergence or covarianceReturnNumNeighbors):
+    if preScatteredQuantities is not None:
         raise NotImplementedError('Corrections and specialised options are not supported by the native pilot')
     reference = referenceParticles if referenceParticles is not None else queryParticles
     referenceValues = referenceValues if referenceValues is not None else queryValues
-    if any(value is not None for value in (queryVolumes, referenceVolumes,
+    # Density's Warp equation consumes none of the optional corrections.
+    # Frontends may pass their common correction bundle to every operation.
+    if operationProperties.operation == WarpOperation.Density and not (consistentDivergence or covarianceReturnNumNeighbors):
+        return computeDensity(queryParticles, reference, domain, operationProperties, adjacency, backend='native')
+    if consistentDivergence or covarianceReturnNumNeighbors or any(value is not None for value in (queryVolumes, referenceVolumes,
                                            crkState, gradHState, renormalizationState)):
         from .nt_corrected import compute
         return compute(queryParticles, reference, domain, operationProperties, adjacency,
                        queryValues, referenceValues, queryVolumes, referenceVolumes,
-                       crkState, gradHState, renormalizationState)
-    if operationProperties.operation == WarpOperation.Density:
-        return computeDensity(queryParticles, reference, domain, operationProperties, adjacency, backend='native')
+                       crkState, gradHState, renormalizationState,
+                       consistent_divergence=consistentDivergence,
+                       return_neighbor_counts=covarianceReturnNumNeighbors)
     if operationProperties.operation == WarpOperation.Gradient:
         return computeGradient(queryParticles, reference, domain, operationProperties, adjacency,
                                queryValues, referenceValues, backend='native')

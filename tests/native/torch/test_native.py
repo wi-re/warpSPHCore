@@ -163,7 +163,7 @@ def test_metadata_failures_are_explicit(device):
     with pytest.raises(NotImplementedError, match='Custom'):
         sph.warpOperation(q, replace(prop, operation=sph.WarpOperation.Custom), d)
     with pytest.raises(NotImplementedError, match='Corrections'):
-        sph.warpOperation(q, prop, d, queryVolumes=q.masses)
+        sph.warpOperation(q, replace(prop, calibrateNormalization=True, n_h=4), d)
     assert sph.warpOperation(replace(q, positions=q.positions.clone().requires_grad_()), prop, d).requires_grad
     with torch.autograd.forward_ad.dual_level():
         dual = torch.autograd.forward_ad.make_dual(q.positions, torch.zeros_like(q.positions))

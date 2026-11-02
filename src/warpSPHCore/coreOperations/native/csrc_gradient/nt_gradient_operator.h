@@ -53,40 +53,17 @@ struct Gradient : SphOperation<T, D, Fields, General> {
 template <class T, int D, int Fields> using GeneralGradientPolicy = Gradient<T, D, Fields, true>;
 
 template <class T, int D, int Fields> struct CorrectedGradient
-    : GeneralGradientPolicy<T, D, Fields> {
-    using Base = GeneralGradientPolicy<T, D, Fields>;
+    : CorrectedKernel<T, D, GeneralGradientPolicy<T, D, Fields>> {
+    using Base = CorrectedKernel<T, D, GeneralGradientPolicy<T, D, Fields>>;
+    using typename Base::Query;
     using typename Base::State;
-    struct Query : Base::Query {
-        crk::Coefficients<T, D, true> correction;
-        T renormalization[D * D] = {};
-    };
-    CorrectionFields<T> corrections;
-
-    SPH_HD Query prepare(int64_t i) const {
-        Query q{Base::prepare(i), crk::prepare<T, D, true>(corrections.crk, i)};
-        if (corrections.renormalization)
-            for (int c = 0; c < D * D; ++c)
-                q.renormalization[c] = corrections.renormalization[i * D * D + c];
-        return q;
-    }
     SPH_HD State identity(const Query&) const { return {}; }
     template <class Record>
     SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
-        T dx[D], w, g, gradient[D];
-        this->evaluate(q, r, edge, dx, w, g);
-        if (corrections.crk.A) crk::gradient(q.correction, dx, w, g, gradient);
-        else for (int d = 0; d < D; ++d) gradient[d] = g * dx[d];
-        if (corrections.renormalization) {
-            T transformed[D] = {};
-            for (int d = 0; d < D; ++d)
-                for (int c = 0; c < D; ++c)
-                    transformed[d] += q.renormalization[d * D + c] * gradient[c];
-            for (int d = 0; d < D; ++d) gradient[d] = transformed[d];
-        }
+        T dx[D], w, gradient[D];
+        this->kernel_gradient(q, r, edge, dx, w, gradient);
         for (int c = 0; c < Fields; ++c) {
-            T fj = r.value(c);
-            if (corrections.reference_omega) fj /= corrections.reference_omega[edge.reference];
-            const T weighted = this->weighted_value(q, r, edge, c, fj);
+            const T weighted = this->weighted_value(q, r, edge, c, this->reference_value(r, edge, c));
             for (int d = 0; d < D; ++d) sum.values[c * D + d] += weighted * gradient[d];
         }
     }

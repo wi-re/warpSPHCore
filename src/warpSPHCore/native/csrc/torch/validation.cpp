@@ -102,8 +102,8 @@ Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot) {
         if (op == 2)
             shape.push_back(D);
         if (op == 3) {
-            STD_TORCH_CHECK(!shape.empty(), "Divergence requires a vector or matrix field");
-            shape.erase(dot ? shape.begin() : shape.end() - 1);
+            STD_TORCH_CHECK(D == 1 || !shape.empty(), "Divergence requires a vector or matrix field");
+            if (!shape.empty()) shape.erase(dot ? shape.begin() : shape.end() - 1);
         }
         if (op == 4) {
             STD_TORCH_CHECK(D == 1 || !shape.empty(), "Curl requires a vector or matrix field");
