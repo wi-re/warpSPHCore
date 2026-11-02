@@ -1,12 +1,20 @@
 # Native neighborhood template prototype
 
-Wendland2/Gather density, interpolation and Difference gradient now use these
-operation policies in the production native CSR path, through the existing
-stable-ABI registrations and JIT/CMake builds. Other kernels, support schemes
-and gradient modes retain their established fallbacks. The scripts here also
+Density, interpolation and gradient use these operation policies in the
+production native CSR path for all 15 kernel families, the five supported
+support schemes and all four gradient schemes, through the existing stable-ABI
+registrations and JIT/CMake builds. Wendland2/Gather retains its specialized
+policies and the three measured legacy fast cases documented in the production
+integration report. Other core operators still use their established loops.
+The scripts here also
 exercise experimental policies and derivative executors. Common types live in
 `src/warpSPHCore/native/csrc/execution`; operation policies live alongside each
 function in its module's `native/csrc_<function>` directory.
+
+See the [coverage expansion report](../../docs/regression/native_template_expansion_2026_11_02.md)
+for qualification and paired measurements of the general policies. Exhaustive
+kernel/support and gradient-scheme tests carry the `extended` marker, so focused
+backend/device runs can exclude them with `-m "not extended"`.
 
 ## Contract
 
@@ -41,6 +49,13 @@ CPU loader reads position, volume and field arrays directly. GPU interpolation
 packs preweighted values and preserves the tuned group widths and two-edge
 batching. Index width is resolved at launch; an offset accessor supports int32
 and int64 offsets independently, without scanning CSR contents.
+
+General policies use the same record and traversal interfaces. They select
+kernel/support evaluation using launch metadata and the original directed
+reference ID; reference supports do not enlarge packed records. The generic
+gradient handles Naive, Symmetric, Difference and Summation weighting, including
+the query density in Symmetric mode. These are internal policy choices; no
+extra user options or runtime verification scans are introduced.
 
 CPU uses the existing Torch stable-ABI `parallel_for` launcher. GPU execution
 uses 4/8/16/32-lane groups. The shared-cell executor stages source records and

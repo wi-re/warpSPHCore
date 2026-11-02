@@ -9,6 +9,9 @@ namespace {
 template <class T, bool Packed = false>
 using DensityNeighborhoodRows = neighborhood::CooperativeSphRows<
     neighborhood::DensityPolicy, T, neighborhood::Weight::Mass, Packed>;
+template <class T>
+using GeneralDensityRows = neighborhood::CooperativeSphRows<
+    neighborhood::GeneralDensityPolicy, T, neighborhood::Weight::Mass>;
 } // namespace
 
 void density_forward_gpu(const Tensors &t, int support, int direction, int kernel) {
@@ -42,7 +45,11 @@ void density_forward_gpu(const Tensors &t, int support, int direction, int kerne
             execute_precision<double>(DensityNeighborhoodRows<double>{}, t, support, direction, 6,
                 CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel);
     } else {
-        execute(ValueGpuRows<true>{}, t, support, direction, 6,
+        if (t[QX].scalar_type() == ScalarType::Float)
+            execute_precision<float>(GeneralDensityRows<float>{}, t, support, direction, 6,
+                CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel);
+        else
+            execute_precision<double>(GeneralDensityRows<double>{}, t, support, direction, 6,
                 CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel);
     }
 }

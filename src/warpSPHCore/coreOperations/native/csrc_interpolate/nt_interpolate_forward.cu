@@ -10,6 +10,9 @@ template <class T, int Batch = 1, bool Packed = false>
 using InterpolateNeighborhoodRows = neighborhood::CooperativeSphRows<
     neighborhood::InterpolatePolicy, T, Packed ? neighborhood::Weight::WeightedField : neighborhood::Weight::Volume,
     Packed, Batch>;
+template <class T>
+using GeneralInterpolateRows = neighborhood::CooperativeSphRows<
+    neighborhood::GeneralInterpolatePolicy, T, neighborhood::Weight::Volume>;
 
 template <class T, int Width, int Batch>
 void packed_interpolate(const Tensors &t, int pitch, int support, int direction, int kernel) {
@@ -62,7 +65,11 @@ void interpolate_forward_gpu(const Tensors &t, int support, int direction, int k
             execute_precision<double>(InterpolateNeighborhoodRows<double>{}, t, support, direction, 1,
                 CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel);
     } else {
-        execute(ValueGpuRows<false>{}, t, support, direction, 1,
+        if (t[QX].scalar_type() == ScalarType::Float)
+            execute_precision<float>(GeneralInterpolateRows<float>{}, t, support, direction, 1,
+                CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
+        else
+            execute_precision<double>(GeneralInterpolateRows<double>{}, t, support, direction, 1,
                 CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
     }
 }

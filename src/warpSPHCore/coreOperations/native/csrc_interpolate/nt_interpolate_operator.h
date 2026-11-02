@@ -6,9 +6,9 @@ namespace sph_native::neighborhood {
 // Normalize=false matches ordinary interpolation. Normalize=true exercises a
 // nonlinear finalizer over a numerator and denominator, as used by weighted
 // interpolation/density operators. Both share the same traversal and AD driver.
-template <class T, int D, int Fields = 1, bool Normalize = false>
-struct Interpolate : SphOperation<T, D, Fields> {
-    using Base = SphOperation<T, D, Fields>;
+template <class T, int D, int Fields = 1, bool Normalize = false, bool General = false>
+struct Interpolate : SphOperation<T, D, Fields, General> {
+    using Base = SphOperation<T, D, Fields, General>;
     using typename Base::Query;
     using typename Base::Reference;
     using State = Sums<T, Fields + int(Normalize)>;
@@ -32,10 +32,8 @@ struct Interpolate : SphOperation<T, D, Fields> {
         return bars;
     }
     template <class Record>
-    SPH_HD void interact(const Query& q, const Record& r, Neighbor, State& sum) const {
-        T dx[D];
-        const T distance = q.geometry.distance(r.data, dx);
-        const T w = q.kernel.value(distance);
+    SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
+        const T w = this->value(q, r, edge);
         for (int c = 0; c < Fields; ++c)
             sum.values[c] += (r.value(c) * r.weight()) * w;
         if constexpr (Normalize) sum.values[Fields] += r.weight() * w;
@@ -55,4 +53,6 @@ struct Interpolate : SphOperation<T, D, Fields> {
     }
 };
 template <class T, int D, int Fields> using InterpolatePolicy = Interpolate<T, D, Fields>;
+template <class T, int D, int Fields>
+using GeneralInterpolatePolicy = Interpolate<T, D, Fields, false, true>;
 } // namespace sph_native::neighborhood

@@ -55,6 +55,7 @@ template <template <class, int, int> class Policy, Weight Kind> struct SerialSph
         if constexpr (!Operation::uses_query_values) input.query_values = nullptr;
         Operation operation{};
         operation.fields = input;
+        operation.configure(a);
         launch_serial_csr(n, operation, BorrowedReferenceLoader<T, D, stored, Kind>{input}, a, launch);
     }
 

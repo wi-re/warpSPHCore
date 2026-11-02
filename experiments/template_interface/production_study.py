@@ -104,9 +104,9 @@ def worker(args):
                      sph.WarpOperation.Gradient if name.startswith('gradient') else
                      sph.WarpOperation.Interpolate)
         values = matrix if name.endswith('matrix') else vector if name.endswith('vector') else scalar
-        properties = sph.OperationProperties(sph.KernelFunctions.Wendland2,
-            operation=operation, supportMode=sph.SupportScheme.Gather,
-            gradientMode=sph.GradientScheme.Difference,
+        properties = sph.OperationProperties(getattr(sph.KernelFunctions, args.kernel),
+            operation=operation, supportMode=getattr(sph.SupportScheme, args.support),
+            gradientMode=getattr(sph.GradientScheme, args.gradient_scheme),
             operationMode=sph.OperationDirection.TrueAllToToAll)
 
         def call():
@@ -151,7 +151,8 @@ def worker(args):
 class Worker:
     def __init__(self, args, library, precision, label):
         command = [sys.executable, __file__, '--worker', '--core', str(args.core),
-            '--planner', str(args.planner), '--library', str(library), '--precision', precision]
+            '--planner', str(args.planner), '--library', str(library), '--precision', precision,
+            '--kernel', args.kernel, '--support', args.support, '--gradient-scheme', args.gradient_scheme]
         self.log = (args.output.parent / (args.output.stem+'-'+precision+'-'+label+'.log')).open('w')
         # An idle worker must sleep rather than spin on the other worker's
         # cores. Both libraries get the same OpenMP wait policy.
@@ -206,6 +207,7 @@ def study(args):
     torch.set_num_threads(1)  # Parent does only small result comparisons.
     report = dict(complete=False, fixtures=[], activity=[],
         libraries=dict(baseline=str(args.baseline), candidate=str(args.candidate)),
+        kernel=args.kernel, support=args.support, gradient_scheme=args.gradient_scheme,
         cpu_threads=24, repeats=args.repeats, omp_wait_policy='PASSIVE', gomp_spincount=0,
         gpu_submit_cpu=min(os.sched_getaffinity(0)) if hasattr(os,'sched_getaffinity') else None)
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -284,5 +286,11 @@ if __name__ == '__main__':
     parser.add_argument('--operations', nargs='+', choices=OPERATIONS, default=list(OPERATIONS))
     parser.add_argument('--both-indices', action='store_true')
     parser.add_argument('--repeats', type=int, default=7)
+    parser.add_argument('--kernel', default='Wendland2',
+        help='KernelFunctions member; identical for both workers')
+    parser.add_argument('--support', default='Gather',
+        choices=['Gather', 'Scatter', 'MeanSymmetric', 'KernelMeanSymmetric', 'SuperSymmetric'])
+    parser.add_argument('--gradient-scheme', default='Difference',
+        choices=['Naive', 'Symmetric', 'Difference', 'Summation'])
     args = parser.parse_args()
     worker(args) if args.worker else study(args)

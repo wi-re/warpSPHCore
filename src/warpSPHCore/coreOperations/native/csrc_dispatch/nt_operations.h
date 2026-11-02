@@ -26,21 +26,21 @@ void run_rows(Task task, const Prepared &p, RowArgs<T, D> a, Buffer out, ConstBu
     switch (p.properties.operation) {
     case Operation::Density:
         if (task == Task::Forward)
-            launch(p.rows, DensityRow<T, D>{a});
+            DensityRows{}(p.rows, a, launch);
         else
             launch(p.rows, AdjointRow<T, D, DensityAdjointPair<T, D>>{
                                a, static_cast<const T *>(cot.data), bars});
         break;
     case Operation::Interpolate:
         if (task == Task::Forward)
-            launch(p.rows, InterpolateRow<T, D>{a});
+            InterpolateRows{}(p.rows, a, launch);
         else
             launch(p.rows, AdjointRow<T, D, InterpolateAdjointPair<T, D>>{
                                a, static_cast<const T *>(cot.data), bars});
         break;
     case Operation::Gradient:
         if (task == Task::Forward)
-            launch(p.rows, GradientRow<T, D>{a});
+            GradientRows{}(p.rows, a, launch);
         else
             launch(p.rows, AdjointRow<T, D, GradientAdjointPair<T, D>>{
                                a, static_cast<const T *>(cot.data), bars});

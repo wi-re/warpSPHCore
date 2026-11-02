@@ -54,6 +54,7 @@ struct CooperativeSphRows {
         if constexpr (!Operation::uses_query_values) input.query_values = nullptr;
         Operation operation{};
         operation.fields = input;
+        operation.configure(a);
         using Raw = ReferenceLoader<T, D, stored, Kind>;
         if constexpr (Packed) {
             using Prepared = ReferenceLoader<T, D, stored, Kind, true>;

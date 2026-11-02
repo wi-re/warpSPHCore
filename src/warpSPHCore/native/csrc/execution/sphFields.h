@@ -2,7 +2,7 @@
 
 #include "execution/neighborhood.h"
 #include "math/queryGeometry.h"
-#include "kernels/kernel.h"
+#include "kernels/value.h"
 #include "util/directionality.h"
 #include <type_traits>
 #if defined(__CUDACC__) || defined(__HIPCC__)
@@ -29,6 +29,16 @@ template <class T, int D, int Fields> struct SphFields {
     T* cache = nullptr;
     int32_t* counts = nullptr;
     int32_t* winners = nullptr;
+};
+
+// Only general operations carry runtime kernel metadata. Keep it out of field
+// views: reference loaders do not need it, and specialized policies should
+// retain their original object layout. The empty base costs no storage.
+template <class T, bool General> struct KernelMetadata {};
+template <class T> struct KernelMetadata<T, true> {
+    const T* reference_supports = nullptr;
+    const T* query_density = nullptr;
+    int kernel = 0, support = 11, scheme = 3;
 };
 
 template <class T, int D, int Fields> struct PreparedQuery {
@@ -140,12 +150,72 @@ template <class T, int D, int Fields, Weight Kind> struct BorrowedReferenceLoade
     }
 };
 
-template <class T, int D, int Fields> struct SphOperation {
+template <class T, int D, int Fields, bool General = false>
+struct SphOperation : KernelMetadata<T, General> {
     static constexpr int field_count = Fields;
     static constexpr bool uses_query_values = false;
     SphFields<T, D, Fields> fields;
     using Query = PreparedQuery<T, D, Fields>;
     using Reference = ReferenceRecord<T, D, Fields>;
+
+    template <class Args> void configure(const Args& a) {
+        if constexpr (General) {
+            this->reference_supports = a.rh;
+            this->query_density = a.qdensity;
+            this->kernel = a.kernel;
+            this->support = a.support;
+            this->scheme = a.scheme;
+        }
+    }
+
+    // A neighborhood supplies the original directed reference ID even when
+    // records have been packed or gathered through a different adjacency.
+    // This lets general support rules use h_j without changing record layouts.
+    template <class Record>
+    SPH_HD void evaluate(const Query& q, const Record& r, Neighbor edge,
+                         T (&dx)[D], T& value, T& gradient) const {
+        const T distance = q.geometry.distance(r.data, dx);
+        if constexpr (!General) {
+            q.kernel.evaluate(distance, value, gradient);
+        } else {
+            // Non-Difference gradient schemes can still share a Gather
+            // kernel across the row. Reuse its coefficients rather than
+            // reconstructing them for every edge.
+            if (this->kernel == 0 && this->support == 11) {
+                q.kernel.evaluate(distance, value, gradient);
+                return;
+            }
+            const T hj = this->reference_supports[edge.reference];
+            if (this->support == 14 || this->support == 15) {
+                T reference_value, reference_gradient;
+                kernel_pair_value<T, D>(distance, q.support, this->kernel, value, gradient);
+                kernel_pair_value<T, D>(distance, hj, this->kernel,
+                                         reference_value, reference_gradient);
+                value = (value + reference_value) / T(2);
+                gradient = (gradient + reference_gradient) / T(2);
+            } else {
+                const T h = pairwise_support(q.support, hj, this->support);
+                kernel_pair_value<T, D>(distance, h, this->kernel, value, gradient);
+            }
+        }
+    }
+
+    template <class Record>
+    SPH_HD T value(const Query& q, const Record& r, Neighbor edge) const {
+        if constexpr (!General) {
+            T dx[D];
+            return q.kernel.value(q.geometry.distance(r.data, dx));
+        } else {
+            T dx[D];
+            const T distance = q.geometry.distance(r.data, dx);
+            const T hj = this->reference_supports[edge.reference];
+            if (this->support == 14 || this->support == 15)
+                return (kernel_value<T, D>(distance, q.support, this->kernel) +
+                        kernel_value<T, D>(distance, hj, this->kernel)) / T(2);
+            return kernel_value<T, D>(distance,
+                pairwise_support(q.support, hj, this->support), this->kernel);
+        }
+    }
 
     SPH_HD Query prepare(int64_t i) const {
         const T h = fields.supports[i];

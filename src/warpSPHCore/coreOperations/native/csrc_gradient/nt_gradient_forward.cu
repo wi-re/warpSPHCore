@@ -1,14 +1,16 @@
 #include "execution/gpu.cuh"
 #include "execution/dispatch.h"
 #include "nt_gradient_forward.h"
-#include "execution/fieldTraversal.cuh"
-#include "execution/packedFieldTraversal.cuh"
+#include "execution/packedValues.cuh"
 #include "execution/rowNeighborhood.cuh"
 namespace sph_native {
 namespace {
 template <class T, bool Packed = false>
 using GradientNeighborhoodRows = neighborhood::CooperativeSphRows<
     neighborhood::Gradient, T, neighborhood::Weight::Volume, Packed>;
+template <class T>
+using GeneralGradientRows = neighborhood::CooperativeSphRows<
+    neighborhood::GeneralGradientPolicy, T, neighborhood::Weight::Volume>;
 } // namespace
 
 void gradient_forward_gpu(const Tensors &t, int support, int direction, int kernel, int scheme,
@@ -37,7 +39,11 @@ void gradient_forward_gpu(const Tensors &t, int support, int direction, int kern
             execute_precision<double>(GradientNeighborhoodRows<double>{}, t, support, direction, 2,
                 CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
     } else {
-        execute(CooperativeFieldRows<GradientPair, 2>{}, t, support, direction, 2,
+        if (t[QX].scalar_type() == ScalarType::Float)
+            execute_precision<float>(GeneralGradientRows<float>{}, t, support, direction, 2,
+                CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
+        else
+            execute_precision<double>(GeneralGradientRows<double>{}, t, support, direction, 2,
                 CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
     }
 }
