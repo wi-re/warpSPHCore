@@ -3,10 +3,12 @@ from .._backend import BACKEND
 if BACKEND == "native":
     from .._models import (ParticleState, ParticleTangentState, PointCloud,
                            DomainDescription, OperationProperties, AdjacencyList,
-                           CapacityPolicy, DEFAULT_CAPACITY)
+                           CapacityPolicy, DEFAULT_CAPACITY, CRKState, CRKTangentState,
+                           GradHState, RenormalizationState, RenormalizationTangentState)
     __all__ = ['ParticleState', 'ParticleTangentState', 'PointCloud',
                'DomainDescription', 'OperationProperties', 'AdjacencyList',
-               'CapacityPolicy', 'DEFAULT_CAPACITY']
+               'CapacityPolicy', 'DEFAULT_CAPACITY', 'CRKState', 'CRKTangentState',
+               'GradHState', 'RenormalizationState', 'RenormalizationTangentState']
 else:
     __all__ = []
 

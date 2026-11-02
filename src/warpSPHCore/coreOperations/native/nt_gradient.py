@@ -8,6 +8,12 @@ def computeGradient(queryParticles, referenceParticles, domain, operationPropert
                     queryValues, referenceValues, queryVolumes=None, referenceVolumes=None,
                     crkState=None, gradHState=None, renormalizationState=None):
     properties = replace(operationProperties, operation=WarpOperation.Gradient)
+    if any(value is not None for value in (queryVolumes, referenceVolumes, crkState,
+                                           gradHState, renormalizationState)):
+        from .nt_corrected import compute
+        return compute(queryParticles, referenceParticles, domain, properties, adjacency,
+                       queryValues, referenceValues, queryVolumes, referenceVolumes,
+                       crkState, gradHState, renormalizationState)
     if queryValues is None or referenceValues is None or referenceParticles.densities is None:
         raise ValueError('Gradients require query/reference values and reference densities')
     inputs = prepare_operator_inputs(

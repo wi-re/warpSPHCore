@@ -1,5 +1,6 @@
 #pragma once
 #include "execution/sphFields.h"
+#include "coreOperations/native/csrc_correction/nt_correction.h"
 
 namespace sph_native::neighborhood {
 
@@ -55,4 +56,28 @@ struct Interpolate : SphOperation<T, D, Fields, General> {
 template <class T, int D, int Fields> using InterpolatePolicy = Interpolate<T, D, Fields>;
 template <class T, int D, int Fields>
 using GeneralInterpolatePolicy = Interpolate<T, D, Fields, false, true>;
+
+template <class T, int D, int Fields> struct CorrectedInterpolate
+    : GeneralInterpolatePolicy<T, D, Fields> {
+    using Base = GeneralInterpolatePolicy<T, D, Fields>;
+    using typename Base::State;
+    struct Query : Base::Query { crk::Coefficients<T, D, false> correction; };
+    CorrectionFields<T> corrections;
+
+    SPH_HD Query prepare(int64_t i) const {
+        return {Base::prepare(i), crk::prepare<T, D, false>(corrections.crk, i)};
+    }
+    SPH_HD State identity(const Query&) const { return {}; }
+    template <class Record>
+    SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
+        T w;
+        if (corrections.crk.A) {
+            T dx[D];
+            const T distance = q.geometry.distance(r.data, dx);
+            w = this->value_at_distance(q, edge, distance);
+            w = crk::value(q.correction, dx, w);
+        } else w = this->value(q, r, edge);
+        for (int c = 0; c < Fields; ++c) sum.values[c] += (r.value(c) * r.weight()) * w;
+    }
+};
 } // namespace sph_native::neighborhood

@@ -3,6 +3,7 @@
 #include "nt_gradient_forward.h"
 #include "execution/packedValues.cuh"
 #include "execution/rowNeighborhood.cuh"
+#include "coreOperations/native/csrc_correction/nt_correction_rows.cuh"
 namespace sph_native {
 namespace {
 template <class T, bool Packed = false>
@@ -46,5 +47,13 @@ void gradient_forward_gpu(const Tensors &t, int support, int direction, int kern
             execute_precision<double>(GeneralGradientRows<double>{}, t, support, direction, 2,
                 CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
     }
+}
+void gradient_corrected_forward_gpu(const Tensors& t, const OptionalTensors& corrections,
+        int support, int direction, int kernel, int scheme) {
+    const stable::accelerator::DeviceGuard guard(t[QX].get_device_index());
+    using Rows = neighborhood::CorrectedRows<neighborhood::CorrectedGradient,
+                                             neighborhood::CooperativeCorrectionExecutor>;
+    execute(Rows{corrections}, t, support, direction, 2,
+            CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme);
 }
 } // namespace sph_native

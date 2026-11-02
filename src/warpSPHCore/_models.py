@@ -61,6 +61,43 @@ class DomainDescription:
         return not self.__eq__(other)
 
 
+@dataclass
+class CRKState:
+    """Query correction coefficients; gradB axes are [derivative, component].
+
+    Native interpolation only needs A and B. Gradient operators also need gradA and
+    gradB. This semantic state is shared by Warp and native execution.
+    """
+    A: torch.Tensor
+    B: torch.Tensor
+    gradA: Optional[torch.Tensor] = None
+    gradB: Optional[torch.Tensor] = None
+
+
+@dataclass
+class CRKTangentState:
+    A: torch.Tensor
+    B: torch.Tensor
+    gradA: torch.Tensor
+    gradB: torch.Tensor
+
+
+@dataclass
+class GradHState:
+    queryOmegas: torch.Tensor
+    referenceOmegas: Optional[torch.Tensor] = None
+
+
+@dataclass
+class RenormalizationState:
+    renormalizationMatrices: torch.Tensor
+
+
+@dataclass
+class RenormalizationTangentState:
+    renormalizationMatrices: torch.Tensor
+
+
 @dataclass(frozen=True)
 class OperationProperties:
     kernel: KernelFunctions

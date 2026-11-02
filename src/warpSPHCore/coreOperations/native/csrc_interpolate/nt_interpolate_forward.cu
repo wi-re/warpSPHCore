@@ -3,6 +3,7 @@
 #include "execution/packedValues.cuh"
 #include "execution/valueTraversal.cuh"
 #include "execution/rowNeighborhood.cuh"
+#include "coreOperations/native/csrc_correction/nt_correction_rows.cuh"
 #include "nt_interpolate_operator.h"
 namespace sph_native {
 namespace {
@@ -72,5 +73,13 @@ void interpolate_forward_gpu(const Tensors &t, int support, int direction, int k
             execute_precision<double>(GeneralInterpolateRows<double>{}, t, support, direction, 1,
                 CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
     }
+}
+void interpolate_corrected_forward_gpu(const Tensors& t, const OptionalTensors& corrections,
+        int support, int direction, int kernel, int scheme) {
+    const stable::accelerator::DeviceGuard guard(t[QX].get_device_index());
+    using Rows = neighborhood::CorrectedRows<neighborhood::CorrectedInterpolate,
+                                             neighborhood::CooperativeCorrectionExecutor>;
+    execute(Rows{corrections}, t, support, direction, 1,
+            CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme);
 }
 } // namespace sph_native

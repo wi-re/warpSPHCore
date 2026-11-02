@@ -40,7 +40,7 @@ void geometry(const Tensors &t, int support) {
                     "SuperSymmetric");
 }
 
-Tensors prepare_operator(const Tensors &inputs, int support, int direction) {
+Tensors prepare_pair_geometry(const Tensors &inputs, int support, int direction) {
     STD_TORCH_CHECK(inputs.size() == OUTPUT, "invalid native operator tensor layout");
     Tensors t = inputs;
     t.resize(SLOTS);
@@ -48,8 +48,6 @@ Tensors prepare_operator(const Tensors &inputs, int support, int direction) {
     const auto &q = t[QX];
     const auto n = q.size(0), nr = t[RX].size(0);
     STD_TORCH_CHECK(direction >= 0 && direction <= 14, "invalid operation direction");
-    vector(t[MASS], q, q.scalar_type(), nr, "reference masses");
-
     vector(t[QKIND], q, ScalarType::Int, n, "query kinds");
     vector(t[RKIND], q, ScalarType::Int, nr, "reference kinds");
     vector(t[COUNTS], q, ScalarType::Int, n, "neighbor counts");
@@ -63,15 +61,23 @@ Tensors prepare_operator(const Tensors &inputs, int support, int direction) {
     STD_TORCH_CHECK(t[OFFSETS].size(0) == n, "CSR offsets must have one entry per query");
     return t;
 }
+Tensors prepare_operator(const Tensors &inputs, int support, int direction) {
+    auto t = prepare_pair_geometry(inputs, support, direction);
+    vector(t[MASS], t[QX], t[QX].scalar_type(), t[RX].size(0), "reference masses");
+    return t;
+}
 Tensors prepare_field_operator(const Tensors &inputs, int support, int direction, int op,
                                int scheme, int lap, bool dot) {
     Tensors t = prepare_operator(inputs, support, direction);
+    vector(t[DENSITY], t[QX], t[QX].scalar_type(), t[RX].size(0), "reference densities");
+    return prepare_field_output(std::move(t), op, scheme, lap, dot);
+}
+Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot) {
     STD_TORCH_CHECK(op >= 1 && op <= 7 && op != 6, "Unknown field operator");
     STD_TORCH_CHECK(scheme >= 1 && scheme <= 4, "Unknown gradient scheme");
     STD_TORCH_CHECK(lap >= 1 && lap <= 4, "Unknown Laplacian scheme");
     const auto &x = t[QX];
     const auto n = x.size(0), nr = t[RX].size(0), D = x.size(1);
-    vector(t[DENSITY], x, x.scalar_type(), nr, "reference densities");
 
     std::vector<int64_t> shape;
     if (op == 7)

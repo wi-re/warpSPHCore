@@ -202,12 +202,14 @@ struct SphOperation : KernelMetadata<T, General> {
 
     template <class Record>
     SPH_HD T value(const Query& q, const Record& r, Neighbor edge) const {
+        T dx[D];
+        return value_at_distance(q, edge, q.geometry.distance(r.data, dx));
+    }
+
+    SPH_HD T value_at_distance(const Query& q, Neighbor edge, T distance) const {
         if constexpr (!General) {
-            T dx[D];
-            return q.kernel.value(q.geometry.distance(r.data, dx));
+            return q.kernel.value(distance);
         } else {
-            T dx[D];
-            const T distance = q.geometry.distance(r.data, dx);
             const T hj = this->reference_supports[edge.reference];
             if (this->support == 14 || this->support == 15)
                 return (kernel_value<T, D>(distance, q.support, this->kernel) +

@@ -44,3 +44,17 @@ def test_invalid_manifest_sources_are_rejected(tmp_path, filename):
     (module / 'sources.json').write_text(json.dumps({'cpu': [filename]}))
     with pytest.raises(ValueError, match='Invalid cpu source'):
         discover_sources(tmp_path)
+
+
+def test_header_only_module_participates_in_build_digest(tmp_path):
+    from warpSPHCore.native._sources import source_digest
+    module = tmp_path / 'crk/native'
+    folder = module / 'csrc_correction'
+    folder.mkdir(parents=True)
+    (module / 'sources.json').write_text('{"cpu": [], "gpu": []}')
+    header = folder / 'nt_correction.h'
+    header.write_text('// initial coefficient formula')
+    before = source_digest(tmp_path)
+    header.write_text('// changed coefficient formula')
+    assert discover_sources(tmp_path) == ([], [])
+    assert source_digest(tmp_path) != before

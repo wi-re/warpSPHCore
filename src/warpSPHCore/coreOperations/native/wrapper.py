@@ -50,12 +50,17 @@ def sphOperation(queryParticles: ParticleState, operationProperties: OperationPr
             consistentDivergence, covarianceReturnNumNeighbors)
     if not isinstance(operationProperties, OperationProperties):
         raise TypeError('operationProperties must be an OperationProperties')
-    if (any(x is not None for x in (queryVolumes, referenceVolumes, preScatteredQuantities,
-                                    crkState, gradHState, renormalizationState))
+    if (preScatteredQuantities is not None
             or consistentDivergence or covarianceReturnNumNeighbors):
         raise NotImplementedError('Corrections and specialised options are not supported by the native pilot')
     reference = referenceParticles if referenceParticles is not None else queryParticles
     referenceValues = referenceValues if referenceValues is not None else queryValues
+    if any(value is not None for value in (queryVolumes, referenceVolumes,
+                                           crkState, gradHState, renormalizationState)):
+        from .nt_corrected import compute
+        return compute(queryParticles, reference, domain, operationProperties, adjacency,
+                       queryValues, referenceValues, queryVolumes, referenceVolumes,
+                       crkState, gradHState, renormalizationState)
     if operationProperties.operation == WarpOperation.Density:
         return computeDensity(queryParticles, reference, domain, operationProperties, adjacency, backend='native')
     if operationProperties.operation == WarpOperation.Gradient:

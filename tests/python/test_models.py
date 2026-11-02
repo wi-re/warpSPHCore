@@ -11,4 +11,10 @@ def test_shared_models_import_without_warp():
     assert DomainDescription is sph.DomainDescription
     assert OperationProperties is sph.OperationProperties
     assert AdjacencyList is sph.AdjacencyList
+    from warpSPHCore.dataTypes import CRKState, GradHState, RenormalizationState
+    from warpSPHCore.dataTypes.corrections_t import (CRKState as LegacyCRKState,
+        GradHState as LegacyGradHState, RenormalizationState as LegacyRenormalizationState)
+    assert CRKState is LegacyCRKState is sph.CRKState
+    assert GradHState is LegacyGradHState is sph.GradHState
+    assert RenormalizationState is LegacyRenormalizationState is sph.RenormalizationState
     assert 'warp' not in sys.modules

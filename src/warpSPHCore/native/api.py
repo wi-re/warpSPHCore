@@ -23,4 +23,7 @@ def nativeCapabilities():
                 reverse_kernels=tuple(k.name for k in KernelFunctions if k.value in REVERSE_KERNELS),
                 field_ranks=(0, 1, 2), deterministic_adjoint=False, radius_search='all_pairs', graph_capture=False,
                 graph_capture_fixed_adjacency=('interpolate_primal',),
-                warp_required=False)
+                warp_required=False,
+                corrected_primals=('interpolate', 'gradient'), corrected_autograd=False,
+                corrections=('crk', 'volume', 'grad_h_gradient', 'renormalization_gradient'),
+                crk_factor_construction=False)

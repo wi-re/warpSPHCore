@@ -14,8 +14,11 @@ def main():
     parser.add_argument('wheel', type=Path)
     parser.add_argument('--device', choices=['cpu', 'cuda'], default='cpu')
     parser.add_argument('--tests', action='store_true', help='Run the native correctness suite against the installed wheel')
+    parser.add_argument('--example', type=Path,
+                        help='Alternative native example to run with compiler/Warp imports blocked')
     args = parser.parse_args()
-    example = Path(__file__).resolve().parents[1] / 'examples/native_core.py'
+    example = (args.example.resolve() if args.example else
+               Path(__file__).resolve().parents[1] / 'examples/native_core.py')
     with tempfile.TemporaryDirectory(prefix='warpsph-prebuilt-check-') as directory:
         with zipfile.ZipFile(args.wheel) as archive:
             names = archive.namelist()
