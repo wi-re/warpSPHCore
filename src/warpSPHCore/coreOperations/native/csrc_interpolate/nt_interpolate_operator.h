@@ -1,0 +1,57 @@
+#pragma once
+#include "execution/sphFields.h"
+
+namespace sph_native::neighborhood {
+
+// Normalize=false matches ordinary interpolation. Normalize=true exercises a
+// nonlinear finalizer over a numerator and denominator, as used by weighted
+// interpolation/density operators. Both share the same traversal and AD driver.
+template <class T, int D, int Fields = 1, bool Normalize = false>
+struct Interpolate : SphOperation<T, D, Fields> {
+    using Base = SphOperation<T, D, Fields>;
+    using typename Base::Query;
+    using typename Base::Reference;
+    using State = Sums<T, Fields + int(Normalize)>;
+    static constexpr Weight weight = Normalize ? Weight::Volume : Weight::WeightedField;
+    SPH_HD State identity(const Query&) const { return {}; }
+    // Pull back the complete reduction once per query. Traversal never needs
+    // to differentiate or duplicate this nonlinear finalization per edge.
+    SPH_HD static State finalize_vjp(const State& sum, const T* cotangent) {
+        State bars{};
+        if constexpr (Normalize) {
+            const T denominator = sum.values[Fields];
+            if (denominator != T(0)) {
+                for (int c = 0; c < Fields; ++c) {
+                    bars.values[c] = cotangent[c] / denominator;
+                    bars.values[Fields] -= cotangent[c] * sum.values[c] / (denominator * denominator);
+                }
+            }
+        } else {
+            for (int c = 0; c < Fields; ++c) bars.values[c] = cotangent[c];
+        }
+        return bars;
+    }
+    template <class Record>
+    SPH_HD void interact(const Query& q, const Record& r, Neighbor, State& sum) const {
+        T dx[D];
+        const T distance = q.geometry.distance(r.data, dx);
+        const T weighted = r.weight() * q.kernel.value(distance);
+        for (int c = 0; c < Fields; ++c)
+            sum.values[c] += r.value(c) * weighted;
+        if constexpr (Normalize) sum.values[Fields] += weighted;
+    }
+    SPH_HD void finish(const Query& q, const State& sum) const {
+        if (this->fields.cache)
+            for (int c = 0; c < Fields + int(Normalize); ++c)
+                this->fields.cache[q.index * (Fields + int(Normalize)) + c] = sum.values[c];
+        if (this->fields.output) {
+            for (int c = 0; c < Fields; ++c) {
+                T value = sum.values[c];
+                if constexpr (Normalize)
+                    value = sum.values[Fields] != T(0) ? value / sum.values[Fields] : T(0);
+                this->fields.output[q.index * Fields + c] = value;
+            }
+        }
+    }
+};
+} // namespace sph_native::neighborhood
