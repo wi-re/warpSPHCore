@@ -30,7 +30,7 @@ void execute_typed(const Task &task, const Tensors &t, int support, int directio
     a.density = ptr<T>(t[DENSITY]);
     a.offsets = index_view(t[OFFSETS]);
     a.neighbors = index_view(t[NEIGHBORS]);
-    a.counts = t[COUNTS].mutable_data_ptr<int32_t>();
+    a.counts = t[COUNTS].defined() ? t[COUNTS].mutable_data_ptr<int32_t>() : nullptr;
     a.collected = t[NEIGHBORS].defined() && t[NEIGHBORS].scalar_type() == ScalarType::Long
                       ? t[NEIGHBORS].mutable_data_ptr<int64_t>()
                       : nullptr;
@@ -38,7 +38,8 @@ void execute_typed(const Task &task, const Tensors &t, int support, int directio
     a.qdensity = ptr<T>(t[QDENSITY]);
     a.kernel = kernel;
     a.scheme = scheme;
-    a.laplacian_mode = laplacian;
+    a.laplacian_mode = laplacian & 15;
+    a.positive_divergence = bool(laplacian & LaplacianPositiveDivergence);
     a.dot_mode = dot;
     if (t[RVALUE].defined() && t[RVALUE].dim() > 0) {
         a.fields = 1;

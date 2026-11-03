@@ -83,17 +83,21 @@ def dense(q,r,domain,prop,qf,rf, *, differentiable=False):
         if D==2:return (g[:,:,0,None]*values[:,:,1]-g[:,:,1,None]*values[:,:,0]).sum(1).reshape(n,*(field_shape[1:] or (1,)))
         return torch.linalg.cross(g[...,None].expand_as(values),values,dim=2).sum(1).reshape(n,*field_shape)
     re=radius+1e-8*h
-    if prop.laplacianMode==sph.LaplacianScheme.Naive:out=(weighted*lap[...,None]).sum(1)
+    if prop.laplacianMode==sph.LaplacianScheme.Naive:contribution=weighted*lap[...,None]
     elif prop.laplacianMode==sph.LaplacianScheme.Dot:
         normals=dx/re[...,None];F_ab=(normals*g).sum(-1)/re
         blocks=weighted.reshape(n,m,F//D,D)
         contribution=(blocks-(D+2)*(blocks*normals[:,:,None]).sum(-1)[...,None]*normals[:,:,None])*F_ab[:,:,None,None]
-        out=contribution.sum(1).reshape(n,F)
+        contribution=contribution.reshape(n,m,F)
     else:
         denominator=re*(radius+1e-12*h) if prop.laplacianMode==sph.LaplacianScheme.Default else re.square()
         factor=-2*(g*dx).sum(-1)/denominator
-        out=(weighted*factor[...,None]).sum(1)
-    return out.reshape(n,*field_shape)
+        contribution=weighted*factor[...,None]
+    if prop.positiveDivergence:
+        gate=(dx*weighted[...,:D]).sum(-1)>=0
+        channels=torch.arange(F,device=qf.device)<D
+        contribution=torch.where(gate[...,None]&channels,contribution,0.)
+    return contribution.sum(1).reshape(n,*field_shape)
 
 
 OPS=[sph.WarpOperation.Density,sph.WarpOperation.Interpolate,sph.WarpOperation.Gradient,

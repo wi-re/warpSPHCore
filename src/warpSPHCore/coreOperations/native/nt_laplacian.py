@@ -3,6 +3,9 @@ from ...native._inputs import prepare_operator_inputs
 
 
 def compute(query, reference, domain, properties, adjacency, queryValues=None, referenceValues=None):
+    if properties.positiveDivergence:
+        from .nt_corrected import compute as corrected
+        return corrected(query, reference, domain, properties, adjacency, queryValues, referenceValues)
     empty = query.positions.new_empty(0)
     if reference.densities is None:
         raise ValueError('laplacian requires reference densities')

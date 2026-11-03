@@ -1,8 +1,8 @@
 from .._backend import BACKEND
 
 if BACKEND == 'native':
-    from .native import radiusSearch
-    __all__ = ['radiusSearch']
+    from .native import *
+    from .native import __all__
 else:
     from .naive.radius_naive import (
         radiusNaive,

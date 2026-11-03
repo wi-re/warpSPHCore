@@ -30,7 +30,7 @@ def prepare_operator_inputs(query, reference, domain, properties, adjacency,
     if not isinstance(properties.kernel, KernelFunctions):
         raise TypeError('kernel must be a KernelFunctions')
     if (any(x is not None for x in corrections) or properties.calibrateNormalization
-            or properties.positiveDivergence):
+            or (properties.operation.name == "Laplacian" and properties.positiveDivergence)):
         raise NotImplementedError('Corrections and specialised options are not supported by the native pilot')
     geometry = prepare_geometry(query, reference, domain, allow_reverse=True)
     check_execution(reference.masses, *fields, reference.densities, query.densities, allow_reverse=True)

@@ -50,6 +50,17 @@ def sphOperation(queryParticles: ParticleState, operationProperties: OperationPr
             consistentDivergence, covarianceReturnNumNeighbors)
     if not isinstance(operationProperties, OperationProperties):
         raise TypeError('operationProperties must be an OperationProperties')
+    if operationProperties.calibrateNormalization:
+        from dataclasses import replace
+        from ...native._options import normalization_factor
+        factor = normalization_factor(operationProperties, domain.dim)
+        result = sphOperation(queryParticles, replace(operationProperties, calibrateNormalization=False),
+            domain, queryValues, referenceValues, queryVolumes, referenceVolumes, adjacency,
+            referenceParticles, preScatteredQuantities, crkState, gradHState, renormalizationState,
+            consistentDivergence, covarianceReturnNumNeighbors, backend='native')
+        if isinstance(result, tuple):
+            return tuple(value * factor if value.is_floating_point() else value for value in result)
+        return result * factor
     if preScatteredQuantities is not None:
         raise NotImplementedError('Corrections and specialised options are not supported by the native pilot')
     reference = referenceParticles if referenceParticles is not None else queryParticles
@@ -58,7 +69,7 @@ def sphOperation(queryParticles: ParticleState, operationProperties: OperationPr
     # Frontends may pass their common correction bundle to every operation.
     if operationProperties.operation == WarpOperation.Density and not (consistentDivergence or covarianceReturnNumNeighbors):
         return computeDensity(queryParticles, reference, domain, operationProperties, adjacency, backend='native')
-    if consistentDivergence or covarianceReturnNumNeighbors or any(value is not None for value in (queryVolumes, referenceVolumes,
+    if (operationProperties.operation == WarpOperation.Laplacian and operationProperties.positiveDivergence) or consistentDivergence or covarianceReturnNumNeighbors or any(value is not None for value in (queryVolumes, referenceVolumes,
                                            crkState, gradHState, renormalizationState)):
         from .nt_corrected import compute
         return compute(queryParticles, reference, domain, operationProperties, adjacency,

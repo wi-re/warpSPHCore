@@ -44,6 +44,14 @@ template <class T,int D>
 SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         int64_t i,int64_t j,const Pair<T,D>& p,const T* bar,bool consistent,bool geometry) {
     PairBars<T,D> result{};
+    T clipped_bar[MaxOutputs]={};
+    if (a.operation==5 && a.positive_divergence) {
+        T gate=0;
+        for (int d=0;d<D;++d) gate+=p.dx[d]*p.weighted[d];
+        if (gate<0) return result;
+        for (int d=0;d<D;++d) clipped_bar[d]=bar[d];
+        bar=clipped_bar;
+    }
     T bw=0,bg[D]={},bx[D]={},br=0,bh=0,blap=0,bv=0,bz[MaxFields]={};
     T raw_bw=0,raw_bg[D]={};
     if (a.operation==Volume) raw_bw=bar[0];

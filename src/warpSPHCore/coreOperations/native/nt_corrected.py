@@ -21,6 +21,8 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
         raise ValueError('consistentDivergence requires divergence')
     if return_neighbor_counts and not covariance:
         raise ValueError('covarianceReturnNumNeighbors requires covariance')
+    if laplacian and properties.positiveDivergence and domain.dim > 1 and reference_values is not None and reference_values.dim() == 1:
+        raise ValueError('Positive-divergence Laplacian requires a vector or matrix field outside 1D')
     differential = not interpolation and not (laplacian and properties.laplacianMode == LaplacianScheme.Naive)
     # Naive Laplacian uses the raw second derivative. Covariance never reads
     # grad-h or supplied fields. Do not validate/load unused correction arrays.
@@ -30,8 +32,8 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
         grad_h_state = None
     if not isinstance(properties.kernel, KernelFunctions):
         raise TypeError('kernel must be a KernelFunctions')
-    if properties.calibrateNormalization or properties.positiveDivergence:
-        raise NotImplementedError('Native corrected primals do not support normalization calibration or positive divergence')
+    if properties.calibrateNormalization:
+        raise NotImplementedError('Resolve normalization calibration at the public native boundary')
     if not covariance and (reference_values is None or (not interpolation and query_values is None)):
         raise ValueError('Corrected field operations require reference values and differential operations require query values')
     if interpolation and (grad_h_state is not None or renormalization_state is not None):

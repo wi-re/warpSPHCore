@@ -920,14 +920,53 @@ a nonlinear-field loss through complete preparation and a corrected gradient,
 then checks the JVP/VJP identity and finite differences. See the
 [corrected AD qualification](../regression/native_corrected_ad_2026_11_02.md).
 
-## Remaining milestones
+## Core completion order
 
-1. Verlet/capacity lifecycle and integration with upstream sorted neighbourhoods.
-2. Frontend operator ports and nonsmooth/singular geometry adjoint contracts.
-3. General uncorrected JVP, reverse-over-JVP and explicit supported HVP contracts.
-4. Reusable workspaces, capture and compiler integration.
-5. Public manylinux wheel release automation; AMD runtime qualification when hardware is available.
-6. Frontend-owned Warp kernels needed by a selected complete simulation.
+Frontend ports stay in a separate worktree until these core stages are closed.
+The research bundles have moved to their independent source repository; builds
+and tests do not require that checkout or the external evidence archive.
+
+| Order | Core work | State |
+|---|---|---|
+| 1 | Verlet lifecycle/capacity reuse; standard operator options | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
+| 2 | Renormalization, small matrices, solver dependencies | Next |
+| 3 | Polynomial reconstruction and MFM/MFV | Pending |
+| 4 | Chunked/owned-row search and native operator traversal | Pending |
+| 5 | Remaining derivative and public API parity | Pending; includes uncorrected JVP and existing density-HVP scope |
+| 6 | Final distribution/merge qualification | Pending; no AMD hardware gate |
+
+Higher-order and nonsmooth derivative claims need explicit numerical contracts;
+a successful primal port does not imply those derivatives. Reusable capture/
+compiler integration and public release automation retain their separate scope.
+
+### Native Verlet and operator options
+
+The native backend exports `buildVerletList`, `filterVerletList`,
+`verletStaleFlag`, `verletUsage` and `deferVerletChecks`. Motion/support reductions
+and candidate filtering share CPU/CUDA/HIP numerical headers. Validity flags stay
+on the current Torch stream; eager rebuilding reads one decision scalar and
+variable-size collection reads its edge count. No CSR-content verification or
+particle readback is introduced. Capacity headroom, CSR-only storage, optional
+COO rows, snapshot ownership and opt-in in-place buffers follow the core policy.
+Support-policy changes and versioned domain changes conservatively rebuild.
+Unversioned inference-mode domain tensors conservatively rebuild as well.
+
+Native filtering preserves Warp's inclusive cutoff (`distance <= support`);
+fresh radius search retains its strict cutoff. Tensor-supported Verlet scales
+must satisfy the caller's usual scale >= 1 contract. Variable-sized native
+build/filter remains outside CUDA graph capture; deferred flags do not add a
+claim of a capture-compatible complete search lifecycle. Warp grid factories
+and Warp-specific collection/query-order tuning are not native execution modes.
+
+`calibrateNormalization` now applies to every standard native operator, including
+corrected operations, first-order derivatives and fixed-geometry field maps.
+The cached coefficient uses shipped native kernel equations in a Warp-free
+process. Positive-divergence Laplacians support primals and active-branch
+first-order AD. They retain Warp's matrix behavior (only the first `D` flattened
+channels are written); scalar fields are admitted only in 1D. The clipped field
+map is nonlinear, so use ordinary JVP/VJP rather than `linearizeFields`.
+
+See the [lifecycle/options qualification](../regression/native_core_lifecycle_2026_11_03.md).
 
 ## Performance comparison
 

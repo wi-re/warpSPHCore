@@ -4,6 +4,7 @@ import torch
 from torch.autograd import forward_ad
 from torch.autograd.function import once_differentiable
 from ._autograd import REVERSE_KERNELS
+from ._options import laplacian_policy, POSITIVE_DIVERGENCE
 from ._topology import CSRTopology
 from .._models import AdjacencyList
 
@@ -96,7 +97,7 @@ class _Corrected(torch.autograd.Function):
         if any(ctx.mask & (1 << slot) for slot in REFERENCE):
             csc = ctx.topology.transpose()
             transpose = [csc.edgeOffsets, csc.numNeighbors, csc.paddedJ]
-        if ctx.config[0] <= 5 and (ctx.mask & ~((1 << 13) | (1 << 14))) == 0:
+        if ctx.config[0] <= 5 and not (ctx.config[5] & POSITIVE_DIVERGENCE) and (ctx.mask & ~((1 << 13) | (1 << 14))) == 0:
             # Reuse the tuned field-only ownership policy when no coefficient
             # or geometry derivatives are requested.
             gradients = [None] * len(flat)
@@ -119,7 +120,7 @@ class _Corrected(torch.autograd.Function):
         _check_geometry(ctx.config, flat, tangents)
         direction = [value.contiguous() if value is not None else None for value in tangents]
         with torch.no_grad():
-            if ctx.config[0] <= 5 and all(value is None for slot, value in enumerate(direction) if slot not in (13, 14)):
+            if ctx.config[0] <= 5 and not (ctx.config[5] & POSITIVE_DIVERGENCE) and all(value is None for slot, value in enumerate(direction) if slot not in (13, 14)):
                 result = build().field_product(flat[:17], flat[17:], direction[13], direction[14], *ctx.config[:8])
             else:
                 result = build().corrected_jvp(flat, direction, example, *ctx.config[:8])
@@ -164,7 +165,7 @@ def apply_corrected(inputs, corrections, properties, *, consistent=False, counts
     flat = [*inputs, *corrections]
     config = (properties.operation.value, properties.supportMode.value,
               properties.operationMode.value, properties.kernel.value,
-              properties.gradientMode.value, properties.laplacianMode.value,
+              properties.gradientMode.value, laplacian_policy(properties),
               properties.divergenceDotMode, consistent, counts)
     _check_geometry(config, flat)
     differentiating = any(isinstance(value, torch.Tensor) and (

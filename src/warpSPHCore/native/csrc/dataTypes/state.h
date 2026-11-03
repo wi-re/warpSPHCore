@@ -4,6 +4,7 @@
 #include "util/support.h"
 
 namespace sph_native {
+constexpr int LaplacianPositiveDivergence = 16;
 template <typename T, int D> struct RowArgs {
     const T *qx, *rx, *qh, *rh, *mass, *lo, *hi;
     const bool *periodic;
@@ -16,7 +17,7 @@ template <typename T, int D> struct RowArgs {
     int64_t references;
     int support, direction, operation, kernel;
     int fields = 1, outputs = D, scheme = 3, laplacian_mode = 2;
-    bool dot_mode = false;
+    bool dot_mode = false, positive_divergence = false;
 
     SPH_HD T displacement(int64_t i, int64_t j, T (&dx)[D]) const {
         return minimum_image_displacement<T, D>(qx + i * D, rx + j * D, lo, hi, periodic, dx);

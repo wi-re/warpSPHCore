@@ -9,9 +9,11 @@ template <class T, int D, int Fields> struct CorrectedLaplacian
     using typename Base::Query;
     using State = Sums<T, Fields>;
     int mode = 2;
+    bool positive = false;
     template <class Args> void configure(const Args& a) {
         Base::configure(a);
         mode = a.laplacian_mode;
+        positive = a.positive_divergence;
     }
     SPH_HD State identity(const Query&) const { return {}; }
     template <class Record>
@@ -78,7 +80,17 @@ template <class T, int D, int Fields> struct CorrectedLaplacian
         for (int c = 0; c < Fields; ++c) values[c] = difference(q, r, edge, c);
         // The blockwise Dot matrix is symmetric; the same contraction is its
         // field transpose. Other schemes are scalar multiples of identity.
-        field_contract(q, r, edge, values, sum.values);
+        if (positive) {
+            T dx[D]; q.geometry.distance(r.data, dx);
+            T projection = 0;
+            for (int d = 0; d < D; ++d) projection += dx[d] * values[d];
+            if (projection < 0) return;
+            T contribution[Fields] = {};
+            field_contract(q, r, edge, values, contribution);
+            // Preserve Warp's positiveDotProduct contract: for a matrix field
+            // only its first D flattened components are written.
+            for (int d = 0; d < D; ++d) sum.values[d] += contribution[d];
+        } else field_contract(q, r, edge, values, sum.values);
     }
     SPH_HD void finish(const Query& q, const State& sum) const {
         for (int c = 0; c < Fields; ++c) this->fields.output[q.index * Fields + c] = sum.values[c];

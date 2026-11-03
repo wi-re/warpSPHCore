@@ -1,5 +1,6 @@
 """Fixed-geometry field linear products for matrix-free native solvers."""
 from typing import NamedTuple, Optional
+from dataclasses import replace
 import torch
 from torch.autograd.function import once_differentiable
 from ..enumTypes import WarpOperation
@@ -44,6 +45,8 @@ class FieldLinearization:
     in-place changes to captured tensors invalidate it.
     """
     def __init__(self, inputs, corrections, properties, topology, consistent, query, reference, alias):
+        from ._options import normalization_factor
+        self._scale = normalization_factor(properties, len(inputs[7]))
         self.topology = topology
         self._topology_token = topology.token()
         self._inputs = [t.detach() if isinstance(t, torch.Tensor) else t for t in inputs]
@@ -66,7 +69,8 @@ class FieldLinearization:
     def _product(self, query, reference):
         from ._build import build
         self._check()
-        return build().field_product(self._inputs, self._corrections, query, reference, *self._parameters)
+        value = build().field_product(self._inputs, self._corrections, query, reference, *self._parameters)
+        return value if self._scale == 1. else value * self._scale
 
     def _pullback(self, cotangent, query, reference):
         from ._build import build
@@ -75,6 +79,7 @@ class FieldLinearization:
         if reference:
             csc = self.topology.transpose()
             transpose = [csc.edgeOffsets, csc.numNeighbors, csc.paddedJ]
+        cotangent = cotangent if self._scale == 1. else cotangent * self._scale
         return FieldCotangents(*build().field_pullback(self._inputs, self._corrections,
             cotangent, transpose, query, reference, *self._parameters))
 
@@ -115,6 +120,8 @@ def linearizeFields(queryParticles, operationProperties, domain, queryValues=Non
     if operationProperties.operation not in (WarpOperation.Interpolate, WarpOperation.Gradient,
             WarpOperation.Divergence, WarpOperation.Curl, WarpOperation.Laplacian):
         raise NotImplementedError('Field linearization supports interpolation, gradient, divergence, curl and Laplacian')
+    if operationProperties.operation == WarpOperation.Laplacian and operationProperties.positiveDivergence:
+        raise ValueError('Positive-divergence Laplacian is nonlinear in fields; use ordinary Torch JVP/VJP')
     check_execution(queryValues, referenceValues, allow_reverse=True)
     alias = referenceValues is None
     referenceValues = queryValues if alias else referenceValues
@@ -122,7 +129,7 @@ def linearizeFields(queryParticles, operationProperties, domain, queryValues=Non
     topology = adjacency if isinstance(adjacency, CSRTopology) else CSRTopology(
         prepare_adjacency(queryParticles, reference, domain, operationProperties, adjacency))
     from ..coreOperations.native.nt_corrected import _prepare, _check_primal
-    inputs, corrections, used = _prepare(queryParticles, reference, domain, operationProperties,
+    inputs, corrections, used = _prepare(queryParticles, reference, domain, replace(operationProperties, calibrateNormalization=False),
         topology.adjacency, queryValues.detach() if queryValues is not None else None,
         referenceValues.detach() if referenceValues is not None else None,
         queryVolumes, referenceVolumes, crkState, gradHState, renormalizationState,

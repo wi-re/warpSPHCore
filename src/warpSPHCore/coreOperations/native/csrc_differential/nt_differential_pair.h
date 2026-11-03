@@ -187,20 +187,26 @@ SPH_HD void forward(const RowArgs<T,D>& a, const Pair<S,D>& p, S* out) {
                 out[d*stride+c]+=p.gradient[(d+1)%3]*p.weighted[((d+2)%3)*stride+c]-p.gradient[(d+2)%3]*p.weighted[((d+1)%3)*stride+c];
         }
     } else if (a.operation==5) {
+        if (a.positive_divergence) {
+            S gate=S(0);
+            for (int d=0;d<D;++d) gate+=p.dx[d]*p.weighted[d];
+            if (ScalarValue<S>::get(gate)<0) return;
+        }
+        const int fields=a.positive_divergence ? D:a.fields;
         if (a.laplacian_mode==1) {
-            for (int c=0; c<a.fields; ++c) out[c]+=p.weighted[c]*p.lap;
+            for (int c=0; c<fields; ++c) out[c]+=p.weighted[c]*p.lap;
         } else if (ScalarValue<S>::get(p.distance)>0) {
             const S denominator=p.distance+S(1e-8)*p.h;
             S n[D],projection=S(0);
             for (int d=0; d<D; ++d) { n[d]=p.dx[d]/denominator; projection+=p.gradient[d]*n[d]; }
             if (a.laplacian_mode==3) {
-                for (int base=0; base<a.fields; base+=D) {
+                for (int base=0; base<fields; base+=D) {
                     S z=S(0); for (int d=0; d<D; ++d) z+=p.weighted[base+d]*n[d];
                     for (int d=0; d<D; ++d) out[base+d]+=(p.weighted[base+d]-S(D+2)*z*n[d])*projection/denominator;
                 }
             } else {
                 const S divisor=p.distance+S(a.laplacian_mode==4 ? 1e-12 : 1e-8)*p.h;
-                for (int c=0; c<a.fields; ++c) out[c]-=S(2)*p.weighted[c]*projection/divisor;
+                for (int c=0; c<fields; ++c) out[c]-=S(2)*p.weighted[c]*projection/divisor;
             }
         }
     }

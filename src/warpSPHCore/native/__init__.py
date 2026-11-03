@@ -30,3 +30,8 @@ def __getattr__(name):
 from ._topology import CSRTopology
 from ._field import linearizeFields, FieldLinearization, FieldCotangents
 __all__ += ['CSRTopology', 'linearizeFields', 'FieldLinearization', 'FieldCotangents']
+
+from ..radiusSearch.native import (buildVerletList, filterVerletList, verletStaleFlag,
+                                  verletUsage, verletValidityMetrics, deferVerletChecks)
+__all__ += ["buildVerletList", "filterVerletList", "verletStaleFlag", "verletUsage",
+            "verletValidityMetrics", "deferVerletChecks"]

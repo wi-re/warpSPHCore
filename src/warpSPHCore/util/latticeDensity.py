@@ -104,6 +104,20 @@ def _evaluators():
     float when `scalar_t` is float32 -- under a float64 configuration
     `eval_k(0.25, 2, 0)` raises "no overload found".
     """
+    from .._backend import BACKEND
+    if BACKEND == 'native':
+        import torch
+        from ..kernels.native import evaluateKernel
+        from ..enumTypes import KernelFunctions
+        @functools.lru_cache(maxsize=4096)
+        def radial(q, dim, kern):
+            # Host-only metadata calculation, cached outside simulation kernels.
+            # Evaluate the shipped native equations rather than copying formulas.
+            x = torch.zeros((1, dim), dtype=torch.float64)
+            x[0, 0] = q
+            return evaluateKernel(x, torch.ones(1, dtype=x.dtype), KernelFunctions(kern)).radial[0]
+        return (lambda q, dim, kern: float(radial(float(q), dim, kern)[0]),
+                lambda dim, kern: float(radial(0., dim, kern)[4]))
     from .. import type_config
     from ..kernels.eval_kernel import eval_k, eval_C_d
     scalar = type_config.scalar_t

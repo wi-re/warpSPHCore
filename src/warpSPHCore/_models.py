@@ -183,6 +183,11 @@ class AdjacencyList:
     # Number of real entries at the front of paddedI / paddedJ (the rest is -1 padding). Host int, known at build time.
     numEdges: Optional[int] = None
 
+    # Backend-owned reuse metadata (support policy and domain tensor versions).
+    # Signature comparisons use host metadata only; bound domain owners are retained.
+    # Restored/foreign lists start unbound and conservatively rebuild.
+    searchContext: Optional[tuple] = None
+
     def cooRows(self, *, padded=True):
         """Explicit temporary COO rows; CSR-only lists never cache this allocation.
 

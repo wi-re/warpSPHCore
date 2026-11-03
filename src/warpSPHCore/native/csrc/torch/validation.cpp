@@ -1,5 +1,6 @@
 #include <limits>
 #include "torch/validation.h"
+#include "dataTypes/state.h"
 
 namespace sph_native {
 void tensor(const Tensor &x, const Tensor &example, ScalarType dtype, const char *name) {
@@ -75,7 +76,7 @@ Tensors prepare_field_operator(const Tensors &inputs, int support, int direction
 Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot, const Tensor* output) {
     STD_TORCH_CHECK(op >= 1 && op <= 7 && op != 6, "Unknown field operator");
     STD_TORCH_CHECK(scheme >= 1 && scheme <= 4, "Unknown gradient scheme");
-    STD_TORCH_CHECK(lap >= 1 && lap <= 4, "Unknown Laplacian scheme");
+    STD_TORCH_CHECK((lap & ~31) == 0 && (lap & 15) >= 1 && (lap & 15) <= 4, "Unknown Laplacian scheme");
     const auto &x = t[QX];
     const auto n = x.size(0), nr = t[RX].size(0), D = x.size(1);
 
@@ -115,9 +116,9 @@ Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot, c
                     shape.push_back(1);
             }
         }
-        if (op == 5 && lap == 3)
+        if (op == 5 && ((lap & 15) == 3 || (lap & LaplacianPositiveDivergence)))
             STD_TORCH_CHECK(D == 1 || t[RVALUE].dim() > 1,
-                            "Dot Laplacian requires a vector or matrix field");
+                            "Dot/positive-divergence Laplacian requires a vector or matrix field");
     }
     if (scheme == 2 && op != 1 && op != 7) {
         vector(t[QDENSITY], x, x.scalar_type(), n, "query densities");

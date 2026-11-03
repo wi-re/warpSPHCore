@@ -1,11 +1,18 @@
-from .build import buildVerletList, deferVerletChecks, verletStaleFlag, verletUsage
-from .filter import filterVerletList, updateNeighborsVerlet
+from ..._backend import BACKEND
 
-__all__ = [
-    "buildVerletList",
-    "verletStaleFlag",
-    "verletUsage",
-    "deferVerletChecks",
-    "filterVerletList",
-    "updateNeighborsVerlet"
-]
+if BACKEND == "native":
+    from ..native.nt_verlet import (buildVerletList, filterVerletList, verletStaleFlag,
+                                    verletUsage, deferVerletChecks)
+    __all__ = ["buildVerletList", "filterVerletList", "verletStaleFlag", "verletUsage", "deferVerletChecks"]
+else:
+    from .build import buildVerletList, deferVerletChecks, verletStaleFlag, verletUsage
+    from .filter import filterVerletList, updateNeighborsVerlet
+
+    __all__ = [
+        "buildVerletList",
+        "verletStaleFlag",
+        "verletUsage",
+        "deferVerletChecks",
+        "filterVerletList",
+        "updateNeighborsVerlet"
+    ]

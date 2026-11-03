@@ -1,126 +1,139 @@
-from .wp_util import (
-#     clearDummyTensorCache,
-#     getCachedDummyTensor,
-#     getCachedIdentityMatrices,
-#     getCachedWarpArray,
-#     clearWarpArrayCache,
-    generateNeighborTestData
-)
-# from .wp_autograd import (
-#     WarpFunctionWrapper,
-#     warpWrapper,
-#     launch_kernel,
-#     clearKernelArgsCache,
-#     StateAwareWarpFunction
-# )
+"""Backend-neutral host utilities; Warp views remain backend-owned."""
+from .._backend import BACKEND
 
-from .support import volumeToSupport, volumeToSupport_tensor, n_h_to_nH, volumeToSupport_warp, computePairwiseSupport, nH_to_n_h
-from .latticeDensity import (
-    latticeDensity, latticeDensityFactor,
-    latticeDensityShells, latticeDensityFourier, latticeDensityClosed,
-    latticeDensityIsStrictlyAbove1,
-    kernelFourierTransform, epsteinZeta, shellCounts, jacobiR2,
-    WENDLAND_TAIL_COEFFICIENTS,
-)
-from .densityCorrection import (
-    applyDensityCorrection, selfTermW0, densityCorrectionConstants,
-)
+if BACKEND == "native":
+    from .latticeDensity import (latticeDensity, latticeDensityFactor, latticeDensityShells,
+        latticeDensityFourier, latticeDensityClosed, latticeDensityIsStrictlyAbove1,
+        kernelFourierTransform, epsteinZeta, shellCounts, jacobiR2, WENDLAND_TAIL_COEFFICIENTS)
+    from .support_common import volumeToSupport, volumeToSupport_tensor, n_h_to_nH, nH_to_n_h
+    __all__ = ['latticeDensity', 'latticeDensityFactor', 'latticeDensityShells',
+        'latticeDensityFourier', 'latticeDensityClosed', 'latticeDensityIsStrictlyAbove1',
+        'kernelFourierTransform', 'epsteinZeta', 'shellCounts', 'jacobiR2', 'WENDLAND_TAIL_COEFFICIENTS',
+        'volumeToSupport', 'volumeToSupport_tensor', 'n_h_to_nH', 'nH_to_n_h']
+else:
+    from .wp_util import (
+    #     clearDummyTensorCache,
+    #     getCachedDummyTensor,
+    #     getCachedIdentityMatrices,
+    #     getCachedWarpArray,
+    #     clearWarpArrayCache,
+        generateNeighborTestData
+    )
+    # from .wp_autograd import (
+    #     WarpFunctionWrapper,
+    #     warpWrapper,
+    #     launch_kernel,
+    #     clearKernelArgsCache,
+    #     StateAwareWarpFunction
+    # )
 
-
-__all__ = [
-    "castTorchToWarp",
-    "castWarpToTorch",
-    "castTorchToWarpAsBuiltins",
-    # "clearDummyTensorCache",
-    # "getCachedDummyTensor",
-    # "getCachedIdentityMatrices",
-    # "getCachedWarpArray",
-    # "clearWarpArrayCache",
-    # "clearKernelArgsCache",
-    # "WarpFunctionWrapper",
-    # "warpWrapper",
-    # "launch_kernel",
-    "volumeToSupport",
-    "volumeToSupport_tensor",
-    "n_h_to_nH",
-    "nH_to_n_h",
-    "volumeToSupport_warp",
-    "computePairwiseSupport",
-    "generateNeighborTestData",
-    "latticeDensity",
-    "latticeDensityFactor",
-    "latticeDensityShells",
-    "latticeDensityFourier",
-    "latticeDensityClosed",
-    "latticeDensityIsStrictlyAbove1",
-    "kernelFourierTransform",
-    "epsteinZeta",
-    "shellCounts",
-    "jacobiR2",
-    "WENDLAND_TAIL_COEFFICIENTS",
-    "applyDensityCorrection",
-    "selfTermW0",
-    "densityCorrectionConstants",
-
-    # "StateAwareWarpFunction"
-]
+    from .support import volumeToSupport, volumeToSupport_tensor, n_h_to_nH, volumeToSupport_warp, computePairwiseSupport, nH_to_n_h
+    from .latticeDensity import (
+        latticeDensity, latticeDensityFactor,
+        latticeDensityShells, latticeDensityFourier, latticeDensityClosed,
+        latticeDensityIsStrictlyAbove1,
+        kernelFourierTransform, epsteinZeta, shellCounts, jacobiR2,
+        WENDLAND_TAIL_COEFFICIENTS,
+    )
+    from .densityCorrection import (
+        applyDensityCorrection, selfTermW0, densityCorrectionConstants,
+    )
 
 
-from .stateUtil import (
-    getParticle, getL_i, getVolume_i, getVolume_j, getGradH_i, getGradH_j, getCRK_i, getCRK_j,
-    getRenormTangent_i, getVolumeTangent_i, getVolumeTangent_j, getGradHTangent_i, getGradHTangent_j,
-    getCRKTangent_i, getCRKTangent_j,
-    getParticleData, getParticleCorrectionData_i, getParticleCorrectionData_j,
-    getParticleCorrectionTangentData_i,
-    access_optional, ternary_helper,
-)
+    __all__ = [
+        "castTorchToWarp",
+        "castWarpToTorch",
+        "castTorchToWarpAsBuiltins",
+        # "clearDummyTensorCache",
+        # "getCachedDummyTensor",
+        # "getCachedIdentityMatrices",
+        # "getCachedWarpArray",
+        # "clearWarpArrayCache",
+        # "clearKernelArgsCache",
+        # "WarpFunctionWrapper",
+        # "warpWrapper",
+        # "launch_kernel",
+        "volumeToSupport",
+        "volumeToSupport_tensor",
+        "n_h_to_nH",
+        "nH_to_n_h",
+        "volumeToSupport_warp",
+        "computePairwiseSupport",
+        "generateNeighborTestData",
+        "latticeDensity",
+        "latticeDensityFactor",
+        "latticeDensityShells",
+        "latticeDensityFourier",
+        "latticeDensityClosed",
+        "latticeDensityIsStrictlyAbove1",
+        "kernelFourierTransform",
+        "epsteinZeta",
+        "shellCounts",
+        "jacobiR2",
+        "WENDLAND_TAIL_COEFFICIENTS",
+        "applyDensityCorrection",
+        "selfTermW0",
+        "densityCorrectionConstants",
 
-__all__.extend([
-    "getParticle",
-    "getL_i",
-    "getVolume_i",
-    "getVolume_j",
-    "getGradH_i",
-    "getGradH_j",
-    "getCRK_i",
-    "getCRK_j",
-    "getRenormTangent_i",
-    "getVolumeTangent_i",
-    "getVolumeTangent_j",
-    "getGradHTangent_i",
-    "getGradHTangent_j",
-    "getCRKTangent_i",
-    "getCRKTangent_j",
-    "getParticleData",
-    "getParticleCorrectionData_i",
-    "getParticleCorrectionData_j",
-    "getParticleCorrectionTangentData_i",
-    "access_optional",
-    "ternary_helper"
+        # "StateAwareWarpFunction"
+    ]
 
-])
 
-from .directionality import checkDirectionality_i, checkDirectionality_j
-__all__.extend([
-    "checkDirectionality_i",
-    "checkDirectionality_j"
-])
+    from .stateUtil import (
+        getParticle, getL_i, getVolume_i, getVolume_j, getGradH_i, getGradH_j, getCRK_i, getCRK_j,
+        getRenormTangent_i, getVolumeTangent_i, getVolumeTangent_j, getGradHTangent_i, getGradHTangent_j,
+        getCRKTangent_i, getCRKTangent_j,
+        getParticleData, getParticleCorrectionData_i, getParticleCorrectionData_j,
+        getParticleCorrectionTangentData_i,
+        access_optional, ternary_helper,
+    )
 
-from .cast import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins, allocateTorchWarp, _torch_scalar_to_warp_dtype, _get_warp_matrix_dtype, _get_warp_vector_dtype
-__all__.extend([
-    "castTorchToWarp",
-    "castWarpToTorch",
-    "castTorchToWarpAsBuiltins",
-    "allocateTorchWarp",
-    "_torch_scalar_to_warp_dtype",
-    "_get_warp_matrix_dtype",
-    "_get_warp_vector_dtype"
-])
+    __all__.extend([
+        "getParticle",
+        "getL_i",
+        "getVolume_i",
+        "getVolume_j",
+        "getGradH_i",
+        "getGradH_j",
+        "getCRK_i",
+        "getCRK_j",
+        "getRenormTangent_i",
+        "getVolumeTangent_i",
+        "getVolumeTangent_j",
+        "getGradHTangent_i",
+        "getGradHTangent_j",
+        "getCRKTangent_i",
+        "getCRKTangent_j",
+        "getParticleData",
+        "getParticleCorrectionData_i",
+        "getParticleCorrectionData_j",
+        "getParticleCorrectionTangentData_i",
+        "access_optional",
+        "ternary_helper"
 
-from .fieldRegistry import acquireView, nullField, clearNullFieldRegistry, structFor
-__all__.extend([
-    "acquireView",
-    "nullField",
-    "clearNullFieldRegistry",
-    "structFor",
-])
+    ])
+
+    from .directionality import checkDirectionality_i, checkDirectionality_j
+    __all__.extend([
+        "checkDirectionality_i",
+        "checkDirectionality_j"
+    ])
+
+    from .cast import castTorchToWarp, castWarpToTorch, castTorchToWarpAsBuiltins, allocateTorchWarp, _torch_scalar_to_warp_dtype, _get_warp_matrix_dtype, _get_warp_vector_dtype
+    __all__.extend([
+        "castTorchToWarp",
+        "castWarpToTorch",
+        "castTorchToWarpAsBuiltins",
+        "allocateTorchWarp",
+        "_torch_scalar_to_warp_dtype",
+        "_get_warp_matrix_dtype",
+        "_get_warp_vector_dtype"
+    ])
+
+    from .fieldRegistry import acquireView, nullField, clearNullFieldRegistry, structFor
+    __all__.extend([
+        "acquireView",
+        "nullField",
+        "clearNullFieldRegistry",
+        "structFor",
+    ])

@@ -2,6 +2,11 @@
 
 ## Unreleased — native development branch
 
+- Add native Verlet validity, filtering, snapshot/capacity lifecycle and deferred
+  device flags; qualify CPU/CUDA and experimental gfx942 compilation.
+- Support native normalization calibration and positive-divergence Laplacians,
+  including their applicable first-order derivatives.
+
 - Move exploratory studies to an independent research repository with a verified
   migration manifest; enforce the external-artifact policy in agent rules and CI.
 
