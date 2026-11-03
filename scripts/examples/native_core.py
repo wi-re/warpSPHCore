@@ -1,4 +1,4 @@
-"""Complete Warp-free native pilot: neighbour build, density, scalar gradient.
+"""Warp-free core example: neighbors, density, corrected gradient and a solve.
 
 Run with WARPSPHCORE_BACKEND=native before package import. No timing is collected.
 """
@@ -29,11 +29,24 @@ def main():
     p.densities = sph.warpOperation(p, properties, domain, adjacency=adjacency)
     properties = sph.OperationProperties(sph.KernelFunctions.Wendland2, operation=sph.WarpOperation.Gradient,
                                          gradientMode=sph.GradientScheme.Difference)
-    gradient = sph.warpOperation(p, properties, domain, torch.ones_like(p.masses), adjacency=adjacency)
+    # Build the correction through the native covariance and dense inverse.
+    # This tiny cloud deliberately exercises the low-neighbor identity rule.
+    correction = sph.computeRenormalizationMatrices(
+        p, properties, domain, adjacency=adjacency, returnEigVals=False)
+    gradient = sph.warpOperation(p, properties, domain, torch.ones_like(p.masses), adjacency=adjacency,
+                                 renormalizationState=correction)
     torch.testing.assert_close(gradient, torch.zeros_like(x), atol=0, rtol=0)
     assert torch.isfinite(p.densities).all() and (p.densities > 0).all()
+    # Real solvers supply an SPH matrix action here. A diagonal system keeps
+    # the example readable while demonstrating reusable native CPU/GPU scratch.
+    diagonal = x.new_tensor([1., 2., 3.])
+    rhs = torch.ones_like(diagonal)
+    workspace = sph.CGWorkspace(rhs, maxiter=16, history=False)
+    solution = sph.cg(lambda value: diagonal*value, rhs,
+                      workspace=workspace, maxiter=16, rtol=1e-10)
+    torch.testing.assert_close(diagonal*solution.x, rhs)
     assert not any(name == 'warp' or name.startswith('warp.') for name in sys.modules)
-    print(f'Native {args.device}: {len(x)} particles, {adjacency.numEdges} CSR entries; density and gradient passed; Warp not imported')
+    print(f'Native {args.device}: {len(x)} particles, {adjacency.numEdges} CSR entries; density, corrected gradient and CG passed; Warp not imported')
 
 
 if __name__ == '__main__':

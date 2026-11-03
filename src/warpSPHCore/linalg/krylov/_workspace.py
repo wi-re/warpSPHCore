@@ -8,9 +8,8 @@ from collections import OrderedDict
 from time import perf_counter
 
 import torch
-import warp as wp
+from ._execution import engine
 
-from ...autograd.stream import torchWarpCapture, torchWarpStream
 from .common import nonnegativeInt, validateVector
 
 
@@ -23,7 +22,7 @@ class KrylovWorkspace:
         self.maxiter = nonnegativeInt('maxiter', maxiter)
         if capture and not example.is_cuda:
             raise ValueError('captured chunks require a CUDA workspace')
-        wp.init()
+        engine.initialize()
         self.history = bool(history)
         self.shape, self.dtype, self.device = example.shape, example.dtype, example.device
         self._t, self._w = {}, {}
@@ -66,7 +65,7 @@ class KrylovWorkspace:
         side.wait_stream(current)
         # Warm one real update, then restore the numerical state. Count that
         # executed work; Python calls made only to record a graph are excluded.
-        with torch.cuda.stream(side), torchWarpStream(self.device):
+        with torch.cuda.stream(side), engine.scope(self.device):
             backup = {key: value.clone() for key, value in self._t.items()}
             try:
                 iteration()
@@ -79,7 +78,7 @@ class KrylovWorkspace:
             recordedCounts = counts.copy()
             graph = torch.cuda.CUDAGraph()
             try:
-                with torchWarpCapture(graph) as capture:
+                with engine.capture(graph) as capture:
                     for _ in range(steps):
                         iteration()
             finally:
@@ -88,7 +87,7 @@ class KrylovWorkspace:
             self.captureMilliseconds += (perf_counter() - before) * 1e3
         current.wait_stream(side)
         self.captureBuilds += 1
-        self._graphs[steps] = (graph, commands, capture.graph)
+        self._graphs[steps] = (graph, commands, getattr(capture, "graph", None))
         # One regular chunk and one tail; arbitrary budget changes do not grow
         # the graph cache indefinitely. Each graph keeps its bound modules.
         if len(self._graphs) > 2:
@@ -97,7 +96,7 @@ class KrylovWorkspace:
 
     def _allocate(self, name, shape, dtype):
         value = torch.empty(shape, device=self.device, dtype=dtype)
-        self._t[name], self._w[name] = value, wp.from_torch(value)
+        self._t[name], self._w[name] = value, engine.array(value)
 
     @property
     def nbytes(self):

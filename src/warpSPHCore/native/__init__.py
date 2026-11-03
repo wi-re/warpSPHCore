@@ -18,13 +18,26 @@ __all__ = list(_enums) + ['ParticleState', 'ParticleTangentState', 'PointCloud',
 # backend can use native infrastructure without re-entering its own exports.
 _CRK_EXPORTS = ['computeCRKVolume', 'computeCRKMoments', 'computeCRKDensity',
                 'computeCRKTerms', 'computeCRKFactors', 'CRKPreparation', 'prepareCRK']
-__all__ += _CRK_EXPORTS
+_LINALG_EXPORTS = ['applyPinv', 'pinvSymmetric', 'symmetricPinv3', 'loadPadded3x3',
+    'bicg', 'bicgstab', 'cg', 'gmres', 'minres', 'richardson', 'LinearOperator',
+    'RestrictedSystem', 'NullspaceSystem', 'NullspaceRhs', 'NullspaceResiduals',
+    'DiagonalPreconditioner', 'BlockJacobiPreconditioner', 'CGWorkspace',
+    'BiCGStabWorkspace', 'SolveResult', 'Status', 'CheckSchedule',
+    'RESIDUAL_STATISTICS', 'StationaryResult', 'residualStatistic', 'runStationary']
+_RENORM_EXPORTS = ['computeRenormalizationMatrices', 'computeRenormalizationMatricesJVP']
+_PINV_EXPORTS = ['pinv_warp', 'pinv1x1', 'pinv2x2_warpBackend']
+__all__ += _CRK_EXPORTS + _LINALG_EXPORTS + _RENORM_EXPORTS + _PINV_EXPORTS
 
 
 def __getattr__(name):
     if name in _CRK_EXPORTS:
         from importlib import import_module
         return getattr(import_module('..crk.native', __name__), name)
+    for exports, module in ((_LINALG_EXPORTS, '..linalg'),
+                            (_RENORM_EXPORTS, '..renorm'), (_PINV_EXPORTS, '..pinv')):
+        if name in exports:
+            from importlib import import_module
+            return getattr(import_module(module, __name__), name)
     raise AttributeError(f'module {__name__!r} has no attribute {name!r}')
 
 from ._topology import CSRTopology

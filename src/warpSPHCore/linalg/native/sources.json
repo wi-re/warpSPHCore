@@ -1,0 +1,2 @@
+{"cpu": ["csrc_krylov/nt_krylov.cpp", "csrc_block/nt_block.cpp"],
+ "gpu": ["csrc_krylov/nt_krylov.cu", "csrc_block/nt_block.cu"]}

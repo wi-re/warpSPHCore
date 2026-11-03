@@ -929,8 +929,8 @@ and tests do not require that checkout or the external evidence archive.
 | Order | Core work | State |
 |---|---|---|
 | 1 | Verlet lifecycle/capacity reuse; standard operator options | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
-| 2 | Renormalization, small matrices, solver dependencies | Next |
-| 3 | Polynomial reconstruction and MFM/MFV | Pending |
+| 2 | Renormalization, small matrices, solver dependencies | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
+| 3 | Polynomial reconstruction and MFM/MFV | Next |
 | 4 | Chunked/owned-row search and native operator traversal | Pending |
 | 5 | Remaining derivative and public API parity | Pending; includes uncorrected JVP and existing density-HVP scope |
 | 6 | Final distribution/merge qualification | Pending; no AMD hardware gate |
@@ -1039,3 +1039,17 @@ identify scaffolding/Torch/dispatch. Black diamonds show matched ordinary runs
 because instrumentation itself adds cost. See the
 [stage attribution report](../regression/native_frontend_stages_2026_11_03.md)
 for scope, raw evidence and reproduction.
+
+### Native dense helpers and solvers
+
+The native root exports the core `linalg` API and
+`computeRenormalizationMatrices` / `computeRenormalizationMatricesJVP` without
+importing Warp. Dense inverse/application, small-block preconditioning and
+CG/BiCGStab workspace updates share compiled CPU/CUDA/HIP numerical headers.
+Solver control flow remains shared with Warp; reductions use Torch in a native
+process. Captured workspace chunks avoid device-wide synchronization, while
+outer convergence checkpoints and true-residual verification retain host reads.
+The workspace path remains inference-only. Ordinary solvers and dense spectral
+AD retain their Torch implementations. See the
+[dense and solver qualification](../regression/native_dense_solvers_2026_11_03.md)
+for numerical policies, derivative scope and verification.

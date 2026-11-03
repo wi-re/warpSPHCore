@@ -2,6 +2,8 @@
 
 ## Unreleased — native development branch
 
+- Native core: Warp-free renormalization and linear algebra, shared CPU/CUDA/HIP dense and Krylov updates, and reusable captured CG/BiCGStab workspaces.
+
 - Add native Verlet validity, filtering, snapshot/capacity lifecycle and deferred
   device flags; qualify CPU/CUDA and experimental gfx942 compilation.
 - Support native normalization calibration and positive-divergence Laplacians,
