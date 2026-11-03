@@ -20,19 +20,10 @@ def computeCovarianceGeometryJVP(queryParticles,domain,kernel,supportMode,adjace
         operationMode=OperationDirection.AllToAll,queryTangentState=None,
         referenceParticles=None,referenceTangentState=None,referenceVolumes=None,
         tangentReferenceVolumes=None):
-    from ...native.api import warpOperation
-    with forward_ad.dual_level():
-        query=_dual_state(queryParticles,queryTangentState)
-        # Explicit JVP roles stay independent even for a self-neighborhood: an
-        # omitted reference tangent means a fixed reference cloud, as in Warp.
-        reference=_dual_state(referenceParticles if referenceParticles is not None else queryParticles,
-                              referenceTangentState)
-        volumes=referenceVolumes
-        if volumes is not None and tangentReferenceVolumes is not None:
-            volumes=forward_ad.make_dual(volumes,tangentReferenceVolumes)
-        properties=OperationProperties(kernel,operation=WarpOperation.Covariance,
-                                        supportMode=supportMode,operationMode=operationMode)
-        covariance,_=warpOperation(query,properties,domain,adjacency=adjacency,referenceParticles=reference,
-                                    referenceVolumes=volumes,covarianceReturnNumNeighbors=True)
-        primal,tangent=forward_ad.unpack_dual(covariance)
-        return tangent if tangent is not None else torch.zeros_like(primal)
+    from .nt_jvp import warpOperationJVP
+    properties=OperationProperties(kernel,operation=WarpOperation.Covariance,
+        supportMode=supportMode,operationMode=operationMode)
+    return warpOperationJVP(queryParticles,properties,domain,
+        queryTangentState=queryTangentState,referenceTangentState=referenceTangentState,
+        referenceParticles=referenceParticles,adjacency=adjacency,
+        referenceVolumes=referenceVolumes,tangentReferenceVolumes=tangentReferenceVolumes)

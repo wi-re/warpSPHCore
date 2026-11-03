@@ -36,9 +36,9 @@ void geometry(const Tensors &t, int support) {
     vector(t[LO], q, q.scalar_type(), q.size(1), "domain min");
     vector(t[HI], q, q.scalar_type(), q.size(1), "domain max");
     vector(t[PERIODIC], q, ScalarType::Bool, q.size(1), "periodicity");
-    STD_TORCH_CHECK(support >= 11 && support <= 15,
-                    "Native pilot supports Gather, Scatter, MeanSymmetric, KernelMeanSymmetric and "
-                    "SuperSymmetric");
+    STD_TORCH_CHECK(support >= 11 && support <= 16,
+                    "Native supports Gather, Scatter, MeanSymmetric, KernelMeanSymmetric, "
+                    "SuperSymmetric and PartialSymmetric (maximum support)");
 }
 
 Tensors prepare_pair_geometry(const Tensors &inputs, int support, int direction) {

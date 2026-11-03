@@ -4,7 +4,7 @@ Explicit imports from native.api continue to request the native implementation,
 including in reference-backend qualification running in a Warp process.
 """
 from functools import partial
-from ..enumTypes import KernelFunctions, WarpOperation
+from ..enumTypes import KernelFunctions, WarpOperation, SupportScheme
 from ._autograd import REVERSE_KERNELS
 from ..coreOperations.native import sphOperation as _operation
 from ..radiusSearch.native import radiusSearch as _radius
@@ -12,14 +12,15 @@ from ..radiusSearch.native import radiusSearch as _radius
 warpOperation = partial(_operation, backend='native')
 sphOperation = warpOperation
 radiusSearch = partial(_radius, backend='native')
+from ..coreOperations.native.nt_jvp import warpOperationJVP
 
 def nativeCapabilities():
     """Declared native scope; no runtime initialisation or compilation."""
     return dict(operations=tuple(op.name.lower() for op in WarpOperation if op != WarpOperation.Custom),
                 kernels=tuple(k.name for k in KernelFunctions), dimensions=(1, 2, 3),
                 precision=('float32', 'float64'), execution=('cpu', 'cuda', 'hip'),
-                experimental_execution=('hip',),
-                autograd=True, autograd_order=1, forward_ad=False, higher_order=False,
+                experimental_execution=('hip',), support_schemes=tuple(s.name for s in SupportScheme),
+                autograd=True, autograd_order=1, forward_ad=True, higher_order=False,
                 reverse_kernels=tuple(k.name for k in KernelFunctions if k.value in REVERSE_KERNELS),
                 field_ranks=(0, 1, 2), deterministic_adjoint=False, radius_search='compact_hash', graph_capture=False,
                 graph_capture_fixed_adjacency=('interpolate_primal',),
@@ -45,4 +46,6 @@ def nativeCapabilities():
                 corrected_forward_ad=True, corrected_ad_order=1,
                 corrected_geometry_kernels=tuple(k.name for k in KernelFunctions if k.value in REVERSE_KERNELS),
                 corrected_adjoint_ownership='csr_csc', corrected_adjoint_floating_atomics=False,
-                crk_preparation_forward_ad=True, crk_preparation_ad_order=1)
+                crk_preparation_forward_ad=True, crk_preparation_ad_order=1,
+                explicit_jvp=True, density_position_hvp=True,
+                density_position_hvp_geometry_ad=False, density_position_hvp_vector_mass_ad_order=1)

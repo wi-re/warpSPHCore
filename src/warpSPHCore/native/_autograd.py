@@ -47,6 +47,15 @@ def apply_operator(name, inputs, properties):
     params = (properties.supportMode.value, properties.operationMode.value, properties.kernel.value,
               properties.gradientMode.value, properties.laplacianMode.value, properties.divergenceDotMode)
     used = _used_slots(name, properties.gradientMode.value)
+    # Uncorrected primals keep their tuned path. Forward products share the
+    # analytic CSR/CSC pair derivatives with corrected operations.
+    from torch.autograd import forward_ad
+    if any(forward_ad.unpack_dual(inputs[slot]).tangent is not None for slot in used):
+        from ._differential import apply_corrected
+        metadata = {5, 6, 9, 10, 11, 12}
+        flat = [value if slot in used or slot in metadata else None
+                for slot, value in enumerate(inputs)]
+        return apply_corrected(flat, [None] * 9, properties)
     needs_reverse = torch.is_grad_enabled() and any(inputs[slot].requires_grad for slot in used)
     if needs_reverse:
         if torch.are_deterministic_algorithms_enabled():

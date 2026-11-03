@@ -7,7 +7,7 @@ title: Experimental native backend
 The native backend builds neighbourhoods, evaluates all 15 radial kernel families,
 and runs the seven standard SPH operators without installing or importing Warp.
 It includes manual first-order adjoints for smooth kernels. CPU, CUDA and HIP
-share the same numerical headers; Warp remains the default backend. Native CRK
+share the same numerical headers; Warp remains the default backend. All seven standard operations, native CRK
 preparation and all six applicable corrected core operations support first-order
 Torch backwards and forward AD, including derivatives through the prepared CRK
 coefficients. Fixed-geometry solver products remain available through
@@ -99,8 +99,9 @@ own compact-hash search. This is a mixed execution path, not a Warp-free fluid
 solver. Unsupported inputs raise; there is no implicit operator fallback.
 Native operators now consume upstream `ChunkedAdjacency` through shared
 owned-row dispatch, including hybrid Warp search/native operator execution. The
-explicit Warp JVP/HVP and CRK JVP entry points retain their separate selection policy; native first-order
-Torch AD and `native.linearizeFields` retain their separately qualified scope.
+public JVP/HVP and CRK JVP entry points now dispatch to native implementations
+under this selection. First-order Torch AD and `native.linearizeFields` retain
+their separately qualified scope.
 Full native frontend CUDA graph execution is not qualified.
 
 For a complete warmed-step comparison, put the paired 0.7.1 source roots on
@@ -644,7 +645,9 @@ neighbour membership, periodic winding and cutoff transitions are discrete.
 Reverse mode supports Wendland2/4/6, cubic/quartic/quintic, B7/B8, Gaussian,
 Poly6 and Cohesion. HOCT4, Spiky, Viscosity and Adhesion reverse mode remains
 explicitly unsupported pending nonsmooth/singular contracts. On this uncorrected
-bridge, JVP, HVP and higher orders are unsupported; the backward bridge is once-differentiable. Reference
+bridge, reverse remains once-differentiable. Uncorrected forward AD now uses the
+shared analytic pair-product bridge; the explicit density position block is
+separate from general higher derivatives. Reference
 scatter uses CPU atomic compare/exchange or GPU atomic addition. Strict Torch
 deterministic mode rejects this path; warn-only mode warns and executes.
 
@@ -881,7 +884,8 @@ spatial CRK coefficients, covariance ignores fields/grad-h, and Naive Laplacian
 ignores CRK/renormalization. Field-only requests reuse the existing optimized field
 policies. Geometry requests support the same 11 smooth-origin kernels as ordinary
 native reverse mode; coefficient and field requests support all 15 kernels.
-Density continues using its existing uncorrected derivative path.
+Density retains its tuned primal and existing reverse path. Its forward products
+now use the shared analytic pair bridge as well.
 
 The common bridge is `native/_differential.py`; native pair preparation, directional
 products and analytic pullbacks live under `coreOperations/native/csrc_differential`.
@@ -905,7 +909,7 @@ branch is retained. Gradient-based Laplacians retain the exact-self zero branch
 and its zero branch derivative, including with nonzero CRK gradients. Geometry at
 force-kernel cusps, branch transitions or limiter/rank changes is not covered by a
 smooth derivative claim. Inactive CRK identity-limiter outputs have zero derivative.
-Higher-order differentiation, HVP and `torch.func` transforms are unsupported;
+General higher-order differentiation and `torch.func` transforms are unsupported;
 backwards is once-differentiable, and JVPs are first-order numerical products.
 Reverse-over-JVP and dual inputs to backwards are rejected explicitly, so the
 Torch factor algebra cannot hide missing native higher-order terms.
@@ -932,7 +936,7 @@ and tests do not require that checkout or the external evidence archive.
 | 2 | Renormalization, small matrices, solver dependencies | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
 | 3 | Polynomial reconstruction and MFM/MFV | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
 | 4 | Chunked/owned-row search and native operator traversal | Implemented and qualified on CPU/CUDA and two-rank Gloo; affected GPU paths compile for experimental HIP |
-| 5 | Remaining derivative and public API parity | Pending; includes uncorrected JVP and existing density-HVP scope |
+| 5 | Remaining derivative and public API parity | Implemented and qualified on CPU/CUDA; affected GPU paths compile for experimental HIP |
 | 6 | Final distribution/merge qualification | Pending; no AMD hardware gate |
 
 Higher-order and nonsmooth derivative claims need explicit numerical contracts;
@@ -1086,3 +1090,36 @@ transient duplicate index allocation. No content-validation scans or hidden CPU
 copies of particle/neighbor data are added. NCCL/multi-node runtime qualification
 requires the relevant machines; local evidence covers two-rank CPU Gloo and
 single-device CUDA. See the [owned-row qualification](../regression/native_owned_rows_2026_11_03.md).
+
+### Public derivative API and backend boundaries
+
+`warpOperationJVP` now provides combined field/geometry/correction products for
+all seven standard operators, through either the native root or the shared
+`warpSPHCore.operations` module. Explicit query/reference roles are independent:
+omitting a reference tangent means zero even when the particle populations alias.
+Ordinary Torch dual-valued calls naturally propagate aliases in both roles.
+`computeCRKFactorsJVP` and the module geometry-JVP names use the same derivatives.
+Products are first-order, with fixed topology/winding/support/limiter branches;
+there is no native graph-building AD engine. The qualified smooth geometry
+kernel set remains explicit in `nativeCapabilities()`.
+
+`warpOperationHVP` preserves the existing density position block only:
+`sum(j != i) m_j H_ij (v_i-v_j)`. It excludes equal global IDs even for separate
+populations, uses the Warp helper's regularized Hessian/origin convention, and
+uses maximum support for KernelMeanSymmetric versus averaged Hessians for
+SuperSymmetric. This legacy helper is not a general second derivative of the
+public density equation. Geometry/support/domain remain fixed. First-order
+products in its supplied vectors and source masses use CSR/CSC reductions,
+without per-edge Hessians or floating atomics. The helper also accepts eager
+primal row chunks, carrying the global row base.
+
+`PartialSymmetric` is now accepted by native search and operators with the
+upstream implementation's maximum-support behavior. This does not introduce a
+new split PESPH equation. Core meshless raw-pass wrappers, sampling, host dtype
+configuration, operator metadata and the flat tensor adapter are available in a
+Warp-free process. Warp inline functions, Warp array/struct factories and custom
+Warp kernels remain backend-specific; their native equivalents are C++ headers,
+not fabricated Python Warp objects. Python math retains its pure host prime
+helper; tensor kernel evaluation is `evaluateKernel`.
+
+See the [derivative/public API qualification](../regression/native_derivative_api_2026_11_03.md).

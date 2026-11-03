@@ -15,7 +15,8 @@
     "csrc_covariance/nt_covariance_adjoint.cpp",
     "csrc_laplacian/nt_laplacian_adjoint.cpp",
     "csrc_field/nt_field_forward.cpp",
-    "csrc_differential/nt_differential_forward.cpp"
+    "csrc_differential/nt_differential_forward.cpp",
+    "csrc_density_hvp/nt_density_hvp.cpp"
   ],
   "gpu": [
     "csrc_density/nt_density_forward.cu",
@@ -33,6 +34,7 @@
     "csrc_covariance/nt_covariance_adjoint.cu",
     "csrc_laplacian/nt_laplacian_adjoint.cu",
     "csrc_field/nt_field_forward.cu",
-    "csrc_differential/nt_differential_forward.cu"
+    "csrc_differential/nt_differential_forward.cu",
+    "csrc_density_hvp/nt_density_hvp.cu"
   ]
 }

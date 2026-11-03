@@ -47,7 +47,7 @@ enum class Kernel {
     Cohesion = 41,
     Adhesion = 42
 };
-enum class Support { Gather = 11, Scatter, MeanSymmetric, KernelMeanSymmetric, SuperSymmetric };
+enum class Support { Gather = 11, Scatter, MeanSymmetric, KernelMeanSymmetric, SuperSymmetric, PartialSymmetric };
 enum class Scheme { Naive = 1, Symmetric, Difference, Summation };
 enum class Laplacian { Naive = 1, Brookshaw, Dot, Default };
 

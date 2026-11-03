@@ -103,6 +103,10 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
         for (int d=0; d<D; ++d) p.raw_g[d]=(gi[d]+gj[d])/S(2);
         if (args.support==15) p.lap=(li+lj)/S(2);
     }
+    if (args.operation==6) {
+        p.mass=read(MASS,j);
+        return p;
+    }
     p.crk=arrays.values[A]; p.renormalized=arrays.values[R];
     p.coefficient_A=read(A,i,T(1)); p.polynomial=S(1);
     for (int d=0; d<D; ++d) {
@@ -148,6 +152,7 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
 // derivative-first axes as the existing CRK preparation policy.
 template <class T, int D, class S>
 SPH_HD void forward(const RowArgs<T,D>& a, const Pair<S,D>& p, S* out) {
+    if (a.operation==6) { out[0]+=p.mass*p.raw_w; return; }
     if (a.operation==Volume) { out[0]+=p.raw_w; return; }
     if (a.operation==Consistency) {
         out[0]+=p.mass*p.volume*p.w;

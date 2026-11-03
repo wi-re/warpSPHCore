@@ -123,3 +123,36 @@ def mfmClosureMatvecNative(particles,props,domain,adjacency,kappa,p):
 
 # Internal shared-controller compatibility; numerical execution is native.
 mfmClosureMatvecWarp = mfmClosureMatvecNative
+
+
+def mfmClosureResidualNative(particles, props, domain, adjacency, vol, Einv, condBad, centred=1, areaCap=0):
+    return _call(_CLOSURE_RES_SPEC,particles,props,domain,adjacency,
+        vol=vol, Einv=Einv, condBad=condBad, centred=int(centred), areaCap=int(areaCap), rowStart=0)
+
+
+def mfmClosureWeightsNative(particles, props, domain, adjacency, vol, Einv, condBad, power, centred=1, areaCap=0):
+    return _call(_CLOSURE_W_SPEC,particles,props,domain,adjacency,
+        vol=vol, Einv=Einv, condBad=condBad, centred=int(centred), areaCap=int(areaCap), power=power, rowStart=0)
+
+
+def mfmFluxNative(
+        particles, props, domain, adjacency, rho, vel, pres, gRho, gVel, gP, aRho, aVel, aP, vol, Einv, lam,
+                condBad, gamma, dt, mode, order, psi1, psi2, power, timeCentred, centred=1, areaCap=0, retry=1,
+                massLimit=0.1, faceGuard=0, closureCap=0.0):
+    return _call(_FLUX_SPEC,particles,props,domain,adjacency,
+                rho=rho, vel=vel, pres=pres, gRho=gRho, gVel=gVel, gP=gP, aRho=aRho, aVel=aVel, aP=aP,
+        vol=vol, Einv=Einv, lam=lam, condBad=condBad, gamma=gamma, dt=dt, mode=int(mode), order=int(order),
+        psi1=psi1, psi2=psi2, power=power, timeCentred=int(timeCentred), centred=int(centred),
+        areaCap=int(areaCap), retry=int(retry), massLimit=massLimit, faceGuard=int(faceGuard),
+        closureCap=closureCap, rowStart=0)
+
+
+def mfmTimestepNative(particles, props, domain, adjacency, rho, vel, pres, gamma, cfl):
+    return _call(_TIMESTEP_SPEC,particles,props,domain,adjacency,
+        rho=rho, vel=vel, pres=pres, gamma=gamma, cfl=cfl, rowStart=0)
+
+
+def mfmCoarseStencilNative(particles, props, domain, adjacency, kappa, cellId, n, periodic):
+    return _call(_COARSE_STENCIL_SPEC,particles,props,domain,adjacency,
+                kappa=kappa, cellId=cellId, n0=int(n[0]), n1=int(n[1]), n2=int(n[2]), p0=int(periodic[0]),
+        p1=int(periodic[1]), p2=int(periodic[2]), rowStart=0)

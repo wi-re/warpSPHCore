@@ -30,7 +30,7 @@ else:
     if _import_util.find_spec("warp") is None:
         raise ImportError(
             "The default backend requires warp-lang; install warpSPHCore[warp], "
-            "or select WARPSPHCORE_BACKEND=native before import for the native pilot."
+            "or select WARPSPHCORE_BACKEND=native before import for the native backend."
         )
     # Convenience re-exports of the most commonly used symbols
 

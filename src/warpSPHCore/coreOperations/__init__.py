@@ -2,10 +2,14 @@ from .._backend import BACKEND
 
 if BACKEND == 'native':
     from .native import computeDensity, computeGradient, sphOperation
+    from .native.nt_density_hvp import computeSPHDensityPositionHVP
+    from .native.nt_jvp import warpOperationJVP
+    from .native.nt_geometry_jvp import *
+    from .native.nt_geometry_jvp import __all__ as _products
     _computeSPHDensity_stateBackend = computeDensity
     _computeSPHGradient_stateBackend = computeGradient
-    __all__ = ['computeDensity', 'computeGradient', 'sphOperation',
-               '_computeSPHDensity_stateBackend', '_computeSPHGradient_stateBackend']
+    __all__ = ['computeDensity', 'computeGradient', 'sphOperation', 'computeSPHDensityPositionHVP', 'warpOperationJVP',
+               '_computeSPHDensity_stateBackend', '_computeSPHGradient_stateBackend'] + _products
 else:
     from .wp_covariance import _computeSPHCovariance_stateBackend
     from .wp_covarianceJVP import computeCovarianceGeometryJVP

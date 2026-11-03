@@ -33,7 +33,9 @@ from .._backend import BACKEND
 if BACKEND == 'native':
     from .backend import Meshless as MeshlessNative
     MeshlessWarp = MeshlessNative  # compatibility for existing backend-opaque callers
-    from .native.nt_mfm import mfmMomentsNative, mfmGradientsNative, mfmLimiterNative
+    from .native.nt_mfm import (mfmMomentsNative, mfmGradientsNative, mfmLimiterNative,
+        mfmFluxNative,mfmTimestepNative,mfmClosureResidualNative,mfmClosureWeightsNative,
+        mfmClosureMatvecNative,mfmCoarseStencilNative)
 else:
     from .warpBackend import MeshlessWarp
     from .wp_mfm import (faceVector, guardedFace, pairFace,
@@ -47,7 +49,8 @@ __all__ = [
     "kernelWeight", "kernelDerivative", "SUPPORTED_KERNELS",
 ]
 if BACKEND == 'native':
-    __all__ += ['MeshlessNative','MeshlessWarp','mfmMomentsNative','mfmGradientsNative','mfmLimiterNative']
+    __all__ += ['MeshlessNative','MeshlessWarp','mfmMomentsNative','mfmGradientsNative','mfmLimiterNative','mfmFluxNative','mfmTimestepNative',
+                'mfmClosureResidualNative','mfmClosureWeightsNative','mfmClosureMatvecNative','mfmCoarseStencilNative']
 else:
     __all__ += ['MeshlessWarp','mfmMomentsWarp','mfmGradientsWarp','mfmLimiterWarp','mfmFluxWarp','mfmTimestepWarp',
                 'faceVector','guardedFace','pairFace']

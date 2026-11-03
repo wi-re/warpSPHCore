@@ -23,6 +23,9 @@ def _check_geometry(config, flat, tangents=None):
 def _core_primal(config, flat):
     from ._build import build
     operation, support, direction, kernel, scheme, lap, dot, consistent, counts = config
+    if operation == 6:
+        borrowed = [value if value is not None else flat[0].new_empty(0) for value in flat[:17]]
+        return build().density_forward(borrowed, support, direction, kernel)
     names = {1: 'interpolate', 2: 'gradient', 3: 'divergence', 4: 'curl', 5: 'laplacian', 7: 'covariance'}
     function = getattr(build(), names[operation] + '_corrected_forward')
     args = (flat[:17], flat[17:], support, direction, kernel, scheme)

@@ -31,9 +31,9 @@ def prepare_operator_inputs(query, reference, domain, properties, adjacency,
         raise TypeError('kernel must be a KernelFunctions')
     if (any(x is not None for x in corrections) or properties.calibrateNormalization
             or (properties.operation.name == "Laplacian" and properties.positiveDivergence)):
-        raise NotImplementedError('Corrections and specialised options are not supported by the native pilot')
-    geometry = prepare_geometry(query, reference, domain, allow_reverse=True)
-    check_execution(reference.masses, *fields, reference.densities, query.densities, allow_reverse=True)
+        raise NotImplementedError('Use the corrected native entry point for correction and specialised options')
+    geometry = prepare_geometry(query, reference, domain, allow_reverse=True, allow_forward=True)
+    check_execution(reference.masses, *fields, reference.densities, query.densities, allow_reverse=True, allow_forward=True)
     adjacency = prepare_adjacency(query, reference, domain, properties, adjacency)
     if not fields:
         empty = query.positions.new_empty(0)
@@ -62,8 +62,7 @@ def prepare_adjacency(query, reference, domain, properties, adjacency):
             raise ValueError('adjacency populations must match the particle states')
         return adjacency
     if not isinstance(adjacency, AdjacencyList):
-        raise TypeError('Native operators require a Torch CSR AdjacencyList; '
-                        'chunked/distributed traversal is not ported')
+        raise TypeError('Native operators require a Torch CSR AdjacencyList or ChunkedAdjacency')
     if adjacency.numRows != len(query.positions) or adjacency.numCols != len(reference.positions):
         raise ValueError('adjacency populations must match the particle states')
     return adjacency

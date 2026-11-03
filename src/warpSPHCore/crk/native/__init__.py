@@ -13,3 +13,6 @@ _computeCRKDensity_stateBackend = computeCRKDensity
 __all__ = ['computeCRKVolume', 'computeCRKMoments', 'computeCRKDensity',
            'computeCRKTerms', 'computeCRKTermsWarp', 'computeCRKFactors',
            'CRKPreparation', 'prepareCRK']
+
+from .nt_jvp import computeCRKFactorsJVP,computeCRKVolumeGeometryJVP,computeCRKMomentsGeometryJVP
+__all__ += ['computeCRKFactorsJVP','computeCRKVolumeGeometryJVP','computeCRKMomentsGeometryJVP']

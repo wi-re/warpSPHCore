@@ -150,9 +150,9 @@ def computeCRKFactorsJVP(
     """
     from .._backend import OPERATORS
     if OPERATORS == "native":
-        raise NotImplementedError(
-            "computeCRKFactorsJVP is a Warp-specific adapter. Use native.prepareCRK "
-            "with Torch forward AD for native products.")
+        from .native.nt_jvp import computeCRKFactorsJVP as nativeJVP
+        return nativeJVP(queryParticles,domain,kernel,queryTangentState,operationMode,
+            adjacency,referenceState,referenceTangentState,referenceVolumeMode=referenceVolumeMode)
     volumeProperties = OperationProperties(
         kernel=kernel,
         supportMode=SupportScheme.Gather,

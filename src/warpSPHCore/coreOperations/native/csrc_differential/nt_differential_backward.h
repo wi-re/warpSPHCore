@@ -54,7 +54,10 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
     }
     T bw=0,bg[D]={},bx[D]={},br=0,bh=0,blap=0,bv=0,bz[MaxFields]={};
     T raw_bw=0,raw_bg[D]={};
-    if (a.operation==Volume) raw_bw=bar[0];
+    if (a.operation==6) {
+        raw_bw=bar[0]*p.mass;
+        result.add(MASS,0,bar[0]*p.raw_w);
+    } else if (a.operation==Volume) raw_bw=bar[0];
     else if (a.operation==Consistency) {
         bw=bar[0]*p.mass*p.volume+bar[1]*p.volume*p.volume;
         bv=bar[0]*p.mass*p.w+T(2)*bar[1]*p.volume*p.w;
@@ -187,7 +190,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         if (a.operation!=1) result.add(RO,0,-bfj*p.fj[c]/p.reference_omega);
     }
     if (arrays.values[VOLUME]) result.add(VOLUME,0,bv);
-    else {
+    else if (a.operation!=6) {
         result.add(MASS,0,bv/p.rhoj);
         result.add(DENSITY,0,-bv*p.mass/(p.rhoj*p.rhoj));
     }

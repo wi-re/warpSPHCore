@@ -87,7 +87,7 @@ void validate_geometry(const Context &context, const Problem &problem) {
     require(problem.query.count >= 0 && problem.query.count <= INT64_MAX / problem.dimension &&
                 problem.reference.count >= 0 && problem.reference.count <= INT32_MAX,
             "Invalid population sizes");
-    require(int(problem.properties.support) >= 11 && int(problem.properties.support) <= 15,
+    require(int(problem.properties.support) >= 11 && int(problem.properties.support) <= 16,
             "Unknown or unsupported support policy");
     const size_t item = problem.precision == Precision::Float32 ? sizeof(float) : sizeof(double);
     buffer(problem.query.positions, problem.query.count * problem.dimension, item);

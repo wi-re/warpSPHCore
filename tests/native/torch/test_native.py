@@ -167,8 +167,8 @@ def test_metadata_failures_are_explicit(device):
     assert sph.warpOperation(replace(q, positions=q.positions.clone().requires_grad_()), prop, d).requires_grad
     with torch.autograd.forward_ad.dual_level():
         dual = torch.autograd.forward_ad.make_dual(q.positions, torch.zeros_like(q.positions))
-        with pytest.raises(NotImplementedError, match='forward-mode'):
-            sph.warpOperation(replace(q, positions=dual), prop, d)
+        result=sph.warpOperation(replace(q, positions=dual), prop, d)
+        assert torch.isfinite(torch.autograd.forward_ad.unpack_dual(result).tangent).all()
     with pytest.raises(RuntimeError, match='contiguous'):
         sph.radiusSearch(replace(q, positions=q.positions.T.contiguous().T), d)
 

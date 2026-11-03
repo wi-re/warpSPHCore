@@ -10,6 +10,13 @@ Tensors prepare_differential(const OptionalTensors& flat,const Tensor& example,
     STD_TORCH_CHECK(flat.size()==Slots,"invalid corrected derivative input layout");
     STD_TORCH_CHECK(valid_kernel(kernel),"Unknown native kernel");
     OptionalTensors inputs(flat.begin(),flat.begin()+OUTPUT),corrections(flat.begin()+OUTPUT,flat.end());
+    if (operation==6) {
+        Tensors borrowed; for (const auto& value:inputs) borrowed.push_back(value ? *value:Tensor{});
+        auto t=prepare_operator(borrowed,support,direction);
+        vector(example,t[QX],t[QX].scalar_type(),t[QX].size(0),"density derivative output");
+        t[OUTPUT]=example;
+        return t;
+    }
     if (operation<=7)
         return prepare_corrected_operator(inputs,corrections,support,direction,operation,scheme,lap,dot,consistent,&example);
     Tensors borrowed; for (const auto& value:inputs) borrowed.push_back(value ? *value:Tensor{});

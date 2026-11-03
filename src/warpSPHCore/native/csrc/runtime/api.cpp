@@ -42,7 +42,7 @@ static Prepared describe(const Problem &v, Task task) {
             "Invalid population sizes");
     auto op = v.properties.operation;
     int support = int(v.properties.support);
-    require(support >= 11 && support <= 15, "Unknown or unsupported support policy");
+    require(support >= 11 && support <= 16, "Unknown or unsupported support policy");
     p.fields = 1;
     for (int i = 0; i < v.field_rank; ++i)
         p.fields *= v.dimension;

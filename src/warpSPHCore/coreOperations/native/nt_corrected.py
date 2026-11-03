@@ -11,6 +11,13 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
             grad_h_state=None, renormalization_state=None, *, consistent_divergence=False,
             return_neighbor_counts=False, allow_forward=False):
     operation = properties.operation
+    if operation == WarpOperation.Density:
+        check_execution(reference.masses, allow_reverse=True, allow_forward=allow_forward)
+        geometry=prepare_geometry(query,reference,domain,allow_reverse=True,allow_forward=allow_forward)
+        adjacency=prepare_adjacency(query,reference,domain,properties,adjacency)
+        inputs=[*geometry[:4],reference.masses,query.kinds,reference.kinds,*geometry[4:],
+                adjacency.edgeOffsets,adjacency.numNeighbors,adjacency.paddedJ,None,None,None,None]
+        return inputs,[None]*9,[*geometry,reference.masses]
     interpolation = operation == WarpOperation.Interpolate
     covariance = operation == WarpOperation.Covariance
     laplacian = operation == WarpOperation.Laplacian
