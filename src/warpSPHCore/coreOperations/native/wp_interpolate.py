@@ -203,10 +203,11 @@ def computeSPHInterpolation_KernelTiled(
 
 
 _INTERPOLATE_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=computeSPHInterpolation_Kernel,
     tiledKernel=computeSPHInterpolation_KernelTiled,
     outputs=(OutputSpec(dtype=lambda ctx, extras: castTorchToWarpAsBuiltins(extras["referenceValues"]).dtype),),
-    extras=(ExtraSpec("referenceValues", ExtraKind.TENSOR),),
+    extras=(ExtraSpec("referenceValues", ExtraKind.TENSOR, RowRole.REFERENCE),),
     jvp=JVPSpec(referenceValueExtra="referenceValues"),
 )
 
@@ -221,17 +222,22 @@ def _computeSPHInterpolant_stateBackend(
     queryVolumes: Optional[torch.Tensor] = None, referenceVolumes: Optional[torch.Tensor] = None,
     crkState: Optional[CRKState] = None,
 ):
-    if crkState is not None and (crkState.gradA is None or crkState.gradB is None):
-        # CRKState requires gradA/gradB (shapes [N,D]/[N,D,D]), but Interpolate never
-        # reads correctionData.queryGradA/queryGradB -- only Ai/Bi. Fill correctly-shaped
-        # dummies rather than leaving them unset -- extractStateInfo accesses
-        # crkState.gradA/.gradB unconditionally whenever a CRKState is provided, and
-        # reusing e.g. crkState.B as a stand-in would be a shape mismatch ([N,D] where
-        # gradB needs [N,D,D]).
-        dim = queryParticles.positions.shape[1]
-        dummy_gradA = getCachedDummyTensor((1, dim), device=crkState.A.device, dtype=crkState.A.dtype)
-        dummy_gradB = getCachedDummyTensor((1, dim, dim), device=crkState.A.device, dtype=crkState.A.dtype)
-        crkState = CRKState(A=crkState.A, B=crkState.B, gradA=dummy_gradA, gradB=dummy_gradB)
+    def completeCRK(state):
+        if (state.gradA is None or state.gradB is None):
+            # CRKState requires gradA/gradB (shapes [N,D]/[N,D,D]), but Interpolate never
+            # reads correctionData.queryGradA/queryGradB -- only Ai/Bi. Fill correctly-shaped
+            # dummies rather than leaving them unset -- extractStateInfo accesses
+            # state.gradA/.gradB unconditionally whenever a CRKState is provided, and
+            # reusing e.g. state.B as a stand-in would be a shape mismatch ([N,D] where
+            # gradB needs [N,D,D]).
+            dim = queryParticles.positions.shape[1]
+            dummy_gradA = getCachedDummyTensor((1, dim), device=state.A.device, dtype=state.A.dtype)
+            dummy_gradB = getCachedDummyTensor((1, dim, dim), device=state.A.device, dtype=state.A.dtype)
+            state = CRKState(A=state.A, B=state.B, gradA=dummy_gradA, gradB=dummy_gradB)
+        return state
+
+    if crkState is not None:
+        crkState = tuple(completeCRK(s) for s in crkState) if isinstance(crkState, tuple) else completeCRK(crkState)
 
     with record_function("warpSPH[Interpolation]"):
         with record_function("warpSPH[Interpolation] - Preprocessing"):

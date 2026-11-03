@@ -223,6 +223,7 @@ def _curlOutputDtype(ctx, extras):
 
 
 _CURL_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=computeSPHCurlTensor_Kernel,
     tiledKernel=computeSPHCurlTensor_KernelTiled,
     defaultNeighborLanes=1,
@@ -231,8 +232,8 @@ _CURL_SPEC = OperatorSpec(
         ExtraSpec("numDims", ExtraKind.SCALAR),
         ExtraSpec("flatInputShape", ExtraKind.SCALAR),
         ExtraSpec("flatOutputShape", ExtraKind.SCALAR),
-        ExtraSpec("queryValuesFlat", ExtraKind.TENSOR),
-        ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR),
+        ExtraSpec("queryValuesFlat", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR, RowRole.REFERENCE),
     ),
     jvp=JVPSpec(queryValueExtra="queryValuesFlat", referenceValueExtra="referenceValuesFlat"),
 )

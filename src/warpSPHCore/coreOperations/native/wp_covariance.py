@@ -242,6 +242,7 @@ def _covarianceMatrixDtype(ctx, extras):
 
 
 _COVARIANCE_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=computeCovariance_Kernel,
     tiledKernel=computeCovariance_KernelTiled,
     outputs=(

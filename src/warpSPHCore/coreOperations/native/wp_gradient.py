@@ -265,6 +265,7 @@ def _gradientOutputDtype(ctx, extras):
 
 
 _GRADIENT_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=computeSPHGradientTensor_Kernel,
     tiledKernel=computeSPHGradientTensor_KernelTiled,
     outputs=(OutputSpec(dtype=_gradientOutputDtype),),
@@ -272,8 +273,8 @@ _GRADIENT_SPEC = OperatorSpec(
         ExtraSpec("numDims", ExtraKind.SCALAR),
         ExtraSpec("flatInputShape", ExtraKind.SCALAR),
         ExtraSpec("flatOutputShape", ExtraKind.SCALAR),
-        ExtraSpec("queryValuesFlat", ExtraKind.TENSOR),
-        ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR),
+        ExtraSpec("queryValuesFlat", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR, RowRole.REFERENCE),
     ),
     jvp=JVPSpec(queryValueExtra="queryValuesFlat", referenceValueExtra="referenceValuesFlat"),
 )

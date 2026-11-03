@@ -7,7 +7,7 @@ from .wrapper import warpWrapper2
 from .scalar_arg import asScalarArg
 from .operator_spec import (
     OperatorSpec, SPHContext, Corrections, EMPTY_CORRECTIONS,
-    OutputSpec, ExtraSpec, ExtraKind, ShapeOf, ThreadSpec, JVPSpec, launchOperator,
+    OutputSpec, ExtraSpec, ExtraKind, RowRole, ShapeOf, ThreadSpec, JVPSpec, launchOperator,
 )
 
 __all__ = [
@@ -18,7 +18,7 @@ __all__ = [
     "warpWrapper2",
     "asScalarArg",
     "OperatorSpec", "SPHContext", "Corrections", "EMPTY_CORRECTIONS",
-    "OutputSpec", "ExtraSpec", "ExtraKind", "ShapeOf", "ThreadSpec", "JVPSpec", "launchOperator",
+    "OutputSpec", "ExtraSpec", "ExtraKind", "RowRole", "ShapeOf", "ThreadSpec", "JVPSpec", "launchOperator",
 ]
 
 from .lanes import neighborLanes, setNeighborLanes, DEFAULT_NEIGHBOR_LANES

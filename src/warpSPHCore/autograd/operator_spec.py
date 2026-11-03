@@ -20,7 +20,7 @@ from __future__ import annotations
 import types
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union, TYPE_CHECKING
 
 import torch
 
@@ -38,6 +38,9 @@ from ..dataTypes import (
     RenormalizationState,
     RenormalizationTangentState,
 )
+if TYPE_CHECKING:
+    from ..radiusSearch.chunked import ChunkedAdjacency
+
 from .launcher import launch_kernel
 from .lanes import DEFAULT_NEIGHBOR_LANES, neighborLanes
 from .stateAwareWarpFunction import _liveTangentMask
@@ -74,6 +77,9 @@ class OutputSpec:
 
     dtype: Union[Any, Callable[["SPHContext", Dict[str, Any]], Any]]
     shape: Union[int, ShapeOf, Callable[["SPHContext", Dict[str, Any]], Any]] = ShapeOf.QUERY
+    #: Unread one-element output required by a shared kernel ABI. Chunk dispatch
+    #: discards local scratch and never treats it as a particle or pair result.
+    chunkScratch: bool = False
 
     def resolve(self, ctx: "SPHContext", extras: Dict[str, Any]) -> Tuple[Any, Any]:
         # Plain `callable(...)` misfires here: a literal Warp dtype (e.g.
@@ -99,6 +105,17 @@ class OutputSpec:
 class ExtraKind(Enum):
     TENSOR = 0
     SCALAR = 1
+    CHUNK_TENSOR = 2
+
+
+class RowRole(Enum):
+    """Particle identity of a tensor extra in whole-row chunk dispatch."""
+
+    QUERY = 0
+    REFERENCE = 1
+    REPLICATED = 2
+    CHUNK = 3
+    ROW_START = 4
 
 
 @dataclass(frozen=True)
@@ -111,6 +128,11 @@ class ExtraSpec:
 
     name: str
     kind: ExtraKind
+    rowRole: Union[RowRole, Callable[["SPHContext", Dict[str, Any]], RowRole], None] = None
+
+    def resolveRowRole(self, ctx, extras):
+        """A disabled optional field can explicitly retain its replicated dummy."""
+        return self.rowRole(ctx, extras) if isinstance(self.rowRole, types.FunctionType) else self.rowRole
 
 
 class ThreadSpec(Enum):
@@ -185,6 +207,20 @@ class OperatorSpec:
     #: Used only without an explicit process lane override. New tiled kernels
     #: can retain scalar dispatch until numerical and consumer gates qualify.
     defaultNeighborLanes: int = DEFAULT_NEIGHBOR_LANES
+    #: Explicit eager, no-AD opt-in: every output is one value per query row;
+    #: every tensor extra declares its row identity. Kernels see LOCAL query i
+    #: and GLOBAL reference j, so direct i == j tests require adaptation.
+    #: Pair outputs need another ABI.
+    rowChunked: bool = False
+    #: Query-only CRK estimators never dereference reference correction arrays.
+    queryOnlyCRK: bool = False
+    #: Optional scalar CUDA threads per block. Cooperating tiled kernels keep
+    #: block_dim=lanes. None preserves Warp's historical 256-thread default.
+    blockDim: Optional[int] = None
+
+    def __post_init__(self):
+        if self.blockDim is not None and (type(self.blockDim) is not int or not 1 <= self.blockDim <= 1024):
+            raise ValueError('OperatorSpec.blockDim must be None or an integer in [1, 1024].')
 
 
 @dataclass
@@ -218,7 +254,7 @@ class SPHContext:
     query: ParticleState
     properties: OperationProperties
     domain: DomainDescription
-    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap, "ChunkedAdjacency"]] = None
     reference: Optional[ParticleState] = None
     corrections: Corrections = field(default_factory=Corrections)
     mode: ExecutionMode = ExecutionMode.AUTO
@@ -476,6 +512,14 @@ def launchOperator(
     engine -- no behaviour differs from an equivalent ``warpWrapper2`` call,
     only how a caller arrives at the arguments.
     """
+    # Lazy imports avoid the radius-search/autograd initialization cycle.
+    from ..radiusSearch.chunked import ChunkedAdjacency
+    from ..radiusSearch.pairField import ChunkedPairField
+    chunked = isinstance(ctx.adjacency, ChunkedAdjacency)
+    if chunked:
+        from .row_dispatch import launchRowChunks
+        return launchRowChunks(spec, ctx, extras)
+
     if ctx.mode is ExecutionMode.FORWARD:
         raise NotImplementedError(
             "ExecutionMode.FORWARD is not implemented (warpier_fields.md "
@@ -495,6 +539,8 @@ def launchOperator(
         is_tensor = isinstance(value, torch.Tensor)
         if spec_extra.kind is ExtraKind.TENSOR and not is_tensor:
             raise TypeError(f"launchOperator: extra {name!r} declared TENSOR, got {type(value)}")
+        if spec_extra.kind is ExtraKind.CHUNK_TENSOR and not (is_tensor or (chunked and isinstance(value, ChunkedPairField))):
+            raise TypeError(f"launchOperator: extra {name!r} requires a tensor or an owned chunk pair field")
         if spec_extra.kind is ExtraKind.SCALAR and is_tensor:
             raise TypeError(f"launchOperator: extra {name!r} declared SCALAR, got a torch.Tensor")
 
@@ -541,4 +587,5 @@ def launchOperator(
         numThreads=spec.numThreads(ctx, extras) if spec.numThreads is not None else None,
         jvp_fn=jvp_fn,
         lanes=lanes,
+        blockDim=spec.blockDim,
     )

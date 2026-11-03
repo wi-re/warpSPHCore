@@ -245,6 +245,7 @@ def _divergenceOutputDtype(ctx, extras):
 
 
 _DIVERGENCE_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=computeSPHDivergenceTensor_Kernel,
     tiledKernel=computeSPHDivergenceTensor_KernelTiled,
     outputs=(OutputSpec(dtype=_divergenceOutputDtype),),
@@ -253,8 +254,8 @@ _DIVERGENCE_SPEC = OperatorSpec(
         ExtraSpec("numDims", ExtraKind.SCALAR),
         ExtraSpec("flatInputShape", ExtraKind.SCALAR),
         ExtraSpec("flatOutputShape", ExtraKind.SCALAR),
-        ExtraSpec("queryValuesFlat", ExtraKind.TENSOR),
-        ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR),
+        ExtraSpec("queryValuesFlat", ExtraKind.TENSOR, RowRole.QUERY),
+        ExtraSpec("referenceValuesFlat", ExtraKind.TENSOR, RowRole.REFERENCE),
     ),
     jvp=JVPSpec(queryValueExtra="queryValuesFlat", referenceValueExtra="referenceValuesFlat"),
 )
