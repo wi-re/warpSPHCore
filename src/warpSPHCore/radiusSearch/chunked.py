@@ -11,7 +11,6 @@ from dataclasses import asdict, dataclass, field, fields
 from hashlib import sha256
 import json
 import math
-import sys
 
 import torch
 import torch.autograd.forward_ad as fwAD
@@ -32,7 +31,8 @@ else:
     from ..util import castTorchToWarp,castTorchToWarpAsBuiltins
     from .compactHash.buildHashmap import buildCompactHashMap
     from .compactHash.wp_countNeighbors import radiusSearchCountNeighborsCompactHashMap
-    from .compactHash.wp_collectNeighbors import radiusSearchCollectJOnly
+    from .compactHash.wp_collectNeighbors import (radiusSearchCollectJOnly, radiusSearchCollectJOnlyBatched,
+        radiusSearchCollectJOnlyBatchedSpatial, ChunkCollectTarget)
     from .verlet.build import _DEFERRED_CHECKS
     from .verlet.wp_countVerlet import countNeighborsVerlet
     from .verlet.wp_updateVerlet import updateNeighborsVerlet
@@ -88,6 +88,9 @@ class ChunkedAdjacency:
     sourceSignature: str | None = None
     communication: object | None = field(default=None, compare=False, repr=False)
     _storageLease: _StorageLease = field(default_factory=_StorageLease, compare=False, repr=False)
+    # Keep the uploaded pointer table alive through asynchronous collection and
+    # later stream handovers. Checkpoint recipes reconstruct it, never export it.
+    _collectionMetadata: object | None = field(default=None, compare=False, repr=False)
 
     def assertStorageValid(self):
         """An in-place rebuild may have overwritten this generation's CSR/J."""
@@ -121,7 +124,7 @@ class ChunkedAdjacency:
                         * torch.empty((), dtype=get_torch_index_dtype()).element_size() * (1 + self.storeI),
                     pairBudgetBytes=sum(c.metadata.capacity for c in self) * self.plan.policy.bytesPerEdge,
                     rowMetadataBytes=_storageBytes(rows), snapshotBytes=_storageBytes(snapshots),
-                    hostPrefixBytes=sys.getsizeof(self.plan.prefix) + sum(sys.getsizeof(p) for p in self.plan.prefix),
+                    hostPrefixBytes=self.plan.hostPrefixBytes,
                     searchScratchBytes=self.searchScratchBytes)
 
 
@@ -327,6 +330,29 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
     def collect():
         if grid is None:
             return
+        if BACKEND == 'warp' and q.is_cuda:
+            targets = []
+            for chunk in chunks:
+                m, adj = chunk.metadata, chunk.adjacency
+                if m.liveEdges:
+                    target = ChunkCollectTarget()
+                    target.rowStart, target.rowStop = m.rowStart, m.rowStop
+                    target.offsets = castTorchToWarp(adj.edgeOffsets)
+                    target.neighbors = castTorchToWarp(adj.paddedJ)
+                    targets.append(target)
+            if targets:
+                # The pointer table is O(chunks), never a concatenated pair
+                # buffer. Its upload and collection share Torch's stream.
+                stream = _stream(q.device)
+                with wp.ScopedStream(stream):
+                    table = wp.array(targets, dtype=ChunkCollectTarget, device=str(q.device))
+                    wp.launch(radiusSearchCollectJOnlyBatchedSpatial if q is r else radiusSearchCollectJOnlyBatched,
+                        dim=len(q), inputs=[castTorchToWarp(y), castTorchToWarp(qh), *shared,
+                            castTorchToWarp(counts), wp.array(dtype=offset_t, device=str(q.device)),
+                            castTorchToWarp(grid.sortIndex), wp.array(dtype=index_t, device=str(q.device)), table],
+                        device=str(q.device), stream=stream)
+                return table
+            return None
         for chunk in chunks:
             m, adj = chunk.metadata, chunk.adjacency
             if m.liveEdges:
@@ -338,10 +364,13 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
                                   castTorchToWarp(adj.numNeighbors), castTorchToWarp(adj.edgeOffsets), castTorchToWarp(grid.sortIndex),
                                   wp.array(dtype=index_t, device=str(q.device)), castTorchToWarp(adj.paddedJ)],
                           device=str(q.device), stream=_stream(q.device))
-    local('search:collect-owned', collect)
+    collectionMetadata = local('search:collect-owned', collect)
+    if collectionMetadata is not None:
+        scratch += collectionMetadata.capacity
     local('search:fill-I', lambda: _fillRows(chunks, q.device))
     return ChunkedAdjacency(plan, chunks, owner, counts, prefix, q, r, qh, rh, domain, mode,
-                            storeI, scale, orderingKey, kind, reason, scratch, communication=communication)
+                            storeI, scale, orderingKey, kind, reason, scratch, communication=communication,
+                            _collectionMetadata=collectionMetadata)
 
 
 def _bindCommunication(communication, prior):
@@ -568,7 +597,7 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
             # filters/allocates. Target storage was fully allocated above.
             def prepare():
                 if communication.rank!=sm.owner:return None
-                live=plan.prefix[sm.rowStop]-plan.prefix[sm.rowStart]
+                live=plan.prefixAt(sm.rowStop)-plan.prefixAt(sm.rowStart)
                 offsets=(prefix[sm.rowStart:sm.rowStop]-prefix[sm.rowStart]).to(get_torch_offset_dtype())
                 result=AdjacencyList(None,torch.empty(live,dtype=get_torch_index_dtype(),device=q.device),
                     counts[sm.rowStart:sm.rowStop],offsets,sm.rowCount,len(r),numEdges=live)
@@ -581,15 +610,15 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
             while cursor<len(plan.chunks) and plan.chunks[cursor].rowStart<sm.rowStop:
                 tm=plan.chunks[cursor]
                 a,b=max(sm.rowStart,tm.rowStart),min(sm.rowStop,tm.rowStop)
-                live=plan.prefix[b]-plan.prefix[a]
+                live=plan.prefixAt(b)-plan.prefixAt(a)
                 if live:
                     def views():
                         send=receive=None
                         if communication.rank==sm.owner:
-                            start=plan.prefix[a]-plan.prefix[sm.rowStart]
+                            start=plan.prefixAt(a)-plan.prefixAt(sm.rowStart)
                             send=temporary.paddedJ[start:start+live]
                         if communication.rank==tm.owner:
-                            start=plan.prefix[a]-plan.prefix[tm.rowStart]
+                            start=plan.prefixAt(a)-plan.prefixAt(tm.rowStart)
                             receive=targets[tm.rowStart].adjacency.paddedJ[start:start+live]
                         return send,receive
                     send,receive=local(f'filter:views:{number}:{cursor}',views)

@@ -160,7 +160,7 @@ def radiusSearchOnCompactHashMap(
             castTorchToWarp(hashTable),
             castTorchToWarp(sortedCellTable),
             castTorchToWarp(qMin),
-            hCell,
+            scalar_t(hCell),
             D,
             castTorchToWarp(offsets),
             castTorchToWarp(numCells),

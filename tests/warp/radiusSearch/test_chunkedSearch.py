@@ -47,7 +47,7 @@ def sample(device, dim=2, periodic=True, asymmetric=False):
 
 
 def policy(**kwargs):
-    values = dict(edgeBudget=64, bytesPerEdge=8, maxRows=3)
+    values = dict(edgeBudget=64, bytesPerEdge=2*torch.empty((), dtype=get_torch_index_dtype()).element_size(), maxRows=3)
     values.update(kwargs)
     return RowChunkPolicy(**values)
 
@@ -140,6 +140,13 @@ def test_allocation_is_bounded_and_flat_search_is_never_called(device, monkeypat
     flatModule = importlib.import_module('warpSPHCore.radiusSearch.compactHash.search')
     monkeypatch.setattr(flatModule, 'radiusSearchOnCompactHashMap', lambda *a, **k: pytest.fail('monolithic search'))
     allocations = []
+    collectionLaunches = []
+    launch = module.wp.launch
+    def audit(kernel, *a, **kw):
+        if kernel in (module.radiusSearchCollectJOnlyBatched, module.radiusSearchCollectJOnlyBatchedSpatial):
+            collectionLaunches.append(kw['dim'])
+        return launch(kernel, *a, **kw)
+    monkeypatch.setattr(module.wp, 'launch', audit)
     original = torch.empty
     def allocate(*a, **kw):
         if a and isinstance(a[0], int) and kw.get('dtype') == get_torch_index_dtype():
@@ -148,11 +155,19 @@ def test_allocation_is_bounded_and_flat_search_is_never_called(device, monkeypat
     monkeypatch.setattr(torch, 'empty', allocate)
     got = radiusSearchRowChunks_(*sample(device, 3), policy=policy(), storeI=False)
     assert got.numEdges > got.plan.policy.capacityLimit
-    assert allocations == [c.metadata.capacity for c in got]
-    assert max(allocations) <= got.plan.policy.capacityLimit
+    if device.type == 'cuda':
+        assert collectionLaunches == [got.numRows]
+    else:
+        assert collectionLaunches == []
+    capacities = [c.metadata.capacity for c in got]
+    # The wide global prefix shares the ID dtype when IDs are int64; it is
+    # row metadata, not a pair allocation. Every remaining allocation is J.
+    prefixAllocation = [got.numRows+1] if get_torch_index_dtype() == torch.int64 else []
+    assert allocations == prefixAllocation + capacities
+    assert max(capacities) <= got.plan.policy.capacityLimit
     assert all(c.adjacency.paddedI is None for c in got)
     report = got.memoryUsage()
-    assert report['pairCapacityBytes'] == sum(allocations)*torch.empty((), dtype=get_torch_index_dtype()).element_size()
+    assert report['pairCapacityBytes'] == sum(capacities)*torch.empty((), dtype=get_torch_index_dtype()).element_size()
     assert report['pairCapacityBytes'] <= report['pairBudgetBytes']
     assert report['searchScratchBytes'] > 0 and report['hostPrefixBytes'] > 0
     assert not hasattr(got, 'paddedJ') and not hasattr(got, 'paddedI')

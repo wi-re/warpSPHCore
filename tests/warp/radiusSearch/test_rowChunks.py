@@ -232,3 +232,43 @@ def test_exact_padding_inversion_matches_brute_force_greedy_partition():
         actual = plan(values, policy=policy, owners=3)
         assert [(c.rowStart, c.rowStop) for c in actual.chunks] == expected
         assertCoverage(actual, values)
+
+
+def test_compact_prefix_offsets_and_accounting_do_not_box_or_alias():
+    values = torch.tensor([3, 0, 4, 1]*64, dtype=torch.int32)
+    p = buildRowChunkPlan(values, generation=RowChunkGeneration(0, 20, 'compact'),
+                          policy=RowChunkPolicy(edgeBudget=20, maxRows=7))
+    held = object.__getattribute__(p, 'prefix')
+    assert not isinstance(held, tuple)
+    assert not held.values.flags.writeable
+    expected = torch.cat((torch.zeros(1, dtype=torch.int64), values.cumsum(0)))
+    assert p.numRows == len(values) and p.totalEdges == int(expected[-1])
+    assert p.prefixAt(3) == int(expected[3])
+    before = p.hostPrefixBytes
+    assert before > expected.numel()*8
+    offsets = p.globalOffsets()
+    torch.testing.assert_close(offsets, expected)
+    for index, chunk in enumerate(p.chunks):
+        local = p.localOffsets(index)
+        torch.testing.assert_close(local, expected[chunk.rowStart:chunk.rowStop]-chunk.edgeStart)
+        local.fill_(-1)
+    offsets.fill_(-1)
+    values.fill_(0)
+    torch.testing.assert_close(p.globalOffsets(), expected)
+    assert object.__getattribute__(p, 'prefix') is held
+    assert p.hostPrefixBytes == before
+    assert type(p.prefix) is tuple and p.prefix == tuple(expected.tolist())
+    assert p.hostPrefixBytes > before
+
+
+def test_deferred_prefix_preserves_dataclass_hash_replace_and_pickle():
+    from dataclasses import asdict
+    import pickle
+    p = plan([3, 0, 1, 2])
+    q = plan([3, 0, 1, 2])
+    assert asdict(p)['prefix'] == (0, 3, 3, 4, 6)
+    assert hash(p) == hash(q)
+    assert pickle.loads(pickle.dumps(q)) == p
+    assert replace(q, policy=p.policy) == p
+    with pytest.raises(FrozenInstanceError):
+        p.prefix = (0,)

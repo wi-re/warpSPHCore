@@ -26,7 +26,10 @@ the trial curl and Laplacian variants retain one lane pending consumer and
 large-problem qualification. OperatorSpec.defaultNeighborLanes carries that
 choice; ordinary and prepared launchers honor it alike. CRK volume and
 compatible work use 32 lanes on bounded chunks, retaining their scalar
-flat/grid defaults after large-list qualification.
+flat/grid defaults after large-list qualification. MFM/MFV gradients, limiters, fluxes and timesteps
+follow the same topology-specific policy via OperatorSpec.chunkedNeighborLanes.
+Their moment kernels retain scalar defaults pending multigrid closure
+qualification; explicit process settings can still select cooperation.
 Lane counts must divide the 32-thread warp evenly to keep blocks full, so
 only powers of two up to 32 are accepted. A process-wide setting, read at
 launch time, so it can be flipped between calls (A/B timing, bisection).

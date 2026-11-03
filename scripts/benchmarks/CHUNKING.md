@@ -173,3 +173,65 @@ The frontend benchmark retains `--lanes 1` as its scalar baseline. Use
 `--lanes default 1 32` to compare production/environment selection with both
 forced paths. The `default` request is recorded as JSON `null`, distinct from
 1 or 32; pin or unset `WARPSPHCORE_NEIGHBOR_LANES` consistently across machines.
+
+
+## Bounded-buffer dispatch and rebuild costs
+
+CUDA chunked search now collects into all owned J buffers in one launch. A
+small device table contains each chunk's row interval and existing buffer
+pointers; a query selects its target by row ID. The scalar acceptance and
+within-row traversal are unchanged. Aliased self queries reuse the reference
+spatial schedule. There is no concatenated pair buffer, atomic append, or
+particle reorder. Optional I is still filled with global row IDs afterwards.
+The table lives with its generation and is counted in search scratch. CPU and
+native collection retain their existing paths.
+
+The shared planner keeps its read-only int64 scan until a caller explicitly
+accesses `plan.prefix`. That access still returns and caches the original tuple
+of Python integers; equality, hashing, dataclass conversion, pickle and v1
+signatures retain their previous values. `prefixAt`, `globalOffsets`,
+`localOffsets`, size queries and memory accounting avoid materialization. This
+removes repeated O(N) Python integer boxing and its host memory footprint from
+ordinary rebuilds. The planner benchmark's `--materialize-prefix` includes the
+legacy public-tuple cost for an explicit comparison. On a fixed core, 128³
+planning measured 11.7 ms with the compact scan and 63.6 ms including the tuple.
+
+Warp MFM/MFV moments, gradients, slope limits, fluxes and signal timesteps now
+share scalar/cooperative implementations. The simulator's material-aware flux
+and limiter variants use the same lane policy. Reductions happen before slope
+ratios and timestep division; self terms are added once. Pair physics, retry,
+mass caps and global reference IDs are unchanged. The new optional
+`OperatorSpec.chunkedNeighborLanes` selects a default for chunk dispatch,
+including prepared/distributed launches, while explicit process/environment
+lane settings still take precedence. Gradients, limiters, fluxes and timesteps use 32 lanes on chunks and retain
+scalar flat/grid defaults. Moment kernels retain scalar defaults on both
+topologies: FP32 multigrid closure potentials exceeded the existing tolerance
+after changing their reduction tree. Cooperative moments remain an explicit
+lane override pending closure qualification. Different lane counts change
+floating summation order; the forward-only MFM contract remains in force.
+
+The deltaSPH size trend in the preceding short run was dominated by rebuild
+placement: the 1448² measured window included one rebuild; the 1024² window did
+not. Separate two-step traces showed essentially unchanged total GPU kernel
+work for CSR/chunks (about 130/133 ms at 1448²). The extra rebuild/dispatch host
+cost must not be interpreted as degrading per-operator GPU scaling.
+
+Exploratory matched three-step/three-repetition timings (cooperative moments
+were still enabled for chunks in this control):
+
+| Scheme / size | CSR after | Chunked before | Chunked after |
+| --- | ---: | ---: | ---: |
+| MFV 96³ | 118.5 ms | 320.2 ms | 172.0 ms |
+| MFV 128³ | 272.8 ms | 760.5 ms | 410.5 ms |
+| deltaSPH 1024² | 32.4 ms | 37.9 ms | 38.3 ms |
+| deltaSPH 1448² | 67.5 ms | 97.7 ms | 80.9 ms |
+
+All use FP32/Warp, input order, eager execution and unchanged 8M-edge / 65,536-row
+budgets. Delta uses its supported 2D TGV fixture; these absolute times do not
+compare equivalent 3D physics. MFV's new reduction tree shifts accepted times by
+at most 1.4e-9 in these windows. Independent physics/conservation tests qualify
+the rounding change. MFV retains about 45–50% chunking overhead; its operator
+launches remain per chunk, so collection batching does not eliminate that cost.
+
+Per-cell tiled collection and scalar block-size sweeps did not improve completed
+steps and were not promoted. Their evidence is retained outside the checkout.

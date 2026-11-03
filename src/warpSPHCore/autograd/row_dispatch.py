@@ -4,7 +4,7 @@ References keep global IDs. Every query-role array is sliced together; tensor
 extras declare their role rather than guessing it from equal population sizes.
 Only O(N) particle outputs are assembled, by disjoint writes, never pair data.
 """
-from dataclasses import fields, is_dataclass
+from dataclasses import fields, is_dataclass, replace
 
 import torch
 import torch.autograd.forward_ad as fwAD
@@ -167,6 +167,8 @@ def _validateSpec(spec, ctx, extras):
 
 def launchRowChunks(spec, ctx, extras, prepared=None):
     """Complete owned rows, then replicate particle results before dependent reads."""
+    if spec.chunkedNeighborLanes is not None:
+        spec = replace(spec, defaultNeighborLanes=spec.chunkedNeighborLanes, chunkedNeighborLanes=None)
     communication = ctx.adjacency.communication
     if communication is None:
         return _launchLocal(spec, ctx, extras, prepared)

@@ -15,9 +15,17 @@ from .indexing import *
 from .wp_index import wrapCellComponentPeriodic, clampCellIndex, indexCells
 from .wp_hashCells import hashGridVec3i
 
-def _makeCollectKernel(writeI: bool, spatial: bool = False):
-    """Specialize only the I store; traversal, acceptance and J ordering are shared."""
-    @wp.kernel(name=("radiusSearchCollectSpatial" if writeI else "radiusSearchCollectJOnlySpatial") if spatial
+@wp.struct
+class ChunkCollectTarget:
+    rowStart: wp.int32
+    rowStop: wp.int32
+    offsets: wp.array(dtype=offset_t)
+    neighbors: wp.array(dtype=index_t)
+
+
+def _makeCollectKernel(writeI: bool, spatial: bool = False, batched: bool = False):
+    """Specialize scheduling/target routing; acceptance and J ordering are shared."""
+    @wp.kernel(name=("radiusSearchCollectBatchedSpatial" if spatial else "radiusSearchCollectBatched") if batched else ("radiusSearchCollectSpatial" if writeI else "radiusSearchCollectJOnlySpatial") if spatial
                else ("radiusSearchCollectCompactHashMap" if writeI else "radiusSearchCollectJOnly"))
     def collect(
         queryPositions: wp.array2d(dtype=scalar_t),  # shape [N,D]
@@ -41,7 +49,7 @@ def _makeCollectKernel(writeI: bool, spatial: bool = False):
         sortIndex: wp.array(dtype=index_t), # shape [M]
         # Outputs
         edge_i: wp.array1d(dtype=index_t),  # shape [total_edges]
-        edge_j: wp.array1d(dtype=index_t)   # shape [total_edges]
+        edge_j: Any   # flat J, or an array of ChunkCollectTarget for batched collection
 
     #  * @param queryPositions_ The positions of the query particles.
     #  * @param querySupport_ The support radii of the query particles.
@@ -76,8 +84,27 @@ def _makeCollectKernel(writeI: bool, spatial: bool = False):
         else:
             queryPos = queryPositions[i]
         querySupport = querySupports[i]
-        edge_offset = edge_offsets[i]
-        edge_index = edge_offset
+        if wp.static(batched):
+            # Targets are disjoint complete row ranges. Search only metadata;
+            # the J/offset arrays remain separate bounded allocations.
+            lo = wp.int32(0)
+            hi = wp.int32(edge_j.shape[0])
+            while lo < hi:
+                mid = lo + (hi-lo)//2
+                if i >= edge_j[mid].rowStop:
+                    lo = mid+1
+                else:
+                    hi = mid
+            if lo >= edge_j.shape[0]:
+                return
+            target = edge_j[lo]
+            if i < target.rowStart:
+                return
+            outputJ = target.neighbors
+            edge_index = target.offsets[i-target.rowStart]
+        else:
+            outputJ = edge_j
+            edge_index = edge_offsets[i]
 
         domainState = domainData()
         domainState.domainMin = minDomain
@@ -207,7 +234,7 @@ def _makeCollectKernel(writeI: bool, spatial: bool = False):
                     if dist <= threshold:
                         if wp.static(writeI):
                             edge_i[edge_index] = index_t(i)
-                        edge_j[edge_index] = sortIndex[neighborIndex]
+                        outputJ[edge_index] = sortIndex[neighborIndex]
                         edge_index += offset_t(1)
 
 
@@ -231,6 +258,8 @@ def _makeCollectKernel(writeI: bool, spatial: bool = False):
 
 radiusSearchCollectCompactHashMap = _makeCollectKernel(True)
 radiusSearchCollectJOnly = _makeCollectKernel(False)
+radiusSearchCollectJOnlyBatched = _makeCollectKernel(False, batched=True)
+radiusSearchCollectJOnlyBatchedSpatial = _makeCollectKernel(False, spatial=True, batched=True)
 radiusSearchCollectSpatial = _makeCollectKernel(True, True)
 radiusSearchCollectJOnlySpatial = _makeCollectKernel(False, True)
 

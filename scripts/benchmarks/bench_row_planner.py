@@ -22,6 +22,7 @@ def main():
     parser.add_argument('--warmup', type=int, default=3)
     parser.add_argument('--repeats', type=int, default=7)
     parser.add_argument('--calls', type=int, default=1)
+    parser.add_argument('--materialize-prefix', action='store_true', help='include explicit public tuple materialization in each timed call')
     parser.add_argument('--budget-gib', type=float, default=8.)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -53,7 +54,7 @@ def main():
     report = dict(schema_version=1, kind='row_planner', machine=metadata(device),
                   arguments=vars(args) | dict(output=str(args.output), policy=asdict(policy)),
                   benchmark_sha256=hashlib.sha256(source).hexdigest(),
-                  timing_scope='CPU counts to immutable plan, including output allocation/release; count generation and validation excluded',
+                  timing_scope='CPU counts to immutable plan, including output allocation/release; public prefix tuple materialization '+('included' if args.materialize_prefix else 'deferred')+'; count generation and validation excluded',
                   records=[])
     for rows in dict.fromkeys(args.rows):
         generator = torch.Generator().manual_seed(173)
@@ -66,7 +67,10 @@ def main():
                           counts_sha256=counts_hash, status='failed')
             try:
                 def build():
-                    return buildRowChunkPlan(counts, generation=generation, policy=policy, numOwners=owners)
+                    result = buildRowChunkPlan(counts, generation=generation, policy=policy, numOwners=owners)
+                    if args.materialize_prefix:
+                        _ = result.prefix
+                    return result
                 reference = build()
                 signature = reference.signature
                 record.update(chunks=len(reference.chunks), total_edges=reference.totalEdges, signature=signature)

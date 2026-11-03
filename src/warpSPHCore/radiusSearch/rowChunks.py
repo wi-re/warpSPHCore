@@ -10,6 +10,7 @@ from bisect import bisect_right
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
+import sys
 
 import numpy as np
 import torch
@@ -100,6 +101,18 @@ class RowChunk:
 
 
 @dataclass(frozen=True, slots=True)
+class _DeferredPrefix:
+    """Private read-only scan; public tuple conversion is paid only on access."""
+    values: np.ndarray
+
+    def __len__(self):
+        return len(self.values)
+
+    def __getitem__(self, index):
+        return int(self.values[index])
+
+
+@dataclass(frozen=True, slots=True)
 class RowChunkPlan:
     generation: RowChunkGeneration
     policy: RowChunkPolicy
@@ -110,13 +123,33 @@ class RowChunkPlan:
     signature: str
     ownershipPolicy: str = 'contiguous-balanced-chunks-v1'
 
+    def __getattribute__(self, name):
+        value = object.__getattribute__(self, name)
+        if name == 'prefix' and isinstance(value, _DeferredPrefix):
+            # Preserve the v1 public tuple, dataclass equality/hash/asdict and
+            # pickle behavior. Production search only needs bounded lookups;
+            # it must not box millions of Python integers on every rebuild.
+            value = tuple(value.values.tolist())
+            object.__setattr__(self, 'prefix', value)
+        return value
+
+    def prefixAt(self, row: int) -> int:
+        """One global boundary without materializing the public prefix tuple."""
+        return object.__getattribute__(self, 'prefix')[row]
+
+    @property
+    def hostPrefixBytes(self) -> int:
+        data = object.__getattribute__(self, 'prefix')
+        return (sys.getsizeof(data) + sys.getsizeof(data.values) if isinstance(data, _DeferredPrefix)
+                else sys.getsizeof(data) + sum(sys.getsizeof(p) for p in data))
+
     @property
     def numRows(self) -> int:
-        return len(self.prefix) - 1
+        return len(object.__getattribute__(self, 'prefix')) - 1
 
     @property
     def totalEdges(self) -> int:
-        return self.prefix[-1]
+        return self.prefixAt(-1)
 
     @property
     def ownerRanges(self) -> tuple[tuple[int, int], ...]:
@@ -131,13 +164,19 @@ class RowChunkPlan:
 
     def globalOffsets(self) -> torch.Tensor:
         """Fresh CPU int64 P[N+1], independent of the flat offset default."""
-        return torch.tensor(self.prefix, dtype=torch.int64)
+        data = object.__getattribute__(self, 'prefix')
+        if isinstance(data, _DeferredPrefix):
+            return torch.from_numpy(data.values.copy())
+        return torch.tensor(data, dtype=torch.int64)
 
     def localOffsets(self, chunkIndex: int) -> torch.Tensor:
         chunk = self.chunks[chunkIndex]
         # Subtract in wide host arithmetic BEFORE constructing any local view.
+        data = object.__getattribute__(self, 'prefix')
+        if isinstance(data, _DeferredPrefix):
+            return torch.from_numpy(data.values[chunk.rowStart:chunk.rowStop] - chunk.edgeStart)
         return torch.tensor(tuple(p - chunk.edgeStart for p in
-                                  self.prefix[chunk.rowStart:chunk.rowStop]), dtype=torch.int64)
+                                  data[chunk.rowStart:chunk.rowStop]), dtype=torch.int64)
 
     def validateSignature(self, expected: str) -> None:
         """Check peer/count/collect agreement before local pair allocation."""
@@ -162,7 +201,9 @@ def buildRowChunkPlan(counts: torch.Tensor, *, generation: RowChunkGeneration,
     own no chunks; zero-neighbour particles still belong to exactly one chunk.
     A vectorized int64 scan builds the prefix; exact integer budget inversion
     and binary searches preserve maximal greedy chunks. The public prefix stays
-    an immutable tuple of Python integers. No per-edge arrays are made.
+    an immutable tuple of Python integers, materialized on first explicit access.
+    Internal planning/offset operations retain a read-only int64 scan instead.
+    No per-edge arrays are made.
     """
     if not isinstance(generation, RowChunkGeneration) or not isinstance(policy, RowChunkPolicy):
         raise TypeError('Expected RowChunkGeneration and RowChunkPolicy metadata.')
@@ -191,7 +232,7 @@ def buildRowChunkPlan(counts: torch.Tensor, *, generation: RowChunkGeneration,
     widePrefix = np.empty(len(values) + 1, dtype=np.int64)
     widePrefix[0] = 0
     np.cumsum(values, dtype=np.int64, out=widePrefix[1:])
-    prefix = tuple(widePrefix.tolist())
+    prefix = widePrefix
     if prefix[-1] > torch.iinfo(torch.int64).max:
         raise OverflowError('Global row-chunk prefix does not fit int64.')
 
@@ -208,8 +249,9 @@ def buildRowChunkPlan(counts: torch.Tensor, *, generation: RowChunkGeneration,
     chunks = []
     for owner, (first, stop) in enumerate(_balancedRanges(len(intervals), numOwners)):
         for start, end in intervals[first:stop]:
-            live = prefix[end] - prefix[start]
-            chunks.append(RowChunk(start, end, prefix[start], live, policy.capacityFor(live), owner))
+            edgeStart = int(prefix[start])
+            live = int(prefix[end]) - edgeStart
+            chunks.append(RowChunk(start, end, edgeStart, live, policy.capacityFor(live), owner))
     countingRanges = _balancedRanges(len(counts), numOwners)
     ownershipPolicy = 'contiguous-balanced-chunks-v1'
     digest = sha256()
@@ -220,5 +262,6 @@ def buildRowChunkPlan(counts: torch.Tensor, *, generation: RowChunkGeneration,
     # Preserve the v1 signature byte for byte: signed little-endian int64
     # boundaries, hashed as a contiguous buffer rather than one Python call/row.
     digest.update(widePrefix.astype('<i8', copy=False))
-    return RowChunkPlan(generation, policy, numOwners, prefix, countingRanges,
+    widePrefix.flags.writeable = False
+    return RowChunkPlan(generation, policy, numOwners, _DeferredPrefix(widePrefix), countingRanges,
                         tuple(chunks), digest.hexdigest(), ownershipPolicy)
