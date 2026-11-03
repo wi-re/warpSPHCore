@@ -51,7 +51,9 @@ template <class T, int D, int Fields> struct CorrectedLaplacian
         for (int d = 0; d < D; ++d) projection += gradient[d] * dx[d] / regularized;
         if (mode == 3) {
             const T factor = projection / regularized;
-            for (int base = 0; base < Fields; base += D) {
+            // Scalar Dot outside 1D is rejected by argument preparation. Do
+            // not instantiate its invalid vector reads in the scalar policy.
+            if constexpr (Fields % D == 0) for (int base = 0; base < Fields; base += D) {
                 T field_projection = T(0);
                 for (int d = 0; d < D; ++d)
                     field_projection += values[base + d] * dx[d] / regularized;
@@ -80,7 +82,9 @@ template <class T, int D, int Fields> struct CorrectedLaplacian
         for (int c = 0; c < Fields; ++c) values[c] = difference(q, r, edge, c);
         // The blockwise Dot matrix is symmetric; the same contraction is its
         // field transpose. Other schemes are scalar multiples of identity.
-        if (positive) {
+        // Runtime metadata rejects scalar positive-divergence in D > 1;
+        // express that shape constraint in the template as well.
+        if constexpr (Fields >= D) if (positive) {
             T dx[D]; q.geometry.distance(r.data, dx);
             T projection = 0;
             for (int d = 0; d < D; ++d) projection += dx[d] * values[d];
@@ -90,7 +94,9 @@ template <class T, int D, int Fields> struct CorrectedLaplacian
             // Preserve Warp's positiveDotProduct contract: for a matrix field
             // only its first D flattened components are written.
             for (int d = 0; d < D; ++d) sum.values[d] += contribution[d];
-        } else field_contract(q, r, edge, values, sum.values);
+            return;
+        }
+        field_contract(q, r, edge, values, sum.values);
     }
     SPH_HD void finish(const Query& q, const State& sum) const {
         for (int c = 0; c < Fields; ++c) this->fields.output[q.index * Fields + c] = sum.values[c];

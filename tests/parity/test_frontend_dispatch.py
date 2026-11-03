@@ -32,7 +32,8 @@ def inputs(device):
 
 def test_all_core_routes_and_calibrated_density(device, monkeypatch):
     q, r, domain, fi, fj, graph = inputs(device)
-    module = importlib.import_module('warpSPHCore.operations')
+    module = importlib.import_module('warpSPHCore.wp_operations')
+    assert importlib.import_module('warpSPHCore.operations').warpOperation is module.warpOperation
     for operation in sph.WarpOperation:
         if operation == sph.WarpOperation.Custom:
             continue
@@ -53,10 +54,16 @@ def test_all_core_routes_and_calibrated_density(device, monkeypatch):
     torch.testing.assert_close(actual, expected, rtol=3e-4, atol=3e-5)
     with pytest.raises(TypeError, match='CSR AdjacencyList'):
         module.warpOperation(q, prop, domain, adjacency=object())
-    with pytest.raises(NotImplementedError, match='Warp-specific'):
-        module.warpOperationJVP(q, prop, domain)
-    with pytest.raises(NotImplementedError, match='second-order'):
-        module.warpOperationHVP(q, prop, domain, q.positions)
+    prop=replace(prop,calibrateNormalization=False)
+    tangent=sph.ParticleTangentState(q.positions.cos()*.02,None,None,None)
+    monkeypatch.setattr(module,'OPERATORS','warp')
+    expected=module.warpOperationJVP(q,prop,domain,queryTangentState=tangent,**options)
+    expected_hvp=module.warpOperationHVP(q,prop,domain,q.positions,**options)
+    monkeypatch.setattr(module,'OPERATORS','native')
+    torch.testing.assert_close(module.warpOperationJVP(q,prop,domain,queryTangentState=tangent,**options),
+                               expected,rtol=3e-4,atol=3e-5)
+    torch.testing.assert_close(module.warpOperationHVP(q,prop,domain,q.positions,**options),
+                               expected_hvp,rtol=3e-4,atol=3e-5)
 
 
 def test_crk_accumulation_routes(device, monkeypatch):
@@ -82,5 +89,9 @@ def test_crk_accumulation_routes(device, monkeypatch):
     policy = importlib.import_module('warpSPHCore._backend')
     monkeypatch.setattr(policy, 'OPERATORS', 'native')
     from warpSPHCore.crk import computeCRKFactorsJVP
-    with pytest.raises(NotImplementedError, match='Warp-specific'):
-        computeCRKFactorsJVP(q, domain, prop.kernel, None, adjacency=graph)
+    tangent=sph.ParticleTangentState(q.positions.cos()*.02,None,None,None)
+    volume,product,state,dstate=computeCRKFactorsJVP(q,domain,prop.kernel,tangent,
+        adjacency=graph,referenceState=r)
+    assert volume.shape==product.shape==q.supports.shape
+    for bundle in (state,dstate):
+        for name in ('A','B','gradA','gradB'):assert torch.isfinite(getattr(bundle,name)).all()

@@ -937,7 +937,7 @@ and tests do not require that checkout or the external evidence archive.
 | 3 | Polynomial reconstruction and MFM/MFV | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
 | 4 | Chunked/owned-row search and native operator traversal | Implemented and qualified on CPU/CUDA and two-rank Gloo; affected GPU paths compile for experimental HIP |
 | 5 | Remaining derivative and public API parity | Implemented and qualified on CPU/CUDA; affected GPU paths compile for experimental HIP |
-| 6 | Final distribution/merge qualification | Pending; no AMD hardware gate |
+| 6 | Final distribution/merge qualification | Qualified local CPU/CUDA wheels, source/JIT fallback and offline HIP; see final qualification report |
 
 Higher-order and nonsmooth derivative claims need explicit numerical contracts;
 a successful primal port does not imply those derivatives. Reusable capture/
@@ -1123,3 +1123,20 @@ not fabricated Python Warp objects. Python math retains its pure host prime
 helper; tensor kernel evaluation is `evaluateKernel`.
 
 See the [derivative/public API qualification](../regression/native_derivative_api_2026_11_03.md).
+
+### Core merge checkpoint
+
+The ordered core port is complete within the documented derivative and execution
+contracts. Warp remains the default/readable backend. Native CPU uses Torch's
+parallel executor; the standalone compatibility library remains available without
+being the primary CPU architecture. Native frontend kernels and new frontend
+integration work belong in a separate worktree after the core merge.
+
+Source wheels are universal `py3-none-any` archives with no local prebuilt binary.
+`scripts/packaging/build_native_wheel.py` explicitly requests platform wheels,
+compiles the selected CPU/CUDA/HIP inventory and pins the qualified Torch build.
+A native wheel loads without compiler helpers; a source wheel uses the JIT path.
+The local CPU/CUDA qualification does not qualify GH200 hardware or an AMD runtime.
+Build a Grace/H100 wheel on the target aarch64 system with `--cpu-arch native`
+and `--gpu-arch 90`; AMD support remains experimental with compile-only evidence.
+See the [final core qualification](../regression/native_core_merge_2026_11_03.md).

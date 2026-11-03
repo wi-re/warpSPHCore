@@ -2,6 +2,8 @@
 
 ## Unreleased — native development branch
 
+- Qualify complete native core distributions: universal source/JIT wheels, platform CPU/CUDA wheels, experimental HIP compilation and retained standalone compatibility; exclude local build artifacts from source wheels.
+
 - Native core: general first-order operator JVPs, explicit CRK products and the legacy density position block with CSR/CSC vector/mass derivatives; Warp-free public operator imports and module compatibility helpers.
 
 - Native core: bounded CSR32/CSR64 owned-row compact search, Verlet filtering and shared distributed operator dispatch, including CRK, polynomial and meshless dependent passes.

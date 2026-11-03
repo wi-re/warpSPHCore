@@ -39,7 +39,7 @@ pip install -e ".[dev]"
 
 The experimental native backend runs without Warp. Install `.[native]` and set
 `WARPSPHCORE_BACKEND=native` **before importing** the package. It provides all 15
-kernel families, seven standard SPH operators, and manual first-order reverse
+kernel families, seven standard SPH operators, and manual first-order JVP/VJP
 passes for smooth kernels in 1D/2D/3D, float32/float64. CPU and GPU launches use
 the same C++ numerical implementations. The default backend remains Warp,
 installed with `.[warp]`.
@@ -55,8 +55,10 @@ Native wheels can be built with CMake for CPU, CUDA, or experimental ROCm;
 compatible wheels load without a compiler, with cached JIT as the source fallback.
 See [native backend scope, wheel builds, and HPC deployment](docs/docs/native-backend.md) for
 build requirements, HIP checks, supported interfaces and remaining work.
-Corrections, scalable search, higher-order AD and complete frontend simulations
-remain work in progress.
+The core also includes corrected operators and CRK preparation, renormalization,
+dense/Krylov helpers, polynomial reconstruction, meshless primals and bounded
+owned-row search/operators. General higher-order AD and a completely native
+frontend retain their separate scope.
 
 The standalone C++17 library can also run all supported primals and explicit
 per-operation adjoints without Torch or Python. Build with

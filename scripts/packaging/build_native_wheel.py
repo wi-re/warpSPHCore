@@ -50,7 +50,7 @@ def main():
     env.setdefault('CXX', shutil.which('c++') or 'c++')
     env.setdefault('CC', shutil.which('cc') or 'cc')
     env['CMAKE_BUILD_PARALLEL_LEVEL'] = str(args.jobs)
-    settings = ['-Ccmake.define.WARPSPHCORE_BUILD_NATIVE=ON',
+    settings = ['-Cwheel.platlib=true', '-Ccmake.define.WARPSPHCORE_BUILD_NATIVE=ON',
                 f'-Ccmake.define.WARPSPHCORE_NATIVE_BACKEND={args.backend}',
                 f'-Ccmake.define.WARPSPHCORE_CPU_ARCH={args.cpu_arch}']
     if args.gpu_arch:

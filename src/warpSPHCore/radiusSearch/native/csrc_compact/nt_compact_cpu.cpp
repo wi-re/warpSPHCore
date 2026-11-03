@@ -58,9 +58,10 @@ void cpu_search(const Context &context, const Problem &problem, const Data &data
                 bool collect) {
     numeric(problem, [&](auto scalar, auto dimension) {
         auto args = arguments<decltype(scalar), decltype(dimension)::value>(problem);
-        if (collect)
+        if (collect) {
             args.collected = static_cast<int64_t *>(output.data);
-        else
+            args.neighbors = {output.data, true};
+        } else
             args.counts = static_cast<int32_t *>(output.data);
         parallel(
             context, problem.query.count,

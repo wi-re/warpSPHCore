@@ -206,7 +206,8 @@ class NoWarp(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, NoWarp())
 ''')
     root = Path(__file__).resolve().parents[3]
-    env = dict(os.environ, PYTHONPATH=os.pathsep.join((str(tmp_path), str(root / 'src'), os.environ.get('PYTHONPATH', ''))))
+    package_root = Path(sph.__file__).resolve().parents[1]
+    env = dict(os.environ, PYTHONPATH=os.pathsep.join((str(tmp_path), str(package_root), os.environ.get('PYTHONPATH', ''))))
     subprocess.run([sys.executable, str(root / 'scripts/examples/native_core.py'), '--device', 'cpu'],
                    env=env, check=True, capture_output=True, text=True)
 
