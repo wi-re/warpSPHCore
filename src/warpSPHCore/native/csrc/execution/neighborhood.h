@@ -27,7 +27,9 @@ template <class Index, class Offsets = const int64_t*> struct Csr {
     template <class Visit>
     SPH_HD void each(int64_t query, int lane, int lanes, Visit visit) const {
         const auto begin = offsets[query];
-        for (int32_t local = lane; local < counts[query]; local += lanes)
+        // Counts can reach INT32_MAX. Advancing a cooperative lane beyond the
+        // last edge must not wrap before the loop condition is checked.
+        for (int64_t local = lane; local < counts[query]; local += lanes)
             visit(Neighbor{int64_t(indices[begin + local]), int64_t(begin + local)});
     }
 

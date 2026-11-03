@@ -103,8 +103,9 @@ class StageTiming:
         timing = self
 
         class NativeNamespace:
-            def __init__(self, namespace):
+            def __init__(self, namespace, prefix=''):
                 self.namespace = namespace
+                self.prefix = prefix
                 self.cache = {}
 
             def __getattr__(self, name):
@@ -113,7 +114,7 @@ class StageTiming:
 
                     @wraps(operator)
                     def call(*args, **kwargs):
-                        with timing.region(engine='native', operation=name):
+                        with timing.region(engine='native', operation=self.prefix + name):
                             return operator(*args, **kwargs)
                     self.cache[name] = call
                 return self.cache[name]
@@ -126,6 +127,28 @@ class StageTiming:
                 proxies[id(namespace)] = NativeNamespace(namespace)
             return proxies[id(namespace)]
         self.patch(_build, 'build', build)
+
+        # Frontend extensions share core build infrastructure but own a separate
+        # namespace. Include their completed public calls in the same exclusive
+        # partition, even when an adapter imported its builder before install.
+        try:
+            from warpSPH.native import _build as frontend_build
+        except ModuleNotFoundError as exc:
+            if exc.name not in ('warpSPH.native', 'warpSPH.native._build'):
+                raise
+        else:
+            original_frontend_build = frontend_build.build
+
+            def build_frontend(*args, **kwargs):
+                namespace = original_frontend_build(*args, **kwargs)
+                key = ('frontend', id(namespace))
+                if key not in proxies:
+                    proxies[key] = NativeNamespace(namespace, 'frontend.')
+                return proxies[key]
+
+            for name, module in list(sys.modules.items()):
+                if name.startswith('warpSPH.') and getattr(module, 'build', None) is original_frontend_build:
+                    self.patch(module, 'build', build_frontend)
 
         # The wave RHS has no numbered frontend gate. Add the corresponding
         # benchmark-only scope around its sole spatial operator, for both paths.

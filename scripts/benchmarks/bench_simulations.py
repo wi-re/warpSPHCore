@@ -34,6 +34,8 @@ def revision(module):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--operators', choices=('warp', 'native'), required=True)
+    parser.add_argument('--frontend-operators', choices=('warp', 'native'), default='warp',
+                        help='Converted frontend families only; remaining stages may still use Warp')
     parser.add_argument('--case', choices=('waveEquation', 'tgv-wc', 'tgv', 'linearWave', 'gresho'), required=True)
     parser.add_argument('--scheme')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
@@ -58,6 +60,7 @@ def main():
         parser.error('the upstream wave runner has no Morton lifecycle adapter; use --order input')
     os.environ['WARPSPHCORE_BACKEND'] = 'warp'
     os.environ['WARPSPHCORE_OPERATORS'] = args.operators
+    os.environ['WARPSPH_FRONTEND_OPERATORS'] = args.frontend_operators
     from warpSPHBootstrap import bootstrap
     bootstrap(precision=args.precision)
     import torch
@@ -157,7 +160,7 @@ def main():
         result = run(case, **options)
         averages = profiler.key_averages()
         events = {e.key: e.count for e in averages
-                  if 'warpsph_native::' in e.key}
+                  if 'warpsph_native::' in e.key or 'warpsph_frontend::' in e.key}
         (args.out / 'native-dispatch.json').write_text(json.dumps(events, indent=2))
         (args.out / 'profile-cpu.txt').write_text(averages.table(sort_by='self_cpu_time_total', row_limit=30))
         if args.device == 'cuda':
@@ -195,6 +198,8 @@ def main():
         metadata['gpu'] = torch.cuda.get_device_name()
         metadata['peak_torch_bytes'] = torch.cuda.max_memory_allocated()
     metadata['operator_backend'] = warpSPHCore.operator_backend
+    metadata['frontend_operator_backend'] = args.frontend_operators
+    metadata['execution_scope'] = 'mixed frontend (see actual dispatch and coverage ledger)'
     (args.out / 'result.json').write_text(json.dumps(metadata, indent=2))
     print(json.dumps({key: metadata[key] for key in ('particles', 'csr_candidates_per_particle', 'median_step_ms', 'median_runner_interval_ms')}))
 
