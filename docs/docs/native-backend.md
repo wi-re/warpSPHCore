@@ -930,8 +930,8 @@ and tests do not require that checkout or the external evidence archive.
 |---|---|---|
 | 1 | Verlet lifecycle/capacity reuse; standard operator options | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
 | 2 | Renormalization, small matrices, solver dependencies | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
-| 3 | Polynomial reconstruction and MFM/MFV | Next |
-| 4 | Chunked/owned-row search and native operator traversal | Pending |
+| 3 | Polynomial reconstruction and MFM/MFV | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
+| 4 | Chunked/owned-row search and native operator traversal | Next |
 | 5 | Remaining derivative and public API parity | Pending; includes uncorrected JVP and existing density-HVP scope |
 | 6 | Final distribution/merge qualification | Pending; no AMD hardware gate |
 
@@ -1053,3 +1053,17 @@ The workspace path remains inference-only. Ordinary solvers and dense spectral
 AD retain their Torch implementations. See the
 [dense and solver qualification](../regression/native_dense_solvers_2026_11_03.md)
 for numerical policies, derivative scope and verification.
+
+### Polynomial and meshless execution
+
+`PolyFit` and `Reconstructor` use native moment/RHS assembly while preserving
+the shared Torch fit and nonlinear reconstruction scaffold. Raw polynomial
+assembly has first-order CSR/CSC JVP/VJP, including explicit source volumes
+and periodic domain lengths. Fixed rank, support and sector rules apply.
+
+In a native process, `warpSPHCore.mfm.MeshlessNative` runs the compiled meshless
+primal passes, closure graph and multigrid kernels. `MeshlessWarp` remains a
+compatibility alias for backend-opaque callers. This compiled path is
+forward-only; the differentiable Torch meshless reference also imports without
+Warp. See the [polynomial and meshless qualification](../regression/native_polynomial_meshless_2026_11_03.md)
+for retained numerical policies and verification.

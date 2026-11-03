@@ -24,9 +24,10 @@ _LINALG_EXPORTS = ['applyPinv', 'pinvSymmetric', 'symmetricPinv3', 'loadPadded3x
     'DiagonalPreconditioner', 'BlockJacobiPreconditioner', 'CGWorkspace',
     'BiCGStabWorkspace', 'SolveResult', 'Status', 'CheckSchedule',
     'RESIDUAL_STATISTICS', 'StationaryResult', 'residualStatistic', 'runStationary']
+_POLY_EXPORTS = ['PolyFit', 'monomialExponents', 'interfacePairs', 'minimumImage', 'Reconstructor', 'smoothnessGram']
 _RENORM_EXPORTS = ['computeRenormalizationMatrices', 'computeRenormalizationMatricesJVP']
 _PINV_EXPORTS = ['pinv_warp', 'pinv1x1', 'pinv2x2_warpBackend']
-__all__ += _CRK_EXPORTS + _LINALG_EXPORTS + _RENORM_EXPORTS + _PINV_EXPORTS
+__all__ += _CRK_EXPORTS + _LINALG_EXPORTS + _RENORM_EXPORTS + _PINV_EXPORTS + _POLY_EXPORTS
 
 
 def __getattr__(name):
@@ -34,7 +35,8 @@ def __getattr__(name):
         from importlib import import_module
         return getattr(import_module('..crk.native', __name__), name)
     for exports, module in ((_LINALG_EXPORTS, '..linalg'),
-                            (_RENORM_EXPORTS, '..renorm'), (_PINV_EXPORTS, '..pinv')):
+                            (_RENORM_EXPORTS, '..renorm'), (_PINV_EXPORTS, '..pinv'),
+                            (_POLY_EXPORTS, '..polyfit')):
         if name in exports:
             from importlib import import_module
             return getattr(import_module(module, __name__), name)

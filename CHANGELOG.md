@@ -2,6 +2,8 @@
 
 ## Unreleased — native development branch
 
+- Native core: polynomial reconstruction assembly with CSR/CSC derivatives and Warp-free MFM/MFV primal, closure and multigrid execution.
+
 - Native core: Warp-free renormalization and linear algebra, shared CPU/CUDA/HIP dense and Krylov updates, and reusable captured CG/BiCGStab workspaces.
 
 - Add native Verlet validity, filtering, snapshot/capacity lifecycle and deferred

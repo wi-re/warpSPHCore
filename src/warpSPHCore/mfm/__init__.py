@@ -29,9 +29,15 @@ from .geometry import MeshlessGeometry
 from .limiters import conditionBeta, slopeLimiter, pairLimit
 from .riemann import starState, faceFlux, robustFaceFlux
 from .scheme import mfmRates, primitives, conserved, signalTimestep
-from .warpBackend import MeshlessWarp
-from .wp_mfm import (faceVector, guardedFace, pairFace,
-                     mfmMomentsWarp, mfmGradientsWarp, mfmLimiterWarp, mfmFluxWarp, mfmTimestepWarp)
+from .._backend import BACKEND
+if BACKEND == 'native':
+    from .backend import Meshless as MeshlessNative
+    MeshlessWarp = MeshlessNative  # compatibility for existing backend-opaque callers
+    from .native.nt_mfm import mfmMomentsNative, mfmGradientsNative, mfmLimiterNative
+else:
+    from .warpBackend import MeshlessWarp
+    from .wp_mfm import (faceVector, guardedFace, pairFace,
+                         mfmMomentsWarp, mfmGradientsWarp, mfmLimiterWarp, mfmFluxWarp, mfmTimestepWarp)
 
 __all__ = [
     # torch reference (the oracle)
@@ -39,9 +45,9 @@ __all__ = [
     "starState", "faceFlux", "robustFaceFlux",
     "conditionBeta", "slopeLimiter", "pairLimit",
     "kernelWeight", "kernelDerivative", "SUPPORTED_KERNELS",
-    # warp backend
-    "MeshlessWarp",
-    "mfmMomentsWarp", "mfmGradientsWarp", "mfmLimiterWarp", "mfmFluxWarp", "mfmTimestepWarp",
-    # face geometry (@wp.func)
-    "faceVector", "guardedFace", "pairFace",
 ]
+if BACKEND == 'native':
+    __all__ += ['MeshlessNative','MeshlessWarp','mfmMomentsNative','mfmGradientsNative','mfmLimiterNative']
+else:
+    __all__ += ['MeshlessWarp','mfmMomentsWarp','mfmGradientsWarp','mfmLimiterWarp','mfmFluxWarp','mfmTimestepWarp',
+                'faceVector','guardedFace','pairFace']
