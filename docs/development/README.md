@@ -12,3 +12,8 @@ The checked-in [development artifact policy](../docs/development-artifacts.md)
 contains the current qualification summary, configuration and regeneration
 commands. The [repository plan](../../REPOSITORY_PLAN.md) retains the current
 capability priorities. The original detailed plan is preserved in the archive.
+
+Exploratory source is now independently tracked under
+`core/research/native-backend/` in that workspace. Disposable troubleshooting
+starts in `/tmp`; retained runs remain outside both source repositories. See
+the artifact policy above and the root `AGENTS.md`.

@@ -119,4 +119,4 @@ GPU: NVIDIA RTX PRO 6000 Blackwell Workstation Edition. Torch 2.13.0+cu130, CUDA
 
 The archive retains immutable native/planner/prototype libraries, screening and final JSON, individual event/wall samples, conversion samples, storage by tensor, Nsight exports, diagnostics, CSV, figures and source snapshots. `source-v1` and `screen-v1-*` preserve the preliminary scalar-only screen; final results use `compression-v2.so`, which contains both scalar and packed-four variants. Original neighbor-gap distributions remain in `experiments/profiler_tuning/index_gaps_2026_10_31.json`.
 
-Source and reproduction commands: [experiment README](../../experiments/csr_compression/README.md). Raw archive: `/home/lu26029/dev/warpSPHDevelopment/core/experiments/native-csr-compression-20261031`.
+Source and reproduction commands: [archived research sources](../docs/development-artifacts.md#research-sources). Raw archive: `/home/lu26029/dev/warpSPHDevelopment/core/experiments/native-csr-compression-20261031`.

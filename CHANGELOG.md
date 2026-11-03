@@ -2,6 +2,9 @@
 
 ## Unreleased — native development branch
 
+- Move exploratory studies to an independent research repository with a verified
+  migration manifest; enforce the external-artifact policy in agent rules and CI.
+
 - Integrate the coordinated 0.7.1 core, frontend and integrator interfaces.
 - Add opt-in native core/CRK accumulation dispatch within the Warp frontend,
   preserving its Morton ordering and CSR buffers. Native chunked/distributed

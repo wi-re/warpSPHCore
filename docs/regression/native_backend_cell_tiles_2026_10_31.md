@@ -254,7 +254,7 @@ pair rate and every sample range.
 
 ## Reproduction and retained evidence
 
-See [the experiment README](../../experiments/cell_tiles/README.md). Code, source/binary hashes, selected
+See [archived research sources](../docs/development-artifacts.md#research-sources). Code, source/binary hashes, selected
 configurations, all raw timings, correctness results and graphs live in:
 
 `/home/lu26029/dev/warpSPHDevelopment/core/experiments/native-cell-tiles-20261031/`

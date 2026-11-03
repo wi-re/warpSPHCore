@@ -25,6 +25,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Check repository artifact layout
+        run: python scripts/check_repository_layout.py
       - id: select
         run: python scripts/testing/select_suites.py >> "$GITHUB_OUTPUT"
 

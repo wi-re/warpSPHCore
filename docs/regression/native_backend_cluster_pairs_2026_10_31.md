@@ -199,7 +199,7 @@ memory is larger than the execution-representation numbers.
 
 ## Reproduction and interpretation
 
-See [the experiment README](../../experiments/cluster_pairs/README.md) for commands.
+See [archived research sources](../docs/development-artifacts.md#research-sources) for commands.
 All raw data, selected schedules, exact timed sources, artifacts, checksums,
 sanitizer logs, CSV and plots are archived under:
 

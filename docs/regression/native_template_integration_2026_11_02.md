@@ -166,7 +166,7 @@ call intervals, not only an isolated kernel launch.
 
 ## Reproduction and artifacts
 
-See [the interface README](../../experiments/template_interface/README.md) and
+See [archived research sources](../docs/development-artifacts.md#research-sources) and
 `production_study.py --help`. Existing wheel build entry point:
 
 ```sh

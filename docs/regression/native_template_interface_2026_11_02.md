@@ -17,7 +17,7 @@ are included.
 Shared headers live in `native/csrc/execution`: `neighborhood.h`,
 `neighborhood.cuh`, `neighborhoodAdjoint.h` and `sphFields.h`. Function policies
 live in their owning module's `native/csrc_<function>` directory. The
-[experiment README](../../experiments/template_interface/README.md) documents the
+[archived research sources](../docs/development-artifacts.md#research-sources) documents the
 contract and reproduction commands.
 
 | Policy | Accumulator | Finalization/output |
