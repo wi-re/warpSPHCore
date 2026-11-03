@@ -14,6 +14,11 @@ def computeCRKDensity(queryParticles, operationProperties, domain, crkState,
         raise ValueError('CRK density requires referenceVolumes, A and B')
     reference = queryParticles if referenceParticles is None else referenceParticles
     operationProperties = replace(operationProperties, supportMode=SupportScheme.Scatter)
+    from ...radiusSearch.chunked import ChunkedAdjacency
+    if isinstance(adjacency,ChunkedAdjacency):
+        from ...native._row_dispatch import preparation
+        return preparation(10,computeCRKDensity,queryParticles,reference,domain,operationProperties,
+                           adjacency,queryVolumes,referenceVolumes,crkState)
     inputs, options, topology = prepare(queryParticles, reference, domain, operationProperties,
                               adjacency, referenceVolumes, reference.masses, crkState.A, crkState.B)
     from ...native._differential import apply_preparation

@@ -62,7 +62,7 @@ template <class T, int D> struct FilterRow {
             // Match Warp's filtering rule, including the exact cutoff. Fresh
             // radius search has its separate, strict '<' membership rule.
             if (args.displacement(i,j,delta) <= args.radius(i,j)) {
-                if (collect) args.collected[args.offsets[i]+found] = j;
+                if (collect) args.neighbors.set(args.offsets[i]+found,j);
                 ++found;
             }
         }

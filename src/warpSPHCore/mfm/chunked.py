@@ -8,7 +8,11 @@ import torch
 from ..autograd.operator_spec import launchOperator
 from ..autograd.row_dispatch import chunkContexts, validateContext
 from ..radiusSearch.pairField import ChunkedPairField
-from .wp_mfm import _CLOSURE_W_SPEC, _ctx
+from .._backend import BACKEND
+if BACKEND == 'native':
+    from .native.nt_mfm import _CLOSURE_W_SPEC,_ctx
+else:
+    from .wp_mfm import _CLOSURE_W_SPEC,_ctx
 
 
 def _local(adjacency, tag, function):

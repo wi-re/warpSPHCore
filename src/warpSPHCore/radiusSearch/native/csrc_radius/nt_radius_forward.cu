@@ -38,8 +38,11 @@ void radius_gpu(RadiusTask task, const Tensors &t, int support, compact::View in
         t[QX].size(0) == t[RX].size(0) && t[QX].const_data_ptr() == t[RX].const_data_ptr();
     execute(CooperativeRadiusRows{task, index, reordered}, t, support, 0, 6,
             CooperativeGpuLauncher<4>{stream});
-    if (task == RadiusTask::Collect)
+    if (task == RadiusTask::Collect && t[NEIGHBORS].scalar_type()==ScalarType::Long)
         sort_csr_rows(t[QX].size(0), index_view(t[OFFSETS]), t[COUNTS].const_data_ptr<int32_t>(),
                       t[NEIGHBORS].mutable_data_ptr<int64_t>(), stream);
+    else if (task == RadiusTask::Collect)
+        sort_csr_rows(t[QX].size(0),index_view(t[OFFSETS]),t[COUNTS].const_data_ptr<int32_t>(),
+                      t[NEIGHBORS].mutable_data_ptr<int32_t>(),stream);
 }
 } // namespace sph_native

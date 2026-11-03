@@ -14,6 +14,7 @@ import torch
 from ..dataTypes import DomainDescription
 from ..enumTypes import SupportScheme
 from ..type_config import get_torch_precision
+from .._backend import BACKEND
 from .chunked import ChunkedAdjacency, _config, _search
 from .rowChunks import RowChunkGeneration, RowChunkPolicy, buildRowChunkPlan
 
@@ -113,7 +114,7 @@ def restoreRowChunkCheckpointState(state, *, device, policy=None, communication=
             or qh.shape != (len(q),) or rh.shape != (len(r),)
             or counts.shape != (len(q),) or counts.dtype != torch.int32):
             raise ValueError('Checkpoint snapshot/count dimensions are inconsistent.')
-        if any(t.dtype != get_torch_precision() or not bool(torch.isfinite(t).all()) for t in (q,r,qh,rh)):
+        if any(t.dtype != (q.dtype if BACKEND == 'native' else get_torch_precision()) or not bool(torch.isfinite(t).all()) for t in (q,r,qh,rh)):
             raise ValueError('Checkpoint particle snapshots must be finite and match configured precision.')
         if type(m['verletScale']) not in (int,float) or not math.isfinite(m['verletScale']) or m['verletScale'] < 1:
             raise ValueError('Invalid checkpoint Verlet scale.')

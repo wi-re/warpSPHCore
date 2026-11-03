@@ -10,9 +10,16 @@ import torch
 import torch.autograd.forward_ad as fwAD
 
 from ..dataTypes import CRKState, GradHState, ParticleState, RenormalizationState, ExecutionMode
-from ..radiusSearch.verlet.build import _DEFERRED_CHECKS
+from ..radiusSearch.chunked import _deferred
+from .._backend import BACKEND
 from ..radiusSearch.pairField import ChunkedPairField
-from .launcher import _allocate_output
+def _allocate_native_output(shape,dtype,device):
+    dtype,trailing = dtype if isinstance(dtype,tuple) else (dtype,())
+    return torch.empty((shape,*trailing),dtype=dtype,device=device)
+
+if BACKEND == 'warp':
+    from .launcher import _allocate_output
+
 from .lanes import neighborLanes
 from .operator_spec import Corrections, ExtraKind, RowRole, ShapeOf, SPHContext
 
@@ -61,7 +68,7 @@ def validateContext(ctx):
     if ctx.mode in (ExecutionMode.FORWARD, ExecutionMode.REVERSE):
         raise NotImplementedError('Row-chunk operators support eager execution without AD only.')
     device = ctx.query.positions.device
-    if _DEFERRED_CHECKS[0] is not None or (device.type == 'cuda' and torch.cuda.is_current_stream_capturing()):
+    if _deferred() is not None or (device.type == 'cuda' and torch.cuda.is_current_stream_capturing()):
         raise NotImplementedError('Row-chunk operators do not support deferred/graph capture.')
     if device != adjacency.queryPositions.device:
         raise ValueError('Row-chunk adjacency and particle fields must share a device.')
@@ -207,8 +214,11 @@ def _launchLocal(spec, ctx, extras, prepared=None):
     outputs = []
     for out in spec.outputs:
         shape, dtype = out.resolve(ctx, extras)
-        tensor, _ = _allocate_output(shape, dtype, str(ctx.query.positions.device), False)
-        del tensor._warp_array
+        if hasattr(spec.kernel,'launch_native'):
+            tensor = _allocate_native_output(shape,dtype,ctx.query.positions.device)
+        else:
+            tensor, _ = _allocate_output(shape,dtype,str(ctx.query.positions.device),False)
+            del tensor._warp_array
         outputs.append(tensor)
     contexts = chunkContexts(ctx) if prepared is None else prepared
     for index, (interval, local) in enumerate(contexts):

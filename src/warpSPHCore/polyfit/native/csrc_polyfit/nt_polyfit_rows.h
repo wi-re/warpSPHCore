@@ -16,6 +16,7 @@ struct Buffers {
     const int32_t* transposeCounts=nullptr;
     int basis, components, sector, sectors;
     bool rhs, subtract, unit;
+    int64_t rowStart=0;
 };
 template<class T> SPH_HD T integer_power(T value,int exponent) {
     T result=1;
@@ -33,12 +34,13 @@ template<class T,int D> struct Pair {
     const T *volumes,*values;
     int basis,components,sector,sectors;
     bool rhs,subtract,unit;
+    int64_t rowStart;
     SPH_HD int width() const { return rhs ? basis*components:basis*(basis+1)/2; }
     template<bool Derivatives> SPH_HD Contribution<T,D> evaluate(int64_t i,int64_t j,int channel) const {
         Contribution<T,D> result{};
         if (!query_allowed(args.qkind[i],args.direction) || !reference_allowed(args.rkind[j],args.direction)) return result;
         T dx[D];const T distance=QueryGeometry<T,D>(args.qx+i*D,args.lo,args.hi,args.periodic).distance(args.rx+j*D,dx);
-        if (sector>=0 && i!=j) {
+        if (sector>=0 && i+rowStart!=j) {
             bool allowed;
             if constexpr(D==1) allowed=sector==0 ? dx[0]>T(0):dx[0]<T(0);
             else {
@@ -67,7 +69,7 @@ template<class T,int D> struct Pair {
             monomial*=factors[d];
         }
         result.component=rhs ? channel%components:0;
-        const T field=rhs ? values[j*components+result.component]-(subtract ? values[i*components+result.component]:T(0)):T(1);
+        const T field=rhs ? values[j*components+result.component]-(subtract ? values[(i+rowStart)*components+result.component]:T(0)):T(1);
         result.value=weight*monomial*field;
         if constexpr(Derivatives) {
             for (int d=0;d<D;++d) {
@@ -135,7 +137,7 @@ template<class T,int D> struct Rows {
                     T dx[D];a.displacement(i,j,dx);
                     T value=c.support*tangent(2,i)+c.mass*tangent(3,j)+c.density*tangent(4,j)+c.volume*tangent(5,j);
                     for (int d=0;d<D;++d) value+=c.position[d]*(tangent(0,i*D+d)-tangent(1,j*D+d)-winding(i,j,d,dx[d])*tangent(7,d));
-                    if (pair.rhs) value+=c.referenceField*tangent(6,j*pair.components+c.component)+c.queryField*tangent(6,i*pair.components+c.component);
+                    if (pair.rhs) value+=c.referenceField*tangent(6,j*pair.components+c.component)+c.queryField*tangent(6,(i+pair.rowStart)*pair.components+c.component);
                     sum+=value;
                 }
             }
@@ -155,7 +157,7 @@ template<class T,int D> struct Rows {
                         bars[7][i*D+d]-=bar*c.position[d]*winding(i,j,d,dx[d]);
                     }
                     bars[2][i]+=bar*c.support;
-                    if (pair.rhs && pair.subtract) bars[6][i*pair.components+c.component]+=bar*c.queryField;
+                    if (pair.rhs && pair.subtract) bars[6][(i+pair.rowStart)*pair.components+c.component]+=bar*c.queryField;
                 }
             }
         } else {
@@ -179,7 +181,7 @@ template<class Launch> struct Dispatch {
         Rows<T,D> rows{};
         rows.pair={a,buffers.exponents.const_data_ptr<int32_t>(),buffers.entries.const_data_ptr<int32_t>(),
             ptr<T>(buffers.volumes),ptr<T>(buffers.values),buffers.basis,buffers.components,
-            buffers.sector,buffers.sectors,buffers.rhs,buffers.subtract,buffers.unit};
+            buffers.sector,buffers.sectors,buffers.rhs,buffers.subtract,buffers.unit,buffers.rowStart};
         rows.output=ptr<T>(buffers.output) ? buffers.output.mutable_data_ptr<T>():nullptr;
         rows.counts=buffers.counts.defined() ? buffers.counts.mutable_data_ptr<int32_t>():nullptr;
         rows.cotangent=ptr<T>(buffers.cotangent);rows.role=role;

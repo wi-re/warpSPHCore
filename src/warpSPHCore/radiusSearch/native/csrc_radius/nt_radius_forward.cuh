@@ -32,7 +32,7 @@ struct CooperativeSearchRow {
                 if (collect && accepted) {
                     const int64_t slot = found + __popc(votes & ((1u << lane) - 1));
                     if (slot < args.counts[i])
-                        args.collected[args.offsets[i] + slot] = j;
+                        args.neighbors.set(args.offsets[i] + slot,j);
                 }
                 found += __popc(votes);
             }

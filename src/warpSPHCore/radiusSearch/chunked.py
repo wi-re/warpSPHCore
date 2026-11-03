@@ -15,37 +15,36 @@ import sys
 
 import torch
 import torch.autograd.forward_ad as fwAD
-import warp as wp
-
+from .._backend import BACKEND
 from ..dataTypes import AdjacencyList, DomainDescription, ParticleState
 from ..enumTypes import SupportScheme
-from ..type_config import (get_torch_index_dtype, get_torch_offset_dtype,
-                           get_torch_precision, index_t, offset_t, scalar_t)
-from ..util import castTorchToWarp, castTorchToWarpAsBuiltins
-from .compactHash.buildHashmap import buildCompactHashMap
-from .compactHash.wp_countNeighbors import radiusSearchCountNeighborsCompactHashMap
-from .compactHash.wp_collectNeighbors import radiusSearchCollectJOnly
+from ..type_config import get_torch_index_dtype, get_torch_offset_dtype, get_torch_precision
 from .csr import validateParticleCounts
 from .allocation import noteAllocationFailure
 from .rowChunks import RowChunk, RowChunkGeneration, RowChunkPlan, RowChunkPolicy, buildRowChunkPlan
-from .verlet.build import _DEFERRED_CHECKS
-from .verlet.wp_countVerlet import countNeighborsVerlet
-from .verlet.wp_updateVerlet import updateNeighborsVerlet
-from .verlet.wp_validity import verletValidityMetrics
+if BACKEND == 'native':
+    from .native.nt_index import SearchIndex
+    from .native.nt_verlet import _DEFERRED, verletValidityMetrics
+    def _deferred():return _DEFERRED.get()
+else:
+    import warp as wp
+    from ..type_config import index_t,offset_t,scalar_t
+    from ..util import castTorchToWarp,castTorchToWarpAsBuiltins
+    from .compactHash.buildHashmap import buildCompactHashMap
+    from .compactHash.wp_countNeighbors import radiusSearchCountNeighborsCompactHashMap
+    from .compactHash.wp_collectNeighbors import radiusSearchCollectJOnly
+    from .verlet.build import _DEFERRED_CHECKS
+    from .verlet.wp_countVerlet import countNeighborsVerlet
+    from .verlet.wp_updateVerlet import updateNeighborsVerlet
+    from .verlet.wp_validity import verletValidityMetrics
+    from .wp_chunked import _fillGlobalRows
+    def _deferred():return _DEFERRED_CHECKS[0]
 
 __all__ = ['OwnedRowChunk', 'ChunkedAdjacency', 'radiusSearchRowChunks_',
            'radiusSearchRowChunks', 'buildChunkedVerletList_', 'buildChunkedVerletList',
            'chunkedVerletStaleFlag_', 'filterChunkedVerletList_', 'filterChunkedVerletList']
 
 
-@wp.kernel
-def _fillGlobalRows(counts: wp.array(dtype=wp.int32), offsets: wp.array(dtype=offset_t),
-                    rowStart: wp.int32, rows: wp.array(dtype=index_t)):
-    row, lane = wp.tid()
-    p = wp.int64(lane)
-    while p < wp.int64(counts[row]):
-        rows[offsets[row] + offset_t(p)] = index_t(rowStart + row)
-        p += wp.int64(32)
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,15 +144,15 @@ def _checkInputs(q, r, qh, rh, domain, mode, policy, storeI):
         raise TypeError('storeI must be a bool.')
     if q.device.type not in ('cpu', 'cuda'):
         raise ValueError('Chunked search supports CPU and CUDA tensors.')
-    if _DEFERRED_CHECKS[0] is not None or (q.is_cuda and torch.cuda.is_current_stream_capturing()):
+    if _deferred() is not None or (q.is_cuda and torch.cuda.is_current_stream_capturing()):
         raise NotImplementedError('Chunked search does not support deferred/graph capture.')
     if any(t.requires_grad or fwAD.unpack_dual(t).tangent is not None for t in (q, r, qh, rh)):
         raise NotImplementedError('Chunked search AD is not supported.')
-    if q.ndim != 2 or r.ndim != 2 or q.shape[1] != r.shape[1] or q.shape[1] not in (2, 3):
+    if q.ndim != 2 or r.ndim != 2 or q.shape[1] != r.shape[1] or q.shape[1] not in ((1,2,3) if BACKEND == 'native' else (2,3)):
         raise ValueError('Query/reference positions must have matching 2D or 3D coordinates.')
     if qh.shape != (len(q),) or rh.shape != (len(r),):
         raise ValueError('Each population requires one support per particle.')
-    if any(t.device != q.device or t.dtype != get_torch_precision() for t in (q, r, qh, rh)):
+    if any(t.device != q.device or t.dtype != (q.dtype if BACKEND == 'native' else get_torch_precision()) for t in (q,r,qh,rh)) or (BACKEND == 'native' and q.dtype not in (torch.float32,torch.float64)):
         raise ValueError('Particle inputs must share the configured precision and device.')
     if domain.dim != q.shape[1] or any(not isinstance(t, torch.Tensor) or t.shape != (domain.dim,)
                                       or t.device != q.device for t in (domain.min, domain.max, domain.periodic)):
@@ -239,7 +238,7 @@ def _allocateChunks(plan, counts, prefix, owner, storeI, reuse, inPlace):
             chunks.append(OwnedRowChunk(metadata, AdjacencyList(i, j, counts[a:b], offsets,
                                                               b - a, plan.generation.numReferences, numEdges=metadata.liveEdges)))
     except (MemoryError, torch.OutOfMemoryError) as error:
-        requested = sum(c.capacity for c in plan.chunks if c.owner == owner) * 4 * (1 + storeI)
+        requested = sum(c.capacity for c in plan.chunks if c.owner == owner) * (4 if get_torch_index_dtype()==torch.int32 else 8) * (1 + storeI)
         noteAllocationFailure(error, counts.device, kind='neighbors', requestedBytes=requested,
                               completedChunks=len(chunks), generation=plan.generation.number)
         # Partial new buffers are not published. The previous immutable
@@ -254,6 +253,10 @@ def _fillRows(chunks, device):
     for chunk in chunks:
         m, adj = chunk.metadata, chunk.adjacency
         if adj.paddedI is not None and m.liveEdges:
+            if BACKEND == 'native':
+                from ..native._build import build
+                build().csr_global_rows(adj.edgeOffsets,adj.numNeighbors,adj.paddedI,m.rowStart)
+                continue
             wp.launch(_fillGlobalRows, dim=(m.rowCount, 32), block_dim=128,
                       inputs=[castTorchToWarp(adj.numNeighbors), castTorchToWarp(adj.edgeOffsets),
                               m.rowStart, castTorchToWarp(adj.paddedI)], device=str(device), stream=_stream(device))
@@ -283,6 +286,14 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
         if not len(q) or not len(r):
             return grid, scratch, None, None
 
+        if BACKEND == 'native':
+            grid = SearchIndex(q,r,qh,rh,domain,mode)
+            width,extra = divmod(len(q),numOwners)
+            ranks = range(numOwners) if communication is None else (owner,)
+            for rank in ranks:
+                a,b = rank*width+min(rank,extra),(rank+1)*width+min(rank+1,extra)
+                if a<b:grid.apply(q[a:b],qh[a:b],counts[a:b])
+            return grid,grid.nbytes,None,None
         grid = buildCompactHashMap(q, r, qh, rh, domain.periodic, domain, mode, len(q) + 1)
         y = torch.vstack([part if not periodic else torch.remainder(part - domain.min[d], domain.max[d] - domain.min[d]) + domain.min[d]
                           for d, (part, periodic) in enumerate(zip(q.mT, domain.periodic.tolist()))]).mT.contiguous()
@@ -319,6 +330,9 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
         for chunk in chunks:
             m, adj = chunk.metadata, chunk.adjacency
             if m.liveEdges:
+                if BACKEND == 'native':
+                    grid.apply(q[m.rowStart:m.rowStop],qh[m.rowStart:m.rowStop],adj.numNeighbors,adj.edgeOffsets,adj.paddedJ)
+                    continue
                 wp.launch(radiusSearchCollectJOnly, dim=m.rowCount,
                           inputs=[castTorchToWarp(y[m.rowStart:m.rowStop]), castTorchToWarp(qh[m.rowStart:m.rowStop]), *shared,
                                   castTorchToWarp(adj.numNeighbors), castTorchToWarp(adj.edgeOffsets), castTorchToWarp(grid.sortIndex),
@@ -496,6 +510,9 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
     counts=local('filter:count-allocation',lambda:torch.zeros(len(q),dtype=torch.int32,device=q.device))
     def arguments(a,b,source):
         adj,m=source.adjacency,source.metadata
+        if BACKEND == 'native':
+            return ([q[a:b],r,qh[a:b],rh,domain.min,domain.max,domain.periodic],adj.paddedJ,
+                    adj.numNeighbors[a-m.rowStart:b-m.rowStart],adj.edgeOffsets[a-m.rowStart:b-m.rowStart])
         return [castTorchToWarpAsBuiltins(q[a:b]),castTorchToWarpAsBuiltins(r),
                 castTorchToWarp(qh[a:b]),castTorchToWarp(rh),castTorchToWarp(domain.min),
                 castTorchToWarp(domain.max),castTorchToWarp(domain.periodic),wp.uint32(adjacency.mode.value),
@@ -505,6 +522,10 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
         for source in adjacency:
             m=source.metadata
             if m.liveEdges:
+                if BACKEND == 'native':
+                    from ..native._build import build
+                    build().verlet_filter_into(*arguments(m.rowStart,m.rowStop,source),counts[m.rowStart:m.rowStop],None,None,adjacency.mode.value)
+                    continue
                 wp.launch(countNeighborsVerlet,dim=m.rowCount,
                           inputs=[*arguments(m.rowStart,m.rowStop,source),castTorchToWarp(counts[m.rowStart:m.rowStop])],
                           device=str(q.device),stream=_stream(q.device))
@@ -516,6 +537,11 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
     if communication is not None:communication.agree('filter:partition',plan.signature)
     chunks=local('filter:allocate-owned',lambda:_allocateChunks(plan,counts,prefix,adjacency.owner,storeI,None,False))
     def collect(a,b,source,target,base):
+        if BACKEND == 'native':
+            from ..native._build import build
+            build().verlet_filter_into(*arguments(a,b,source),target.numNeighbors[a-base:b-base],
+                                      target.edgeOffsets[a-base:b-base],target.paddedJ,adjacency.mode.value)
+            return
         wp.launch(updateNeighborsVerlet,dim=b-a,
                   inputs=[*arguments(a,b,source),castTorchToWarp(target.edgeOffsets[a-base:b-base]),
                           castTorchToWarp(target.numNeighbors[a-base:b-base]),

@@ -18,7 +18,7 @@ template <class T, int D, bool Ordered = true> struct SearchRow {
                 T dx[D];
                 if (geometry.distance(args.rx + j * D, dx) < args.radius(i, j)) {
                     if (collect && found < args.counts[i])
-                        args.collected[args.offsets[i] + found] = j;
+                        args.neighbors.set(args.offsets[i] + found,j);
                     ++found;
                 }
             }
@@ -27,8 +27,10 @@ template <class T, int D, bool Ordered = true> struct SearchRow {
             args.counts[i] = int32_t(found);
         else if constexpr (Ordered) {
             const auto written = found < args.counts[i] ? found : args.counts[i];
-            if (written > 1)
-                sort_row(args.collected + args.offsets[i], written);
+            if (written > 1) {
+                if (args.neighbors.wide) sort_row(const_cast<int64_t*>(static_cast<const int64_t*>(args.neighbors.data))+args.offsets[i],written);
+                else sort_row(const_cast<int32_t*>(static_cast<const int32_t*>(args.neighbors.data))+args.offsets[i],written);
+            }
         }
     }
 };

@@ -97,9 +97,9 @@ pressure iterations, communication and explicit Verlet-list construction remain
 their existing implementations. Missing adjacency uses the native operator's
 own compact-hash search. This is a mixed execution path, not a Warp-free fluid
 solver. Unsupported inputs raise; there is no implicit operator fallback.
-In particular, native operators do not yet consume upstream `ChunkedAdjacency`:
-owned-row multi-GPU/multi-node execution still needs Warp operators. The explicit
-Warp JVP/HVP and CRK JVP entry points reject this selection; native first-order
+Native operators now consume upstream `ChunkedAdjacency` through shared
+owned-row dispatch, including hybrid Warp search/native operator execution. The
+explicit Warp JVP/HVP and CRK JVP entry points retain their separate selection policy; native first-order
 Torch AD and `native.linearizeFields` retain their separately qualified scope.
 Full native frontend CUDA graph execution is not qualified.
 
@@ -931,7 +931,7 @@ and tests do not require that checkout or the external evidence archive.
 | 1 | Verlet lifecycle/capacity reuse; standard operator options | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
 | 2 | Renormalization, small matrices, solver dependencies | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
 | 3 | Polynomial reconstruction and MFM/MFV | Implemented and qualified on CPU/CUDA; new GPU paths compile for experimental HIP |
-| 4 | Chunked/owned-row search and native operator traversal | Next |
+| 4 | Chunked/owned-row search and native operator traversal | Implemented and qualified on CPU/CUDA and two-rank Gloo; affected GPU paths compile for experimental HIP |
 | 5 | Remaining derivative and public API parity | Pending; includes uncorrected JVP and existing density-HVP scope |
 | 6 | Final distribution/merge qualification | Pending; no AMD hardware gate |
 
@@ -1067,3 +1067,22 @@ compatibility alias for backend-opaque callers. This compiled path is
 forward-only; the differentiable Torch meshless reference also imports without
 Warp. See the [polynomial and meshless qualification](../regression/native_polynomial_meshless_2026_11_03.md)
 for retained numerical policies and verification.
+
+### Owned-row execution
+
+Native compact search retains one Torch-owned cell index, counts row slices and
+collects directly into bounded CSR32/CSR64 chunk buffers. It never constructs a
+full particle neighbor list as an intermediate. Standard operations, correction
+preparation, polynomial sums and meshless closure/rates use the upstream shared
+row planner, explicit query/reference roles and ownership/communication protocol.
+The native polynomial path carries the global row base for LABFM subtraction and
+sector self terms. Public precision/index/offset host settings import without Warp.
+
+Chunked execution is eager and primal-only, as on the upstream Warp path.
+References and O(N) particle results remain replicated; this is a bound on owned
+edge storage, not on total simulation memory. The initial retained index build
+copies compact index arrays device-to-device into Torch-owned storage and has a
+transient duplicate index allocation. No content-validation scans or hidden CPU
+copies of particle/neighbor data are added. NCCL/multi-node runtime qualification
+requires the relevant machines; local evidence covers two-rank CPU Gloo and
+single-device CUDA. See the [owned-row qualification](../regression/native_owned_rows_2026_11_03.md).

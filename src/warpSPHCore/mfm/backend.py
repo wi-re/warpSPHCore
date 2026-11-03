@@ -29,14 +29,14 @@ from .._backend import BACKEND
 if BACKEND == 'native':
     from .native.nt_mfm import (PreparedLauncher, _CLOSURE_RES_SPEC, _CLOSURE_W_SPEC,
         _COARSE_STENCIL_SPEC, _FLUX_SPEC, _GRADIENTS_SPEC, _LIMITER_SPEC, _MOMENTS_SPEC,
-        _TIMESTEP_SPEC, _ctx, mfmClosureMatvecWarp)
+        _TIMESTEP_SPEC, _CLOSURE_MV_SPEC, _ctx, mfmClosureMatvecWarp)
     from .native.nt_closure import mfmClosureMatvecCSR
     scalar_t = float
 else:
     from ..type_config import scalar_t
     from ..autograd.prepared import PreparedLauncher
     from .wp_mfm import (_CLOSURE_RES_SPEC, _CLOSURE_W_SPEC, _COARSE_STENCIL_SPEC, _FLUX_SPEC, _GRADIENTS_SPEC,
-                         _LIMITER_SPEC, _MOMENTS_SPEC, _TIMESTEP_SPEC, _ctx, mfmClosureMatvecWarp)
+                         _LIMITER_SPEC, _MOMENTS_SPEC, _TIMESTEP_SPEC, _CLOSURE_MV_SPEC, _ctx, mfmClosureMatvecWarp)
     from .wp_closure import mfmClosureMatvecCSR
 
 __all__ = ["Meshless"]
@@ -338,8 +338,7 @@ class Meshless:
         elif csr:
             mv = mfmClosureMatvecCSR(self.adjacency, kappa)
         else:
-            mv = lambda p: mfmClosureMatvecWarp(self.particles, self.props, self.domain, self.adjacency, kappa,
-                                                p.contiguous())
+            mv = lambda p: self._fast.launch(_CLOSURE_MV_SPEC,kappa=kappa,p=p.contiguous(),rowStart=0)
         Ax0, diag = mv(x0)
         if ws is not None:
             ws.diag.copy_(diag)
@@ -370,7 +369,7 @@ class Meshless:
         # the CPU the flag is read every `_CG_CHECK` iterations.
         lagged = a.is_cuda
         if lagged:
-            flags = torch.zeros(_CG_LAG + 1, dtype=torch.bool, pin_memory=True)
+            flags = torch.zeros(_CG_LAG + 1, dtype=torch.bool, device='cpu', pin_memory=True)
             events = [torch.cuda.Event() for _ in range(_CG_LAG + 1)]
         done = torch.zeros((), dtype=torch.bool, device=a.device)
         conv = torch.zeros((), dtype=torch.bool, device=a.device)

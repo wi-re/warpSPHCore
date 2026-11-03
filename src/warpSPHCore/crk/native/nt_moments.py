@@ -6,6 +6,12 @@ def computeCRKMoments(queryParticles, operationProperties, domain, queryVolumes,
                       referenceVolumes, adjacency=None, referenceParticles=None):
     # queryVolumes remains part of the shared module ABI. These directed
     # moment equations consume only the reference population's volumes.
+    from ...radiusSearch.chunked import ChunkedAdjacency
+    if isinstance(adjacency,ChunkedAdjacency):
+        from ...native._row_dispatch import preparation
+        reference=queryParticles if referenceParticles is None else referenceParticles
+        return preparation(9,computeCRKMoments,queryParticles,reference,domain,operationProperties,
+                           adjacency,queryVolumes,referenceVolumes)
     inputs, options, topology = prepare(queryParticles, referenceParticles, domain,
                               operationProperties, adjacency, referenceVolumes)
     if referenceVolumes is None:

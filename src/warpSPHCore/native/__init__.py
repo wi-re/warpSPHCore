@@ -50,3 +50,17 @@ from ..radiusSearch.native import (buildVerletList, filterVerletList, verletStal
                                   verletUsage, verletValidityMetrics, deferVerletChecks)
 __all__ += ["buildVerletList", "filterVerletList", "verletStaleFlag", "verletUsage",
             "verletValidityMetrics", "deferVerletChecks"]
+
+# Host dtype settings remain available to callers building shared chunk policies.
+from ..type_config import (get_type_config,get_precision,get_dim,get_torch_precision,
+                           get_torch_index_dtype,get_torch_offset_dtype,to_torch,to_numpy)
+from ..radiusSearch import (OwnedRowChunk,ChunkedAdjacency,RowChunk,RowChunkGeneration,
+    RowChunkPlan,RowChunkPolicy,buildRowChunkPlan,radiusSearchRowChunks_,radiusSearchRowChunks,
+    buildChunkedVerletList_,buildChunkedVerletList,filterChunkedVerletList_,filterChunkedVerletList,
+    chunkedVerletStaleFlag_,ChunkedPairField,rowChunkCheckpointRecipe,rowChunkCheckpointState,restoreRowChunkCheckpointState)
+__all__ += ['get_type_config','get_precision','get_dim','get_torch_precision',
+    'get_torch_index_dtype','get_torch_offset_dtype','to_torch','to_numpy',
+    'OwnedRowChunk','ChunkedAdjacency','RowChunk','RowChunkGeneration','RowChunkPlan','RowChunkPolicy',
+    'buildRowChunkPlan','radiusSearchRowChunks_','radiusSearchRowChunks','buildChunkedVerletList_',
+    'buildChunkedVerletList','filterChunkedVerletList_','filterChunkedVerletList','chunkedVerletStaleFlag_',
+    'ChunkedPairField','rowChunkCheckpointRecipe','rowChunkCheckpointState','restoreRowChunkCheckpointState']

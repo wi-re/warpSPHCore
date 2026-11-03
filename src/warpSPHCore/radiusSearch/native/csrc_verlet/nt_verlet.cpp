@@ -117,10 +117,41 @@ std::tuple<Tensor,Tensor,Tensor> filter(const Tensors& inputs,const Tensor& neig
     launch(true);
     return {tensors[NEIGHBORS],tensors[COUNTS],tensors[OFFSETS]};
 }
+// Bounded count/collect entry points let whole-row planners keep pair storage
+// local. They reuse the same filtering row as the ordinary flat lifecycle.
+void filter_into(const Tensors& inputs,const Tensor& neighbors,const Tensor& counts,const Tensor& offsets,
+                 const Tensor& targetCounts,const std::optional<Tensor>& targetOffsets,
+                 const std::optional<Tensor>& targetNeighbors,int64_t support) {
+    auto tensors=geometry_inputs(inputs,int(support));const auto& x=tensors[QX];
+    vector(counts,x,ScalarType::Int,x.size(0),"source counts");vector(targetCounts,x,ScalarType::Int,x.size(0),"target counts");
+    for(const auto& value:{neighbors,offsets}) {
+        STD_TORCH_CHECK(value.scalar_type()==ScalarType::Int || value.scalar_type()==ScalarType::Long,"CSR storage must be int32/int64");
+        tensor(value,x,value.scalar_type(),"source CSR");STD_TORCH_CHECK(value.dim()==1,"CSR storage must be a vector");
+    }
+    STD_TORCH_CHECK(offsets.numel()==x.size(0),"Source offset count mismatch");
+    const bool collect=targetOffsets.has_value();STD_TORCH_CHECK(collect==targetNeighbors.has_value(),"Collection needs target offsets and neighbors");
+    tensors[COUNTS]=targetCounts;
+    if(collect) {
+        STD_TORCH_CHECK((targetOffsets->scalar_type()==ScalarType::Int || targetOffsets->scalar_type()==ScalarType::Long) &&
+                        (targetNeighbors->scalar_type()==ScalarType::Int || targetNeighbors->scalar_type()==ScalarType::Long),"CSR storage must be int32/int64");
+        vector(*targetOffsets,x,targetOffsets->scalar_type(),x.size(0),"target offsets");tensor(*targetNeighbors,x,targetNeighbors->scalar_type(),"target neighbors");
+        STD_TORCH_CHECK(targetNeighbors->dim()==1,"Target neighbors must be a vector");tensors[OFFSETS]=*targetOffsets;tensors[NEIGHBORS]=*targetNeighbors;
+    }
+    const Candidates source{index_view(neighbors),index_view(offsets),counts.const_data_ptr<int32_t>()};
+    if(x.is_cuda()) {
+#ifdef WITH_CUDA
+        filter_gpu(tensors,int(support),source,collect);
+#else
+        STD_TORCH_CHECK(false,"Build native GPU support to use CUDA/HIP");
+#endif
+    } else execute(FilterRows{source,collect},tensors,int(support),0,6,CpuLauncher{});
+}
 STABLE_TORCH_LIBRARY_FRAGMENT(warpsph_native,m) {
     m.def("verlet_metrics(Tensor[] geometry, Tensor prior_q, Tensor prior_r, Tensor old_qh, Tensor old_rh, Tensor scale, int support_case, float slack, bool same) -> (Tensor, Tensor)");
     m.impl("verlet_metrics",TORCH_BOX(&metrics));
     m.def("verlet_filter(Tensor[] geometry, Tensor neighbors, Tensor counts, Tensor offsets, int support) -> (Tensor, Tensor, Tensor)");
     m.impl("verlet_filter",TORCH_BOX(&filter));
+    m.def("verlet_filter_into(Tensor[] geometry, Tensor neighbors, Tensor counts, Tensor offsets, Tensor(a!) target_counts, Tensor? target_offsets, Tensor(b!)? target_neighbors, int support) -> ()");
+    m.impl("verlet_filter_into",TORCH_BOX(&filter_into));
 }
 } // namespace sph_native::verlet

@@ -5,23 +5,25 @@
 namespace sph_native {
 // A row occupies one 32-lane group. Common degrees fit one or two register
 // values per lane; longer rows retain the general in-place heap fallback.
-template <bool Wide> __device__ void bitonic_row(int64_t *values, int count, int lane) {
-    int64_t first = lane < count ? values[lane] : INT64_MAX;
-    int64_t second = INT64_MAX;
+template <bool Wide,class Index> __device__ void bitonic_row(Index *values, int count, int lane) {
+    using Register = std::conditional_t<sizeof(Index)==4,int,long long>;
+    constexpr Register maximum = sizeof(Index)==4 ? INT32_MAX:INT64_MAX;
+    Register first = lane < count ? values[lane] : maximum;
+    Register second = maximum;
     if constexpr (Wide)
-        second = lane + 32 < count ? values[lane + 32] : INT64_MAX;
+        second = lane + 32 < count ? values[lane + 32] : maximum;
 #pragma unroll
     for (int size = 2; size <= (Wide ? 64 : 32); size *= 2) {
 #pragma unroll
         for (int step = size / 2; step; step /= 2) {
-            int64_t partner_first, partner_second = INT64_MAX;
+            Register partner_first, partner_second = maximum;
             if (step == 32) {
                 partner_first = second;
                 partner_second = first;
             } else {
-                partner_first = group_xor<32>(static_cast<long long>(first), step);
+                partner_first = group_xor<32>(first, step);
                 if constexpr (Wide)
-                    partner_second = group_xor<32>(static_cast<long long>(second), step);
+                    partner_second = group_xor<32>(second, step);
             }
             const bool low = ((lane & step) == 0) == ((lane & size) == 0);
             first = low ? (first < partner_first ? first : partner_first)
@@ -41,15 +43,15 @@ template <bool Wide> __device__ void bitonic_row(int64_t *values, int count, int
             values[lane + 32] = second;
     }
 }
-struct SortCSRRow {
+template<class Index> struct SortCSRRow {
     IndexView offsets;
     const int32_t *counts;
-    int64_t *indices;
+    Index *indices;
     __device__ void operator()(int64_t i, int lane) const {
         const int count = counts[i];
         if (count <= 1)
             return;
-        int64_t *row = indices + offsets[i];
+        Index *row = indices + offsets[i];
         if (count <= 32)
             bitonic_row<false>(row, count, lane);
         else if (count <= 64)
@@ -58,8 +60,8 @@ struct SortCSRRow {
             sort_row(row, count);
     }
 };
-inline void sort_csr_rows(int64_t count, IndexView offsets, const int32_t *counts, int64_t *indices,
+template<class Index> inline void sort_csr_rows(int64_t count, IndexView offsets, const int32_t *counts, Index *indices,
                           NativeStream stream) {
-    CooperativeGpuLauncher<32>{stream}(count, SortCSRRow{offsets, counts, indices});
+    CooperativeGpuLauncher<32>{stream}(count, SortCSRRow<Index>{offsets, counts, indices});
 }
 } // namespace sph_native

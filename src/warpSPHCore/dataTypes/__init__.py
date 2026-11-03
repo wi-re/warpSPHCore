@@ -1,11 +1,12 @@
 from .._backend import BACKEND
 
 if BACKEND == "native":
+    from ..enumTypes import ExecutionMode
     from .._models import (ParticleState, ParticleTangentState, PointCloud,
                            DomainDescription, OperationProperties, AdjacencyList,
                            CapacityPolicy, DEFAULT_CAPACITY, CRKState, CRKTangentState,
                            GradHState, RenormalizationState, RenormalizationTangentState)
-    __all__ = ['ParticleState', 'ParticleTangentState', 'PointCloud',
+    __all__ = ['ExecutionMode','ParticleState', 'ParticleTangentState', 'PointCloud',
                'DomainDescription', 'OperationProperties', 'AdjacencyList',
                'CapacityPolicy', 'DEFAULT_CAPACITY', 'CRKState', 'CRKTangentState',
                'GradHState', 'RenormalizationState', 'RenormalizationTangentState']

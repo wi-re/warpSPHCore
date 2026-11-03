@@ -2,7 +2,10 @@ from .._backend import BACKEND
 
 if BACKEND == "native":
     from .compileGlue import compileGlue,compileGlueEnabled,markDynamic,setCompileGlue
-    __all__ = ["compileGlue","compileGlueEnabled","markDynamic","setCompileGlue"]
+    from .operator_spec import (OperatorSpec,SPHContext,Corrections,EMPTY_CORRECTIONS,
+                                OutputSpec,ExtraSpec,ExtraKind,RowRole,ShapeOf,ThreadSpec,JVPSpec,launchOperator)
+    __all__ = ["OperatorSpec","SPHContext","Corrections","EMPTY_CORRECTIONS","OutputSpec", "ExtraSpec",
+               "ExtraKind","RowRole","ShapeOf","ThreadSpec","JVPSpec","launchOperator","compileGlue","compileGlueEnabled","markDynamic","setCompileGlue"]
 else:
 
     from .arg_extract import extractStateInfo

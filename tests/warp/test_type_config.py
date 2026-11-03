@@ -7,7 +7,7 @@ import types
 import pytest
 import warp as wp
 
-SOURCE=Path(__file__).resolve().parents[2]/'src/warpSPHCore/type_config.py'
+SOURCE=Path(__file__).resolve().parents[2]/'src/warpSPHCore/wp_type_config.py'
 
 
 @pytest.mark.parametrize('index,offset,precision',[

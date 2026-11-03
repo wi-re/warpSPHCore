@@ -2,6 +2,8 @@
 
 ## Unreleased — native development branch
 
+- Native core: bounded CSR32/CSR64 owned-row compact search, Verlet filtering and shared distributed operator dispatch, including CRK, polynomial and meshless dependent passes.
+
 - Native core: polynomial reconstruction assembly with CSR/CSC derivatives and Warp-free MFM/MFV primal, closure and multigrid execution.
 
 - Native core: Warp-free renormalization and linear algebra, shared CPU/CUDA/HIP dense and Krylov updates, and reusable captured CG/BiCGStab workspaces.
@@ -16,8 +18,8 @@
 
 - Integrate the coordinated 0.7.1 core, frontend and integrator interfaces.
 - Add opt-in native core/CRK accumulation dispatch within the Warp frontend,
-  preserving its Morton ordering and CSR buffers. Native chunked/distributed
-  traversal remains unported.
+  preserving its Morton ordering and CSR buffers. Native owned-row traversal now shares the upstream
+  communication and eager primal contract.
 - Add complete-simulation correctness comparisons and CPU/CUDA scaling drivers;
   retain failed FP32 projection controls explicitly in the qualification report.
 - Add benchmark-only exclusive frontend stage profiling and stacked CPU/CUDA

@@ -25,8 +25,6 @@ from typing import Any, Callable, Dict, Optional, Tuple, Union, TYPE_CHECKING
 import torch
 
 from ..dataTypes import (
-    AdjacencyListWarp,
-    CompactHashMap,
     CRKState,
     CRKTangentState,
     DomainDescription,
@@ -39,12 +37,10 @@ from ..dataTypes import (
     RenormalizationTangentState,
 )
 if TYPE_CHECKING:
+    from ..dataTypes import AdjacencyListWarp, CompactHashMap
     from ..radiusSearch.chunked import ChunkedAdjacency
 
-from .launcher import launch_kernel
 from .lanes import DEFAULT_NEIGHBOR_LANES, neighborLanes
-from .stateAwareWarpFunction import _liveTangentMask
-from .wrapper import _launch
 
 
 class ShapeOf(Enum):
@@ -254,7 +250,7 @@ class SPHContext:
     query: ParticleState
     properties: OperationProperties
     domain: DomainDescription
-    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap, "ChunkedAdjacency"]] = None
+    adjacency: Any = None  # backend-owned neighborhood, validated at dispatch
     reference: Optional[ParticleState] = None
     corrections: Corrections = field(default_factory=Corrections)
     mode: ExecutionMode = ExecutionMode.AUTO
@@ -396,6 +392,7 @@ def _build_geometry_jvp_fn(spec: OperatorSpec, sphCtx: SPHContext, extras: Dict[
         live_mask = getattr(autogradCtx, "_jvp_live_mask", None)
         n = len(flat_tangents)
         if live_mask is None:
+            from .stateAwareWarpFunction import _liveTangentMask
             live_mask = _liveTangentMask(flat_tangents)
 
         def isLive(i):
@@ -519,6 +516,14 @@ def launchOperator(
     if chunked:
         from .row_dispatch import launchRowChunks
         return launchRowChunks(spec, ctx, extras)
+
+    from .._backend import BACKEND
+    if hasattr(spec.kernel,'launch_native'):
+        return spec.kernel.launch_native(ctx,extras)
+    if BACKEND == 'native':
+        raise TypeError('Native OperatorSpec kernels must provide launch_native(context,extras)')
+    from .launcher import launch_kernel
+    from .wrapper import _launch
 
     if ctx.mode is ExecutionMode.FORWARD:
         raise NotImplementedError(

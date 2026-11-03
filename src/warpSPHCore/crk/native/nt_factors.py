@@ -48,7 +48,9 @@ def prepareCRK(queryParticles, domain, kernel,
     with torch.no_grad():
         graph = prepare_adjacency(queryParticles, reference, domain,
             replace(volume_properties, supportMode=SupportScheme.SuperSymmetric), adjacency)
-        graph = adjacency if isinstance(adjacency, CSRTopology) else CSRTopology(graph)
+        from ...radiusSearch.chunked import ChunkedAdjacency
+        if not isinstance(graph,ChunkedAdjacency):
+            graph = adjacency if isinstance(adjacency,CSRTopology) else CSRTopology(graph)
     query_volumes = computeCRKVolume(queryParticles, volume_properties, domain,
                                      graph, reference)
     reference_volumes = query_volumes

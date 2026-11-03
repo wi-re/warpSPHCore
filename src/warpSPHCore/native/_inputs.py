@@ -55,6 +55,12 @@ def prepare_adjacency(query, reference, domain, properties, adjacency):
             reference_geometry = replace(reference, positions=reference.positions.detach(), supports=reference.supports.detach())
             fixed_domain = replace(domain, min=domain.min.detach(), max=domain.max.detach())
             adjacency = radiusSearch(query_geometry, fixed_domain, reference_geometry, properties.supportMode, backend='native')
+    from ..radiusSearch.chunked import ChunkedAdjacency
+    if isinstance(adjacency,ChunkedAdjacency):
+        adjacency.assertStorageValid()
+        if adjacency.numRows!=len(query.positions) or adjacency.numCols!=len(reference.positions):
+            raise ValueError('adjacency populations must match the particle states')
+        return adjacency
     if not isinstance(adjacency, AdjacencyList):
         raise TypeError('Native operators require a Torch CSR AdjacencyList; '
                         'chunked/distributed traversal is not ported')
