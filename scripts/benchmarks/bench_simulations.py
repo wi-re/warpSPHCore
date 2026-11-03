@@ -2,7 +2,8 @@
 
 Set PYTHONPATH to the paired core/frontend/integrator source roots. Each backend
 must run in a fresh process; --operators selects only core pair operators and
-CRK accumulation passes. Frontend-specific kernels and Verlet search stay Warp.
+CRK accumulation passes. --frontend-operators independently selects converted
+frontend families; actual dispatch still identifies mixed execution.
 The runner's step timer includes integrator stages, search and layout work;
 setup, JIT compilation, output and diagnostics are outside the measured steps.
 """
@@ -17,6 +18,7 @@ from pathlib import Path
 import statistics
 import subprocess
 import time
+import re
 
 
 def revision(module):
@@ -29,6 +31,20 @@ def revision(module):
             digest.update(str(path.relative_to(source.parent)).encode())
             digest.update(path.read_bytes())
     return dict(source=str(source), commit=result.stdout.strip(), source_sha256=digest.hexdigest())
+
+
+def frontend_gpu_policies(module):
+    """Record fixed launch widths from the pinned module-owned source manifests."""
+    package = Path(module.__file__).parent
+    policies = {}
+    for manifest in sorted(package.rglob('native/sources.json')):
+        for filename in json.loads(manifest.read_text()).get('gpu', ()):
+            source = manifest.parent / filename
+            text = source.read_text()
+            widths = sorted(set(map(int, re.findall(r'CooperativeGpuLauncher<(\d+)>', text))))
+            policies[str(source.relative_to(package))] = dict(cooperative_lanes=widths,
+                pointwise_launcher='GpuLauncher{' in text)
+    return policies
 
 
 def main():
@@ -52,6 +68,8 @@ def main():
     parser.add_argument('--profile', action='store_true', help='Record dispatched Torch operators; these timings are not benchmark results')
     parser.add_argument('--stage-profile', action='store_true', help='Partition runner time by frontend stage and actual Warp/native dispatch (adds event overhead)')
     parser.add_argument('--snapshots', action='store_true', help='Save every accepted state for trajectory comparison, outside step timing')
+    parser.add_argument('--storage-chunks', type=int, choices=(0, 1, 2, 4), default=0,
+                        help='0: CSR; otherwise bound self rows into the requested few chunks')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     if args.steps < 1 or args.warmup < 1:
@@ -75,6 +93,33 @@ def main():
     torch.manual_seed(173)
     importAll()
     case = getCase(args.case)
+    if args.storage_chunks:
+        import math
+        from warpSPHCore.radiusSearch import RowChunkPolicy, buildChunkedVerletList
+        from warpSPHCore import SupportScheme, get_torch_index_dtype
+        original_build = case.buildSystem
+
+        def build_chunked(ctx):
+            def factory(state, config):
+                n, dimension = state.positions.shape
+                width = dimension if args.scheme == 'CRKSPH' else 1
+                index_bytes = torch.empty(0, dtype=get_torch_index_dtype()).element_size()
+                policy = RowChunkPolicy(edgeBudget=2**31-1,
+                    maxRows=math.ceil(n/args.storage_chunks),
+                    bytesPerEdge=index_bytes + width*state.positions.element_size(),
+                    maxElementsPerEdge=width)
+                return buildChunkedVerletList(state, config.domain, policy=policy,
+                    supportMode=SupportScheme.SuperSymmetric,
+                    verletScale=config.verletScale, storeI=False)
+            import inspect
+            if 'neighborhoodFactory' in inspect.signature(original_build).parameters:
+                return original_build(ctx, neighborhoodFactory=factory)
+            # Some released case samplers lack the construction hook. This
+            # setup-only conversion is excluded from timing and recorded below.
+            system = original_build(ctx)
+            system.adjacency = factory(system.state, ctx.config)
+            return system
+        case = replace(case, buildSystem=build_chunked)
     args.out.mkdir(parents=True, exist_ok=True)
     snapshots, gaps, adjacency_objects = [], [], []
     profiler = None
@@ -180,7 +225,7 @@ def main():
                     snapshots=snapshots), args.out / 'states.pt')
     metadata = dict(arguments={**vars(args), 'out': str(args.out)},
                     versions=dict(core=warpSPHCore.__version__, integrators=warpSPHIntegrators.__version__,
-                                  torch=torch.__version__),
+                                  torch=torch.__version__, warp=__import__('warp').__version__),
                     sources={name: revision(module) for name, module in
                              [('core', warpSPHCore), ('frontend', warpSPH), ('integrators', warpSPHIntegrators)]},
                     particles=len(result.state.state.positions),
@@ -200,6 +245,20 @@ def main():
     metadata['operator_backend'] = warpSPHCore.operator_backend
     metadata['frontend_operator_backend'] = args.frontend_operators
     metadata['execution_scope'] = 'mixed frontend (see actual dispatch and coverage ledger)'
+    metadata['cpu_execution'] = dict(torch_threads=torch.get_num_threads(),
+                                    affinity=sorted(os.sched_getaffinity(0)))
+    metadata['frontend_gpu_policies'] = frontend_gpu_policies(warpSPH)
+    metadata['native_build_environment'] = {name: os.environ.get(name) for name in
+        ('WARPSPHCORE_NATIVE_BUILD', 'WARPSPHCORE_NATIVE_CPU_ARCH', 'TORCH_CUDA_ARCH_LIST',
+         'WARPSPHCORE_NEIGHBOR_LANES', 'MAX_JOBS')}
+    from dataclasses import asdict
+    adjacency = result.state.adjacency
+    metadata['neighborhood'] = dict(kind=type(adjacency).__name__,
+        num_edges=adjacency.numEdges,
+        chunks=[asdict(chunk.metadata) for chunk in getattr(adjacency, 'chunks', ())],
+        policy=asdict(adjacency.plan.policy) if hasattr(adjacency, 'plan') else None,
+        setup_conversion_may_use_csr=bool(args.storage_chunks and
+            'neighborhoodFactory' not in __import__('inspect').signature(original_build).parameters))
     (args.out / 'result.json').write_text(json.dumps(metadata, indent=2))
     print(json.dumps({key: metadata[key] for key in ('particles', 'csr_candidates_per_particle', 'median_step_ms', 'median_runner_interval_ms')}))
 
