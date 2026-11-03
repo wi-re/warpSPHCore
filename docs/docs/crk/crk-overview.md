@@ -15,6 +15,13 @@ Module: `src/warpSPHCore/crk/`. Public API:
 from warpSPHCore.crk import computeCRKFactors, computeCRKFactorsJVP
 ```
 
+With `WARPSPHCORE_BACKEND=native`, `computeCRKFactors` selects the native primal
+pipeline without importing Warp. `prepareCRK` additionally returns reference
+volumes directly, and accepts a separate reference-to-reference CSR list for
+integration with frontend-owned topology. Native preparation derivatives and
+`computeCRKFactorsJVP` are not yet available; see the
+[native integration contract](../native-backend#native-crk-preparation-and-frontend-integration).
+
 ## The corrected kernel and gradient
 
 With $x_{ij} = x_i - x_j$ (the kernel's own convention) and the
@@ -31,13 +38,13 @@ $$
 = A_i W_{ij}\, B_i
 + A_i\big(1 + B_i\cdot x_{ij}\big)\, \nabla W_{ij}
 + \big(1 + B_i\cdot x_{ij}\big)\, W_{ij}\, \nabla A_i
-+ A_i W_{ij}\, \big(\nabla B_i^{\top} x_{ij}\big)
++ A_i W_{ij}\, \big(\nabla B_i x_{ij}\big)
 \qquad\texttt{(correctGradientCRK)}
 $$
 
 The last term contracts $\nabla B_i$'s **component** axis against
 $x_{ij}$, leaving the differentiation axis free (the code is explicit
-about this: `matmul(wp.transpose(gradBi), x_ij)`).
+about this: `matmul(gradBi, x_ij)`, with `gradBi[derivative, component]` layout).
 
 The JVP counterparts `computeKernelCRKJVP` /
 `correctGradientCRKJVP` apply the ordinary product rule to the same

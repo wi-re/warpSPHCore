@@ -3,7 +3,7 @@
 warpier_fields.md's Section 5 (tests 1-2) asks for and that no other test
 provides.
 
-`tests/operations/test_gradcheck_scripts.py` auto-discovers and runs every
+`tests/warp/operations/test_gradcheck_scripts.py` auto-discovers and runs every
 scripts/gradcheck_*.py, but each one in its own **subprocess** (see that
 test's docstring), so cross-call state within a single process -- exactly
 what a cached wp.array wrapper and its `.grad` buffer are -- is never

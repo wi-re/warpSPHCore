@@ -86,6 +86,8 @@ test.csv
 *egg
 *.egg*
 *.whl
+# Generated packaged native library and its build receipt.
+/src/warpSPHCore/native/_lib/
 *.mp4
 palette.png
 
@@ -115,9 +117,16 @@ higherOrderSPH/harness/pde/REPORT_pde_smoke.md
 !/docs/development/README.md
 /docs/regression/*
 !/docs/regression/*.md
-/experiments/*/figures/
-/experiments/*/results/
-/experiments/index_width/results.json
-/experiments/index_width/audit.json
-/experiments/index_width/summary.md
 /higherOrderSPH/harness/pde/REPORT_pde_*.md
+
+# Exploratory sources and generated runs belong outside the library checkout.
+/experiments/
+/scratch/
+/tmp/
+/runs/
+/artifacts/
+/results/
+/logs/
+/profiles/
+*.nsys-rep
+*.ncu-rep

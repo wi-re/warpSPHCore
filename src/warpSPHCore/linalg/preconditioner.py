@@ -7,28 +7,19 @@ fixed-address coefficient updates are visible to already-captured applications.
 from typing import Any
 
 import torch
-import warp as wp
 from torch.autograd import forward_ad
 
-from ..autograd.stream import currentTorchWarpStream
+from .._backend import BACKEND
+if BACKEND == 'warp':
+    import warp as wp
+    from ..autograd.stream import currentTorchWarpStream
+    from .wp_preconditioner import _blockApply
 from .krylov.common import finiteScalar
 from .operator import LinearOperator
 
 __all__ = ['DiagonalPreconditioner', 'BlockJacobiPreconditioner']
 
 
-@wp.kernel(enable_backward=False)
-def _blockApply(inverse: wp.array3d(dtype=Any), v: wp.array(dtype=Any),
-                out: wp.array(dtype=Any), d: int, transpose: bool):
-    row = wp.tid()
-    particle, component = row // d, row % d
-    value = v.dtype(0)
-    for k in range(d):
-        coefficient = inverse[particle, component, k]
-        if transpose:
-            coefficient = inverse[particle, k, component]
-        value += coefficient * v[particle * d + k]
-    out[row] = value
 
 
 def _check(values, block):
@@ -214,13 +205,17 @@ class _Preconditioner:
             return torch.mul(self._inverse, v, out=out)
         ad = v.requires_grad or forward_ad.unpack_dual(v).tangent is not None
         outAD = out is not None and (out.requires_grad or forward_ad.unpack_dual(out).tangent is not None)
-        if self._application == 'native' and v.device.type == 'cuda' and not ad and not outAD:
+        if self._application == 'native' and (BACKEND == 'native' or v.device.type == 'cuda') and not ad and not outAD:
             result = torch.empty_like(v) if out is None else out
             if v.numel():
-                wp.launch(_blockApply, dim=v.numel(),
-                          inputs=[wp.from_torch(self._inverse), wp.from_torch(v),
-                                  wp.from_torch(result), self._blockSize, transpose],
-                          stream=currentTorchWarpStream(v.device))
+                if BACKEND == 'native':
+                    from ..native._build import build
+                    build().block_apply(self._inverse, v, result, transpose)
+                else:
+                    wp.launch(_blockApply, dim=v.numel(),
+                              inputs=[wp.from_torch(self._inverse), wp.from_torch(v),
+                                      wp.from_torch(result), self._blockSize, transpose],
+                              stream=currentTorchWarpStream(v.device))
             return result
         matrix = self._inverse.transpose(-1, -2) if transpose else self._inverse
         vectors = v.reshape(-1, self._blockSize, 1)
@@ -269,8 +264,9 @@ class BlockJacobiPreconditioner(_Preconditioner):
     with default rtol=d*eps(dtype). 'identity' replaces an entire unusable
     block; 'pinv' truncates only discarded components. requireSPD checks the
     resulting action, allowing identity fallback but rejecting truncated rank.
-    application='native' opts into a dtype-generic CUDA kernel for d <= 3;
-    CPU and vector-AD calls retain Torch. Warm it before CUDA graph capture.
+    application='native' opts into a dtype-generic kernel for d <= 3;
+    The native backend supports CPU/CUDA/HIP; Warp uses Torch on CPU.
+    Vector-AD calls retain Torch. Warm before CUDA graph capture.
     """
 
     _block = True

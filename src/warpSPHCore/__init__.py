@@ -19,61 +19,74 @@ Or import subpackages directly:
     from warpSPHCore.coreOperations import ...
 """
 
-# Convenience re-exports of the most commonly used symbols
+from ._backend import BACKEND as backend, OPERATORS as operator_backend
 
-# Imported first, before anything else: a zero-dependency leaf module many
-# submodules need (see profiling.py's docstring for the circular-import
-# hazard this avoids -- importing it anywhere else first can reenter a
-# still-initializing package).
-from . import profiling as _profiling  # noqa: F401
+if backend == "native":
+    from .native import *
+    from .native import __all__
+    __version__ = "0.7.1"
+else:
+    import importlib.util as _import_util
+    if _import_util.find_spec("warp") is None:
+        raise ImportError(
+            "The default backend requires warp-lang; install warpSPHCore, "
+            "or select WARPSPHCORE_BACKEND=native before import for the native backend."
+        )
+    # Convenience re-exports of the most commonly used symbols
 
-submodules = []
-# Type related submodules
-from .type_config import *
-submodules.append(type_config)
-from .dataTypes import *
-submodules.append(dataTypes)
-from .enumTypes import *
-submodules.append(enumTypes)
+    # Imported first, before anything else: a zero-dependency leaf module many
+    # submodules need (see profiling.py's docstring for the circular-import
+    # hazard this avoids -- importing it anywhere else first can reenter a
+    # still-initializing package).
+    from . import profiling as _profiling  # noqa: F401
 
-# General utility submodules
-from .util import *
-submodules.append(util)
-from .math import *
-submodules.append(math)
-from .sampling import *
-submodules.append(sampling)
+    submodules = []
+    # Type related submodules
+    from .type_config import *
+    submodules.append(type_config)
+    from .dataTypes import *
+    submodules.append(dataTypes)
+    from .enumTypes import *
+    submodules.append(enumTypes)
 
-# Autograd submodules
-from .autograd import *
-submodules.append(autograd)
+    # General utility submodules
+    from .util import *
+    submodules.append(util)
+    from .math import *
+    submodules.append(math)
+    from .sampling import *
+    submodules.append(sampling)
 
-# SPH submodules
-from .kernels import *
-submodules.append(kernels)
-from .radiusSearch import *
-submodules.append(radiusSearch)
-from .operations import *
-submodules.append(operations)
+    # Autograd submodules
+    from .autograd import *
+    submodules.append(autograd)
 
-# SPH correction submodules
-from .crk import *
-submodules.append(crk)
-from .renorm import *
-submodules.append(renorm)
-from .polyfit import *
-submodules.append(polyfit)
+    # SPH submodules
+    from .kernels import *
+    submodules.append(kernels)
+    from .radiusSearch import *
+    submodules.append(radiusSearch)
+    from .operations import *
+    submodules.append(operations)
 
-# Specific math operations
-from .pinv import *
-submodules.append(pinv)
-from .linalg import *
-submodules.append(linalg)
+    # SPH correction submodules
+    from .crk import *
+    submodules.append(crk)
+    from .renorm import *
+    submodules.append(renorm)
+    from .polyfit import *
+    submodules.append(polyfit)
 
-# Set version
-__version__ = "0.7.1"
+    # Specific math operations
+    from .pinv import *
+    submodules.append(pinv)
+    from .linalg import *
+    submodules.append(linalg)
 
-__all__ = []
+    # Set version
+    __version__ = "0.7.1"
 
-for submodule in submodules:
-    __all__.extend(getattr(submodule, '__all__', []))
+    __all__ = []
+
+    for submodule in submodules:
+        __all__.extend(getattr(submodule, '__all__', []))

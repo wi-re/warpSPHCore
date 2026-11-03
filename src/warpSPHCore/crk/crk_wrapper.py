@@ -148,6 +148,11 @@ def computeCRKFactorsJVP(
     estimate uses referenceTangentState in both of its roles, even if the
     reference population aliases the query. None retains the legacy reuse.
     """
+    from .._backend import OPERATORS
+    if OPERATORS == "native":
+        from .native.nt_jvp import computeCRKFactorsJVP as nativeJVP
+        return nativeJVP(queryParticles,domain,kernel,queryTangentState,operationMode,
+            adjacency,referenceState,referenceTangentState,referenceVolumeMode=referenceVolumeMode)
     volumeProperties = OperationProperties(
         kernel=kernel,
         supportMode=SupportScheme.Gather,

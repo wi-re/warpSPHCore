@@ -32,9 +32,10 @@ import math
 from typing import Callable, List, Optional
 
 import torch
-import warp as wp
-
-from ..type_config import scalar_t
+from .._backend import BACKEND
+if BACKEND == 'warp':
+    import warp as wp
+    from .wp_multigrid import _segmentSum_Kernel
 
 __all__ = ["CellMultigrid"]
 
@@ -64,14 +65,6 @@ def _sumInto(out: torch.Tensor, index: torch.Tensor, src: torch.Tensor) -> torch
         return out.index_add_(0, index, src)
 
 
-@wp.kernel
-def _segmentSum_Kernel(perm: wp.array(dtype=wp.int64), starts: wp.array(dtype=wp.int64), ends: wp.array(dtype=wp.int64),  # type: ignore
-                       src: wp.array2d(dtype=scalar_t), out: wp.array2d(dtype=scalar_t)):  # type: ignore
-    o, c = wp.tid()
-    acc = out[o, c]
-    for k in range(wp.int32(starts[o]), wp.int32(ends[o])):
-        acc += src[perm[k], c]
-    out[o, c] = acc
 
 
 class _SegmentSum:
@@ -93,7 +86,8 @@ class _SegmentSum:
             self.starts = torch.empty(self.nrows, dtype=torch.int64, device=dev)
             self.ends = torch.empty(self.nrows, dtype=torch.int64, device=dev)
             self._rows = torch.arange(self.nrows, dtype=index.dtype, device=dev)
-            self._wa = (wp.from_torch(self.perm), wp.from_torch(self.starts), wp.from_torch(self.ends))
+            self._wa = (self.perm,self.starts,self.ends) if BACKEND == 'native' else (
+                wp.from_torch(self.perm),wp.from_torch(self.starts),wp.from_torch(self.ends))
             self._fill(index)
 
     def _fill(self, index):
@@ -113,9 +107,13 @@ class _SegmentSum:
         if not self.cuda or src.dim() != 2 or src.shape[1] < 2 or src.dtype != out.dtype:
             return _sumInto(out, self.index, src)
         src = src.contiguous()
-        wp.launch(_segmentSum_Kernel, dim=(self.nrows, src.shape[1]),
-                  inputs=[*self._wa, wp.from_torch(src)], outputs=[wp.from_torch(out)],
-                  device=wp.device_from_torch(out.device), stream=wp.stream_from_torch(torch.cuda.current_stream(out.device)))
+        if BACKEND == 'native':
+            from ..native._build import build
+            build().segment_sum(*self._wa,src,out)
+        else:
+            wp.launch(_segmentSum_Kernel, dim=(self.nrows, src.shape[1]),
+                      inputs=[*self._wa, wp.from_torch(src)], outputs=[wp.from_torch(out)],
+                      device=wp.device_from_torch(out.device), stream=wp.stream_from_torch(torch.cuda.current_stream(out.device)))
         return out
 
 

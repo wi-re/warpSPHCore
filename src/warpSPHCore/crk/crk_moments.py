@@ -1,3 +1,4 @@
+from .._backend import OPERATORS
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Optional, Union
@@ -315,6 +316,10 @@ def _computeCRKMoments_stateBackend(
     computed here rather than read off adjacency.numNeighbors since that field doesn't
     exist for grid/CompactHashMap traversal).
     """
+    if OPERATORS == "native":
+        from .native.nt_moments import computeCRKMoments
+        return computeCRKMoments(queryParticles, operationProperties, domain, queryVolumes, referenceVolumes, adjacency, referenceParticles)
+
     with record_function("warpSPH[CRKMoments]"):
         with record_function("warpSPH[CRKMoments] - Preprocessing"):
             dim = queryParticles.positions.shape[1]

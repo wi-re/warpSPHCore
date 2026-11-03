@@ -29,7 +29,7 @@ def divergenceProduct(
     res = type(output)(scalar_t(0.0))
     dim = wp.int32(3) # hardcoded as this is the overload for 3D.
 
-    if dotMode:
+    if not dotMode:
         for i in range(wp.static(len(output))):
             for d in range(dim):
                 res[i] += fij[i * dim + d] * kernelGradient[d]
@@ -50,7 +50,7 @@ def divergenceProduct(
     res = type(output)(scalar_t(0.0))
     dim = wp.int32(2) # hardcoded as this is the overload for 2D.
 
-    if dotMode:
+    if not dotMode:
         for i in range(wp.static(len(output))):
             for d in range(dim):
                 res[i] += fij[i * dim + d] * kernelGradient[d]

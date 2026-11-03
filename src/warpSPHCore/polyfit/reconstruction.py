@@ -123,7 +123,11 @@ class Reconstructor:
     def _build(cls, kind, q, domain, kernel, specs, ell, params, adjacency, cond_max):
         maxR = torch.stack([s["radius"] for s in specs]).amax(0)
         if adjacency is None:
-            from ..radiusSearch import radiusSearchCompactHashMap
+            from .._backend import BACKEND
+            if BACKEND == 'native':
+                from ..radiusSearch import radiusSearch as radiusSearchCompactHashMap
+            else:
+                from ..radiusSearch import radiusSearchCompactHashMap
             # the neighbour search is structural: build it from the primals (forward-mode
             # duals on the particle tensors are handled by PolyFit.build, not here)
             prim = lambda t: t if t is None else fwAD.unpack_dual(t).primal

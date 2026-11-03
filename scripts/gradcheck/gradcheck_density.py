@@ -18,7 +18,7 @@ be changed after warpSPHCore has been imported once in a process. A
 gradcheck-quality comparison needs float64. That is why this is a
 standalone script (`python scripts/gradcheck/gradcheck_density.py`) rather than a
 pytest case living alongside the float32 forward-mode suite in
-tests/operations/ -- pytest runs everything in one process, and the
+tests/warp/operations/ -- pytest runs everything in one process, and the
 forward-mode suite intentionally runs at the library's default float32.
 
 --------------------------------------------------------------------------

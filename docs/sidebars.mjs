@@ -5,6 +5,7 @@ const sidebars = {
     'quickstart',
     'examples',
     'development-artifacts',
+    'native-backend',
     {
       type: 'category',
       label: 'Operators',

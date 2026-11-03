@@ -20,8 +20,13 @@ class SupportScheme(Enum):
 # def supportSchemeTomode(scheme: SupportScheme) -> str:
 #     return scheme.name
     
-import warp as wp
-def supportSchemeToUint(scheme: SupportScheme) -> wp.uint32:
+def supportSchemeToUint(scheme: SupportScheme):
+    from ._backend import BACKEND
+    if BACKEND == "native":
+        if not isinstance(scheme, SupportScheme):
+            raise ValueError(f"Unsupported support scheme: {scheme}")
+        return scheme.value
+    import warp as wp
     scheme_map = {
         SupportScheme.Gather: 11,
         SupportScheme.Scatter: 12,
@@ -121,9 +126,29 @@ class ParticleType(Enum):
     Other = 3
 
 
+
+class ExecutionMode(Enum):
+    """NONE | REVERSE | FORWARD, carried on a minimal execution context and
+    folded into the StateBundle cache key (Step F). FORWARD is declared and
+    deliberately unimplemented -- see warpier_fields.md Section 3.6,
+    requirement 4 and Step G's readiness audit.
+
+    AUTO (Step I, Section 8.2) is a caller-facing default only, never a
+    struct-table key: ``SPHContext.mode`` defaults to it so no caller has to
+    pick NONE vs REVERSE explicitly. It is rejected exactly like FORWARD by
+    anything that keys off mode directly (``structFor``, ``getStateBundle``)
+    -- ``launchOperator`` is the one place that resolves it, and it is a
+    caller-facing placeholder, not a fourth struct variant.
+    """
+    NONE = 0
+    REVERSE = 1
+    FORWARD = 2
+    AUTO = 3
+
+
 __all__ = [
     "SupportScheme",
-    "KernelFunctions",
+    "KernelFunctions", "ExecutionMode",
     "GradientScheme",
     "LaplacianScheme",
     "WarpOperation",    

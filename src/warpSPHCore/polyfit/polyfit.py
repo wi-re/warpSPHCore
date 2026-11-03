@@ -38,8 +38,13 @@ import torch.autograd.forward_ad as fwAD
 from ..dataTypes import DomainDescription, ParticleState, ParticleTangentState
 from ..enumTypes import OperationDirection, SupportScheme, KernelFunctions
 from ..dataTypes import OperationProperties
-from .wp_polyfit import _computePolyMoments_stateBackend, _computePolyRHS_stateBackend
-from .wp_polyfitJVP import computePolyMomentsGeometryJVP, computePolyRHSGeometryJVP
+from .._backend import BACKEND
+if BACKEND == 'native':
+    from .native import (_computePolyMoments_stateBackend, _computePolyRHS_stateBackend,
+                         computePolyMomentsGeometryJVP, computePolyRHSGeometryJVP)
+else:
+    from .wp_polyfit import _computePolyMoments_stateBackend, _computePolyRHS_stateBackend
+    from .wp_polyfitJVP import computePolyMomentsGeometryJVP, computePolyRHSGeometryJVP
 
 __all__ = ["PolyFit", "monomialExponents", "interfacePairs", "minimumImage"]
 
@@ -379,7 +384,11 @@ def interfacePairs(particles: ParticleState, domain: DomainDescription,
     ``halfList=False`` for the full directed list. ``d`` is differentiable in
     the positions."""
     if adjacency is None:
-        from ..radiusSearch import radiusSearchCompactHashMap
+        from .._backend import BACKEND
+        if BACKEND == 'native':
+            from ..radiusSearch import radiusSearch as radiusSearchCompactHashMap
+        else:
+            from ..radiusSearch import radiusSearchCompactHashMap
         prim = lambda t: t if t is None else fwAD.unpack_dual(t).primal
         adjacency = radiusSearchCompactHashMap(
             ParticleState(positions=prim(particles.positions), supports=prim(particles.supports),

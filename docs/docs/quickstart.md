@@ -3,7 +3,7 @@
 ## Install
 
 ```bash
-pip install -e .          # core (torch, warp-lang, numpy)
+pip install -e . # default backend (torch>=2.10, warp-lang, numpy)
 # or with test tooling:
 pip install -e ".[dev]"
 ```
@@ -153,11 +153,13 @@ this quickstart.
 ## Running the tests
 
 ```bash
-pytest tests/operations            # CPU + CUDA (CUDA skipped if absent)
+pytest --suite warp --device cpu tests/warp/operations
+# On a CUDA host:
+pytest --suite warp --device cuda tests/warp/operations
 ```
 
 The gradcheck suites run as subprocesses at float64
-(`tests/operations/test_gradcheck_scripts.py`) because precision is
+(`tests/warp/operations/test_gradcheck_scripts.py`) because precision is
 baked in at import time.
 
 For complete checked compositions, including the density/correction/gradient

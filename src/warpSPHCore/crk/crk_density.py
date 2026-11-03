@@ -1,3 +1,4 @@
+from .._backend import OPERATORS
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Optional, Union
@@ -237,6 +238,10 @@ def _computeCRKDensity_stateBackend(
     particle, using the CRK terms (A/B) and apparent volumes already solved for by
     computeCRKMoments/computeCRKTermsWarp.
     """
+    if OPERATORS == "native":
+        from .native.nt_density import computeCRKDensity
+        return computeCRKDensity(queryParticles, operationProperties, domain, crkState, queryVolumes, referenceVolumes, adjacency, referenceParticles)
+
     with record_function("warpSPH[CRKDensity]"):
         with record_function("warpSPH[CRKDensity] - Kernel Execution"):
             ctx = SPHContext(

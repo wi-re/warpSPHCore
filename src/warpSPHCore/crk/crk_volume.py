@@ -1,3 +1,4 @@
+from .._backend import OPERATORS
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Optional, Union
@@ -170,6 +171,10 @@ def _computeCRKVolume_stateBackend(
     and _computeCRKDensity_stateBackend (crk_moments.py / crk_density.py) -- it applies
     no corrections of its own.
     """
+    if OPERATORS == "native":
+        from .native.nt_volume import computeCRKVolume
+        return computeCRKVolume(queryParticles, operationProperties, domain, adjacency, referenceParticles)
+
     with record_function("warpSPH[CRKVolume]"):
         with record_function("warpSPH[CRKVolume] - Kernel Execution"):
             ctx = SPHContext(

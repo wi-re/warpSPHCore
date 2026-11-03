@@ -18,13 +18,13 @@ import torch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'src'))
-TESTS = ['tests/radiusSearch/test_adjacencyCapacity.py', 'tests/radiusSearch/test_hashMapSlots.py',
-         'tests/radiusSearch/test_verletValidity.py', 'tests/operations/test_operations_core.py',
-         'tests/operations/test_operations_crk_analytic.py', 'tests/operations/test_tiled_curl_laplacian.py',
-         'tests/operations/test_forward_mode_geometry_jvp_density.py',
-         'tests/operations/test_forward_mode_geometry_jvp_gradient.py',
-         'tests/operations/test_forward_mode_tier2_density_hvp_self_pair.py',
-         'tests/operations/test_polyfit.py', 'tests/operations/test_mfm_warp.py']
+TESTS = ['tests/warp/radiusSearch/test_adjacencyCapacity.py', 'tests/warp/radiusSearch/test_hashMapSlots.py',
+         'tests/warp/radiusSearch/test_verletValidity.py', 'tests/warp/operations/test_operations_core.py',
+         'tests/warp/operations/test_operations_crk_analytic.py', 'tests/warp/operations/test_tiled_curl_laplacian.py',
+         'tests/warp/operations/test_forward_mode_geometry_jvp_density.py',
+         'tests/warp/operations/test_forward_mode_geometry_jvp_gradient.py',
+         'tests/warp/operations/test_forward_mode_tier2_density_hvp_self_pair.py',
+         'tests/warp/operations/test_polyfit.py', 'tests/warp/operations/test_mfm_warp.py']
 
 
 def main():
@@ -51,7 +51,7 @@ def main():
     try:
         with tempfile.TemporaryDirectory(prefix='split-consumers-') as directory:
             xml = Path(directory) / 'results.xml'
-            result = pytest.main(['-q', '-x', *TESTS, f'--junitxml={xml}'])
+            result = pytest.main(['--suite', 'warp', '--device', 'cuda', '-q', '-x', *TESTS, f'--junitxml={xml}'])
             stats = [dict(s.attrib) for s in ET.parse(xml).getroot().iter('testsuite')]
     finally:
         search.radiusSearchOnCompactHashMap = wrapper.radiusSearchOnCompactHashMap = original

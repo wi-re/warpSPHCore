@@ -4,60 +4,170 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  changes:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: [ "3.12"]
-
+    outputs:
+      python: ${{ steps.select.outputs.python }}
+      warp: ${{ steps.select.outputs.warp }}
+      native: ${{ steps.select.outputs.native }}
+      torch: ${{ steps.select.outputs.torch }}
+      torch_full: ${{ steps.select.outputs.torch_full }}
+      packaging: ${{ steps.select.outputs.packaging }}
+      parity: ${{ steps.select.outputs.parity }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check repository artifact layout
+        run: python scripts/check_repository_layout.py
+      - id: select
+        run: python scripts/testing/select_suites.py >> "$GITHUB_OUTPUT"
 
+  python:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.12"
           cache: pip
+      - name: Install CPU Torch and test dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[native]" pytest pyyaml
+      - name: Python scaffolding and build contracts (no kernels compiled)
+        run: pytest --suite python -q
 
-      - name: Install CPU-only torch
-        run: pip install torch --index-url https://download.pytorch.org/whl/cpu
+  native-cpu:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install CPU Torch and test dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[native]" pytest pyyaml
+      - name: Build and qualify the Torch-independent C++ library
+        run: |
+          cmake -S . -B /tmp/warpsph-standalone -DWARPSPHCORE_BUILD_STANDALONE=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/tmp/warpsph-standalone-install
+          cmake --build /tmp/warpsph-standalone -j2
+          ctest --test-dir /tmp/warpsph-standalone -L cpu --output-on-failure
+          pytest --suite standalone --device cpu --native-library=/tmp/warpsph-standalone/libnative_standalone_test.so -q
+          cmake --install /tmp/warpsph-standalone
+          cmake -S scripts/examples/standalone -B /tmp/warpsph-consumer -DCMAKE_PREFIX_PATH=/tmp/warpsph-standalone-install
+          cmake --build /tmp/warpsph-consumer -j2
+          /tmp/warpsph-consumer/sph_example
 
-      - name: Install warpSPHCore (dev extras)
-        run: pip install -e ".[dev]"
+  torch-cpu:
+    needs: changes
+    if: needs.changes.outputs.torch == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install CPU Torch and test dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[native]" pytest pyyaml
+      - name: Qualify the Torch adapter
+        env:
+          WARPSPHCORE_NATIVE_BUILD: cpu
+          MAX_JOBS: "2"
+          FULL_MATRIX: ${{ needs.changes.outputs.torch_full }}
+        run: |
+          if [ "$FULL_MATRIX" = true ]; then
+            pytest --suite torch --device cpu -q
+          else
+            pytest --suite torch --device cpu -m "not extended" -q
+          fi
 
-      - name: Run pytest suite
-        run: pytest tests/ -v
-
-      - name: Check integer widths independently of precision
-        run: python scripts/diagnostics/qualify_index_types.py --device cpu --output /tmp/index-types.json
-
-      - name: Check isolated wheel and public examples in both precisions
+  packaging:
+    needs: changes
+    if: needs.changes.outputs.packaging == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install CPU Torch and test dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+      - name: Build compiler-free stable-ABI wheel and audit exports
+        run: |
+          python scripts/packaging/build_native_wheel.py --backend cpu --output /tmp/warpsph-native-wheel
+          python scripts/packaging/check_native_wheel.py /tmp/warpsph-native-wheel/*.whl
+          python scripts/packaging/audit_native_abi.py /tmp/warpsph-native-wheel/*.whl
+      - name: Check source wheel and public examples in both precisions
         run: |
           python -m build --wheel --outdir /tmp/warpsphcore-wheel
           python scripts/packaging/check_wheel.py /tmp/warpsphcore-wheel/*.whl
 
-      - name: Run operation matrix (2D, float32, non-jittered, CI gate)
-        run: python scripts/diagnostics/operation_matrix.py --device cpu --ci --verbose
-
-      - name: Run operation matrix (2D, float64, CI gate)
-        run: python scripts/diagnostics/operation_matrix.py --device cpu --precision float64 --nx 24 --ci --verbose
-
-      - name: Run operation matrix (1D, CI gate)
-        run: python scripts/diagnostics/operation_matrix.py --device cpu --dim 1 --nx 64 --ci --verbose
-
-      - name: Run operation matrix (jittered, CI gate)
-        run: python scripts/diagnostics/operation_matrix.py --device cpu --jitter 0.01 --ci --verbose
-
-      - name: Run operation matrix (3D, CUDA only)
+  warp-cpu:
+    needs: changes
+    if: needs.changes.outputs.warp == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install CPU Torch and test dependencies
         run: |
-          if python -c "import torch, sys; sys.exit(0 if torch.cuda.is_available() else 1)"; then
-            python scripts/diagnostics/operation_matrix.py --device cuda --dim 3 --nx 8 --ci --verbose
-          else
-            echo "No CUDA device on this runner; skipping the 3D matrix (dim=3 is CPU-prohibitive, see warpier_core.md)."
-          fi
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+      - name: Qualify Warp backend
+        run: pytest --suite warp --device cpu -q
+      - name: Check integer widths independently of precision
+        run: python scripts/diagnostics/qualify_index_types.py --device cpu --output /tmp/index-types.json
+      - name: Operation matrices
+        run: |
+          python scripts/diagnostics/operation_matrix.py --device cpu --ci --verbose
+          python scripts/diagnostics/operation_matrix.py --device cpu --precision float64 --nx 24 --ci --verbose
+          python scripts/diagnostics/operation_matrix.py --device cpu --dim 1 --nx 64 --ci --verbose
+          python scripts/diagnostics/operation_matrix.py --device cpu --jitter 0.01 --ci --verbose
+
+  parity-cpu:
+    needs: changes
+    if: needs.changes.outputs.parity == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        precision: [float32, float64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install CPU Torch and test dependencies
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[dev]"
+      - name: Compare Warp and native numerical results
+        env:
+          warpSPHCore_PRECISION: ${{ matrix.precision }}
+          WARPSPHCORE_NATIVE_BUILD: cpu
+          MAX_JOBS: "2"
+        run: pytest --suite parity --device cpu -q

@@ -13,6 +13,8 @@ three traversal inputs) -- see warpier_core.md's "Renormalization Grid-Mode Cove
 note for why this needed its own script rather than reusing gradcheck_covariance_native.py.
 """
 
+from __future__ import annotations
+
 import torch
 from dataclasses import replace
 from typing import Optional, Union, Tuple
@@ -22,9 +24,14 @@ from .enumTypes import WarpOperation
 
 from .dataTypes import *
 
-from .operations import warpOperation
+from ._backend import BACKEND
+if BACKEND == 'native':
+    from .native.api import warpOperation
+    from .coreOperations.native.nt_renormalization import computeCovarianceGeometryJVP
+else:
+    from .operations import warpOperation
+    from .coreOperations.wp_covarianceJVP import computeCovarianceGeometryJVP
 from .pinv import pinv2x2_warpBackend, pinv_warp
-from .coreOperations.wp_covarianceJVP import computeCovarianceGeometryJVP
 
 
 from .pinv.symmetric import _symmetric_pinv_jvp

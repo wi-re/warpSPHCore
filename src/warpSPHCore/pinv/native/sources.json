@@ -1,0 +1,1 @@
+{"cpu": ["csrc_pinv/nt_pinv.cpp"], "gpu": ["csrc_pinv/nt_pinv.cu"]}

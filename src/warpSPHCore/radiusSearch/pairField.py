@@ -11,6 +11,7 @@ import torch
 
 from .chunked import ChunkedAdjacency
 from .allocation import noteAllocationFailure
+from ..type_config import get_torch_index_dtype
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,7 +28,8 @@ class ChunkedPairField:
             raise ValueError('Pair-field trailingShape must contain positive integer extents.')
         width = prod(trailingShape)
         policy = adjacency.plan.policy
-        pairBytes = 4 * (1 + adjacency.storeI) + width * torch.empty(0, dtype=dtype).element_size()
+        indexBytes = 4 if get_torch_index_dtype()==torch.int32 else 8
+        pairBytes = indexBytes * (1 + adjacency.storeI) + width * torch.empty(0, dtype=dtype).element_size()
         if policy.maxElementsPerEdge < width or policy.bytesPerEdge < pairBytes:
             raise ValueError('RowChunkPolicy must account for pair-field scalar extents and J/I plus field bytes.')
 

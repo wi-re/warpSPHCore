@@ -16,7 +16,7 @@ def outerTensorProduct(
     res = type(out)(scalar(0.0))
     for i in range(wp.static(len(tensor))): # loop over elements of input tensor
         for j in range(dim): # loop over dimensions of output gradient
-            outIndex = j * wp.static(len(tensor)) + i # compute flattened index for output
+            outIndex = i * dim + j # append the derivative axis, matching outputShape
             res[outIndex] += vec[j] * tensor[i] # accumulate outer product into output
             
     return res

@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+- Merge the experimental native backend while retaining Warp as a required
+  dependency and the default backend; require Torch >=2.10 for native stable ABI
+  support. Shared numerical Python changes select both backend test suites.
+
+- Qualify complete native core distributions: universal source/JIT wheels, platform CPU/CUDA wheels, experimental HIP compilation and retained standalone compatibility; exclude local build artifacts from source wheels.
+
+- Native core: general first-order operator JVPs, explicit CRK products and the legacy density position block with CSR/CSC vector/mass derivatives; Warp-free public operator imports and module compatibility helpers.
+
+- Native core: bounded CSR32/CSR64 owned-row compact search, Verlet filtering and shared distributed operator dispatch, including CRK, polynomial and meshless dependent passes.
+
+- Native core: polynomial reconstruction assembly with CSR/CSC derivatives and Warp-free MFM/MFV primal, closure and multigrid execution.
+
+- Native core: Warp-free renormalization and linear algebra, shared CPU/CUDA/HIP dense and Krylov updates, and reusable captured CG/BiCGStab workspaces.
+
+- Add native Verlet validity, filtering, snapshot/capacity lifecycle and deferred
+  device flags; qualify CPU/CUDA and experimental gfx942 compilation.
+- Support native normalization calibration and positive-divergence Laplacians,
+  including their applicable first-order derivatives.
+
+- Move exploratory studies to an independent research repository with a verified
+  migration manifest; enforce the external-artifact policy in agent rules and CI.
+
+- Integrate the coordinated 0.7.1 core, frontend and integrator interfaces.
+- Add opt-in native core/CRK accumulation dispatch within the Warp frontend,
+  preserving its Morton ordering and CSR buffers. Native owned-row traversal now shares the upstream
+  communication and eager primal contract.
+- Add complete-simulation correctness comparisons and CPU/CUDA scaling drivers;
+  retain failed FP32 projection controls explicitly in the qualification report.
+- Add benchmark-only exclusive frontend stage profiling and stacked CPU/CUDA
+  charts, distinguishing remaining Warp kernels from native operators and scaffolding.
+
 ## 0.7.1 — 2026-11-03
 
 Coordinated GitHub checkpoint with warpSPH and warpSPHIntegrators 0.7.1.

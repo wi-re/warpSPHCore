@@ -6,6 +6,54 @@ reports, raw measurements and historical plot collections live outside the
 checkout. Building these docs and running ordinary tests does not require
 the development archive.
 
+## Research sources
+
+The core checkout contains maintained library code, focused regression tests,
+reusable documented benchmarks/diagnostics and public documentation. Exploratory
+kernels, one-off troubleshooting scripts, campaign coordinators and parameter
+sweeps start outside this checkout. Disposable work belongs in `/tmp`; retained
+research source is tracked in a separate Git repository.
+
+The local native research repository is:
+
+```text
+$WARPSPH_DEVELOPMENT_ROOT/core/research/native-backend/
+```
+
+Here the shared root is `/home/lu26029/dev/warpSPHDevelopment`. That workspace is
+not itself a Git repository; only the research child has independent source
+history. No remote or automatic backup has been configured. Simulation output,
+measurements and profiler captures stay outside both source repositories, under
+`core/experiments/<study>/<run>/` in the shared workspace.
+
+The 2026-11-03 migration preserves all 102 tracked experiment files from core
+commit `58a1062` in `core/archives/research-migration-20261103/`. Its manifest
+records original paths, sizes and SHA-256 checksums verified before removal.
+The initial research commit is `0892905`. One hundred source/input files are
+tracked in the research repository; the two
+generated inventory/measurement JSON files remain in the immutable archive.
+The manually reviewed operator assessments remain with the research source.
+Existing measured-run archives were not modified.
+
+Historical report commands and research README files describe their original
+layout and source revision. For exact replay, use the pinned revision/runtime
+in a disposable checkout. New research should explicitly select its target core
+checkout and output directory; do not restore experiments into the maintained
+core checkout to satisfy old relative-path assumptions.
+
+Before promoting a research result, extract the maintained implementation and
+minimal regression or a reusable documented tool. Leave the exploratory variants,
+raw evidence and campaign scripts in the research/evidence workspace. Record both
+source commits, configuration and runtime with important results. Preserve
+failed controls alongside passing runs; do not overwrite prior evidence.
+
+`AGENTS.md` applies this rule to agent work. `.gitignore` discourages local run
+directories, and `python scripts/check_repository_layout.py` checks the Git index
+in CI without loading Torch/Warp. The guard rejects tracked experiment/run paths
+and simulation/profiler files, with explicit exceptions for maintained fixtures.
+It is a layout check, not a substitute for reviewing whether a new script has a
+maintained consumer. Tests, builds and public examples need no research checkout.
+
 ## Local archive
 
 The default layout is a sibling of the source repository:
@@ -20,6 +68,8 @@ dev/
       REPOSITORY_PLAN.md       # detailed plan at the time of migration
       docs/development/        # reports and generated figures
       docs/regression/         # raw results and workload fixtures
+      research/native-backend/ # independent Git repo for exploratory source
+      archives/               # immutable migration snapshots
       experiments/            # experiment results and reports
       higherOrderSPH/          # generated harness reports
       logs/2026-10-16/          # captured development runs

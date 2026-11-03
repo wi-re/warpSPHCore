@@ -1,0 +1,8 @@
+{
+  "cpu": [
+    "csrc_kernel/nt_kernel_forward.cpp"
+  ],
+  "gpu": [
+    "csrc_kernel/nt_kernel_forward.cu"
+  ]
+}
