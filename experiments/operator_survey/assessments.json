@@ -1,0 +1,3687 @@
+{
+  "files": {
+    "core:src/warpSPHCore/coreOperations/_jvpCommon.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "4043aea0d3952e4bd7363f09d0575ce4d95b41d680f627950573fc0eed8fe8a8"
+    },
+    "core:src/warpSPHCore/coreOperations/native/wp_covariance.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "covariance: identity",
+      "stores": "covariance: matrix and integer count",
+      "complexity": "low",
+      "operations": [
+        "covariance"
+      ],
+      "reviewed_source_sha256": "736601bff1bec295b8eddfec4599c793a35dad4dfb4e930b95bca8e715b951c0"
+    },
+    "core:src/warpSPHCore/coreOperations/native/wp_curl.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "curl: identity",
+      "stores": "curl: one output field",
+      "complexity": "low",
+      "operations": [
+        "curl"
+      ],
+      "reviewed_source_sha256": "71174c1b0d542ad4b7a9575182b1d62d7d6355f0f5af078ce564ba80b6295b8f"
+    },
+    "core:src/warpSPHCore/coreOperations/native/wp_density.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "density: identity",
+      "stores": "density: one output field",
+      "complexity": "low",
+      "operations": [
+        "density"
+      ],
+      "reviewed_source_sha256": "10d2506a3c2e93997cd6085b4c932cc895a616f84884c6932457f63663623d41"
+    },
+    "core:src/warpSPHCore/coreOperations/native/wp_divergence.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "divergence: identity",
+      "stores": "divergence: one output field",
+      "complexity": "low",
+      "operations": [
+        "divergence"
+      ],
+      "reviewed_source_sha256": "9ba493f567c8e585529a07554f4cb481fcf5fd7ce4b619ff737d64b0db59d378"
+    },
+    "core:src/warpSPHCore/coreOperations/native/wp_gradient.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "gradient: identity",
+      "stores": "gradient: one output field",
+      "complexity": "low",
+      "operations": [
+        "gradient"
+      ],
+      "reviewed_source_sha256": "6e5a259cd0ce648f1193685497c2a7d59aff843ca7ccd0851096438cbc97afe7"
+    },
+    "core:src/warpSPHCore/coreOperations/native/wp_interpolate.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "interpolate: identity",
+      "stores": "interpolate: one output field",
+      "complexity": "low",
+      "operations": [
+        "interpolate"
+      ],
+      "reviewed_source_sha256": "af33ba9567ea34970c867a8af1466dc4c8de300f13b0721c25b5a32f6b51cbb5"
+    },
+    "core:src/warpSPHCore/coreOperations/native/wp_laplacian.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "laplacian: identity",
+      "stores": "laplacian: one output field",
+      "complexity": "medium",
+      "operations": [
+        "laplacian"
+      ],
+      "reviewed_source_sha256": "d57ed614e305ac78cf5cbf584722efc58644aadbdd227b76cde149a60c8261ff"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_covariance.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Compatibility import alias to the corresponding coreOperations/native/wp_ implementation; no additional operation.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "e2571ef25c0af63c05a23eba4e2fcafafbdf501db10e02378f7598925a81853f"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_covarianceJVP.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "covariance JVP: identity",
+      "stores": "covariance JVP: one tangent field",
+      "complexity": "medium",
+      "operations": [
+        "covariance JVP"
+      ],
+      "reviewed_source_sha256": "357f4574547998a99c9053f3c8e632b15dbd10e6112733357939ca4768a03bd9"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_curl.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Compatibility import alias to the corresponding coreOperations/native/wp_ implementation; no additional operation.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "12314ed1782ce0086bd54bb7543f7f0db3844d197e469fc4cba70117245addbe"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_curlJVP.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "curl JVP: identity",
+      "stores": "curl JVP: one tangent field",
+      "complexity": "medium",
+      "operations": [
+        "curl JVP"
+      ],
+      "reviewed_source_sha256": "20c5ba3216188fe97319cf4240c48e640adff80b3e7de7afb5a7e85c22273772"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_density.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Compatibility import alias to the corresponding coreOperations/native/wp_ implementation; no additional operation.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "a9de28b965b2107860f4717b47f3c6a66039495bf3007de41745fed9c4053c0f"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_densityHVP.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "density Hessian edge terms: evaluate one pair Hessian",
+      "stores": "density Hessian edge terms: D*D per explicit edge",
+      "complexity": "medium",
+      "operations": [
+        "density Hessian edge terms"
+      ],
+      "reviewed_source_sha256": "eaf7c225d486ecb9d71211257caa74f931e9021e14eb1998a043b0f5b4de863c"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_densityJVP.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "density JVP: identity",
+      "stores": "density JVP: one tangent field",
+      "complexity": "medium",
+      "operations": [
+        "density JVP"
+      ],
+      "reviewed_source_sha256": "cd50aebc850b75005db522323730c2fef29d7da4f09207f47261b625a2b33827"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_divergence.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Compatibility import alias to the corresponding coreOperations/native/wp_ implementation; no additional operation.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "aacbd7b1607417a484c31dbff50548a5be30b5f74ef4ea5269056e9d718c2f83"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_divergenceJVP.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "divergence JVP: identity",
+      "stores": "divergence JVP: one tangent field",
+      "complexity": "medium",
+      "operations": [
+        "divergence JVP"
+      ],
+      "reviewed_source_sha256": "62b67cac8acd526b95ff0c09ce576e39b4dc6533bbad63a9c567778986d834d4"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_gradient.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Compatibility import alias to the corresponding coreOperations/native/wp_ implementation; no additional operation.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "216fba701f13345c9dd71a6f5d6450ae77573a53d74eb65582dc62d065195dbf"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_gradientJVP.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "gradient JVP: identity",
+      "stores": "gradient JVP: one tangent field",
+      "complexity": "medium",
+      "operations": [
+        "gradient JVP"
+      ],
+      "reviewed_source_sha256": "3751c645b745bde2becb3e356b9143651d7ba1b8e83431150a793902f6747b60"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_interpolate.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Compatibility import alias to the corresponding coreOperations/native/wp_ implementation; no additional operation.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "a80ec8b43b5554259ddd33bee075e12e3cbf40a29774072464cf5be375d316fc"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_interpolateJVP.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "interpolate JVP: identity",
+      "stores": "interpolate JVP: one tangent field",
+      "complexity": "medium",
+      "operations": [
+        "interpolate JVP"
+      ],
+      "reviewed_source_sha256": "1b8ac912448ecc7a50e1b2623513cece2462c661e4c5e3c83d71534181e74fc1"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_laplacian.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Compatibility import alias to the corresponding coreOperations/native/wp_ implementation; no additional operation.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "a0a74423fb71eb86b50f9de58137009f4b00945981e33092a23c861e8b491793"
+    },
+    "core:src/warpSPHCore/coreOperations/wp_laplacianJVP.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Laplacian Brookshaw JVP: identity; Laplacian Naive JVP: identity; Laplacian Dot JVP: identity; Laplacian Default JVP: identity",
+      "stores": "Laplacian Brookshaw JVP: one tangent field; Laplacian Naive JVP: one tangent field; Laplacian Dot JVP: one tangent field; Laplacian Default JVP: one tangent field",
+      "complexity": "medium",
+      "operations": [
+        "Laplacian Brookshaw JVP",
+        "Laplacian Naive JVP",
+        "Laplacian Dot JVP",
+        "Laplacian Default JVP"
+      ],
+      "reviewed_source_sha256": "9af7533cae314dcb61078266aaec21f7148b4b7f1d0b56d01a02054867f86621"
+    },
+    "core:src/warpSPHCore/crk/crk_density.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "CRK density: guarded numerator/denominator",
+      "stores": "CRK density: one density",
+      "complexity": "low",
+      "operations": [
+        "CRK density"
+      ],
+      "reviewed_source_sha256": "586f2950036f169731641cff864d1688b39960d8467874d7dd8490713a808841"
+    },
+    "core:src/warpSPHCore/crk/crk_moments.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "CRK moments: identity; coefficient solve is a later stage",
+      "stores": "CRK moments: six moment arrays and one count array",
+      "complexity": "medium",
+      "operations": [
+        "CRK moments"
+      ],
+      "reviewed_source_sha256": "89b313d0ec0c0d8b2eddf3c72afb1963b179a5bba9e1f835012b35e10c2e228b"
+    },
+    "core:src/warpSPHCore/crk/crk_moments_jvp.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "CRK moments JVP: identity",
+      "stores": "CRK moments JVP: six tangent moment arrays",
+      "complexity": "medium",
+      "operations": [
+        "CRK moments JVP"
+      ],
+      "reviewed_source_sha256": "554d78fe0c5277120c6ae412a7d1d5448124df2a298dac7e4c91324bb78f77f3"
+    },
+    "core:src/warpSPHCore/crk/crk_volume.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "CRK volume: guarded reciprocal",
+      "stores": "CRK volume: one volume",
+      "complexity": "low",
+      "operations": [
+        "CRK volume"
+      ],
+      "reviewed_source_sha256": "ba2fa5df2ea8ad619ecf30abe315021e6f6fd4670e704013ede61e265b2e0691"
+    },
+    "core:src/warpSPHCore/crk/crk_volume_jvp.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "CRK volume JVP: -d(sum W)*V*V using primal volume",
+      "stores": "CRK volume JVP: one tangent volume",
+      "complexity": "medium",
+      "operations": [
+        "CRK volume JVP"
+      ],
+      "reviewed_source_sha256": "cd6e3248eeab9af0e15f4faaae5f538cb5a8039522bcc61dd277c389375f582b"
+    },
+    "core:src/warpSPHCore/crk/kernel.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "f6441a8d302cbb0b5840ac77b88c3bec5c19f5d525f7f3fc5e98848d5acca5ae"
+    },
+    "core:src/warpSPHCore/kernels/derivative.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "ac15ae56308cb0cf3394dc5c91e9bd283331ea7f8934e89cbf8e30a01dd43177"
+    },
+    "core:src/warpSPHCore/kernels/eval_kernel.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "94ad0d694daac43eaa777ecacf952ea9e66622570acaa426326fa70a2982ed86"
+    },
+    "core:src/warpSPHCore/kernels/gradH.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "4d2e686dfd1b2ab3ab375469e4cbb816328274003ca43c8248b927dc28befed5"
+    },
+    "core:src/warpSPHCore/kernels/gradient.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "2d985a7235bbb53cfb1ad3677e7fca33c25fd33c4e09f7027c77a54e80b2d7d6"
+    },
+    "core:src/warpSPHCore/kernels/hessian.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "0b69f1ef7f7e12055aab6c397d0995eb5e3debeb91f4cf445c2a2b0b86f3a39b"
+    },
+    "core:src/warpSPHCore/kernels/kernel.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "a42218415b27e2f6eee0832121c224086d50e2295e7c898e22a1ac8d8146d433"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/B7.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "894f6ed3f8d13e6453b6b6c85c884015c0fa0bc6fcef377a45163b4dc922db5c"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/B8.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "3a3affb0a3d10187f8e5e7d708636f19c912602bf27085d528cc3fb0202f6f85"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/adhesionKernel.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "34ac5fce2c93f2ba10a6642debc34aaed87869c30b0c8ef1864b175575809413"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/cohesionKernel.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "ada24d3b79a999148c1416f21241bc12eb3ead07ed3a0e544c99d2c0d4c5a98d"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/cubicSpline.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "d661c0ac8e6ea3fdc420c95c5a902107a8c31137f6a69985e8321e874f03efdb"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/gaussian.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "38b79cb0dd4df10ae5bd8716ad2bd6d8ab9235e968662b547c2646f2665fe132"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/hoct4.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "a327edcf68f73b82f960ab35ebfd5320876a1286c63572dbdd13abc1d1c9002e"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/poly6.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "faa7b84225a62b47193b473a9d112752701b4054feb1031bea28427c794a4b33"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/quarticSpline.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "0a5fe106f8789ccc9bbaaa7f7f629b023440187e7b8720ccca17afd0aa24b399"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/quinticSpline.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "2ef9c40119ecbf088f564e90be29540e49905c79508416dc9bf26cc90db5dbf4"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/spiky.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "8f91e83bd9f10c2fd8ee4af93f04bc8204b4620406021624fee02dce093f0e94"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/viscosityKernel.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "5fe5d89ed24e997ca7a485c78562aba67b67984f1562c513741b9c918afc38d4"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/wendland2.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "147d6cf94c76bfd1bc84e7efd71e8de2c2b6257dc54c4f9e96cd068ae341db22"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/wendland4.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "b283e006d3e38e8a9b0eed3475b75982fae183b817dc858dfbeeef1d97c5335c"
+    },
+    "core:src/warpSPHCore/kernels/kernelFunctions/wendland6.py": {
+      "family": "radial kernel helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Seven scalar evaluators/constants: value, first/second/third derivative, dimensional normalization, scale and packing ratio.",
+      "stores": "return scalar; no global particle output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "9421ca14a1d013bb66819b99a27593dd4565a7e888fd52738dc74d27d5d5dfaf"
+    },
+    "core:src/warpSPHCore/kernels/kernelJVP.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "361bfeb7459cba687f3371c478e1fcf32b9182ddc13e0f1f8b97b3d3600069a6"
+    },
+    "core:src/warpSPHCore/kernels/laplacian.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "7d2f21875a0a00a4a58eb488580ab2f9d918eb92184fd1b5d984cd0f69853881"
+    },
+    "core:src/warpSPHCore/kernels/properties.py": {
+      "family": "pair math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Evaluate pair kernels, derivatives, corrected gradients or tangent weights; custom gradients accumulate local input adjoints.",
+      "stores": "return scalar/vector/matrix or tangent tuple; custom-gradient input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "e16292f608607424aceafe59a410b8347ffe5ba84a6bb1addb32eadc1c419b13"
+    },
+    "core:src/warpSPHCore/linalg/krylov/bicgstabWorkspace.py": {
+      "family": "solver workspace",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Vector updates and scalar decisions using external dot/norm reductions; global failure/convergence flags use atomic_max.",
+      "stores": "solution/residual/direction vectors, scalar state and optional history",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "4ba6928700c29b3b6ed14b3a0562f6f3ad8174fae083e93f5bac1c4a55d42cf7"
+    },
+    "core:src/warpSPHCore/linalg/krylov/cgWorkspace.py": {
+      "family": "solver workspace",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Vector updates and scalar decisions using external dot/norm reductions; global failure/convergence flags use atomic_max.",
+      "stores": "solution/residual/direction vectors, scalar state and optional history",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "2b4cff0659639ba53557f1d2b3ab42111eb19f9daf7adc4b38f74bd5a749a697"
+    },
+    "core:src/warpSPHCore/linalg/pinv.py": {
+      "family": "pointwise linear algebra",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Small matrix pseudoinverse/eigenvalue routines or application to a local RHS.",
+      "stores": "per-query inverse/eigenvalues or solved local vectors",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "44b717a0097947c7902162521b3265d48c9f57bad6751dd6d803afb63428125b"
+    },
+    "core:src/warpSPHCore/linalg/preconditioner.py": {
+      "family": "pointwise linear algebra",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Apply a local block preconditioner.",
+      "stores": "one vector component per output row",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "4175548f6c5bad3ee3da3c49233a7e18ad16b6c9805af14a57229c2af59c2cdb"
+    },
+    "core:src/warpSPHCore/math/wp_cross.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "0b7020c21fdb00d81fdcd46c555ca5fd6028a27068c0bdccfdb365c2056d5404"
+    },
+    "core:src/warpSPHCore/math/wp_delta.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "4bc32b43a4d6d1c5d10e0d2c62b29b7795c31969f71659769ae83e4a028ab7cb"
+    },
+    "core:src/warpSPHCore/math/wp_dim.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "2cd523dbf8ad76d30e4490f201d914e78ff9b30202621335c8b4d8acdd2cc9b6"
+    },
+    "core:src/warpSPHCore/math/wp_distance.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "13c47c87bf362dda1a36497f842c91f6e3623051a1a5664a561b1d3175978c7f"
+    },
+    "core:src/warpSPHCore/math/wp_divdot.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "681cb703fec1b5982f764d9aa0c5cb49fafb74f4b285d3591e7e8aa66bdcf87b"
+    },
+    "core:src/warpSPHCore/math/wp_dot.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "4c7229c2d46981ae83b0d5d018ee14e666ea21852ec6985ed56df8664e3dad7a"
+    },
+    "core:src/warpSPHCore/math/wp_eps.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "6020abf33e336139932ae84fddb84ddbadc23908b8f60d545d6b3beb60dc2302"
+    },
+    "core:src/warpSPHCore/math/wp_eye.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "7f0b0da201ee22fad11bf8cf4666dc07cf1804929c21997cafe23ded490e9756"
+    },
+    "core:src/warpSPHCore/math/wp_laplaciandot.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "5a97c17165794f11a57fcbada172edc930b14f77f005e5133e682a862b6b0965"
+    },
+    "core:src/warpSPHCore/math/wp_matmul.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "3248e718bb349b6e63e0b065f0bb80cd1fadc066d4eeff6b2c88a42f965df328"
+    },
+    "core:src/warpSPHCore/math/wp_norm.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "20ccfbcaacf957ea9b7eb0b34f6eb8e5f287d5dba13b487727cb8897880da743"
+    },
+    "core:src/warpSPHCore/math/wp_normalize.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "ab7f9053f1cdf8ca0ef2ff8769826a9174adf4737ae96c9fbacbb3c3d1cdf93e"
+    },
+    "core:src/warpSPHCore/math/wp_outerTensorProduct.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "af7720a26a35c7154db36742b89ca0ca00b7d2f2100e3d3c808d18e3e0fb2ea3"
+    },
+    "core:src/warpSPHCore/math/wp_pow.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "a62c35071ddafeb6c5222d70420484f517f44e0c5e3ceccdb2eadab28e091f07"
+    },
+    "core:src/warpSPHCore/math/wp_sqrt.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "f559dc5d7519df3c5f7fdd08c591fd4f494f61fbcbb9267ed36c3c757687f92e"
+    },
+    "core:src/warpSPHCore/math/wp_vec1.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Vector/matrix type declarations only.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "84d5270ae844def9dee8dc25dd0523bb91d7decda0a97c03f66a1b6dc15badc6"
+    },
+    "core:src/warpSPHCore/math/wp_zero.py": {
+      "family": "local math helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Fixed-dimensional arithmetic, tensor contraction, constructors and custom local adjoints; internal component sums are not neighbor reductions.",
+      "stores": "return scalar/vector/matrix; local component assignments or input adjoints",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "4df2261c6000380373de528c824c61da54da19f8d98cb11e7d4eb69235fc342d"
+    },
+    "core:src/warpSPHCore/mfm/multigrid.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "multigrid segment sum: identity",
+      "stores": "multigrid segment sum: out[coarse cell, component]",
+      "complexity": "low",
+      "operations": [
+        "multigrid segment sum"
+      ],
+      "reviewed_source_sha256": "d3e9c5b36940f2fb64a2b01f2f172dea698affff2574f5ba23f1391ebd4443af"
+    },
+    "core:src/warpSPHCore/mfm/wp_closure.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "MFM closure CSR matvec: identity",
+      "stores": "MFM closure CSR matvec: y and diagonal",
+      "complexity": "high",
+      "operations": [
+        "MFM closure CSR matvec"
+      ],
+      "reviewed_source_sha256": "e7531598b53b4cd7d6bcdbf69769b499d071e62eeba659d9393ef343dbc736ed"
+    },
+    "core:src/warpSPHCore/mfm/wp_mfm.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "MFM moments: add self count of one; MFM gradients: multiply by query inverse moment matrix; zero deficient queries; MFM limiter: alphaScalar ratios/clamps with query beta; MFM closure residual: identity; MFM closure weights: pair face weight and cap; MFM closure matvec: identity; MFM flux: identity; MFM coarse stencil: identity; MFM timestep: 2*CFL*h/maxSignal",
+      "stores": "MFM moments: omega, matrix, count; MFM gradients: two gradient vectors and a Jacobian; MFM limiter: rho limiter, velocity limiters, pressure limiter; MFM closure residual: vector and scalar; MFM closure weights: one kappa per CSR edge; MFM closure matvec: y and diagonal; MFM flux: dm, dp, de; MFM coarse stencil: one fixed stencil vector; MFM timestep: one timestep",
+      "complexity": "high",
+      "operations": [
+        "MFM moments",
+        "MFM gradients",
+        "MFM limiter",
+        "MFM closure residual",
+        "MFM closure weights",
+        "MFM closure matvec",
+        "MFM flux",
+        "MFM coarse stencil",
+        "MFM timestep"
+      ],
+      "reviewed_source_sha256": "95880fd838823115f79d0f30545651054927bd5f9a6ce3ecf45eaa2d5e7c071f"
+    },
+    "core:src/warpSPHCore/pinv/wp_pinv1x1.py": {
+      "family": "pointwise linear algebra",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Small matrix pseudoinverse/eigenvalue routines or application to a local RHS.",
+      "stores": "per-query inverse/eigenvalues or solved local vectors",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "9f1488cd02a50867960c74fe5c96c47567e14fefca4ff16a5bb32b75c6814044"
+    },
+    "core:src/warpSPHCore/pinv/wp_pinv2x2.py": {
+      "family": "pointwise linear algebra",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Small matrix pseudoinverse/eigenvalue routines or application to a local RHS.",
+      "stores": "per-query inverse/eigenvalues or solved local vectors",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "4341cdd4ce696c40daf4d64a7c96bb2e716eed3fd7784923dda9935657d43aa9"
+    },
+    "core:src/warpSPHCore/pinv/wp_pinv3x3.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Commented prototype only; no executable Warp definitions.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "3b0f1b6b75d36423685e7cb8e1f3f6afbb2030a9082b3ebe0b648d4d985cb1ab"
+    },
+    "core:src/warpSPHCore/polyfit/wp_polyfit.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "polynomial moments: identity; polynomial RHS: identity",
+      "stores": "polynomial moments: matrix coefficient and, in primal, count from coefficient zero; polynomial RHS: RHS coefficient",
+      "complexity": "high",
+      "operations": [
+        "polynomial moments",
+        "polynomial RHS"
+      ],
+      "reviewed_source_sha256": "1d3bf0f21584a14513891671fb38fa2ad83af424b0597470d0687e4eb938eae3"
+    },
+    "core:src/warpSPHCore/polyfit/wp_polyfitJVP.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "polynomial moments JVP: identity; polynomial RHS JVP: identity",
+      "stores": "polynomial moments JVP: matrix coefficient and, in primal, count from coefficient zero; polynomial RHS JVP: RHS coefficient",
+      "complexity": "high",
+      "operations": [
+        "polynomial moments JVP",
+        "polynomial RHS JVP"
+      ],
+      "reviewed_source_sha256": "7329a871be1abacd0416a7072c1f8a8a88cfacca93afc51232115b5811588701"
+    },
+    "core:src/warpSPHCore/radiusSearch/compactHash/indexing.py": {
+      "family": "indexing and traversal helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Index/hash/Morton computation, periodic cell/range lookup, lane partition and laneSum.",
+      "stores": "indices/hashes or returned range; laneSum reduces arbitrary scalar/vector/tensor values",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "932e848b48a1cf3951029f35d17b54efeb8ad125d2e2fef6e13c927b51438a98"
+    },
+    "core:src/warpSPHCore/radiusSearch/compactHash/morton.py": {
+      "family": "indexing and traversal helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Index/hash/Morton computation, periodic cell/range lookup, lane partition and laneSum.",
+      "stores": "indices/hashes or returned range; laneSum reduces arbitrary scalar/vector/tensor values",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "74ea3702277554955b792e73db8e37f6a939733e54e468f68f8e3748decb6690"
+    },
+    "core:src/warpSPHCore/radiusSearch/compactHash/wp_collectNeighbors.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "compact-hash collect: identity; CSR row expansion: identity",
+      "stores": "compact-hash collect: reference IDs and optional query IDs per accepted edge; CSR row expansion: one query ID per edge",
+      "complexity": "high",
+      "operations": [
+        "compact-hash collect",
+        "CSR row expansion"
+      ],
+      "reviewed_source_sha256": "4f555a370bbe10241b5bfca0f0dc9ceba49743a28bf719ed513eab489279b351"
+    },
+    "core:src/warpSPHCore/radiusSearch/compactHash/wp_countNeighbors.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "compact-hash count: identity",
+      "stores": "compact-hash count: count per query",
+      "complexity": "medium",
+      "operations": [
+        "compact-hash count"
+      ],
+      "reviewed_source_sha256": "dd4f53904fe8608b8dff91019ef269952ac4df95d76fb6f33fc9d91e7778b33a"
+    },
+    "core:src/warpSPHCore/radiusSearch/compactHash/wp_hashCells.py": {
+      "family": "indexing and traversal helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Index/hash/Morton computation, periodic cell/range lookup, lane partition and laneSum.",
+      "stores": "indices/hashes or returned range; laneSum reduces arbitrary scalar/vector/tensor values",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "47e2037811d606372267c9dfd96612c4e88aa977a2aafd98fdef36dc4cf13f95"
+    },
+    "core:src/warpSPHCore/radiusSearch/compactHash/wp_index.py": {
+      "family": "indexing and traversal helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Index/hash/Morton computation, periodic cell/range lookup, lane partition and laneSum.",
+      "stores": "indices/hashes or returned range; laneSum reduces arbitrary scalar/vector/tensor values",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "8d890be26de3f70388b54d9f87d4b43bc07c1da91eae72a25822e4b3f496d0c8"
+    },
+    "core:src/warpSPHCore/radiusSearch/grid_util.py": {
+      "family": "indexing and traversal helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Index/hash/Morton computation, periodic cell/range lookup, lane partition and laneSum.",
+      "stores": "indices/hashes or returned range; laneSum reduces arbitrary scalar/vector/tensor values",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "dd519e1b4589f0c1351a5be755ddc2be45387569652e74f1e8914e9775249814"
+    },
+    "core:src/warpSPHCore/radiusSearch/small/wp_radius_small.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "direct radius count: identity; direct radius collect: identity",
+      "stores": "direct radius count: count per query; direct radius collect: i,j per accepted edge",
+      "complexity": "medium",
+      "operations": [
+        "direct radius count",
+        "direct radius collect"
+      ],
+      "reviewed_source_sha256": "da0306cf9b36d5252dc2f41516604c26d3e7fbd08db7be96c1625cd150b8f0ed"
+    },
+    "core:src/warpSPHCore/radiusSearch/verlet/wp_countVerlet.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Verlet count: identity",
+      "stores": "Verlet count: count",
+      "complexity": "low",
+      "operations": [
+        "Verlet count"
+      ],
+      "reviewed_source_sha256": "ea3b0c0aa151ee17cbb5e656bdf45d063af1c88942ea96bb6b57daff50a51d9a"
+    },
+    "core:src/warpSPHCore/radiusSearch/verlet/wp_updateVerlet.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Verlet collect: identity",
+      "stores": "Verlet collect: accepted i,j edges",
+      "complexity": "medium",
+      "operations": [
+        "Verlet collect"
+      ],
+      "reviewed_source_sha256": "971318a84dfbfca2a924cce604288abb1c4333cfa222877fe8a8c30342c23d66"
+    },
+    "core:src/warpSPHCore/radiusSearch/verlet/wp_validity.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Verlet validity: combine bounds and compare with buffer",
+      "stores": "Verlet validity: four diagnostics and one rebuild flag",
+      "complexity": "medium",
+      "operations": [
+        "Verlet validity"
+      ],
+      "reviewed_source_sha256": "a5059a3a76e3ecccde070ced96205316c5ffad5376b978aa5e0d386181f926de"
+    },
+    "core:src/warpSPHCore/type_config.py": {
+      "family": "scalar conversion helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Convert to configured scalar type.",
+      "stores": "return scalar",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "67b086d058aa361ddec21f7de486c2d743b42b5409869958bbaa2ee81bc8bf2c"
+    },
+    "core:src/warpSPHCore/util/directionality.py": {
+      "family": "state and optional loader helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Particle/correction record loading, direction checks, support conversion and optional/default access.",
+      "stores": "return record or value; no neighborhood output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "fe477c9e9d88ce58cb82505dc4a58c40831ba3dd5bc3f4998661f74ffe6f721d"
+    },
+    "core:src/warpSPHCore/util/stateUtil.py": {
+      "family": "state and optional loader helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Particle/correction record loading, direction checks, support conversion and optional/default access.",
+      "stores": "return record or value; no neighborhood output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "bd8b67378cbc1e8d670a939924fff7bd66a91d8b976dcdfd5804acc0980865d9"
+    },
+    "core:src/warpSPHCore/util/support.py": {
+      "family": "state and optional loader helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Particle/correction record loading, direction checks, support conversion and optional/default access.",
+      "stores": "return record or value; no neighborhood output",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "f74cda9529f900b630539b24d65da93655a09165f100132063469e7e4fb48085"
+    },
+    "core:src/warpSPHCore/util/wp_util.py": {
+      "family": "alias or scaffolding",
+      "accumulator_summary": "0 neighborhood accumulators",
+      "processing": "Python utility/scaffolding only; no executable Warp definition.",
+      "stores": "none in decorated Warp code",
+      "complexity": "none",
+      "operations": [],
+      "reviewed_source_sha256": "6497f8fc4db01613eaa3794500aa754ac4f6675368adbb5e2939308168dcffdd"
+    },
+    "frontend:src/warpSPH/modules/adaptiveSupport/owenHermite.py": {
+      "family": "lookup helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Sample a scalar radial derivative table and interpolate a scalar gradient moment.",
+      "stores": "lookup samples or returned scalar",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "21b4829195768ab0bb45a4cc5e082d31bf477ffb1f7c41c2166613a6f33e552e"
+    },
+    "frontend:src/warpSPH/modules/adaptiveSupport/wp_materialPsi.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "material support moments: separate dimension roots",
+      "stores": "material support moments: two support statistics",
+      "complexity": "medium",
+      "operations": [
+        "material support moments"
+      ],
+      "reviewed_source_sha256": "1e0a2d7e64e1d453acd7929e6f080f1a4ea4d35c5860bf9cd51a7be2144fe6cd"
+    },
+    "frontend:src/warpSPH/modules/adaptiveSupport/wp_omega.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "grad-h omega: 1 - sum",
+      "stores": "grad-h omega: one query field",
+      "complexity": "low",
+      "operations": [
+        "grad-h omega"
+      ],
+      "reviewed_source_sha256": "8958d17b5ce93549287efffc303e615f59e89a32fd295675f3ae0d21fbde7784"
+    },
+    "frontend:src/warpSPH/modules/adaptiveSupport/wp_psi.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "support lookup construction: rescaling, absolute value and dimension roots",
+      "stores": "support lookup construction: n_h, psi, psiH, N_H, psiHLattice",
+      "complexity": "medium",
+      "operations": [
+        "support lookup construction"
+      ],
+      "reviewed_source_sha256": "162ac3bc605bc9651a2263b5172c201d2014146c45458f4339f6e914d2d65f4f"
+    },
+    "frontend:src/warpSPH/modules/adaptiveSupport/wp_psi0.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "support psi moments: separate dimension roots after all cells/lanes",
+      "stores": "support psi moments: psi0 and psi0h",
+      "complexity": "low",
+      "operations": [
+        "support psi moments"
+      ],
+      "reviewed_source_sha256": "f7a226e806682c1ce05e03c33a4333e3dde0bdca021298af8f5013418254ee4b"
+    },
+    "frontend:src/warpSPH/modules/artificialCompressible/dyngpusphOperators.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "dynGPUSPH closures: weighted means, wall/pressure closure, normal handling; dynGPUSPH moments: eigenvalue-derived lambda, normal normalization; dynGPUSPH residual: scale or freeze switch",
+      "stores": "dynGPUSPH closures: pressure, normal, average velocity, divergence, laplacian; dynGPUSPH moments: lambda, normal, gradient, laplacian; dynGPUSPH residual: divergence, pressure/viscous/acoustic/second/fourth vectors, wall distance, diffusion, switch, edge",
+      "complexity": "high",
+      "operations": [
+        "dynGPUSPH closures",
+        "dynGPUSPH moments",
+        "dynGPUSPH residual"
+      ],
+      "reviewed_source_sha256": "fa9f4febe3d41986ee150e8bd5761976de31c24dc412bc070b32af5b7ecc668a"
+    },
+    "frontend:src/warpSPH/modules/artificialCompressible/dyngpusphShifting.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "dynGPUSPH shift: ratios, matrix inverse, normalizations, collision correction, clamps and pressure/velocity updates; dynGPUSPH surface fields: lambda from matrix, normalize normal; dynGPUSPH cone: combine predicate with query lambda/edge policy; dynGPUSPH vicinity: preserve raw query label or mark vicinity",
+      "stores": "dynGPUSPH shift: shift, recorded shift, pressure, velocity, active flag, gradP, diagonal gradV, lambda; dynGPUSPH surface fields: lambda and normal; dynGPUSPH cone: edge classification; dynGPUSPH vicinity: edge classification",
+      "complexity": "high",
+      "operations": [
+        "dynGPUSPH shift",
+        "dynGPUSPH surface fields",
+        "dynGPUSPH cone",
+        "dynGPUSPH vicinity"
+      ],
+      "reviewed_source_sha256": "7f8af8dfaa7f86d40504367725b418d3d7a3f6531d46875f63afa18ea80db67c"
+    },
+    "frontend:src/warpSPH/modules/artificialCompressible/wp_jstSwitch.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "JST switch: Python/Torch divides by clamped denominator",
+      "stores": "JST switch: Warp stores two raw sums; public wrapper returns one switch",
+      "complexity": "low",
+      "operations": [
+        "JST switch"
+      ],
+      "reviewed_source_sha256": "aff96568efb2c7b800b10f33695541414b4f58f23ef41047fa75606092af1611"
+    },
+    "frontend:src/warpSPH/modules/artificialCompressible/wp_residual.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "artificial-compressible residual: pressure gradient multiplied by -1/rho_i",
+      "stores": "artificial-compressible residual: one scalar and three vectors",
+      "complexity": "medium",
+      "operations": [
+        "artificial-compressible residual"
+      ],
+      "reviewed_source_sha256": "1e7880de51ce72fa23cd76e9f95f0715bf562f42acdb5d374a474cdd6696435a"
+    },
+    "frontend:src/warpSPH/modules/compSPH/accel.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "compressible acceleration: identity",
+      "stores": "compressible acceleration: query acceleration/heating; optionally pressure and viscosity vectors per edge",
+      "complexity": "high",
+      "operations": [
+        "compressible acceleration"
+      ],
+      "reviewed_source_sha256": "60c858d1f50defbe1ee5d82d79706104e8180355ef1fcda4fa0409a6a1bc34c8"
+    },
+    "frontend:src/warpSPH/modules/compSPH/balance.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "compressible balance fractions: entropy/work partition with clamp and exceptional values",
+      "stores": "compressible balance fractions: one fraction f_ij per edge",
+      "complexity": "high",
+      "operations": [
+        "compressible balance fractions"
+      ],
+      "reviewed_source_sha256": "7cc26206aebb4b3f2bdaa768d15b6a3f18065da08e3a1190727887919f22c9ef"
+    },
+    "frontend:src/warpSPH/modules/compSPH/dudt.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "compressible thermal rate: identity",
+      "stores": "compressible thermal rate: dudt",
+      "complexity": "high",
+      "operations": [
+        "compressible thermal rate"
+      ],
+      "reviewed_source_sha256": "6bf2ae3ccdb00cdd5a0067e496f8e410057ba52db6023966ddebaebcb69600c4"
+    },
+    "frontend:src/warpSPH/modules/compSPH/work.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "compressible stage work: identity",
+      "stores": "compressible stage work: rate per query OR weighted vector per edge",
+      "complexity": "high",
+      "operations": [
+        "compressible stage work"
+      ],
+      "reviewed_source_sha256": "a9eefc7ec2eba66f38e4ed53aca2305ebf5f1b498bbe5dc5094d1874464ab538"
+    },
+    "frontend:src/warpSPH/modules/compSPH/workReduction.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "retained pair work reduction: optional entropy partition per interaction",
+      "stores": "retained pair work reduction: one query rate",
+      "complexity": "high",
+      "operations": [
+        "retained pair work reduction"
+      ],
+      "reviewed_source_sha256": "2463ca2f8f611ff2d5be369cbba511c3090c2a769db7dde7b7a72f5701ae34c6"
+    },
+    "frontend:src/warpSPH/modules/crk/accel.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "CRK acceleration: identity",
+      "stores": "CRK acceleration: query acceleration/heating; optionally pressure and viscosity vectors per edge",
+      "complexity": "high",
+      "operations": [
+        "CRK acceleration"
+      ],
+      "reviewed_source_sha256": "fadc30b135aeb29385b9aa12d2445b58af6079e33e6edc0230b46ed2d7339aa3"
+    },
+    "frontend:src/warpSPH/modules/crk/dudt.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "CRK thermal rate: identity",
+      "stores": "CRK thermal rate: dudt",
+      "complexity": "high",
+      "operations": [
+        "CRK thermal rate"
+      ],
+      "reviewed_source_sha256": "614f544787d550813e040c9e68e71a54ae26fec08c794bcbd1603f831ac2ac37"
+    },
+    "frontend:src/warpSPH/modules/crk/materialDensity.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "material CRK density: guarded ratio",
+      "stores": "material CRK density: density",
+      "complexity": "low",
+      "operations": [
+        "material CRK density"
+      ],
+      "reviewed_source_sha256": "f897f103be86f7c358c080ded014197374878d0bf0013fc173b9e9bd7aaccf7f"
+    },
+    "frontend:src/warpSPH/modules/crk/partition.py": {
+      "family": "pair entropy helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Compute/clamp entropy-based pair work partition; no neighbor reduction.",
+      "stores": "return one fraction",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "7e934e0db995cb2aad5039ee909d8397d5181dd73ab4d8b5a9b42130d312c1c0"
+    },
+    "frontend:src/warpSPH/modules/crk/terms.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "CRK coefficient solve: inverse moment matrix, determinant limiter, A/B and derivatives",
+      "stores": "CRK coefficient solve: A scalar, B vector, gradA vector, gradB matrix (1 + 2*D + D*D)",
+      "complexity": "medium",
+      "operations": [
+        "CRK coefficient solve"
+      ],
+      "reviewed_source_sha256": "f9bff05920687d9ea0fac1806127dac675d4fde03e6cb8b5cfbeb18d2163408c"
+    },
+    "frontend:src/warpSPH/modules/crk/work.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "CRK stage work: identity",
+      "stores": "CRK stage work: rate per query OR weighted vector per edge",
+      "complexity": "high",
+      "operations": [
+        "CRK stage work"
+      ],
+      "reviewed_source_sha256": "7ae218d41cfd81153995c401cc02d1f270002b350b488c523798ce77b0a2d194"
+    },
+    "frontend:src/warpSPH/modules/deltaSPH/updates.py": {
+      "family": "pointwise state update",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "EOS/material lookup, conserved-to-primitive conversion or assembled/masked particle updates.",
+      "stores": "per-particle thermodynamic fields and update vectors",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "c0d179699742e17f11131ca557ed7d6b1004684cda1427fb949abf03ed9f425f"
+    },
+    "frontend:src/warpSPH/modules/deltaSPH/wp_densityDelta.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "delta density diffusion: identity",
+      "stores": "delta density diffusion: one query field",
+      "complexity": "medium",
+      "operations": [
+        "delta density diffusion"
+      ],
+      "reviewed_source_sha256": "22983cca4ad3930c00254e95c4fb61b600df9f37ef031d6f27c3bd03a487b311"
+    },
+    "frontend:src/warpSPH/modules/deltaSPH/wp_viscosityDelta.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "delta viscosity: identity",
+      "stores": "delta viscosity: one query field",
+      "complexity": "low",
+      "operations": [
+        "delta viscosity"
+      ],
+      "reviewed_source_sha256": "695729cb96c82ccbb9382c690bca4bed3d5c9798de68f73b55ec00e0f47e8832"
+    },
+    "frontend:src/warpSPH/modules/dissipation/pi/coefficients.py": {
+      "family": "pair viscosity helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Construct a pair record, choose switched coefficients and evaluate a viscosity/conductivity term; no neighbor loop.",
+      "stores": "return pair record, coefficient tuple or scalar",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "34e7e1a316f50285ad55f304b6b2a9abf6c95372f5bb2208251e7d6a700f7163"
+    },
+    "frontend:src/warpSPH/modules/dissipation/pi/dispatch.py": {
+      "family": "pair viscosity helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Construct a pair record, choose switched coefficients and evaluate a viscosity/conductivity term; no neighbor loop.",
+      "stores": "return pair record, coefficient tuple or scalar",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "c9de05795bde5af09ae4c637a7f5b51fe4339cc3804dfeb1193f61ea7bc61eca"
+    },
+    "frontend:src/warpSPH/modules/dissipation/pi/oneSided.py": {
+      "family": "pair viscosity helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Construct a pair record, choose switched coefficients and evaluate a viscosity/conductivity term; no neighbor loop.",
+      "stores": "return pair record, coefficient tuple or scalar",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "bdc0564c360cd4038f95b974a6d4f2c96a9d48741a7be91ac6b5a322125eedd2"
+    },
+    "frontend:src/warpSPH/modules/dissipation/pi/pair.py": {
+      "family": "pair viscosity helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Construct a pair record, choose switched coefficients and evaluate a viscosity/conductivity term; no neighbor loop.",
+      "stores": "return pair record, coefficient tuple or scalar",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "f785929fa0dd78f53febfd0f59fd4ae53de293f745962dcf3df7c14f374bb0d9"
+    },
+    "frontend:src/warpSPH/modules/dissipation/pi/terms.py": {
+      "family": "pair viscosity helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Construct a pair record, choose switched coefficients and evaluate a viscosity/conductivity term; no neighbor loop.",
+      "stores": "return pair record, coefficient tuple or scalar",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "377d613139af3d07db7079a7a9bd4db3411115aa74b6f5f461f9c4b9695ad2d9"
+    },
+    "frontend:src/warpSPH/modules/dissipation/wp_conductivity.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "thermal conductivity: multiply by thermalConductivity",
+      "stores": "thermal conductivity: one query field",
+      "complexity": "low",
+      "operations": [
+        "thermal conductivity"
+      ],
+      "reviewed_source_sha256": "402f8700f6fa673636f9d2ce844821edf10066cb4bf4792fd9ea4e106a4e1d7c"
+    },
+    "frontend:src/warpSPH/modules/dissipation/wp_diffusion.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "viscosity diffusion: identity",
+      "stores": "viscosity diffusion: one query field",
+      "complexity": "medium",
+      "operations": [
+        "viscosity diffusion"
+      ],
+      "reviewed_source_sha256": "40891a40fdff7a197c6fcc6526997e2d13a1500704cef26b95d3d93f95f26658"
+    },
+    "frontend:src/warpSPH/modules/dissipation/wp_dissipation.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "thermal dissipation: identity",
+      "stores": "thermal dissipation: one query field",
+      "complexity": "medium",
+      "operations": [
+        "thermal dissipation"
+      ],
+      "reviewed_source_sha256": "5319f7d549748a1f786f094094884bc91c05c72478b029b6dc66aa2e7b4f34ac"
+    },
+    "frontend:src/warpSPH/modules/eos/conserved.py": {
+      "family": "pointwise state update",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "EOS/material lookup, conserved-to-primitive conversion or assembled/masked particle updates.",
+      "stores": "per-particle thermodynamic fields and update vectors",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "72758abe8b7a049feac9db0cbd98f637c1214a7a70b348b48418d0d1a8219f69"
+    },
+    "frontend:src/warpSPH/modules/eos/materials.py": {
+      "family": "pointwise state update",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "EOS/material lookup, conserved-to-primitive conversion or assembled/masked particle updates.",
+      "stores": "per-particle thermodynamic fields and update vectors",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "233ca11ed94121672e2fb53df9812d6d3c48dd16f56ace5d1b9feb42eab809ca"
+    },
+    "frontend:src/warpSPH/modules/godunov/wp_gsph.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Godunov rates: identity",
+      "stores": "Godunov rates: acceleration and dudt",
+      "complexity": "high",
+      "operations": [
+        "Godunov rates"
+      ],
+      "reviewed_source_sha256": "13e0700dd1fbdbf75d2833ea07b4fa3a48cad9adc9197667bf57d8a7aea32636"
+    },
+    "frontend:src/warpSPH/modules/godunov/wp_inutsuka.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Gaussian density/gradient: identity; Inutsuka rates: identity",
+      "stores": "Gaussian density/gradient: density and gradient; Inutsuka rates: acceleration and dudt",
+      "complexity": "high",
+      "operations": [
+        "Gaussian density/gradient",
+        "Inutsuka rates"
+      ],
+      "reviewed_source_sha256": "eb7e824f857d979e3a187590cd8935c2a8a969de0f2ec3f6039e7c2dc83de319"
+    },
+    "frontend:src/warpSPH/modules/iisph/wp_contactPressureDiagonal.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "IISPH contact pressure diagonal: subtract query contact term",
+      "stores": "IISPH contact pressure diagonal: one query scalar/vector",
+      "complexity": "low",
+      "operations": [
+        "IISPH contact pressure diagonal"
+      ],
+      "reviewed_source_sha256": "1db9d34bae6330992af4af0e2abb3264497928fe86482e7df85dac34e0a559fd"
+    },
+    "frontend:src/warpSPH/modules/iisph/wp_densityRate.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "IISPH density rate: add dot(query field, query wallGradient)",
+      "stores": "IISPH density rate: one query scalar/vector",
+      "complexity": "low",
+      "operations": [
+        "IISPH density rate"
+      ],
+      "reviewed_source_sha256": "9dfaf02490b22d22b88c97d4889c1b7911b6a5f475bf9599738fc6c6a61e00fb"
+    },
+    "frontend:src/warpSPH/modules/iisph/wp_gradientSum.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "IISPH gradient sum: add query wallGradient",
+      "stores": "IISPH gradient sum: one query scalar/vector",
+      "complexity": "low",
+      "operations": [
+        "IISPH gradient sum"
+      ],
+      "reviewed_source_sha256": "6e4de1d12726d4527f8a3f6a3c276c1f40b417c54cbb5c21a6d91e118cff661a"
+    },
+    "frontend:src/warpSPH/modules/iisph/wp_pressureAcceleration.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "IISPH pressure acceleration: add query pressure and contact-wall terms",
+      "stores": "IISPH pressure acceleration: one query scalar/vector",
+      "complexity": "low",
+      "operations": [
+        "IISPH pressure acceleration"
+      ],
+      "reviewed_source_sha256": "2558aa88205c71e3090b17e87668a8abfdc217fc46a66c0e743e23b554ba5c1c"
+    },
+    "frontend:src/warpSPH/modules/iisph/wp_pressureDiagonal.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "IISPH pressure diagonal: combine with query gradientSum squared and density ratio",
+      "stores": "IISPH pressure diagonal: one query scalar/vector",
+      "complexity": "low",
+      "operations": [
+        "IISPH pressure diagonal"
+      ],
+      "reviewed_source_sha256": "71feefba4cce7345981a2bdb3b60b953591c44f7da2eda39d5ada6e2146b8dde"
+    },
+    "frontend:src/warpSPH/modules/iisph/wp_sampledGravity.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "IISPH sampled gravity: identity",
+      "stores": "IISPH sampled gravity: one query scalar/vector",
+      "complexity": "low",
+      "operations": [
+        "IISPH sampled gravity"
+      ],
+      "reviewed_source_sha256": "6a40884b3c0a4cce71470bdb4d19031bc3e719fca6d347ee20eef77cc9509081"
+    },
+    "frontend:src/warpSPH/modules/iisph/wp_wallGradient.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "IISPH wall gradient: identity",
+      "stores": "IISPH wall gradient: one query scalar/vector",
+      "complexity": "low",
+      "operations": [
+        "IISPH wall gradient"
+      ],
+      "reviewed_source_sha256": "5672d1f33de73088aaf3861f39d579c9563088551f3359b2e468c167f8889bb3"
+    },
+    "frontend:src/warpSPH/modules/incompressible/wp_alpha.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "incompressible alpha: area_i/m_i * dot(A,A) + area_i*B",
+      "stores": "incompressible alpha: one alpha",
+      "complexity": "medium",
+      "operations": [
+        "incompressible alpha"
+      ],
+      "reviewed_source_sha256": "9c6b6122d345f33ea5da4e02484725725fa5061c27f30ec1c2c7f0f39b620c13"
+    },
+    "frontend:src/warpSPH/modules/incompressible/wp_wallMoment.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "wall moment: identity",
+      "stores": "wall moment: one query field",
+      "complexity": "low",
+      "operations": [
+        "wall moment"
+      ],
+      "reviewed_source_sha256": "3317c578740b3b2bbf9aa2b1e7894e4983f4630be2cb838f2e3b6418cd473346"
+    },
+    "frontend:src/warpSPH/modules/liu/wp_mat.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Liu matrices: store Shepard from matrix[0,0], not the separately returned Shepard sum",
+      "stores": "Liu matrices: Shepard scalar, augmented vector/matrix, count",
+      "complexity": "medium",
+      "operations": [
+        "Liu matrices"
+      ],
+      "reviewed_source_sha256": "950f0613c6839ac75063f309f3ff4e521d5a3058436748d0d7e4148ea7478079"
+    },
+    "frontend:src/warpSPH/modules/mdbc/wp_nopenshift.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "mDBC no-penetration shift: divide each shift component by its count + epsilon",
+      "stores": "mDBC no-penetration shift: average shift vector and counts",
+      "complexity": "medium",
+      "operations": [
+        "mDBC no-penetration shift"
+      ],
+      "reviewed_source_sha256": "2e41671683ca8a89f408dc6337a8b00a97deb36d19a607b2007757b4c54642b1"
+    },
+    "frontend:src/warpSPH/modules/meshless/flux.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "frontend MFM flux: identity",
+      "stores": "frontend MFM flux: dm, dp, de",
+      "complexity": "high",
+      "operations": [
+        "frontend MFM flux"
+      ],
+      "reviewed_source_sha256": "af1c0c6b2bab3516ced444615827be53ad892dfb870ac99d54e5f35d1b63185d"
+    },
+    "frontend:src/warpSPH/modules/meshless/primitives.py": {
+      "family": "pointwise state update",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "EOS/material lookup, conserved-to-primitive conversion or assembled/masked particle updates.",
+      "stores": "per-particle thermodynamic fields and update vectors",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "299166357fce53d18a6db671da57561c6c0a89b7b2060d696e61eee198712e79"
+    },
+    "frontend:src/warpSPH/modules/pesph/operators.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "pressure-entropy sums: identity; pressure-entropy force: identity",
+      "stores": "pressure-entropy sums: five query scalars; pressure-entropy force: acceleration and work",
+      "complexity": "medium",
+      "operations": [
+        "pressure-entropy sums",
+        "pressure-entropy force"
+      ],
+      "reviewed_source_sha256": "869ccbcb9e1ab116b95d3d828027da66c53234fb4d5d71201c3e73f9d9cbc594"
+    },
+    "frontend:src/warpSPH/modules/pressure/wp_perSidePressure.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "per-side pressure: multiply completed work by query f_i",
+      "stores": "per-side pressure: acceleration and dudt",
+      "complexity": "low",
+      "operations": [
+        "per-side pressure"
+      ],
+      "reviewed_source_sha256": "c5e65f296940d705e3cd74338a188a40cc3d948675f0178da9887e5ff5d76854"
+    },
+    "frontend:src/warpSPH/modules/pressure/wp_surfaceAware.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "surface-aware pressure: -sum / query density",
+      "stores": "surface-aware pressure: one query field",
+      "complexity": "low",
+      "operations": [
+        "surface-aware pressure"
+      ],
+      "reviewed_source_sha256": "e39e199dedef43baabc28abbbf1dd7abd09e7a23b6046b01ac568f5b77bcb0ce"
+    },
+    "frontend:src/warpSPH/modules/reconstruction/diagnostics.py": {
+      "family": "pair reconstruction helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Limit/reconstruct scalar, primitive or velocity pair states; diagnostics can write one explicit pair result.",
+      "stores": "return reconstructed scalar/vector/tuple or one diagnostic per supplied pair",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "cbfd4ba6fa4b9f0289c84d9622897ffa376dfa29828ff5640f9cf4eaae5ceda8"
+    },
+    "frontend:src/warpSPH/modules/reconstruction/limiters.py": {
+      "family": "pair reconstruction helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Limit/reconstruct scalar, primitive or velocity pair states; diagnostics can write one explicit pair result.",
+      "stores": "return reconstructed scalar/vector/tuple or one diagnostic per supplied pair",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "ffea7ee324aa93331a1a5cd8a6cb238c61052c6345d6b7cf241d2f50de6a8707"
+    },
+    "frontend:src/warpSPH/modules/reconstruction/meshless.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "frontend MFM limiter: limiter ratios and clamps",
+      "stores": "frontend MFM limiter: rho, pressure and velocity limiter factors",
+      "complexity": "medium",
+      "operations": [
+        "frontend MFM limiter"
+      ],
+      "reviewed_source_sha256": "be2427307d9bab95a0ecc79aa09e4b41822f1f1da1ea5adc104904858399130c"
+    },
+    "frontend:src/warpSPH/modules/reconstruction/pairState.py": {
+      "family": "pair reconstruction helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Limit/reconstruct scalar, primitive or velocity pair states; diagnostics can write one explicit pair result.",
+      "stores": "return reconstructed scalar/vector/tuple or one diagnostic per supplied pair",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "1145d7ff9e331d83e83b65509095930893d99250d7fdf9749c876f39832c0b6c"
+    },
+    "frontend:src/warpSPH/modules/reconstruction/pairVelocity.py": {
+      "family": "pair reconstruction helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Limit/reconstruct scalar, primitive or velocity pair states; diagnostics can write one explicit pair result.",
+      "stores": "return reconstructed scalar/vector/tuple or one diagnostic per supplied pair",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "61a7852048d183f363440c6c19bad919b6204b48282ecc6ba5b79a04e2c4379e"
+    },
+    "frontend:src/warpSPH/modules/riemann/meshless.py": {
+      "family": "pair Riemann helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Compute wave/contact states and scalar/vector fluxes from two states.",
+      "stores": "return wave/star/flux tuple; no particle reduction",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "ed6ba283241aa7438c4aebe60c2c5a944ad9ff3bc8c4e6f188dd1cf01479103e"
+    },
+    "frontend:src/warpSPH/modules/riemann/solvers.py": {
+      "family": "pair Riemann helper",
+      "accumulator_summary": "0 across-particle-neighborhood accumulators; see local syntax for internal component/solver reductions.",
+      "processing": "Compute wave/contact states and scalar/vector fluxes from two states.",
+      "stores": "return wave/star/flux tuple; no particle reduction",
+      "complexity": "outside pair traversal",
+      "operations": [],
+      "reviewed_source_sha256": "8dd1975cd9ca84f17b2a636ffed85ab29af02ffc57a78b8ebdcafe428461591f"
+    },
+    "frontend:src/warpSPH/modules/shifting/wp_deltaShiftRaw.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "raw delta shift: identity",
+      "stores": "raw delta shift: one query field",
+      "complexity": "low",
+      "operations": [
+        "raw delta shift"
+      ],
+      "reviewed_source_sha256": "7c1d750f51da95d11c33dbd2b8b1401168263e706035c997af7319c8ba25ff94"
+    },
+    "frontend:src/warpSPH/modules/shifting/wp_implicitShifting.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "implicit shift pair terms: evaluate W, gradient and Hessian",
+      "stores": "implicit shift pair terms: 1 + D + D*D per explicit edge",
+      "complexity": "high",
+      "operations": [
+        "implicit shift pair terms"
+      ],
+      "reviewed_source_sha256": "ee2cb4ee4fa0f38570ff7bea5be89d7cb9e0288c40f87d03fba4913a60fa304f"
+    },
+    "frontend:src/warpSPH/modules/shifting/wp_michelUChar.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "characteristic shift speed: reload winning neighbor and evaluate/store selected quantity; preserve empty/self behavior",
+      "stores": "characteristic shift speed: one speed",
+      "complexity": "medium",
+      "operations": [
+        "characteristic shift speed"
+      ],
+      "reviewed_source_sha256": "73b741295f30440d6df6ad6dab3faf3b881b640518253a139cf8dd4b99207909"
+    },
+    "frontend:src/warpSPH/modules/shockCapturing/ReadHayfield2012/kernels.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Read-Hayfield signal speed: reload winning neighbor and evaluate/store selected quantity; preserve empty/self behavior; Read-Hayfield entropy: identity",
+      "stores": "Read-Hayfield signal speed: one speed; Read-Hayfield entropy: one entropy rate",
+      "complexity": "medium",
+      "operations": [
+        "Read-Hayfield signal speed",
+        "Read-Hayfield entropy"
+      ],
+      "reviewed_source_sha256": "e5235d4aeae3c4a6555d95234e9adf372aab0e0ae623072a444ebed311385d32"
+    },
+    "frontend:src/warpSPH/modules/shockCapturing/Wadsley2017/kernels.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Wadsley neighbor mean: guarded ratio and clamp [-1,1]; Wadsley point fields: gradient-derived divergence, tensor norm, ratio and pressure normal",
+      "stores": "Wadsley neighbor mean: one R value; Wadsley point fields: D, Tnorm, ratio and normal",
+      "complexity": "low",
+      "operations": [
+        "Wadsley neighbor mean",
+        "Wadsley point fields"
+      ],
+      "reviewed_source_sha256": "704b9d2fae773d526799055f7ccea98d8cf38befac3dfbf459d0c5afc417b70e"
+    },
+    "frontend:src/warpSPH/modules/shockCapturing/wp_computeM.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "shock moment M: identity",
+      "stores": "shock moment M: one query field",
+      "complexity": "low",
+      "operations": [
+        "shock moment M"
+      ],
+      "reviewed_source_sha256": "30610428c843a25e8c9a22fc7094bf8a5f4ea7cdb49f25f80d67eb38827b624d"
+    },
+    "frontend:src/warpSPH/modules/shockCapturing/wp_vsig.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "signal speed: reload winning neighbor and evaluate/store selected quantity; preserve empty/self behavior",
+      "stores": "signal speed: one speed",
+      "complexity": "medium",
+      "operations": [
+        "signal speed"
+      ],
+      "reviewed_source_sha256": "1110889d1d548c7ada1dc896e785ff68e6b0368ef984c7b36b6f18bfad57b622"
+    },
+    "frontend:src/warpSPH/modules/surfaceDetection/wp_barecasco.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Barecasco cover pass: normalize complete cover vector; Barecasco cone pass: identity",
+      "stores": "Barecasco cover pass: query normal and input to second traversal; Barecasco cone pass: surface detection count",
+      "complexity": "medium",
+      "operations": [
+        "Barecasco cover pass",
+        "Barecasco cone pass"
+      ],
+      "reviewed_source_sha256": "13b0c596cccf3eea93bd3c97b293e313ba2f1a63a3dfd5922dbd63112991a80c"
+    },
+    "frontend:src/warpSPH/modules/surfaceDetection/wp_barecascoCone.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Barecasco cone count: identity",
+      "stores": "Barecasco cone count: one query field",
+      "complexity": "low",
+      "operations": [
+        "Barecasco cone count"
+      ],
+      "reviewed_source_sha256": "bbb9ec3afe825120853b58f9bab245a0ae8a777761b01c3a3cd4d0a2917308bd"
+    },
+    "frontend:src/warpSPH/modules/surfaceDetection/wp_barecascoCover.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Barecasco cover: identity; caller may normalize",
+      "stores": "Barecasco cover: one query field",
+      "complexity": "low",
+      "operations": [
+        "Barecasco cover"
+      ],
+      "reviewed_source_sha256": "439ab1b0891c851f1bd76e0a4c38087fe2f048b8350fed3de0ed7955e55bb619"
+    },
+    "frontend:src/warpSPH/modules/surfaceDetection/wp_dilate.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "surface dilation sum: identity; thresholding is a caller operation",
+      "stores": "surface dilation sum: one query field",
+      "complexity": "low",
+      "operations": [
+        "surface dilation sum"
+      ],
+      "reviewed_source_sha256": "bae9df71d94821553ba7a979adfa248a211eb1afbbbb270e055190bf69c41d03"
+    },
+    "frontend:src/warpSPH/modules/surfaceDetection/wp_maronne.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "Maronne count: identity",
+      "stores": "Maronne count: one query field",
+      "complexity": "low",
+      "operations": [
+        "Maronne count"
+      ],
+      "reviewed_source_sha256": "475e590459572f52578e42689ed010b2e1f18effee1bd48d9d57eb2430c2b515"
+    },
+    "frontend:src/warpSPH/modules/surfaceDetection/wp_nearestSurfaceNormal.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "nearest surface normal: reload winning neighbor and evaluate/store selected quantity; preserve empty/self behavior",
+      "stores": "nearest surface normal: one distance and one normal",
+      "complexity": "medium",
+      "operations": [
+        "nearest surface normal"
+      ],
+      "reviewed_source_sha256": "dcd88a73793fd29faa7e1724f52b2a1c372f90c168c5576dc41f1ae76e9013e6"
+    },
+    "frontend:src/warpSPH/modules/util/wp_numNeighbors.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "frontend neighbor count: identity",
+      "stores": "frontend neighbor count: one query field",
+      "complexity": "low",
+      "operations": [
+        "frontend neighbor count"
+      ],
+      "reviewed_source_sha256": "26327a9d795833a113620608f90df70a85253963ba56d779f7d3c3acc219bbb1"
+    },
+    "frontend:src/warpSPH/modules/util/wp_sum.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "frontend neighbor field sum: identity",
+      "stores": "frontend neighbor field sum: one query field",
+      "complexity": "low",
+      "operations": [
+        "frontend neighbor field sum"
+      ],
+      "reviewed_source_sha256": "66f5d4d54c2278610a42ac150d0ca8e49e206fb0907826f7db41394c080d8ff7"
+    },
+    "frontend:src/warpSPH/sample/wp_deltaShift.py": {
+      "family": "operation",
+      "accumulator_summary": "See separately enumerated operation records; launch/range/adjacency helpers share that state.",
+      "processing": "sample delta shift: identity",
+      "stores": "sample delta shift: one query field",
+      "complexity": "low",
+      "operations": [
+        "sample delta shift"
+      ],
+      "reviewed_source_sha256": "33883ac07b34177628788f06a0120e661c8cc67c1b1dd0a30a72055c3e85fbbd"
+    }
+  },
+  "operations": [
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/native/wp_density.py",
+      "name": "density",
+      "anchors": [
+        "computeSPHDensity_Func_i",
+        "computeSPHDensity_Kernel"
+      ],
+      "accumulators": "density",
+      "scalar_components": "1",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one output field",
+      "reference_loads": "mass and support; position/kind; optional CRK query coefficients and renormalization where used",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/native/wp_interpolate.py",
+      "name": "interpolate",
+      "anchors": [
+        "computeSPHInterpolation_Func_i",
+        "computeSPHInterpolation_Kernel"
+      ],
+      "accumulators": "field",
+      "scalar_components": "F",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one output field",
+      "reference_loads": "field, volume or mass/density; optional omega; optional CRK query coefficients and renormalization where used",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/native/wp_gradient.py",
+      "name": "gradient",
+      "anchors": [
+        "computeSPHGradientTensor_Func_i",
+        "computeSPHGradientTensor_Kernel"
+      ],
+      "accumulators": "field gradient",
+      "scalar_components": "F*D",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one output field",
+      "reference_loads": "field, volume or mass/density; optional omega; optional CRK query coefficients and renormalization where used",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/native/wp_divergence.py",
+      "name": "divergence",
+      "anchors": [
+        "computeSPHDivergenceTensor_Func_i",
+        "computeSPHDivergenceTensor_Kernel"
+      ],
+      "accumulators": "field contraction",
+      "scalar_components": "output component count (vector input: 1)",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one output field",
+      "reference_loads": "field, volume or mass/density; optional omega; optional CRK query coefficients and renormalization where used",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/native/wp_curl.py",
+      "name": "curl",
+      "anchors": [
+        "computeSPHCurlTensor_Func_i",
+        "computeSPHCurlTensor_Kernel"
+      ],
+      "accumulators": "curl",
+      "scalar_components": "output component count (2D vector: 1; 3D vector: 3)",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one output field",
+      "reference_loads": "field, volume or mass/density; optional omega; optional CRK query coefficients and renormalization where used",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/native/wp_laplacian.py",
+      "name": "laplacian",
+      "anchors": [
+        "computeSPHLaplacianTensor_Func_i",
+        "computeSPHLaplacianTensor_Kernel"
+      ],
+      "accumulators": "field Laplacian",
+      "scalar_components": "output component count (ordinary scalar/vector: F)",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one output field",
+      "reference_loads": "field, volume or mass/density; optional omega; scheme-specific derivatives; optional CRK query coefficients and renormalization where used",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/native/wp_covariance.py",
+      "name": "covariance",
+      "anchors": [
+        "computeCovariance_Func_i",
+        "computeCovariance_Kernel"
+      ],
+      "accumulators": "matrix and neighbor count",
+      "scalar_components": "D*D floating + 1 integer",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "matrix and integer count",
+      "reference_loads": "volume or mass/density; displacement, support and kind; optional CRK query coefficients and renormalization where used",
+      "category": "sum",
+      "complexity": "low",
+      "notes": "Counts are accumulated even when the public caller requests only the covariance matrix."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_densityJVP.py",
+      "name": "density JVP",
+      "anchors": [
+        "computeSPHDensityJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "1",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal and tangent positions, support, relevant fields, volumes and correction data",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": "Separate JVP pass; do not assume every primal rank and scheme is supported."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_interpolateJVP.py",
+      "name": "interpolate JVP",
+      "anchors": [
+        "computeSPHInterpolateJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "F",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal and tangent positions, support, relevant fields, volumes and correction data",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": "Separate JVP pass; do not assume every primal rank and scheme is supported."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_gradientJVP.py",
+      "name": "gradient JVP",
+      "anchors": [
+        "computeSPHGradientJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "D for the scalar-field path",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal and tangent positions, support, relevant fields, volumes and correction data",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": "Separate JVP pass; do not assume every primal rank and scheme is supported."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_divergenceJVP.py",
+      "name": "divergence JVP",
+      "anchors": [
+        "computeSPHDivergenceJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "1 for the vector-field path",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal and tangent positions, support, relevant fields, volumes and correction data",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": "Separate JVP pass; do not assume every primal rank and scheme is supported."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_curlJVP.py",
+      "name": "curl JVP",
+      "anchors": [
+        "computeSPHCurlJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "1 for the 2D vector-field path",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal and tangent positions, support, relevant fields, volumes and correction data",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": "Separate JVP pass; do not assume every primal rank and scheme is supported."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_covarianceJVP.py",
+      "name": "covariance JVP",
+      "anchors": [
+        "computeCovarianceJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "D*D",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal and tangent positions, support, relevant fields, volumes and correction data",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": "Separate JVP pass; do not assume every primal rank and scheme is supported."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_laplacianJVP.py",
+      "name": "Laplacian Brookshaw JVP",
+      "anchors": [
+        "computeSPHLaplacianBrookshawJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "output component count",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal/tangent pair geometry, fields, volumes and corrections",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_laplacianJVP.py",
+      "name": "Laplacian Naive JVP",
+      "anchors": [
+        "computeSPHLaplacianNaiveJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "output component count",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal/tangent pair geometry, fields, volumes and corrections",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_laplacianJVP.py",
+      "name": "Laplacian Dot JVP",
+      "anchors": [
+        "computeSPHLaplacianDotJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "output component count",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal/tangent pair geometry, fields, volumes and corrections",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_laplacianJVP.py",
+      "name": "Laplacian Default JVP",
+      "anchors": [
+        "computeSPHLaplacianDefaultJVP_Func_i"
+      ],
+      "accumulators": "tangent output",
+      "scalar_components": "output component count",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "one tangent field",
+      "reference_loads": "primal/tangent pair geometry, fields, volumes and corrections",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/coreOperations/wp_densityHVP.py",
+      "name": "density Hessian edge terms",
+      "anchors": [
+        "_computeSPHDensityHVP_PairKernel"
+      ],
+      "accumulators": "none across neighbors",
+      "scalar_components": "0",
+      "combine": "none",
+      "finalize": "evaluate one pair Hessian",
+      "stores": "D*D per explicit edge",
+      "reference_loads": "query/reference positions and support",
+      "category": "edge",
+      "complexity": "medium",
+      "notes": "Only the explicit Warp edge kernel is counted here; subsequent HVP assembly is Python/Torch scaffolding."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/crk/crk_density.py",
+      "name": "CRK density",
+      "anchors": [
+        "computeCRKDensity_Func_i"
+      ],
+      "accumulators": "mass-weighted volume sum; squared-volume sum",
+      "scalar_components": "2",
+      "combine": "sum",
+      "finalize": "guarded numerator/denominator",
+      "stores": "one density",
+      "reference_loads": "mass, apparent volume, geometry/kernel",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/crk/crk_volume.py",
+      "name": "CRK volume",
+      "anchors": [
+        "computeCRKVolume_Func_i"
+      ],
+      "accumulators": "kernel sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "guarded reciprocal",
+      "stores": "one volume",
+      "reference_loads": "geometry/kernel",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/crk/crk_moments.py",
+      "name": "CRK moments",
+      "anchors": [
+        "computeCRKMoments_Func_i"
+      ],
+      "accumulators": "m0, m1, m2, gradient(m0), gradient(m1), gradient(m2), neighbor count",
+      "scalar_components": "1 + 2*D + 2*D*D + D*D*D floating + 1 integer (3D: 52 + 1)",
+      "combine": "componentwise sum",
+      "finalize": "identity; coefficient solve is a later stage",
+      "stores": "six moment arrays and one count array",
+      "reference_loads": "volume, displacement, kernel value and gradient",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": "Largest fixed SPH moment state in this survey; GPU scheduling must account for register pressure."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/crk/crk_volume_jvp.py",
+      "name": "CRK volume JVP",
+      "anchors": [
+        "computeCRKVolumeJVP_Func_i"
+      ],
+      "accumulators": "tangent kernel sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "-d(sum W)*V*V using primal volume",
+      "stores": "one tangent volume",
+      "reference_loads": "primal/tangent geometry and support",
+      "category": "finalize",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/crk/crk_moments_jvp.py",
+      "name": "CRK moments JVP",
+      "anchors": [
+        "computeCRKMomentsJVP_Func_i"
+      ],
+      "accumulators": "six tangent moment tensors",
+      "scalar_components": "1 + 2*D + 2*D*D + D*D*D (3D: 52)",
+      "combine": "componentwise sum",
+      "finalize": "identity",
+      "stores": "six tangent moment arrays",
+      "reference_loads": "primal/tangent geometry, volumes and kernel derivatives",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_mfm.py",
+      "name": "MFM moments",
+      "anchors": [
+        "mfmMoments_Func_i"
+      ],
+      "accumulators": "omega, E, count",
+      "scalar_components": "1 + D*D floating + 1 integer",
+      "combine": "sum",
+      "finalize": "add self count of one",
+      "stores": "omega, matrix, count",
+      "reference_loads": "positions and supports",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_mfm.py",
+      "name": "MFM gradients",
+      "anchors": [
+        "mfmGradients_Func_i"
+      ],
+      "accumulators": "density gradient sum, velocity Jacobian sum, pressure gradient sum",
+      "scalar_components": "2*D + D*D (3D: 15)",
+      "combine": "sum",
+      "finalize": "multiply by query inverse moment matrix; zero deficient queries",
+      "stores": "two gradient vectors and a Jacobian",
+      "reference_loads": "rho, velocity, pressure, geometry/kernel",
+      "category": "finalize",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_mfm.py",
+      "name": "MFM limiter",
+      "anchors": [
+        "mfmLimiter_Func_i"
+      ],
+      "accumulators": "neighbor and reconstructed min/max for rho, P and each velocity component",
+      "scalar_components": "8 + 4*D (3D: 20)",
+      "combine": "mixed componentwise min/max, query-value identities",
+      "finalize": "alphaScalar ratios/clamps with query beta",
+      "stores": "rho limiter, velocity limiters, pressure limiter",
+      "reference_loads": "rho, velocity, pressure, support and position; query gradients",
+      "category": "extrema",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_mfm.py",
+      "name": "MFM closure residual",
+      "anchors": [
+        "mfmClosureResidual_Kernel"
+      ],
+      "accumulators": "face-vector sum and squared-face-norm sum",
+      "scalar_components": "D + 1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "vector and scalar",
+      "reference_loads": "positions, support, volumes, inverse moments, closure data",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_mfm.py",
+      "name": "MFM closure weights",
+      "anchors": [
+        "mfmClosureWeights_Kernel"
+      ],
+      "accumulators": "none across neighbors",
+      "scalar_components": "0",
+      "combine": "none",
+      "finalize": "pair face weight and cap",
+      "stores": "one kappa per CSR edge",
+      "reference_loads": "geometry, volumes, inverse moments",
+      "category": "edge",
+      "complexity": "high",
+      "notes": "Following matvec and coarse-stencil kernels read kappa by edge offset; list-free execution needs recomputation or alternate storage."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_mfm.py",
+      "name": "MFM closure matvec",
+      "anchors": [
+        "mfmClosureMatvec_Kernel"
+      ],
+      "accumulators": "Laplacian action and diagonal",
+      "scalar_components": "2",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "y and diagonal",
+      "reference_loads": "p[j] plus kappa at CSR edge offset",
+      "category": "sum",
+      "complexity": "high",
+      "notes": "Arithmetic is simple; retained edge-weight lifecycle is the integration issue."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_closure.py",
+      "name": "MFM closure CSR matvec",
+      "anchors": [
+        "mfmClosureMatvecCSR_Kernel"
+      ],
+      "accumulators": "Laplacian action and diagonal",
+      "scalar_components": "2",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "y and diagonal",
+      "reference_loads": "p[j], precomputed edge weights",
+      "category": "sum",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_mfm.py",
+      "name": "MFM flux",
+      "anchors": [
+        "mfmFlux_Func_i"
+      ],
+      "accumulators": "mass, momentum and total-energy rates",
+      "scalar_components": "D + 2",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "dm, dp, de",
+      "reference_loads": "primitive states, gradients, limiters, volumes, inverse moments, closure, material and Riemann data",
+      "category": "sum",
+      "complexity": "high",
+      "notes": "Large pair computation, but only D+2 accumulated components; uses canonical pair orientation."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_mfm.py",
+      "name": "MFM coarse stencil",
+      "anchors": [
+        "mfmCoarseStencil_Kernel"
+      ],
+      "accumulators": "one weighted sum per neighboring cell offset",
+      "scalar_components": "3**D (3D: 27)",
+      "combine": "componentwise sum into selected slot",
+      "finalize": "identity",
+      "stores": "one fixed stencil vector",
+      "reference_loads": "cell IDs and kappa indexed by CSR edge",
+      "category": "sum",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/wp_mfm.py",
+      "name": "MFM timestep",
+      "anchors": [
+        "mfmTimestep_Kernel"
+      ],
+      "accumulators": "maximum signal speed",
+      "scalar_components": "1",
+      "combine": "max, initialized with twice query sound speed",
+      "finalize": "2*CFL*h/maxSignal",
+      "stores": "one timestep",
+      "reference_loads": "rho, pressure, velocity, support and position",
+      "category": "extrema",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/mfm/multigrid.py",
+      "name": "multigrid segment sum",
+      "anchors": [
+        "_segmentSum_Kernel"
+      ],
+      "accumulators": "one component of a coarse-cell sum",
+      "scalar_components": "1 per output component",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "out[coarse cell, component]",
+      "reference_loads": "source array and permutation",
+      "category": "global",
+      "complexity": "low",
+      "notes": "Segmented aggregation, not a particle neighborhood traversal."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/polyfit/wp_polyfit.py",
+      "name": "polynomial moments",
+      "anchors": [
+        "computePolyMoments_Func_i"
+      ],
+      "accumulators": "one matrix coefficient and count",
+      "scalar_components": "1 floating + 1 integer per (query, matrix coefficient)",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "matrix coefficient and, in primal, count from coefficient zero",
+      "reference_loads": "scaled displacement, volume/kernel, exponents and sector; tangents in JVP",
+      "category": "sum",
+      "complexity": "high",
+      "notes": "Full output size depends on basis. Preserve component/block scheduling rather than putting the entire polynomial matrix in each lane."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/polyfit/wp_polyfit.py",
+      "name": "polynomial RHS",
+      "anchors": [
+        "computePolyRHS_Func_i"
+      ],
+      "accumulators": "one RHS coefficient",
+      "scalar_components": "1 per (query, basis, field component)",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "RHS coefficient",
+      "reference_loads": "field, scaled displacement, volume/kernel, exponents and sector; tangents in JVP",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/polyfit/wp_polyfitJVP.py",
+      "name": "polynomial moments JVP",
+      "anchors": [
+        "computePolyMomentsJVP_Func_i"
+      ],
+      "accumulators": "one matrix coefficient",
+      "scalar_components": "1 floating per (query, matrix coefficient)",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "matrix coefficient and, in primal, count from coefficient zero",
+      "reference_loads": "scaled displacement, volume/kernel, exponents and sector; tangents in JVP",
+      "category": "sum",
+      "complexity": "high",
+      "notes": "Full output size depends on basis. Preserve component/block scheduling rather than putting the entire polynomial matrix in each lane."
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/polyfit/wp_polyfitJVP.py",
+      "name": "polynomial RHS JVP",
+      "anchors": [
+        "computePolyRHSJVP_Func_i"
+      ],
+      "accumulators": "one RHS coefficient",
+      "scalar_components": "1 per (query, basis, field component)",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "RHS coefficient",
+      "reference_loads": "field, scaled displacement, volume/kernel, exponents and sector; tangents in JVP",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/radiusSearch/small/wp_radius_small.py",
+      "name": "direct radius count",
+      "anchors": [
+        "warp_radius_search_kernel_direct_2"
+      ],
+      "accumulators": "accepted neighbor count",
+      "scalar_components": "1 integer",
+      "combine": "integer sum",
+      "finalize": "identity",
+      "stores": "count per query",
+      "reference_loads": "positions/supports",
+      "category": "construction",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/radiusSearch/small/wp_radius_small.py",
+      "name": "direct radius collect",
+      "anchors": [
+        "warp_radius_search_collect_kernel_direct_2"
+      ],
+      "accumulators": "row write cursor",
+      "scalar_components": "1 offset integer",
+      "combine": "ordered append into allocated row",
+      "finalize": "identity",
+      "stores": "i,j per accepted edge",
+      "reference_loads": "positions/supports",
+      "category": "construction",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/radiusSearch/compactHash/wp_countNeighbors.py",
+      "name": "compact-hash count",
+      "anchors": [
+        "_countNeighborsCompactHashMapRow"
+      ],
+      "accumulators": "accepted neighbor count",
+      "scalar_components": "1 integer",
+      "combine": "integer sum",
+      "finalize": "identity",
+      "stores": "count per query",
+      "reference_loads": "positions/supports, cell/hash tables; periodic deduplication",
+      "category": "construction",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/radiusSearch/compactHash/wp_collectNeighbors.py",
+      "name": "compact-hash collect",
+      "anchors": [
+        "collect"
+      ],
+      "accumulators": "row write cursor",
+      "scalar_components": "1 offset integer",
+      "combine": "ordered append into allocated row",
+      "finalize": "identity",
+      "stores": "reference IDs and optional query IDs per accepted edge",
+      "reference_loads": "positions/supports, sorted IDs, cell/hash tables; periodic deduplication",
+      "category": "construction",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/radiusSearch/compactHash/wp_collectNeighbors.py",
+      "name": "CSR row expansion",
+      "anchors": [
+        "fillCSRRows"
+      ],
+      "accumulators": "strided write cursor",
+      "scalar_components": "1 offset integer",
+      "combine": "disjoint row fill",
+      "finalize": "identity",
+      "stores": "one query ID per edge",
+      "reference_loads": "counts and offsets",
+      "category": "construction",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/radiusSearch/verlet/wp_countVerlet.py",
+      "name": "Verlet count",
+      "anchors": [
+        "countNeighborsVerletFunc"
+      ],
+      "accumulators": "accepted count",
+      "scalar_components": "1 integer",
+      "combine": "integer sum",
+      "finalize": "identity",
+      "stores": "count",
+      "reference_loads": "candidate IDs and current geometry/support",
+      "category": "construction",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/radiusSearch/verlet/wp_updateVerlet.py",
+      "name": "Verlet collect",
+      "anchors": [
+        "updateNeighborsVerletFunc"
+      ],
+      "accumulators": "accepted count/cursor",
+      "scalar_components": "1 integer",
+      "combine": "ordered append",
+      "finalize": "identity",
+      "stores": "accepted i,j edges",
+      "reference_loads": "candidate IDs and current geometry/support",
+      "category": "construction",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "core",
+      "path": "src/warpSPHCore/radiusSearch/verlet/wp_validity.py",
+      "name": "Verlet validity",
+      "anchors": [
+        "_validityReduce",
+        "_validityDecide"
+      ],
+      "accumulators": "movement max, support-change max, support min for query/reference sets",
+      "scalar_components": "6 global scalar reduction slots",
+      "combine": "atomic min over signed maxima/minima in current Warp",
+      "finalize": "combine bounds and compare with buffer",
+      "stores": "four diagnostics and one rebuild flag",
+      "reference_loads": "current/prior positions and supports",
+      "category": "global",
+      "complexity": "medium",
+      "notes": "A real global safety condition for neighbor-cache validity; separate from per-query SPH reductions."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/adaptiveSupport/wp_omega.py",
+      "name": "grad-h omega",
+      "anchors": [
+        "computeOmega_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "1 - sum",
+      "stores": "one query field",
+      "reference_loads": "mass, density, support and grad-h kernel derivative",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/deltaSPH/wp_densityDelta.py",
+      "name": "delta density diffusion",
+      "anchors": [
+        "computeDensityDiffusionDeltaSPH_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "rho or selected field, density gradients, support/corrections, body force",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/deltaSPH/wp_viscosityDelta.py",
+      "name": "delta viscosity",
+      "anchors": [
+        "computeVelocityDiffusionDeltaSPH_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "velocity, mass/density, supports/corrections",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/dissipation/wp_conductivity.py",
+      "name": "thermal conductivity",
+      "anchors": [
+        "computeConductivity_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "multiply by thermalConductivity",
+      "stores": "one query field",
+      "reference_loads": "energy, velocity, sound speed, pressure, alpha and viscosity parameters",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/dissipation/wp_diffusion.py",
+      "name": "viscosity diffusion",
+      "anchors": [
+        "computeViscosity_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "velocity, density, sound speed, alpha, pressure; optional velocity/state gradients and Balsara field",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/dissipation/wp_dissipation.py",
+      "name": "thermal dissipation",
+      "anchors": [
+        "computeThermalDissipation_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "energy, velocity, sound speed, alpha, pressure; optional reconstructed gradients",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/incompressible/wp_wallMoment.py",
+      "name": "wall moment",
+      "anchors": [
+        "computeWallMoment_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "rho, volume, position and kernel",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/pressure/wp_surfaceAware.py",
+      "name": "surface-aware pressure",
+      "anchors": [
+        "computePressureSurfaceAware_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "-sum / query density",
+      "stores": "one query field",
+      "reference_loads": "pressure, surface mask, volume, geometry/corrections",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/shifting/wp_deltaShiftRaw.py",
+      "name": "raw delta shift",
+      "anchors": [
+        "computeDeltaShiftRaw_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "mass/density, geometry, kernel value/gradient, query parameters",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/shockCapturing/wp_computeM.py",
+      "name": "shock moment M",
+      "anchors": [
+        "computeM_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "D*D",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "volume, displacement, kernel gradient/corrections",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/surfaceDetection/wp_barecascoCover.py",
+      "name": "Barecasco cover",
+      "anchors": [
+        "computeBarecascoCover_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "identity; caller may normalize",
+      "stores": "one query field",
+      "reference_loads": "positions, support and kind",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/surfaceDetection/wp_barecascoCone.py",
+      "name": "Barecasco cone count",
+      "anchors": [
+        "computeBarecascoConeCount_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "positions, supports and query cover axis",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/surfaceDetection/wp_dilate.py",
+      "name": "surface dilation sum",
+      "anchors": [
+        "dilateSurfaceMask_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "identity; thresholding is a caller operation",
+      "stores": "one query field",
+      "reference_loads": "surface mask, positions/support/kind",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/surfaceDetection/wp_maronne.py",
+      "name": "Maronne count",
+      "anchors": [
+        "computeMaronneSurfaceDetection_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "normals, positions/support and kind",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/util/wp_numNeighbors.py",
+      "name": "frontend neighbor count",
+      "anchors": [
+        "countNeighbors_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "1 integer",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "positions, support, kind",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/util/wp_sum.py",
+      "name": "frontend neighbor field sum",
+      "anchors": [
+        "warpSum_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "field component count",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "field, position, support, kind",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/sample/wp_deltaShift.py",
+      "name": "sample delta shift",
+      "anchors": [
+        "computeDeltaShift_Func_i"
+      ],
+      "accumulators": "one scalar/vector/tensor sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query field",
+      "reference_loads": "mass/density, geometry/corrections and shift parameters",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/adaptiveSupport/wp_materialPsi.py",
+      "name": "material support moments",
+      "anchors": [
+        "_sums"
+      ],
+      "accumulators": "kernel sum and gradient-magnitude sum",
+      "scalar_components": "2",
+      "combine": "sum",
+      "finalize": "separate dimension roots",
+      "stores": "two support statistics",
+      "reference_loads": "material IDs, mass/rho, geometry/kernel; optional tabulated gradient",
+      "category": "finalize",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/adaptiveSupport/wp_psi0.py",
+      "name": "support psi moments",
+      "anchors": [
+        "computePsi0_Func_i_raw"
+      ],
+      "accumulators": "kernel sum and gradient-magnitude sum",
+      "scalar_components": "2",
+      "combine": "sum",
+      "finalize": "separate dimension roots after all cells/lanes",
+      "stores": "psi0 and psi0h",
+      "reference_loads": "geometry/kernel; relevant optional corrections",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/adaptiveSupport/wp_psi.py",
+      "name": "support lookup construction",
+      "anchors": [
+        "computePsi"
+      ],
+      "accumulators": "lattice kernel sum, derivative sum, count; separate shell-integral sum",
+      "scalar_components": "3 floating + 1 integer, excluding induction variables",
+      "combine": "sum within distinct lattice/shell loops",
+      "finalize": "rescaling, absolute value and dimension roots",
+      "stores": "n_h, psi, psiH, N_H, psiHLattice",
+      "reference_loads": "synthetic lattice and kernel functions",
+      "category": "construction",
+      "complexity": "medium",
+      "notes": "No simulation adjacency. Count is computed but N_H stores analytic support volume / particle volume."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/artificialCompressible/wp_jstSwitch.py",
+      "name": "JST switch",
+      "anchors": [
+        "computeJstSwitch_Func_i"
+      ],
+      "accumulators": "numerator and denominator",
+      "scalar_components": "2",
+      "combine": "sum",
+      "finalize": "Python/Torch divides by clamped denominator",
+      "stores": "Warp stores two raw sums; public wrapper returns one switch",
+      "reference_loads": "pressure, volume, geometry/kernel",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": "Native finalize can remove the extra Torch division/clamp pass while preserving denominator semantics."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/artificialCompressible/wp_residual.py",
+      "name": "artificial-compressible residual",
+      "anchors": [
+        "_sums"
+      ],
+      "accumulators": "divergence, pressure gradient, viscosity, gradient-divergence",
+      "scalar_components": "1 + 3*D (3D: 10)",
+      "combine": "sum",
+      "finalize": "pressure gradient multiplied by -1/rho_i",
+      "stores": "one scalar and three vectors",
+      "reference_loads": "velocity, pressure, mass/rho, fluid divergence and corrections",
+      "category": "finalize",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/iisph/wp_contactPressureDiagonal.py",
+      "name": "IISPH contact pressure diagonal",
+      "anchors": [
+        "computeIISPHContactPressureDiagonal_Func_i"
+      ],
+      "accumulators": "one sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "subtract query contact term",
+      "stores": "one query scalar/vector",
+      "reference_loads": "rest volume, wall gradient, contact point, denominator",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/iisph/wp_densityRate.py",
+      "name": "IISPH density rate",
+      "anchors": [
+        "computeIISPHDensityRate_Func_i"
+      ],
+      "accumulators": "one sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "add dot(query field, query wallGradient)",
+      "stores": "one query scalar/vector",
+      "reference_loads": "rest volume, field, kernel gradient",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/iisph/wp_gradientSum.py",
+      "name": "IISPH gradient sum",
+      "anchors": [
+        "computeIISPHGradientSum_Func_i"
+      ],
+      "accumulators": "one sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "add query wallGradient",
+      "stores": "one query scalar/vector",
+      "reference_loads": "rest volume, kernel gradient",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/iisph/wp_pressureAcceleration.py",
+      "name": "IISPH pressure acceleration",
+      "anchors": [
+        "computeIISPHPressureAcceleration_Func_i"
+      ],
+      "accumulators": "one sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "add query pressure and contact-wall terms",
+      "stores": "one query scalar/vector",
+      "reference_loads": "rest volume, density ratio, normalized pressure, query contact state",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/iisph/wp_pressureDiagonal.py",
+      "name": "IISPH pressure diagonal",
+      "anchors": [
+        "computeIISPHPressureDiagonal_Func_i"
+      ],
+      "accumulators": "one sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "combine with query gradientSum squared and density ratio",
+      "stores": "one query scalar/vector",
+      "reference_loads": "rest volume, kernel gradient",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/iisph/wp_sampledGravity.py",
+      "name": "IISPH sampled gravity",
+      "anchors": [
+        "computeIISPHSampledGravity_Func_i"
+      ],
+      "accumulators": "one sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query scalar/vector",
+      "reference_loads": "rest volume, contact point, query gravity and geometry",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/iisph/wp_wallGradient.py",
+      "name": "IISPH wall gradient",
+      "anchors": [
+        "computeIISPHWallGradient_Func_i"
+      ],
+      "accumulators": "one sum",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one query scalar/vector",
+      "reference_loads": "rest volume and kernel gradient",
+      "category": "sum",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/incompressible/wp_alpha.py",
+      "name": "incompressible alpha",
+      "anchors": [
+        "computeAlpha_Func_i_first"
+      ],
+      "accumulators": "gradient vector sum A and scalar squared-gradient sum B",
+      "scalar_components": "D + 1",
+      "combine": "sum before intended neighborhood finalization",
+      "finalize": "area_i/m_i * dot(A,A) + area_i*B",
+      "stores": "one alpha",
+      "reference_loads": "reference apparent area, mass, kind, geometry and gradient corrections",
+      "category": "finalize",
+      "complexity": "medium",
+      "notes": "CURRENT GRID SEMANTICS: adjacency applies this nonlinear expression separately per cell and sums it. CSR applies it once. Preserve or fix explicitly; do not silently change on port."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/liu/wp_mat.py",
+      "name": "Liu matrices",
+      "anchors": [
+        "computeLiuMatrices_Func_i"
+      ],
+      "accumulators": "Shepard sum, augmented vector, augmented matrix, neighbor count",
+      "scalar_components": "1 + (D+1) + (D+1)**2 floating + 1 integer (3D: 21 + 1)",
+      "combine": "sum",
+      "finalize": "store Shepard from matrix[0,0], not the separately returned Shepard sum",
+      "stores": "Shepard scalar, augmented vector/matrix, count",
+      "reference_loads": "reference quantity, query position, volume, kernel value/gradient",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/mdbc/wp_nopenshift.py",
+      "name": "mDBC no-penetration shift",
+      "anchors": [
+        "computeMdbcNoPenShift_Func_i"
+      ],
+      "accumulators": "shift vector and per-axis integer contributor counts",
+      "scalar_components": "D floating + D integers",
+      "combine": "componentwise sum",
+      "finalize": "divide each shift component by its count + epsilon",
+      "stores": "average shift vector and counts",
+      "reference_loads": "ghost offsets defining boundary normals, velocity, mass/rho and geometry/corrections",
+      "category": "finalize",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/shifting/wp_michelUChar.py",
+      "name": "characteristic shift speed",
+      "anchors": [
+        "computeUChar_Func_i_argmax"
+      ],
+      "accumulators": "found flag, best value, winning neighbor index",
+      "scalar_components": "1 floating + 1 integer + 1 bool",
+      "combine": "argmax with explicit tie/empty policy",
+      "finalize": "reload winning neighbor and evaluate/store selected quantity; preserve empty/self behavior",
+      "stores": "one speed",
+      "reference_loads": "velocity and geometry",
+      "category": "select",
+      "complexity": "medium",
+      "notes": "Current strict comparisons retain the first winning entry in traversal order. Selection state is small; tie and AD policy require explicit treatment."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/shockCapturing/wp_vsig.py",
+      "name": "signal speed",
+      "anchors": [
+        "computeVsig_Func_i_argmax"
+      ],
+      "accumulators": "found flag, best value, winning neighbor index",
+      "scalar_components": "1 floating + 1 integer + 1 bool",
+      "combine": "argmax with explicit tie/empty policy",
+      "finalize": "reload winning neighbor and evaluate/store selected quantity; preserve empty/self behavior",
+      "stores": "one speed",
+      "reference_loads": "velocity, optional sound speed and geometry",
+      "category": "select",
+      "complexity": "medium",
+      "notes": "Current strict comparisons retain the first winning entry in traversal order. Selection state is small; tie and AD policy require explicit treatment."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/surfaceDetection/wp_nearestSurfaceNormal.py",
+      "name": "nearest surface normal",
+      "anchors": [
+        "computeNearestSurfaceNormal_Func_i_argmin"
+      ],
+      "accumulators": "found flag, best value, winning neighbor index",
+      "scalar_components": "1 floating + 1 integer + 1 bool",
+      "combine": "argmin with explicit tie/empty policy",
+      "finalize": "reload winning neighbor and evaluate/store selected quantity; preserve empty/self behavior",
+      "stores": "one distance and one normal",
+      "reference_loads": "surface mask, normals and geometry",
+      "category": "select",
+      "complexity": "medium",
+      "notes": "Current strict comparisons retain the first winning entry in traversal order. Selection state is small; tie and AD policy require explicit treatment."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/shockCapturing/ReadHayfield2012/kernels.py",
+      "name": "Read-Hayfield signal speed",
+      "anchors": [
+        "rhVmax_Func_i_argmax"
+      ],
+      "accumulators": "found flag, best value, winning neighbor index",
+      "scalar_components": "1 floating + 1 integer + 1 bool",
+      "combine": "argmax with explicit tie/empty policy",
+      "finalize": "reload winning neighbor and evaluate/store selected quantity; preserve empty/self behavior",
+      "stores": "one speed",
+      "reference_loads": "velocity, sound speed and geometry",
+      "category": "select",
+      "complexity": "medium",
+      "notes": "Current strict comparisons retain the first winning entry in traversal order. Selection state is small; tie and AD policy require explicit treatment."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/surfaceDetection/wp_barecasco.py",
+      "name": "Barecasco cover pass",
+      "anchors": [
+        "computeBarecascoSurfaceDetection_Func_i_first"
+      ],
+      "accumulators": "cover vector",
+      "scalar_components": "D",
+      "combine": "sum",
+      "finalize": "normalize complete cover vector",
+      "stores": "query normal and input to second traversal",
+      "reference_loads": "positions and supports",
+      "category": "multipass",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/surfaceDetection/wp_barecasco.py",
+      "name": "Barecasco cone pass",
+      "anchors": [
+        "computeBarecascoSurfaceDetection_Func_i_second"
+      ],
+      "accumulators": "cone count",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "surface detection count",
+      "reference_loads": "positions/supports and finalized cover axis",
+      "category": "multipass",
+      "complexity": "medium",
+      "notes": "Second full traversal depends on first-pass finalization; cannot obtain both by one ordinary pair reduction."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/shifting/wp_implicitShifting.py",
+      "name": "implicit shift pair terms",
+      "anchors": [
+        "computeShiftingPairTerms_Kernel"
+      ],
+      "accumulators": "none across neighbors",
+      "scalar_components": "0",
+      "combine": "none",
+      "finalize": "evaluate W, gradient and Hessian",
+      "stores": "1 + D + D*D per explicit edge",
+      "reference_loads": "explicit i,j geometry/support",
+      "category": "edge",
+      "complexity": "high",
+      "notes": "Downstream solver consumes edge tensors. Matrix-free recomputation is a separate integration choice."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/pressure/wp_perSidePressure.py",
+      "name": "per-side pressure",
+      "anchors": [
+        "perSide_Func_i"
+      ],
+      "accumulators": "acceleration and unscaled work",
+      "scalar_components": "D + 1",
+      "combine": "sum",
+      "finalize": "multiply completed work by query f_i",
+      "stores": "acceleration and dudt",
+      "reference_loads": "pressure, velocity, mass/rho, support and two kernel gradients",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/godunov/wp_gsph.py",
+      "name": "Godunov rates",
+      "anchors": [
+        "godunov_Func_i"
+      ],
+      "accumulators": "acceleration and work",
+      "scalar_components": "D + 1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "acceleration and dudt",
+      "reference_loads": "primitive states, gradients, sound speed, limited Riemann states, geometry",
+      "category": "sum",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/godunov/wp_inutsuka.py",
+      "name": "Gaussian density/gradient",
+      "anchors": [
+        "gaussianDensity_Func_Adjacency"
+      ],
+      "accumulators": "density and density gradient",
+      "scalar_components": "1 + D",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "density and gradient",
+      "reference_loads": "mass, support and geometry",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/godunov/wp_inutsuka.py",
+      "name": "Inutsuka rates",
+      "anchors": [
+        "inutsuka_Func_Adjacency"
+      ],
+      "accumulators": "acceleration and work",
+      "scalar_components": "D + 1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "acceleration and dudt",
+      "reference_loads": "primitive states, gradients, reconstruction, volume integral, Riemann data",
+      "category": "sum",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/compSPH/accel.py",
+      "name": "compressible acceleration",
+      "anchors": [
+        "computeCompSPHPair",
+        "computeCompSPHAccel_Func_i"
+      ],
+      "accumulators": "acceleration vector and optional heating scalar",
+      "scalar_components": "D + 1",
+      "combine": "sum for query outputs; independent edge writes when retained",
+      "finalize": "identity",
+      "stores": "query acceleration/heating; optionally pressure and viscosity vectors per edge",
+      "reference_loads": "velocity, energy, pressure, sound speed, alpha, correction data; CRK also reference coefficients and velocity gradients",
+      "category": "edge",
+      "complexity": "high",
+      "notes": "retainPairs gates edge arrays. Pair formula is already factored and shared with recomputing work path; O(N) force-only modes exist."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/compSPH/dudt.py",
+      "name": "compressible thermal rate",
+      "anchors": [
+        "computeCompSPHdudt_Func_i"
+      ],
+      "accumulators": "thermal rate",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "dudt",
+      "reference_loads": "velocity, energy, pressure, sound speed, alpha and corrections",
+      "category": "sum",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/compSPH/work.py",
+      "name": "compressible stage work",
+      "anchors": [
+        "_compWorkKernel"
+      ],
+      "accumulators": "energy rate in reduce mode; otherwise no query sum",
+      "scalar_components": "1 floating or 0",
+      "combine": "sum for rate; write/add by stable edge slot in retained mode",
+      "finalize": "identity",
+      "stores": "rate per query OR weighted vector per edge",
+      "reference_loads": "recomputed force pair, stage half velocities, final half velocity, material/entropy data",
+      "category": "multipass",
+      "complexity": "high",
+      "notes": "Existing Warp code already recomputes pair force after stage acceleration. It has both rate-only and retained-work modes; all traversal is currently CSR."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/crk/accel.py",
+      "name": "CRK acceleration",
+      "anchors": [
+        "computeCrkSPHPair",
+        "computeCrkSPHAccel_Func_i"
+      ],
+      "accumulators": "acceleration vector and optional heating scalar",
+      "scalar_components": "D + 1",
+      "combine": "sum for query outputs; independent edge writes when retained",
+      "finalize": "identity",
+      "stores": "query acceleration/heating; optionally pressure and viscosity vectors per edge",
+      "reference_loads": "velocity, energy, pressure, sound speed, alpha, correction data; CRK also reference coefficients and velocity gradients",
+      "category": "edge",
+      "complexity": "high",
+      "notes": "retainPairs gates edge arrays. Pair formula is already factored and shared with recomputing work path; O(N) force-only modes exist."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/crk/dudt.py",
+      "name": "CRK thermal rate",
+      "anchors": [
+        "computeCrkSPHdudt_Func_i"
+      ],
+      "accumulators": "thermal rate",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "dudt",
+      "reference_loads": "velocity, energy, pressure, sound speed, alpha and corrections",
+      "category": "sum",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/crk/work.py",
+      "name": "CRK stage work",
+      "anchors": [
+        "_crkWorkKernel"
+      ],
+      "accumulators": "energy rate in reduce mode; otherwise no query sum",
+      "scalar_components": "1 floating or 0",
+      "combine": "sum for rate; write/add by stable edge slot in retained mode",
+      "finalize": "identity",
+      "stores": "rate per query OR weighted vector per edge",
+      "reference_loads": "recomputed force pair, stage half velocities, final half velocity, material/entropy data",
+      "category": "multipass",
+      "complexity": "high",
+      "notes": "Existing Warp code already recomputes pair force after stage acceleration. It has both rate-only and retained-work modes; all traversal is currently CSR."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/compSPH/balance.py",
+      "name": "compressible balance fractions",
+      "anchors": [
+        "computeCompSPHBalanceTerm_Func_i"
+      ],
+      "accumulators": "none across neighbors",
+      "scalar_components": "0",
+      "combine": "none",
+      "finalize": "entropy/work partition with clamp and exceptional values",
+      "stores": "one fraction f_ij per edge",
+      "reference_loads": "stored pressure/viscosity accelerations and query/reference stage state",
+      "category": "edge",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/compSPH/workReduction.py",
+      "name": "retained pair work reduction",
+      "anchors": [
+        "_pairWorkRows",
+        "_referenceEntropyRows"
+      ],
+      "accumulators": "one rate sum",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "optional entropy partition per interaction",
+      "stores": "one query rate",
+      "reference_loads": "stored work at edge slot, velocity difference and entropy state",
+      "category": "sum",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/crk/materialDensity.py",
+      "name": "material CRK density",
+      "anchors": [
+        "_materialDensitySums"
+      ],
+      "accumulators": "numerator and denominator",
+      "scalar_components": "2",
+      "combine": "sum",
+      "finalize": "guarded ratio",
+      "stores": "density",
+      "reference_loads": "mass, volume, material IDs, geometry/kernel",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/crk/terms.py",
+      "name": "CRK coefficient solve",
+      "anchors": [
+        "_crkTermsKernel"
+      ],
+      "accumulators": "none across neighbors; local matrix contractions",
+      "scalar_components": "0 neighborhood components",
+      "combine": "none",
+      "finalize": "inverse moment matrix, determinant limiter, A/B and derivatives",
+      "stores": "A scalar, B vector, gradA vector, gradB matrix (1 + 2*D + D*D)",
+      "reference_loads": "query moment tensors only",
+      "category": "pointwise",
+      "complexity": "medium",
+      "notes": "Separate stage over precomputed moments; not automatically fused if neighboring operations need coefficients from both sides."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/pesph/operators.py",
+      "name": "pressure-entropy sums",
+      "anchors": [
+        "_pressureSums"
+      ],
+      "accumulators": "number density, weighted sum, two support derivatives, mass density",
+      "scalar_components": "5",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "five query scalars",
+      "reference_loads": "weights, mass, geometry and value/grad-h kernel",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/pesph/operators.py",
+      "name": "pressure-entropy force",
+      "anchors": [
+        "_pressureForce"
+      ],
+      "accumulators": "acceleration and thermal work",
+      "scalar_components": "D + 1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "acceleration and work",
+      "reference_loads": "velocity, weights, pressure-entropy state and two kernel gradients",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/meshless/flux.py",
+      "name": "frontend MFM flux",
+      "anchors": [
+        "mfmFlux_Func_i"
+      ],
+      "accumulators": "mass, momentum and total-energy rates",
+      "scalar_components": "D + 2",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "dm, dp, de",
+      "reference_loads": "primitive states, gradients/limiters, volume, inverse moments, closure and material/Riemann data",
+      "category": "sum",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/reconstruction/meshless.py",
+      "name": "frontend MFM limiter",
+      "anchors": [
+        "mfmLimiter_Func_i"
+      ],
+      "accumulators": "neighbor and reconstructed min/max for rho, P and velocity",
+      "scalar_components": "8 + 4*D (3D: 20)",
+      "combine": "mixed componentwise min/max with query-value identities",
+      "finalize": "limiter ratios and clamps",
+      "stores": "rho, pressure and velocity limiter factors",
+      "reference_loads": "primitive states, geometry; query gradients/beta",
+      "category": "extrema",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/shockCapturing/ReadHayfield2012/kernels.py",
+      "name": "Read-Hayfield entropy",
+      "anchors": [
+        "rhEntropy_Func_i"
+      ],
+      "accumulators": "entropy diffusion",
+      "scalar_components": "1",
+      "combine": "sum",
+      "finalize": "identity",
+      "stores": "one entropy rate",
+      "reference_loads": "velocity, sound speed, alpha, pressure, entropy, mass/rho and geometry",
+      "category": "sum",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/shockCapturing/Wadsley2017/kernels.py",
+      "name": "Wadsley neighbor mean",
+      "anchors": [
+        "wadsleyNeighbourMeanKernel"
+      ],
+      "accumulators": "weighted numerator and weight sum",
+      "scalar_components": "2",
+      "combine": "sum",
+      "finalize": "guarded ratio and clamp [-1,1]",
+      "stores": "one R value",
+      "reference_loads": "ratio, mass and geometry/support",
+      "category": "finalize",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/shockCapturing/Wadsley2017/kernels.py",
+      "name": "Wadsley point fields",
+      "anchors": [
+        "wadsleyPointKernel"
+      ],
+      "accumulators": "none across neighbors; local tensor contractions",
+      "scalar_components": "0 neighborhood components",
+      "combine": "none",
+      "finalize": "gradient-derived divergence, tensor norm, ratio and pressure normal",
+      "stores": "D, Tnorm, ratio and normal",
+      "reference_loads": "query velocity/pressure gradients",
+      "category": "pointwise",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/artificialCompressible/dyngpusphOperators.py",
+      "name": "dynGPUSPH closures",
+      "anchors": [
+        "_closures"
+      ],
+      "accumulators": "weight, pressure, lambda, divergence; mean velocity/position, laplacian, normal; surface flag",
+      "scalar_components": "4 + 4*D floating + 1 bool (implemented in 2D: 12 + bool)",
+      "combine": "sum + OR",
+      "finalize": "weighted means, wall/pressure closure, normal handling",
+      "stores": "pressure, normal, average velocity, divergence, laplacian",
+      "reference_loads": "pressure, velocity, lambda, body force, mass/rho and geometry",
+      "category": "mixed",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/artificialCompressible/dyngpusphOperators.py",
+      "name": "dynGPUSPH moments",
+      "anchors": [
+        "_moments"
+      ],
+      "accumulators": "moment matrix, normal, pressure gradient, pressure laplacian",
+      "scalar_components": "D*D + 2*D + 1 (implemented in 2D: 9)",
+      "combine": "sum",
+      "finalize": "eigenvalue-derived lambda, normal normalization",
+      "stores": "lambda, normal, gradient, laplacian",
+      "reference_loads": "pressure, mass/rho and geometry",
+      "category": "finalize",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/artificialCompressible/dyngpusphOperators.py",
+      "name": "dynGPUSPH residual",
+      "anchors": [
+        "_residual"
+      ],
+      "accumulators": "three scalar sums, five vector sums, wall-distance minimum and edge-vicinity state",
+      "scalar_components": "4 + 5*D floating + 1 categorical scalar (2D: 14 + 1)",
+      "combine": "sum + min + categorical OR",
+      "finalize": "scale or freeze switch",
+      "stores": "divergence, pressure/viscous/acoustic/second/fourth vectors, wall distance, diffusion, switch, edge",
+      "reference_loads": "velocity and laplacian, pressure and derivatives, wall states, edge flags and geometry",
+      "category": "mixed",
+      "complexity": "high",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/artificialCompressible/dyngpusphShifting.py",
+      "name": "dynGPUSPH shift",
+      "anchors": [
+        "_kernel"
+      ],
+      "accumulators": "eight scalars, six vectors, moment matrix, two counts and vicinity flag",
+      "scalar_components": "8 + 6*D + D*D floating + 2 integers + bool (2D: 24 + 2 + bool)",
+      "combine": "sum + min + max + OR with query-dependent identities",
+      "finalize": "ratios, matrix inverse, normalizations, collision correction, clamps and pressure/velocity updates",
+      "stores": "shift, recorded shift, pressure, velocity, active flag, gradP, diagonal gradV, lambda",
+      "reference_loads": "lambda, edge/normal, pressure, velocity, mass/rho, geometry and optional source-cell coordinates",
+      "category": "mixed",
+      "complexity": "high",
+      "notes": "Specialized 2D kernel with two support ranges; keep its mixed reduction and domain predicates explicit."
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/artificialCompressible/dyngpusphShifting.py",
+      "name": "dynGPUSPH surface fields",
+      "anchors": [
+        "_surface_fields"
+      ],
+      "accumulators": "moment matrix and normal",
+      "scalar_components": "D*D + D (implemented 2D: 6)",
+      "combine": "sum",
+      "finalize": "lambda from matrix, normalize normal",
+      "stores": "lambda and normal",
+      "reference_loads": "geometry and volume",
+      "category": "finalize",
+      "complexity": "medium",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/artificialCompressible/dyngpusphShifting.py",
+      "name": "dynGPUSPH cone",
+      "anchors": [
+        "_surface_cone"
+      ],
+      "accumulators": "whether a qualifying cone neighbor exists",
+      "scalar_components": "1 bool",
+      "combine": "OR",
+      "finalize": "combine predicate with query lambda/edge policy",
+      "stores": "edge classification",
+      "reference_loads": "geometry and normal",
+      "category": "extrema",
+      "complexity": "low",
+      "notes": ""
+    },
+    {
+      "package": "frontend",
+      "path": "src/warpSPH/modules/artificialCompressible/dyngpusphShifting.py",
+      "name": "dynGPUSPH vicinity",
+      "anchors": [
+        "_surface_vicinity"
+      ],
+      "accumulators": "whether an edge neighbor exists",
+      "scalar_components": "1 bool",
+      "combine": "OR",
+      "finalize": "preserve raw query label or mark vicinity",
+      "stores": "edge classification",
+      "reference_loads": "raw edge flags, kind, position and support",
+      "category": "extrema",
+      "complexity": "low",
+      "notes": ""
+    }
+  ]
+}
