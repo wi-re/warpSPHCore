@@ -47,7 +47,7 @@ def metadata(device):
     packages = {}
     source_versions = {}
     repositories = {}
-    for name in ('warpSPHCore', 'warpSPH', 'warpSPHIntegrators', 'warpSPHPlotting', 'warp-lang', 'torch'):
+    for name in ('warpSPHCore', 'warpSPH', 'warpSPHIntegrators', 'warpSPHPlotting', 'warp-lang', 'torch', 'numpy'):
         try:
             packages[name] = importlib.metadata.version(name)
         except importlib.metadata.PackageNotFoundError:

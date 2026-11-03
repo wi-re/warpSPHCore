@@ -91,3 +91,41 @@ builds two chunked searches per accepted step. The reference planner's Python
 row loops/digest and geometry's repeated construction therefore need separate
 attention from GPU kernel packing. These timings are single-machine evidence,
 not a strong/weak scaling or GH200 result.
+
+## CPU planner optimization
+
+The baseline above predates the optimized shared planner. Planning now computes
+one exact live-edge bound from padding/alignment, scans counts in NumPy int64,
+finds maximal chunk ends with binary searches, and hashes the prefix buffer in
+one call. The public Python-integer prefix tuple, chunk boundaries, owners,
+errors and v1 signature encoding are preserved. All callers use the faster path;
+there is no new compute flag, device build or CUDA initialization requirement.
+NumPy is already a core dependency.
+
+On the same single P core and constant counts, the 48³ planner changed from
+51.33 to 1.32 ms and the 128³ planner from 1037.12 to 53.72 ms. Heterogeneous
+128³ counts changed from 1048.63 to 54.42 ms; signatures matched the old code.
+The immutable prefix still requires O(N) Python integer storage/construction.
+
+Fresh matched 48³ accepted-step runs (three warmup, five measured steps, five
+repetitions, default chunk budgets) changed MFM from 138.17 to 44.53 ms and MFV
+from 137.48 to 45.40 ms. CRKSPH remained about 227–228 ms, consistent with its
+retained list during these measured steps and its GPU launch bottleneck.
+
+The host-only maintained benchmark times completed plan construction and output
+release, with count generation and validation outside the window:
+
+```sh
+python scripts/benchmarks/bench_row_planner.py --rows 110592 2097152 \
+  --owners 1 4 --output /path/to/evidence/planner-constant.json
+python scripts/benchmarks/bench_row_planner.py --rows 110592 2097152 \
+  --distribution uniform --output /path/to/evidence/planner-variable.json
+```
+
+Default policy is an 8M-edge budget, 65,536 maximum rows, 10% headroom,
+16 bytes/edge and a three-scalar extent per edge. Supply `--policy policy.json`
+with `RowChunkPolicy` fields for other exact rational padding or byte budgets.
+`--neighbors` sets the constant count or the inclusive upper bound of uniform
+random counts. These are synthetic stored counts, not generated particle pairs.
+Use external CPU affinity controls for matching comparisons. Results include
+raw samples, counts hashes, signatures, policy, owner counts and source metadata.

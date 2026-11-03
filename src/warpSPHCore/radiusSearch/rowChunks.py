@@ -1,15 +1,17 @@
-"""CPU reference planner for whole-row neighbour storage (no pair allocation).
+"""CPU planner for whole-row neighbour storage (no pair allocation).
 
 This is deliberately separate from CUDA reduction lanes and the flat search API.
 Counts must describe the *stored* list, including Verlet padding in support.
 The caller supplies a signature covering particle ordering, reference fields,
 supports, domain, grid configuration and acceptance rules for one rebuild.
-Device scans/collection and production configuration are subsequent work.
+Planning stays on the host and does not initialize or compile a device backend.
 """
+from bisect import bisect_right
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 
+import numpy as np
 import torch
 
 from .csr import WARP_ARRAY_MAX, validateParticleCounts
@@ -153,13 +155,14 @@ def buildRowChunkPlan(counts: torch.Tensor, *, generation: RowChunkGeneration,
                       policy: RowChunkPolicy, numOwners: int = 1) -> RowChunkPlan:
     """Greedily pack maximal whole-row intervals under explicit capacity bounds.
 
-    CPU reference only: no implicit CUDA synchronization/copy. Counts are the
+    Host counts only: no implicit CUDA synchronization/copy. Counts are the
     already assembled int32 C[N], from disjoint countingRanges, not a sum of
     duplicated full counts. Compute owners receive balanced contiguous numbers
     of chunks, independently of the equal-row counting assignment. Empty owners
     own no chunks; zero-neighbour particles still belong to exactly one chunk.
-    Python integers hold the immutable reference prefix; all tensor offsets are
-    explicitly int64. No arrays proportional to the number of edges are made.
+    A vectorized int64 scan builds the prefix; exact integer budget inversion
+    and binary searches preserve maximal greedy chunks. The public prefix stays
+    an immutable tuple of Python integers. No per-edge arrays are made.
     """
     if not isinstance(generation, RowChunkGeneration) or not isinstance(policy, RowChunkPolicy):
         raise TypeError('Expected RowChunkGeneration and RowChunkPolicy metadata.')
@@ -169,27 +172,38 @@ def buildRowChunkPlan(counts: torch.Tensor, *, generation: RowChunkGeneration,
     if counts.device.type != 'cpu':
         raise ValueError('The CPU reference planner requires CPU counts explicitly.')
     validateParticleCounts(len(counts), generation.numReferences)
-    prefix = [0]
-    for count in counts.tolist():
-        if count < 0 or count > generation.numReferences:
-            raise ValueError('Each stored row count must be between zero and numReferences.')
-        prefix.append(prefix[-1] + count)
+    # Invert padding/alignment once, using exact Python integer arithmetic:
+    # ceil(live * (d + n) / d), rounded to alignment, must fit capacityLimit.
+    capacityLimit = policy.capacityLimit
+    alignedLimit = capacityLimit // policy.alignment * policy.alignment
+    maxLive = (alignedLimit * policy.headroomDenominator //
+               (policy.headroomDenominator + policy.headroomNumerator))
+    values = counts.numpy(force=True)
+    smallest, largest = int(values.min(initial=0)), int(values.max(initial=0))
+    if smallest < 0 or largest > generation.numReferences:
+        raise ValueError('Each stored row count must be between zero and numReferences.')
+    if largest > maxLive:
+        row = int(np.flatnonzero(values > maxLive)[0])
+        raise OverflowError(f'Row {row} with {int(values[row])} stored edges exceeds the padded chunk capacity limit {capacityLimit}; increase the budget or reduce headroom. Rows cannot be split.')
+
+    # Counts and population lengths are bounded by int32, so their sum is
+    # strictly below 2**62. The scan cannot overflow its int64 accumulator.
+    widePrefix = np.empty(len(values) + 1, dtype=np.int64)
+    widePrefix[0] = 0
+    np.cumsum(values, dtype=np.int64, out=widePrefix[1:])
+    prefix = tuple(widePrefix.tolist())
     if prefix[-1] > torch.iinfo(torch.int64).max:
         raise OverflowError('Global row-chunk prefix does not fit int64.')
 
     intervals = []
     start = 0
-    for row in range(len(counts)):
-        rowEdges = prefix[row + 1] - prefix[row]
-        if policy.capacityFor(rowEdges) > policy.capacityLimit:
-            raise OverflowError(f'Row {row} with {rowEdges} stored edges exceeds the padded chunk capacity limit {policy.capacityLimit}; increase the budget or reduce headroom. Rows cannot be split.')
-        candidate = prefix[row + 1] - prefix[start]
-        rowLimit = policy.maxRows is not None and row - start >= policy.maxRows
-        if row > start and (rowLimit or policy.capacityFor(candidate) > policy.capacityLimit):
-            intervals.append((start, row))
-            start = row
-    if start < len(counts):
-        intervals.append((start, len(counts)))
+    while start < len(values):
+        limit = len(values) if policy.maxRows is None else min(len(values), start + policy.maxRows)
+        # Include trailing zero rows at a full edge budget, exactly as the
+        # row-by-row greedy planner does; the row cap remains independent.
+        stop = bisect_right(prefix, prefix[start] + maxLive, lo=start + 1, hi=limit + 1) - 1
+        intervals.append((start, stop))
+        start = stop
 
     chunks = []
     for owner, (first, stop) in enumerate(_balancedRanges(len(intervals), numOwners)):
@@ -203,9 +217,8 @@ def buildRowChunkPlan(counts: torch.Tensor, *, generation: RowChunkGeneration,
                     numOwners=numOwners, ownershipPolicy=ownershipPolicy,
                     countingRanges=countingRanges, chunks=[asdict(c) for c in chunks])
     digest.update(json.dumps(metadata, sort_keys=True, separators=(',', ':')).encode('utf-8'))
-    # Include every row boundary, not just per-chunk totals. Stream the prefix
-    # into the digest to avoid a second full JSON encoding of a large count list.
-    for offset in prefix:
-        digest.update(offset.to_bytes(8, byteorder='little', signed=True))
-    return RowChunkPlan(generation, policy, numOwners, tuple(prefix), countingRanges,
+    # Preserve the v1 signature byte for byte: signed little-endian int64
+    # boundaries, hashed as a contiguous buffer rather than one Python call/row.
+    digest.update(widePrefix.astype('<i8', copy=False))
+    return RowChunkPlan(generation, policy, numOwners, prefix, countingRanges,
                         tuple(chunks), digest.hexdigest(), ownershipPolicy)

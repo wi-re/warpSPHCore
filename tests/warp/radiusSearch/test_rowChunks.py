@@ -195,3 +195,40 @@ def test_exhaustive_small_rows_have_maximal_chunks_and_stable_replicas():
         for left, right in zip(p.chunks, p.chunks[1:]):
             assert left.liveEdges + values[right.rowStart] > p.policy.capacityLimit
         assert p == plan(values, owners=3)
+
+
+@pytest.mark.parametrize('values,policy,owners,signature', [
+    ([2, 0, 6, 0, 1, 7], RowChunkPolicy(edgeBudget=8, headroomNumerator=0), 3,
+     'eda01253ad90aa6d56f42d87ba44f07cbb2317b355884faa5222fa2a728fb14a'),
+    ([WARP_ARRAY_MAX//3]*4 + [0, 11],
+     RowChunkPolicy(edgeBudget=WARP_ARRAY_MAX, maxElementsPerEdge=3, headroomNumerator=0), 4,
+     '62901fb44470bff11e59d0aeba56177f3b179c35e768fb9c154c2ea0b2d01286'),
+    ([], RowChunkPolicy(byteBudget=3, bytesPerEdge=4), 4,
+     'f2a12de529a5ffb788c59e834ab73908b87d3d7f568095c0e8ea3db77c7ed860'),
+])
+def test_optimized_planner_preserves_v1_signature_bytes(values, policy, owners, signature):
+    # Frozen from the original per-row implementation, including its little-
+    # endian prefix encoding. Mixed-version peers must agree byte for byte.
+    assert plan(values, policy=policy, owners=owners).signature == signature
+
+
+def test_exact_padding_inversion_matches_brute_force_greedy_partition():
+    # Exercise non-aligned limits and rational headroom that floats cannot
+    # distinguish from zero. The oracle evaluates public capacityFor directly.
+    for budget, alignment, fraction, maxRows in itertools.product(
+            (1, 7, 17), (1, 4, 9), ((0, 1), (1, 3), (2, 7), (1, 10**40)), (None, 2)):
+        numerator, denominator = fraction
+        policy = RowChunkPolicy(edgeBudget=budget, alignment=alignment,
+            headroomNumerator=numerator, headroomDenominator=denominator, maxRows=maxRows)
+        fitting = max(v for v in range(18) if policy.capacityFor(v) <= policy.capacityLimit)
+        values = [fitting, 0, min(1, fitting), 0, fitting, 0]
+        expected, start = [], 0
+        while start < len(values):
+            limit = len(values) if maxRows is None else min(len(values), start + maxRows)
+            stop = max(end for end in range(start + 1, limit + 1)
+                       if policy.capacityFor(sum(values[start:end])) <= policy.capacityLimit)
+            expected.append((start, stop))
+            start = stop
+        actual = plan(values, policy=policy, owners=3)
+        assert [(c.rowStart, c.rowStop) for c in actual.chunks] == expected
+        assertCoverage(actual, values)
