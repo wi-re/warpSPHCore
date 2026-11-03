@@ -3,6 +3,7 @@ from warp.types import vector, matrix
 # from wp_tensor import tensor
 from typing import Any, Union
 import torch
+from ._backend import OPERATORS
 
 from .util import *
 
@@ -47,6 +48,25 @@ def warpOperation(
     consistentDivergence: bool = False,
     covarianceReturnNumNeighbors: bool = False,
 ):
+    if OPERATORS == "native":
+        # The 0.7.1 projection frontend requests this scalar lattice correction
+        # during initialization. Reuse its cached, host-metadata-only factor;
+        # native pair kernels still consume the ordinary uncalibrated policy.
+        scale = 1.0
+        if operationProperties.calibrateNormalization and operationProperties.operation == WarpOperation.Density:
+            from dataclasses import replace
+            from .util.latticeDensity import latticeDensityFactor
+            scale = latticeDensityFactor(operationProperties.kernel,
+                                         float(operationProperties.n_h), domain.dim)
+            operationProperties = replace(operationProperties, calibrateNormalization=False)
+        from .coreOperations.native.wrapper import sphOperation
+        result = sphOperation(
+            queryParticles, operationProperties, domain, queryValues, referenceValues,
+            queryVolumes, referenceVolumes, adjacency, referenceParticles,
+            preScatteredQuantities, crkState, gradHState, renormalizationState,
+            consistentDivergence, covarianceReturnNumNeighbors, backend="native")
+        return result if scale == 1.0 else result * scale
+
     if operationProperties.operation == WarpOperation.Custom:
         raise ValueError("Custom operations are not supported in warpOperation. Please write your own caller.")
     referenceParticles = referenceParticles if referenceParticles is not None else queryParticles
@@ -375,6 +395,10 @@ def warpOperationJVP(
         else:
             raise ValueError("Invalid type for renormalizationState: {}. Must be either RenormalizationState or torch.Tensor.".format(type(renormalizationState)))
 
+    if OPERATORS == "native":
+        raise NotImplementedError(
+            "warpOperationJVP is a Warp-specific adapter. Use native.linearizeFields "
+            "or the native Torch forward-AD interface for native products.")
     geometryTangentArgs = {
         "queryTangentState.positions": queryTangentState.positions if queryTangentState is not None else None,
         "referenceTangentState.positions": referenceTangentState.positions if referenceTangentState is not None else None,
@@ -775,6 +799,8 @@ def warpOperationHVP(
     hand-written "small explicit second-order helper" the plan flagged as
     the fallback.
     """
+    if OPERATORS == "native":
+        raise NotImplementedError("Native core operators do not support second-order warpOperationHVP")
     if operationProperties.operation is not WarpOperation.Density:
         raise NotImplementedError(
             f"warpOperationHVP: only Density's position Hessian is implemented "

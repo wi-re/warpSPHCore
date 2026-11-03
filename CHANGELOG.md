@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased — native development branch
+
+- Integrate the coordinated 0.7.1 core, frontend and integrator interfaces.
+- Add opt-in native core/CRK accumulation dispatch within the Warp frontend,
+  preserving its Morton ordering and CSR buffers. Native chunked/distributed
+  traversal remains unported.
+- Add complete-simulation correctness comparisons and CPU/CUDA scaling drivers;
+  retain failed FP32 projection controls explicitly in the qualification report.
+
 ## 0.7.1 — 2026-11-03
 
 Coordinated GitHub checkpoint with warpSPH and warpSPHIntegrators 0.7.1.

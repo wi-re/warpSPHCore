@@ -12,7 +12,9 @@ preparation and all six applicable corrected core operations support first-order
 Torch backwards and forward AD, including derivatives through the prepared CRK
 coefficients. Fixed-geometry solver products remain available through
 `native.linearizeFields`. Nonsmooth/singular geometry contracts, higher-order native
-derivatives and complete frontend simulations remain unported.
+derivatives and a completely native frontend remain unported. The 0.7.1 frontend
+can run complete eager simulations with native core operators and Warp frontend
+kernels using the explicit compatibility selection below.
 
 ## Install and select
 
@@ -68,6 +70,58 @@ cache; use node-local storage or prebuilt wheels for large cluster jobs.
 `CUDA_HOME`/`ROCM_HOME` configure toolkit discovery when needed. HIP preprocessing
 uses private build copies and never writes generated headers into the package.
 Importing the package or calling `nativeCapabilities()` compiles nothing.
+
+### Using the 0.7.1 frontend
+
+Keep the frontend's Warp runtime and select the native core before import:
+
+```bash
+export WARPSPHCORE_BACKEND=warp
+export WARPSPHCORE_OPERATORS=native
+# Run the usual frontend entry point in eager mode.
+```
+
+`warpSPHCore.backend` identifies the process runtime; `operator_backend`
+identifies this core execution selection.
+
+This redirects the public `warpOperation`/flat operation calls and CRK
+volume/moment/consistency-density accumulations to native code. Existing Torch
+particle states, int32/int64 CSR buffers and Morton ordering pass through without
+copies or hidden permutations. Calibrated summation density uses the upstream
+cached lattice factor and a Torch output scale in this compatibility adapter.
+The pure native API's calibration restriction is unchanged. No CSR content scans,
+CPU readbacks or extra debug options are introduced in these operator calls.
+
+Frontend force/work kernels, fused CRK coefficient construction, shifting,
+pressure iterations, communication and explicit Verlet-list construction remain
+their existing implementations. Missing adjacency uses the native operator's
+own compact-hash search. This is a mixed execution path, not a Warp-free fluid
+solver. Unsupported inputs raise; there is no implicit operator fallback.
+In particular, native operators do not yet consume upstream `ChunkedAdjacency`:
+owned-row multi-GPU/multi-node execution still needs Warp operators. The explicit
+Warp JVP/HVP and CRK JVP entry points reject this selection; native first-order
+Torch AD and `native.linearizeFields` retain their separately qualified scope.
+Full native frontend CUDA graph execution is not qualified.
+
+For a complete warmed-step comparison, put the paired 0.7.1 source roots on
+`PYTHONPATH` and run each operator backend in its own process:
+
+```bash
+python scripts/benchmarks/bench_simulations.py --operators warp \
+  --case tgv-wc --scheme deltaSPH --nx 128 --device cpu \
+  --order morton --n-h 4 --sound-speed 10 --out /tmp/simulation-warp
+python scripts/benchmarks/bench_simulations.py --operators native \
+  --case tgv-wc --scheme deltaSPH --nx 128 --device cpu \
+  --order morton --n-h 4 --sound-speed 10 --out /tmp/simulation-native
+```
+
+The primary timer includes integrator stages, search and layout preparation;
+the accepted-boundary interval also includes runner diagnostics and outputs.
+Compilation/setup/warmup are excluded. `--snapshots` saves every accepted state
+for numerical comparisons outside the primary timer. `--profile` records two
+warmed steps to show which native kernels the solver actually calls; profiled
+timings are not benchmark results. Physical projection limits may shorten a
+requested fixed step; compare the recorded clocks as well as the fields.
 
 ### Building native wheels
 

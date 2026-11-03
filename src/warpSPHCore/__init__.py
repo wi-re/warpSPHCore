@@ -19,7 +19,7 @@ Or import subpackages directly:
     from warpSPHCore.coreOperations import ...
 """
 
-from ._backend import BACKEND as backend
+from ._backend import BACKEND as backend, OPERATORS as operator_backend
 
 if backend == "native":
     from .native import *

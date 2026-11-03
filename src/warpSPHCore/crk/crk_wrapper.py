@@ -148,6 +148,11 @@ def computeCRKFactorsJVP(
     estimate uses referenceTangentState in both of its roles, even if the
     reference population aliases the query. None retains the legacy reuse.
     """
+    from .._backend import OPERATORS
+    if OPERATORS == "native":
+        raise NotImplementedError(
+            "computeCRKFactorsJVP is a Warp-specific adapter. Use native.prepareCRK "
+            "with Torch forward AD for native products.")
     volumeProperties = OperationProperties(
         kernel=kernel,
         supportMode=SupportScheme.Gather,

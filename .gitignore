@@ -86,6 +86,8 @@ test.csv
 *egg
 *.egg*
 *.whl
+# Generated packaged native library and its build receipt.
+/src/warpSPHCore/native/_lib/
 *.mp4
 palette.png
 

@@ -17,7 +17,7 @@ target_include_directories(warpsph_core PUBLIC
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/warpSPHCore>)
 target_include_directories(warpsph_core PRIVATE "${sph_package}")
 target_compile_definitions(warpsph_core PRIVATE SPH_NATIVE_BUILDING_LIBRARY)
-set_target_properties(warpsph_core PROPERTIES EXPORT_NAME core VERSION 0.6.3 SOVERSION 0
+set_target_properties(warpsph_core PROPERTIES EXPORT_NAME core VERSION 0.7.1 SOVERSION 0
   CXX_VISIBILITY_PRESET hidden CUDA_VISIBILITY_PRESET hidden HIP_VISIBILITY_PRESET hidden
   VISIBILITY_INLINES_HIDDEN YES)
 if(WARPSPHCORE_STANDALONE_OPENMP)
@@ -66,7 +66,7 @@ endforeach()
 install(EXPORT warpSPHCoreTargets NAMESPACE warpSPHCore:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/warpSPHCore)
 configure_package_config_file("${CMAKE_CURRENT_SOURCE_DIR}/cmake/warpSPHCoreConfig.cmake.in"
   "${CMAKE_CURRENT_BINARY_DIR}/warpSPHCoreConfig.cmake" INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/warpSPHCore)
-write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/warpSPHCoreConfigVersion.cmake" VERSION 0.6.3 COMPATIBILITY SameMajorVersion)
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/warpSPHCoreConfigVersion.cmake" VERSION 0.7.1 COMPATIBILITY SameMajorVersion)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/warpSPHCoreConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/warpSPHCoreConfigVersion.cmake"
   DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/warpSPHCore)
 if(WARPSPHCORE_STANDALONE_TESTS)
