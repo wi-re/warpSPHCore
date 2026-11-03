@@ -39,4 +39,7 @@ part of a core operator call. Public implicit-rebuild traversal uses the public
 operator's default search settings, whereas explicit search workers apply the
 recorded collection/query/COO options. Local matrix stages do not have a pair
 denominator. Failed/unsupported requests remain explicit; no backend fallback
-is allowed. Native C++ operator/search harness integration remains separate.
+is allowed. The original worker still qualifies Warp operator/search fixtures
+only. For matched native/Warp fixed-list chunking, use
+[bench_chunking.py](CHUNKING.md); the simulator runner can also select native
+core operators inside its Warp runtime explicitly.

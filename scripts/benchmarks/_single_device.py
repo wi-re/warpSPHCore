@@ -16,6 +16,15 @@ import subprocess
 import time
 
 
+def native_digest(root):
+    digest = hashlib.sha256()
+    for path in sorted((Path(root)/'src').rglob('*')):
+        if path.is_file() and path.suffix in ('.cpp', '.cu', '.h', '.cuh', '.hpp'):
+            digest.update(str(path.relative_to(root)).encode())
+            digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 def git_info(root):
     def git(*args):
         p = subprocess.run(['git', '-C', str(root), *args], capture_output=True, text=True)
@@ -29,7 +38,7 @@ def git_info(root):
         digest.update(path.read_bytes())
     return dict(root=str(root), revision=git('rev-parse', 'HEAD'), source_sha256=digest.hexdigest(),
                 dirty=bool(git('status', '--porcelain')),
-                branch=git('branch', '--show-current'))
+                branch=git('branch', '--show-current'), native_source_sha256=native_digest(root))
 
 
 def metadata(device):
@@ -48,7 +57,7 @@ def metadata(device):
             if spec and spec.origin:
                 root = Path(spec.origin).resolve().parents[2]
                 repositories[name] = git_info(root)
-                for node in ast.parse(Path(spec.origin).read_text()).body:
+                for node in ast.walk(ast.parse(Path(spec.origin).read_text())):
                     if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == '__version__' for t in node.targets):
                         if isinstance(node.value, ast.Constant):
                             source_versions[name] = node.value.value
@@ -65,8 +74,9 @@ def metadata(device):
                   packages=packages, source_versions=source_versions,
                   version_note='packages are installed distribution metadata; source_versions are literal source declarations (editable installs can differ)',
                   torch_runtime_version=str(torch.__version__), repositories=repositories, device=str(device),
-                  backend=getattr(warpSPHCore, 'backend', 'warp'), cuda_version=torch.version.cuda,
-                  environment={k: v for k, v in os.environ.items() if k.startswith(('WARPSPH', 'warpSPHCore_', 'OMP_', 'MKL_'))},
+                  backend=getattr(warpSPHCore, 'backend', 'warp'),
+                  operator_backend=getattr(warpSPHCore, 'operator_backend', getattr(warpSPHCore, 'backend', 'warp')), cuda_version=torch.version.cuda,
+                  environment={k: v for k, v in os.environ.items() if k.startswith(('WARPSPH', 'warpSPHCore_', 'OMP_', 'MKL_')) or k in ('TORCH_CUDA_ARCH_LIST', 'CUDA_VISIBLE_DEVICES', 'CXX', 'CXXFLAGS', 'CUDA_HOME', 'MAX_JOBS')},
                   matmul_allow_tf32=torch.backends.cuda.matmul.allow_tf32,
                   cudnn_allow_tf32=torch.backends.cudnn.allow_tf32)
     if torch.device(device).type == 'cuda':
@@ -86,6 +96,7 @@ def configure(request):
     # Must run before importing core: its precision is fixed for process lifetime.
     os.environ['warpSPHCore_PRECISION'] = request['precision']
     os.environ['WARPSPHCORE_BACKEND'] = request['backend']
+    os.environ['WARPSPHCORE_OPERATORS'] = request.get('operator_backend') or request['backend']
     os.environ['warpSPHCore_DIM'] = 'Any'
     os.environ['warpSPHCore_INDEX_DTYPE'] = request.get('index_dtype', 'int32')
     os.environ['warpSPHCore_OFFSET_DTYPE'] = request.get('offset_dtype', 'int64')
@@ -100,6 +111,10 @@ def configure(request):
     actual = getattr(warpSPHCore, 'backend', 'warp')
     if actual != request['backend']:
         raise NotImplementedError(f"requested {request['backend']} backend, imported {actual}; no fallback allowed")
+    actual_operators = getattr(warpSPHCore, 'operator_backend', actual)
+    expected_operators = request.get('operator_backend') or request['backend']
+    if actual_operators != expected_operators:
+        raise NotImplementedError(f'requested {expected_operators} operators, imported {actual_operators}; no fallback allowed')
     if actual == 'warp':
         import warp
         warp.init()
