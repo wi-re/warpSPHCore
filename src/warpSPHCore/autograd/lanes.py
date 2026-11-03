@@ -24,7 +24,9 @@ count; ``1`` (or ``0``) restores the thread-per-particle kernels everywhere.
 Without an explicit process setting, qualified kernels default to 32 lanes;
 the trial curl and Laplacian variants retain one lane pending consumer and
 large-problem qualification. OperatorSpec.defaultNeighborLanes carries that
-choice; ordinary and prepared launchers honor it alike.
+choice; ordinary and prepared launchers honor it alike. CRK volume and
+compatible work use 32 lanes on bounded chunks, retaining their scalar
+flat/grid defaults after large-list qualification.
 Lane counts must divide the 32-thread warp evenly to keep blocks full, so
 only powers of two up to 32 are accepted. A process-wide setting, read at
 launch time, so it can be flipped between calls (A/B timing, bisection).

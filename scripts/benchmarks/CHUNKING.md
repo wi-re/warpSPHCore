@@ -129,3 +129,47 @@ with `RowChunkPolicy` fields for other exact rational padding or byte budgets.
 random counts. These are synthetic stored counts, not generated particle pairs.
 Use external CPU affinity controls for matching comparisons. Results include
 raw samples, counts hashes, signatures, policy, owner counts and source metadata.
+
+
+## Cooperative CRK volume and compatible work
+
+Warp CRK volume and simulator compatible-work sweeps now have deterministic
+multi-lane variants. Each lane visits a contiguous part of a row; particle sums
+use the existing fixed tile reduction, and pair-work writes remain disjoint.
+The scalar kernels remain available and CPU dispatch stays scalar. Native core
+operators keep their own implementation and launch geometry.
+
+These two operators default to 32 lanes for `ChunkedAdjacency`, retaining their
+scalar default for flat CSR/grid inputs. Explicit `setNeighborLanes` or
+`WARPSPHCORE_NEIGHBOR_LANES` settings take precedence. This distinction matters:
+forcing 32 lanes for both new variants made the 96³ flat trajectory about 6%
+slower, although it substantially improved bounded chunks. Chunk budgets still
+matter; this policy does not establish an optimum for every custom chunk size.
+Different lane counts can change floating summation order.
+
+Matched production-default CRKSPH accepted-step medians on the same Blackwell,
+FP32, input-order fixture (three warmup steps, three repetitions):
+
+| Size | CSR before | CSR after | Chunked before | Chunked after |
+| --- | ---: | ---: | ---: | ---: |
+| 48³ | 71.85 ms | 71.73 ms | 120.12 ms | 82.38 ms |
+| 96³ | 526.74 ms | 526.95 ms | 920.09 ms | 627.23 ms |
+
+The measured windows contain five and three accepted steps respectively, using
+the default 8M-edge / 65,536-row budgets. These measurements already include the
+CPU planner optimization above and the existing cooperative force kernels.
+Within each before/after pair, live directed edge counts and accepted times
+match. Separate 48³ five-step profiles reduced compatible work from 42.9 to
+13.1 ms/step and volume from 11.7 to 3.3 ms/step. Those instrumented kernel sums
+are separate evidence and must not replace completed-step wall timings.
+
+FP32/FP64 checks cover volume geometry gradients on CSR/grid inputs, masked rows,
+CUDA graph replay with changed supports, compatible work, stage rates, topology
+rebuild/replay, default kernel selection and energy budgets. The differentiable
+forcing route retains its expanded fallback. These are local Warp results;
+3090/GH200 and multi-GPU comparisons still need matched runs.
+
+The frontend benchmark retains `--lanes 1` as its scalar baseline. Use
+`--lanes default 1 32` to compare production/environment selection with both
+forced paths. The `default` request is recorded as JSON `null`, distinct from
+1 or 32; pin or unset `WARPSPHCORE_NEIGHBOR_LANES` consistently across machines.

@@ -85,3 +85,57 @@ def test_tiled_gradients_match(cuda_case, name):
 
     ref, tiled = _both(grads)
     _close(ref, tiled)
+
+
+@pytest.mark.parametrize('traversal', ['adjacency', 'grid'])
+def test_crk_volume_tiled_geometry_gradients_and_masked_rows(cuda_case, traversal):
+    from dataclasses import replace
+    from warpSPHCore import OperationProperties
+    from warpSPHCore.crk.crk_volume import _computeCRKVolume_stateBackend
+    from warpSPHCore.enumTypes import KernelFunctions, OperationDirection
+    p, d, adjacency = cuda_case['particles'], cuda_case['domain'], cuda_case['adjacency']
+    kinds = p.kinds.clone()
+    kinds[::7] = 1
+    props = OperationProperties(kernel=KernelFunctions.Wendland2,
+                                operationMode=OperationDirection.FluidToFluid)
+    topo = adjacency if traversal == 'adjacency' else adjacency.hashMap
+    def run():
+        x = p.positions.detach().clone().requires_grad_()
+        h = p.supports.detach().clone().requires_grad_()
+        state = replace(p, positions=x, supports=h, kinds=kinds)
+        volume = _computeCRKVolume_stateBackend(state, props, d, adjacency=topo)
+        weight = torch.arange(len(x), device=x.device, dtype=x.dtype).cos()
+        gradients = torch.autograd.grad((volume*weight).sum(), (x, h))
+        assert torch.count_nonzero(volume[::7]) == 0
+        return (volume.detach(), *gradients)
+    scalar, tiled = _both(run)
+    for a, b in zip(scalar, tiled):
+        assert torch.isfinite(a).all() and torch.isfinite(b).all()
+        _close(a, b, rtol=1e-4 if a.dtype == torch.float32 else 2e-11)
+
+
+def test_crk_volume_tiled_graph_replay_reads_current_supports(cuda_case):
+    from dataclasses import replace
+    from warpSPHCore import OperationProperties
+    from warpSPHCore.crk.crk_volume import _computeCRKVolume_stateBackend
+    from warpSPHCore.enumTypes import KernelFunctions
+    from warpSPHCore.autograd.stream import torchWarpCapture, torchWarpStream
+    p = replace(cuda_case['particles'], supports=cuda_case['particles'].supports.clone())
+    props = OperationProperties(kernel=KernelFunctions.Wendland2)
+    def volume():
+        return _computeCRKVolume_stateBackend(p, props, cuda_case['domain'], adjacency=cuda_case['adjacency'])
+    setNeighborLanes(32)
+    stream = torch.cuda.Stream()
+    stream.wait_stream(torch.cuda.current_stream())
+    with torch.cuda.stream(stream), torchWarpStream(p.positions.device):
+        for _ in range(3):
+            volume()
+        graph = torch.cuda.CUDAGraph()
+        with torchWarpCapture(graph):
+            captured = volume()
+        # Smaller supports remain covered by the frozen candidate list.
+        p.supports.mul_(.99)
+        graph.replay()
+        expected = volume()
+    stream.synchronize()
+    torch.testing.assert_close(captured, expected, rtol=0, atol=0)

@@ -1,4 +1,6 @@
 from .._backend import OPERATORS
+from dataclasses import replace
+from ..radiusSearch.chunked import ChunkedAdjacency
 import warp as wp
 from warp.types import vector, matrix
 from typing import Any, Optional, Union
@@ -10,7 +12,7 @@ from ..autograd import *
 
 from ..dataTypes import *
 
-from ..radiusSearch.grid_util import checkOffset, getIndexRange
+from ..radiusSearch.grid_util import checkOffset, getIndexRangeLane, laneSum
 from ..math import *
 from ..kernels import *
 from ..util import *
@@ -68,7 +70,7 @@ def computeCRKVolume_Func_i(
 
 @wp.func
 def computeCRKVolume_Func_Adjacency(
-    i: wp.int32, dim: wp.int32,
+    i: wp.int32, dim: wp.int32, lane: wp.int32, lanes: wp.int32,
     # SPH properties for the points and the corrections
     queryState: Any, referenceState: Any, correctionData: Any,
     # Domain properties 
@@ -97,7 +99,7 @@ def computeCRKVolume_Func_Adjacency(
 
     wsum = scalar_t(0.0)
     for o in range(numOffsets):
-        beginIndex, numIndices = getIndexRange(i, o, useAdjacency, adjacencyState, gridState, queryState, domainState)
+        beginIndex, numIndices = getIndexRangeLane(i, o, lane, lanes, useAdjacency, adjacencyState, gridState, queryState, domainState)
         if beginIndex < 0:
             continue
 
@@ -137,7 +139,7 @@ def computeCRKVolume_Kernel(
         return
 
     wsum, masked = computeCRKVolume_Func_Adjacency(
-        i, domainState.dim,
+        i, domainState.dim, 0, 1,
         queryState, referenceState, correctionData, domainState,
         useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
         kernelProperties,
@@ -151,11 +153,49 @@ def computeCRKVolume_Kernel(
         outputValues[i] = scalar_t(1.0) / wsum
 
 
+@wp.kernel
+def computeCRKVolume_KernelTiled(
+    queryState: Any,
+    referenceState: Any,
+    domainState: domainData,
+
+    useAdjacency: wp.bool, adjacencyState: adjacencyData, gridState: gridData,
+    correctionData: Any, # unused (no corrections apply to the volume estimate itself) -- kept for ABI consistency, see coreOperations/wp_density.py for the same pattern
+
+    kernelProperties: kernelState,
+    # Do not change the parameters above -- this is the canonical structured kernel ABI
+    # (see warpier_core.md, Phase 1 / Step 1); other operators share this argument prefix.
+
+    # The last parameter is always the output array and should not be changed
+    outputValues: wp.array(dtype = scalar_t) # type: ignore
+):
+    i, lane = wp.tid()
+    wsum, masked = computeCRKVolume_Func_Adjacency(
+        i, domainState.dim, lane, wp.block_dim(),
+        queryState, referenceState, correctionData, domainState,
+        useAdjacency, adjacencyState, gridState, gridState.numOffsets if not useAdjacency else 1,
+        kernelProperties,
+    )
+    total = laneSum(wsum)
+    if lane == 0:
+        if masked or total == scalar_t(0.0):
+            outputValues[i] = scalar_t(0.0)
+        else:
+            outputValues[i] = scalar_t(1.0) / total
+
+
 _CRK_VOLUME_SPEC = OperatorSpec(
     rowChunked=True,
     kernel=computeCRKVolume_Kernel,
+    tiledKernel=computeCRKVolume_KernelTiled,
+    defaultNeighborLanes=1,
     outputs=(OutputSpec(dtype=scalar_t),),
 )
+
+
+# Bounded query batches benefit from cooperation; large flat lists retain the
+# established scalar default. Explicit lane overrides still select either path.
+_CHUNK_VOLUME_SPEC = replace(_CRK_VOLUME_SPEC, defaultNeighborLanes=32)
 
 
 def _computeCRKVolume_stateBackend(
@@ -163,7 +203,7 @@ def _computeCRKVolume_stateBackend(
     operationProperties: OperationProperties,
     domain: DomainDescription,
 
-    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap]] = None,
+    adjacency: Optional[Union[AdjacencyListWarp, CompactHashMap, ChunkedAdjacency]] = None,
     referenceParticles: Optional[ParticleState] = None,
 ) -> torch.Tensor:
     """Computes the CRK apparent-volume estimate V_i = 1 / sum_j W_ij for every query
@@ -184,6 +224,7 @@ def _computeCRKVolume_stateBackend(
                 adjacency=adjacency,
                 reference=referenceParticles,
             )
-            result = launchOperator(_CRK_VOLUME_SPEC, ctx)
+            spec = _CHUNK_VOLUME_SPEC if isinstance(adjacency, ChunkedAdjacency) else _CRK_VOLUME_SPEC
+            result = launchOperator(spec, ctx)
 
     return result

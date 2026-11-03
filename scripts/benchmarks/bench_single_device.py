@@ -75,15 +75,17 @@ def workload(request, device):
                   mean_neighbors_including_self=w.edges / w.n,
                   search_options_scope='explicit fixture topology; implicit operator rebuild uses public operator defaults')
     if request['kind'] == 'operator':
+        # Case's legacy lane field is integer-only; runtime dispatch uses the
+        # process selection above. Keep None in the reported request/metadata.
         c = Case(w.n, dim=w.dim, neighbors=request['neighbors'], operation=request['operation'],
-                 traversal=request['traversal'], lanes=request['lanes'], kernel=request['kernel'])
+                 traversal=request['traversal'], lanes=request['lanes'] or 1, kernel=request['kernel'])
         fn = w.call(c)
         # Independent lane-1/CSR reference outside timing, including grid/rebuild paths.
         from dataclasses import replace
         setNeighborLanes(1)
         reference = w.call(replace(c, traversal='adjacency', lanes=1))()
         setNeighborLanes(request['lanes'])
-        return fn, lambda out: check_output(out, reference), dict(common, case=asdict(c), **work_counts(c, w.edges))
+        return fn, lambda out: check_output(out, reference), dict(common, case=asdict(c) | dict(lanes=request['lanes']), **work_counts(c, w.edges))
     if request['kind'] != 'search':
         raise ValueError(request['kind'])
     from warpSPHCore import radiusSearchCompactHashMap
