@@ -216,22 +216,34 @@ not. Separate two-step traces showed essentially unchanged total GPU kernel
 work for CSR/chunks (about 130/133 ms at 1448²). The extra rebuild/dispatch host
 cost must not be interpreted as degrading per-operator GPU scaling.
 
-Exploratory matched three-step/three-repetition timings (cooperative moments
-were still enabled for chunks in this control):
+Final matched three-step/three-repetition production-default timings:
 
-| Scheme / size | CSR after | Chunked before | Chunked after |
-| --- | ---: | ---: | ---: |
-| MFV 96³ | 118.5 ms | 320.2 ms | 172.0 ms |
-| MFV 128³ | 272.8 ms | 760.5 ms | 410.5 ms |
-| deltaSPH 1024² | 32.4 ms | 37.9 ms | 38.3 ms |
-| deltaSPH 1448² | 67.5 ms | 97.7 ms | 80.9 ms |
+| Scheme / size | CSR after | Chunked before | Chunked after | Overhead after |
+| --- | ---: | ---: | ---: | ---: |
+| MFV 96³ | 118.2 ms | 320.2 ms | 182.4 ms | 54.3% |
+| MFV 128³ | 272.8 ms | 760.5 ms | 432.0 ms | 58.4% |
+| deltaSPH 1024² | 32.2 ms | 37.9 ms | 38.4 ms | 19.1% |
+| deltaSPH 1448² | 67.0 ms | 97.7 ms | 79.3 ms | 18.4% |
 
 All use FP32/Warp, input order, eager execution and unchanged 8M-edge / 65,536-row
 budgets. Delta uses its supported 2D TGV fixture; these absolute times do not
-compare equivalent 3D physics. MFV's new reduction tree shifts accepted times by
-at most 1.4e-9 in these windows. Independent physics/conservation tests qualify
-the rounding change. MFV retains about 45–50% chunking overhead; its operator
+compare equivalent 3D physics. Final accepted-time sequences and available
+chunked edge totals match the before trajectories. Independent physics and
+conservation tests also pass. MFV retains about 55–60% chunking overhead; its operator
 launches remain per chunk, so collection batching does not eliminate that cost.
 
 Per-cell tiled collection and scalar block-size sweeps did not improve completed
 steps and were not promoted. Their evidence is retained outside the checkout.
+
+A longer delta control (three warmup, twenty measured steps, three repetitions)
+measured 33.5 / 41.8 ms for CSR/chunks at 1024² and 65.7 / 76.8 ms at 1448².
+The resulting overhead is 24.8% / 16.9%; it does not reproduce the increasing
+relative cost seen in the original three-step windows. This remains an early
+trajectory on one machine, not developed-flow or 3D delta qualification.
+
+Separate 96³ MFV two-step profiles reduced collection from 67.9 to 15.8 ms/step
+(CSR: 16.5), with four batched collection launches replacing 124 chunk launches.
+Simulator flux kernels changed from 89.1 to 59.9 ms/step (CSR: 42.5). Scalar
+moments remain 20.5 ms/step versus 7.9 for CSR. Batching these operator passes
+is the next target; it can retain scalar summation order for closure-sensitive
+moments. Profile kernel sums do not replace completed-step wall timings.
