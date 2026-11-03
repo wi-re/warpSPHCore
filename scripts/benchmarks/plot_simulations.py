@@ -19,7 +19,7 @@ def main():
     for path in sorted(args.results.glob('*/result.json')):
         result = json.loads(path.read_text())
         config = result['arguments']
-        if config['device'] != args.device or result['profiled'] or config['snapshots']:
+        if config['device'] != args.device or result['profiled'] or config.get('stage_profile', False) or config['snapshots']:
             continue
         if path.parent.name.startswith(('gpu-repeat-', 'gpu-repeat-large-', 'gpu-confirm-')):
             continue

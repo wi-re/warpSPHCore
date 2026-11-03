@@ -48,6 +48,7 @@ def main():
     parser.add_argument('--steps', type=int, default=30)
     parser.add_argument('--threads', type=int, default=24)
     parser.add_argument('--profile', action='store_true', help='Record dispatched Torch operators; these timings are not benchmark results')
+    parser.add_argument('--stage-profile', action='store_true', help='Partition runner time by frontend stage and actual Warp/native dispatch (adds event overhead)')
     parser.add_argument('--snapshots', action='store_true', help='Save every accepted state for trajectory comparison, outside step timing')
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
@@ -90,6 +91,13 @@ def main():
             if value.is_floating_point() and not torch.isfinite(value).all():
                 raise AssertionError(f'Non-finite accepted {name}')
         return values
+
+    stage_timing = None
+    if args.stage_profile:
+        if args.profile:
+            parser.error('Use separate runs for --profile and --stage-profile')
+        from stage_timing import StageTiming
+        stage_timing = StageTiming(args.device).install()
 
     initial_values = None
 
@@ -156,6 +164,9 @@ def main():
             (args.out / 'profile-gpu.txt').write_text(averages.table(sort_by='self_device_time_total', row_limit=30))
     else:
         result = run(case, **options)
+    if stage_timing is not None:
+        stage_timing.save(args.out / 'stage-timing.json', args.warmup, args.steps)
+        stage_timing.close()
     if result.diverged:
         raise AssertionError(f'Simulation diverged: {result.stopReason}')
     rows = [row for row in result.trajectory if row['step'] >= args.warmup]

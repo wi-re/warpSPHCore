@@ -8,6 +8,8 @@
   traversal remains unported.
 - Add complete-simulation correctness comparisons and CPU/CUDA scaling drivers;
   retain failed FP32 projection controls explicitly in the qualification report.
+- Add benchmark-only exclusive frontend stage profiling and stacked CPU/CUDA
+  charts, distinguishing remaining Warp kernels from native operators and scaffolding.
 
 ## 0.7.1 — 2026-11-03
 

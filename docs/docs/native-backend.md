@@ -987,3 +987,16 @@ report separates that result from operator throughput. Sparse neighborhoods,
 1D and FP64 often favor CSR. Production kernels are unchanged. The primary
 benchmark now defaults to n_h=4, with n_h=2.57 as comparison and --neighbors 32
 for reproducing historical runs.
+
+### Full simulation stage profiling
+
+The benchmark-only `--stage-profile` option on
+`scripts/benchmarks/bench_simulations.py` uses the frontend's existing numbered
+gates and actual Warp/native dispatch to partition complete step time. It keeps
+mixed CRK stages explicit and adds no instrumentation to production simulation
+code. `plot_simulation_stages.py` creates stacked comparisons: colors identify
+simulation aspects, diagonal hatching identifies remaining Warp work, and dots
+identify scaffolding/Torch/dispatch. Black diamonds show matched ordinary runs
+because instrumentation itself adds cost. See the
+[stage attribution report](../regression/native_frontend_stages_2026_11_03.md)
+for scope, raw evidence and reproduction.
