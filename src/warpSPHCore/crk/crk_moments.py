@@ -284,6 +284,7 @@ def _dimOf(ctx, extras):
 
 
 _CRK_MOMENTS_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=computeCRKMoments_Kernel,
     tiledKernel=computeCRKMoments_KernelTiled,
     outputs=(

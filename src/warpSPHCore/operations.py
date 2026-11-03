@@ -105,7 +105,8 @@ def warpOperation(
                 "state-aware autograd bridge. Pass queryValues/referenceValues instead."
             )
 
-        if crkState is not None and (crkState.gradA is None or crkState.gradB is None) and operation in (WarpOperation.Gradient, WarpOperation.Divergence, WarpOperation.Curl):
+        crkRoles = crkState if isinstance(crkState, tuple) else (crkState,)
+        if crkState is not None and any(s.gradA is None or s.gradB is None for s in crkRoles) and operation in (WarpOperation.Gradient, WarpOperation.Divergence, WarpOperation.Curl):
             raise ValueError("CRK gradient correction A and B tensors must be provided if useCRK is True and the operation is Gradient, Divergence, or Curl.")
 
         if operation == WarpOperation.Interpolate:

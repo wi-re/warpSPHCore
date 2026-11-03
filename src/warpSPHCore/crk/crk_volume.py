@@ -151,6 +151,7 @@ def computeCRKVolume_Kernel(
 
 
 _CRK_VOLUME_SPEC = OperatorSpec(
+    rowChunked=True,
     kernel=computeCRKVolume_Kernel,
     outputs=(OutputSpec(dtype=scalar_t),),
 )

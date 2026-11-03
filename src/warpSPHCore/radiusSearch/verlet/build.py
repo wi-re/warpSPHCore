@@ -232,6 +232,18 @@ def buildVerletList(
         forceRebuild : bool = False,
         *, collection: str = 'auto', queryOrder: str = 'auto', storeI: bool = True,
 ):
+    from ..chunked import ChunkedAdjacency, buildChunkedVerletList
+    if isinstance(priorNeighborhood, ChunkedAdjacency):
+        if gridFactory is not None or capacity is not DEFAULT_CAPACITY:
+            raise NotImplementedError('Chunked Verlet lists do not support flat capacities or grid factories.')
+        if collection not in ('auto', 'split') or queryOrder not in ('auto', 'input'):
+            raise NotImplementedError('Chunked Verlet lists require direct split collection in input row order.')
+        return buildChunkedVerletList(
+            queryParticles, domain, referenceParticles=referenceParticles,
+            policy=priorNeighborhood.plan.policy, verletScale=verletScale,
+            supportMode=supportMode, priorNeighborhood=priorNeighborhood,
+            storeI=storeI, rebuildSlack=rebuildSlack, forceRebuild=forceRebuild,
+            orderingKey=priorNeighborhood.orderingKey)
     with record_function(f"[warpSPH] - buildVerletList"):
         if referenceParticles is None:
             referenceParticles = queryParticles

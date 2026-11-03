@@ -32,6 +32,7 @@ def _launch(
     numThreads: Optional[int] = None,
     jvp_fn: Optional[Callable] = None,
     lanes: Optional[int] = None,
+    blockDim: Optional[int] = None,
 ):
     """Shared engine behind both ``warpWrapper2`` (the untyped, positional
     legacy entry point) and ``launchOperator`` (Step I, ``operator_spec.py``
@@ -120,13 +121,15 @@ def _launch(
             return struct_args + tuple(reconstructed)
 
         # Wrap launcher to inject numThreads / lanes if provided
-        if numThreads is not None or lanes is not None:
+        if numThreads is not None or lanes is not None or blockDim is not None:
             original_launcher = launcher
             launchKw = {}
             if numThreads is not None:
                 launchKw['numThreads'] = numThreads
             if lanes is not None:
                 launchKw['lanes'] = lanes
+            if blockDim is not None:
+                launchKw['blockDim'] = blockDim
             def launcher_with_threads(kernel, output_shape, output_dtype, *args):
                 return original_launcher(kernel, output_shape, output_dtype, *args, **launchKw)
             launcher = launcher_with_threads

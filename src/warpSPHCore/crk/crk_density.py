@@ -215,6 +215,8 @@ def computeCRKDensity_KernelTiled(
 
 
 _CRK_DENSITY_SPEC = OperatorSpec(
+    rowChunked=True,
+    queryOnlyCRK=True,
     kernel=computeCRKDensity_Kernel,
     tiledKernel=computeCRKDensity_KernelTiled,
     outputs=(OutputSpec(dtype=scalar_t),),
