@@ -231,3 +231,39 @@ improves that route while the broader historical regression remains. ACSPH
 TGV completes at 36.4 ms versus 518 ms historically, with a metadata-only
 harness ABI fix after a preserved failure. These historical timings include
 broader core/runtime changes and do not replace the controlled W4 campaigns.
+
+## Deadline handoff and physical matrix qualification
+
+The authorized GPU session stopped at 08:00 UTC on 2026-11-04. The fluid matrix
+was replayed in declared row order before compressible; no physical duration,
+resolution, tolerance or alarm was shortened to increase coverage. Selected
+fluid status counts are `{"completed": 32, "failed": 2, "pending": 45, "session-deadline": 1, "unsupported": 25}`; compressible counts are `{"pending": 142, "unsupported": 8}`.
+The external `matrix/continuation-status-r18.json` lists every remaining row,
+selected attempt, frozen compiled pair and source head. A budget-interrupted
+row requires replay: partial diagnostics are not a restart checkpoint.
+
+Completed execution is distinct from field parity. Among the completed fluid
+rows, 2 pass the original 2e-4 endpoint gate, 27 fail and 3 lack a
+comparable endpoint. 4 initial comparisons fail their unchanged gate.
+Historical replays include broader source/runtime changes; these failures do
+not replace same-source operator checks and must not be described as unchanged
+results. All observed frontend numerical calls dispatch natively, while the
+complete solvers remain mixed Warp/native. Timings and every failed attempt
+remain in the external selected JSON/CSV and per-row evidence.
+
+Hydrostatic particle-wall ACSPH stops at t=2.93729 before t=4 on the velocity
+alarm. Its historical run also fails, but used a different 100x versus current
+20x stop policy; this is not a matched failure-parity claim. Analytic-wall
+Taylor-Couette deltaSPH becomes nonfinite at step 324, t=0.0648 before t=25.
+Current matrix-harness Warp/frontend controls also fail (overflow/allocation
+errors), whereas dedicated-runner all-Warp controls at original 00061ed/2f9fc64
+and current frozen 04125a4/70276cf both pass 500 steps, with identical recorded
+times, maximum velocities and minimum densities. This narrows investigation to
+behavior exercised by the matrix harness; native full-row qualification is
+still unresolved. No timestep, alarm, tolerance or numerical method was tuned
+to bypass these failures. The original AC metadata error and successful retry
+remain separately retained.
+
+The Isambard run was not started or resumed. HIP coverage is compile-only;
+long FP32 pointwise parity, non-isentropic CRK cancellation-sensitive work,
+legacy unsupported grid modes and neighborhood AD retain the limits above.
