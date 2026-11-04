@@ -132,7 +132,8 @@ def main():
         # UID order removes the storage permutation without hiding dynamics.
         order = torch.argsort(state.UIDs)
         names = ('UIDs', 'positions', 'supports', 'masses', 'kinds', 'velocities',
-                 'densities', 'pressures', 'internalEnergies', 'u', 'v')
+                 'densities', 'pressures', 'internalEnergies', 'u', 'v', 'Q',
+                 'totalEnergies', 'materials', 'entropies', 'soundspeeds', 'alphas')
         values = {name: value.detach()[order].cpu().clone() for name in names
                   if isinstance(value := getattr(state, name, None), torch.Tensor)}
         for name, value in values.items():
@@ -146,6 +147,19 @@ def main():
             parser.error('Use separate runs for --profile and --stage-profile')
         from stage_timing import StageTiming
         stage_timing = StageTiming(args.device).install()
+
+    def active_adjacency(system):
+        adjacency = getattr(system, 'adjacency', None)
+        if adjacency is not None:
+            return adjacency, 'system.adjacency'
+        context = getattr(system, 'meshlessContext', None)
+        geometry = getattr(context, 'geom', None)
+        if geometry is not None:
+            return geometry.adjacency, 'meshlessContext.geom'
+        ticket = getattr(system.state, '_meshlessGeometry', None)
+        if ticket is not None:
+            return ticket.geometry.adjacency, 'accepted geometry ticket'
+        raise ValueError('Benchmark needs an explicit active neighborhood for this solver')
 
     initial_values = None
 
@@ -171,7 +185,7 @@ def main():
         if step >= args.warmup and last_boundary is not None:
             gaps.append(1000 * (now - last_boundary))
         last_boundary = now
-        adjacency_objects.append(id(system.adjacency))
+        adjacency_objects.append(id(active_adjacency(system)[0]))
         if args.snapshots:
             snapshots.append(state_values(system))
         if profiler is not None:
@@ -223,13 +237,14 @@ def main():
         raise AssertionError(f'Expected {args.steps} measured steps, got {len(timings)}')
     torch.save(dict(initial=initial_values, final=state_values(result.state),
                     snapshots=snapshots), args.out / 'states.pt')
+    adjacency, adjacency_source = active_adjacency(result.state)
     metadata = dict(arguments={**vars(args), 'out': str(args.out)},
                     versions=dict(core=warpSPHCore.__version__, integrators=warpSPHIntegrators.__version__,
                                   torch=torch.__version__, warp=__import__('warp').__version__),
                     sources={name: revision(module) for name, module in
                              [('core', warpSPHCore), ('frontend', warpSPH), ('integrators', warpSPHIntegrators)]},
                     particles=len(result.state.state.positions),
-                    csr_candidates_per_particle=float(result.state.adjacency.numNeighbors.float().mean().cpu()),
+                    csr_candidates_per_particle=float(adjacency.numNeighbors.float().mean().cpu()),
                     median_step_ms=statistics.median(timings),
                     mean_step_ms=statistics.mean(timings),
                     median_runner_interval_ms=statistics.median(gaps),
@@ -252,8 +267,7 @@ def main():
         ('WARPSPHCORE_NATIVE_BUILD', 'WARPSPHCORE_NATIVE_CPU_ARCH', 'TORCH_CUDA_ARCH_LIST',
          'WARPSPHCORE_NEIGHBOR_LANES', 'MAX_JOBS')}
     from dataclasses import asdict
-    adjacency = result.state.adjacency
-    metadata['neighborhood'] = dict(kind=type(adjacency).__name__,
+    metadata['neighborhood'] = dict(kind=type(adjacency).__name__, source=adjacency_source,
         num_edges=adjacency.numEdges,
         chunks=[asdict(chunk.metadata) for chunk in getattr(adjacency, 'chunks', ())],
         policy=asdict(adjacency.plan.policy) if hasattr(adjacency, 'plan') else None,
