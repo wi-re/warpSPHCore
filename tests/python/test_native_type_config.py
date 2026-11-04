@@ -28,3 +28,13 @@ def test_native_independent_integer_widths_and_preconfiguration(monkeypatch):
     policy=load()
     assert policy.get_torch_precision()==torch.float32 and policy.get_dim()==3
     assert policy.get_torch_index_dtype()==torch.int32
+
+
+def test_native_dynamic_dimension_accepts_preimport_typing_any(monkeypatch):
+    from typing import Any
+    config=types.ModuleType('warpSPHCore_config');config.precision='single'
+    monkeypatch.setitem(sys.modules,'warpSPHCore_config',config)
+    monkeypatch.delenv('warpSPHCore_DIM',raising=False)
+    for dim in (Any,'typing.Any','Any','dynamic',None):
+        config.dim=dim
+        assert load().get_dim() is Any

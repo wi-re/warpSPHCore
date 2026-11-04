@@ -21,7 +21,7 @@ index_t = integer_type('warpSPHCore_INDEX_DTYPE',getattr(config,'index_dtype',No
 offset_t = integer_type('warpSPHCore_OFFSET_DTYPE',getattr(config,'offset_dtype',None))
 neighbor_count_t = torch.int32
 _dimension = getattr(config,'dim',None) if getattr(config,'dim',None) is not None else os.getenv('warpSPHCore_DIM','Any')
-if str(_dimension).strip().lower() in ('','any','dynamic','none','*'):dim_t = Any
+if _dimension is Any or str(_dimension).strip().lower() in ('','any','typing.any','dynamic','none','*'):dim_t = Any
 else:
     dim_t = int(_dimension)
     if dim_t<1:raise ValueError('warpSPHCore_DIM must be positive or Any')
