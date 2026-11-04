@@ -94,3 +94,59 @@ wide CSR. Two CPU/two CUDA regressions reject every attempted Warp tensor view
 in native prepared flat/owned launches. Existing ownership/field/prepared checks
 pass 73 CPU (one device skip) and 76 CUDA cases. Both PESPH variants preserve
 bitwise flat/chunk/prepared results in eight CPU and eight CUDA checks.
+
+
+## Complete frontend primal and package checkpoint
+
+Final numerical pins are frontend `148551f` and paired core `1700e1c`. All 100
+frontend kernel definitions (65 files, factories included) now have native
+primal routes. Late increments cover IISPH, wall moments, surface detection,
+Godunov/Gaussian/Inutsuka, material EOS, Morton keys, PESPH, bounded utility and
+diagnostic reductions, Liu/mDBC and both ACSPH families. Pair viscosity and
+reconstruction share templated physics. Shared core meshless functionality is
+reused. Source ownership/manifests, CPU/GPU traversal, bindings and portable
+builds follow the existing core structure. Defaults remain Warp; complete
+source coverage does not certify every solver/setup/derivative route as fully
+native. Unsupported neighborhood AD and method-specific legacy-grid modes
+reject explicitly. The frontend coverage ledger specifies these contracts.
+
+Complete source qualification passes 559 CPU cases (five device skips), 564
+FP32 CUDA cases and 564 FP64 CUDA cases. Both portable CMake CPU wheels pass
+559 cases under strict prebuilt loading. The CMake CUDA frontend wheel paired
+with the qualified core GPU development-JIT binary snapshot passes 564 cases,
+plus 59 selected installed FP64 independent/dense/width oracles. The GPU core
+snapshot is not a separately built core CMake CUDA wheel. HIP gfx942 compiles
+all 29 frontend and two shared meshless GPU units; AMD execution is unavailable.
+No tolerance was relaxed. Prior baseline failures and discarded probes remain
+external evidence, including the native-core uniform-transport and AC no-wall
+precision checks documented in the frontend ledger.
+
+Final prepared native calls pass real sparse addressing above 2^31 in FP32 and
+FP64 without any Warp tensor view. FP64 peak allocation is 60.13 GB and the
+largest flattened work element is 6,442,450,958. Separately, final-source fixed
+128³ CUDA lists contain 1,017,118,720 live neighbors (degree 485). Native CSR,
+one-, two- and four-chunk force medians are 53.17/53.25/53.59/53.94 ms and work
+medians 57.50/57.93/58.18/58.67 ms. Warp force costs 183.60/184.25/185.52/187.21
+ms; compatible work is extent-limited for CSR/one chunk and costs 150.69/158.08
+ms for two/four chunks. Actual dispatch, complete public calls, seven five-call
+repetitions, identical isentropic physical settings and policies are retained.
+The same final-source non-isentropic 64³ case still fails six near-zero entropy
+sign work components across CSR/1/2/4 chunks at the original bound. It remains
+unqualified; the isentropic result does not supersede it.
+
+The earlier large driven 128³ accepted-step checkpoint (frontend `7af0f9c`,
+core `cdac0f0`) passes all UID-ordered initial/accepted/final fields at 2e-4;
+all 24 controls/profile runs finish at exactly 0.0014999996637925506. Native
+CSR/1/2/4-chunk mean costs are 389.61/393.24/391.39/393.64 ms versus Warp
+935.56/938.93 ms for two/four chunks (CSR/one-chunk Warp work unsupported).
+This trajectory has candidate degree 515, distinct from the degree-485 fixed
+list. Source flags/policies are frozen with each checkpoint.
+
+Final-source 128² CPU accepted-state and stage comparisons pass at 2e-4 with
+exact final times. One-thread Warp/native medians in ms: CRK 1228.03/637.46,
+delta 346.62/338.67, MFM 319.41/330.84, MFV 175.67/197.68. Single-thread MFM
+and MFV still regress by 3.6% and 12.5%. Four-thread medians are respectively
+1280.07/180.91, 328.97/89.24, 489.07/89.76, 258.44/53.15; raw slower runs and
+means remain included. A one-file factored-W4 experiment against the earlier
+meshless checkpoint reduced its original 45–58% single-thread regressions,
+but did not eliminate them. Index-width tuning remains a separate follow-up.
