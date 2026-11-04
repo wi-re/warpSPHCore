@@ -150,3 +150,20 @@ and MFV still regress by 3.6% and 12.5%. Four-thread medians are respectively
 means remain included. A one-file factored-W4 experiment against the earlier
 meshless checkpoint reduced its original 45–58% single-thread regressions,
 but did not eliminate them. Index-width tuning remains a separate follow-up.
+
+
+A final addressing audit found the same signed lane-increment overflow in the
+borrowed `CsrView` used by native differential/density pullbacks. Its counter is
+now int64, matching typed CSR. The original borrowed boundary fails UBSan at
+INT_MAX-2 + 8; both typed and borrowed CPU checks pass after the fix, as does a
+minimal real CUDA borrowed traversal. These checks isolate final-lane arithmetic
+with a shifted one-entry fixture; they do not claim a billion-live-edge row.
+The performance/package snapshots above remain pinned to `1700e1c`; this later
+boundary-only correction does not change their measured source or artifacts.
+
+Final frozen-pair matched CUDA accepted-step medians (Warp/native, ms) are
+CRKSPH 512² 20.046/8.729, deltaSPH 512² 7.731/4.878, MFM 256² 6.872/3.121 and
+MFV 256² 3.956/1.759. All three repetitions per backend and separate exclusive
+stage runs pass every saved field at the original 2e-4 bound and exact final
+time. Largest scaled field error is 2.30e-5. These use native core in both
+controls, Warp 1.19, W4, n_h=4, matched physical settings and recorded policies.

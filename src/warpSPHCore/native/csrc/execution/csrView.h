@@ -13,7 +13,8 @@ struct CsrView {
     template <class Visit>
     SPH_HD void each(int64_t row, int lane, int lanes, Visit visit) const {
         const auto begin = offsets[row];
-        for (int32_t k = lane; k < counts[row]; k += lanes)
+        // Match typed Csr: the final cooperative increment can exceed INT32_MAX.
+        for (int64_t k = lane; k < counts[row]; k += lanes)
             visit(Neighbor{indices[begin + k], begin + k});
     }
 };
