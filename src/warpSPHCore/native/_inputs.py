@@ -3,7 +3,7 @@
 Tensor shape/device/content validation remains in C++; operator-specific field
 requirements and derivative policy belong to each nt_<operator> entry point.
 """
-from dataclasses import replace
+from types import SimpleNamespace
 from .._models import AdjacencyList
 from ..enumTypes import KernelFunctions
 import torch
@@ -51,9 +51,13 @@ def prepare_adjacency(query, reference, domain, properties, adjacency):
     if adjacency is None:
         # Neighbour topology is discrete; differentiate the fixed CSR primal.
         with torch.no_grad():
-            query_geometry = replace(query, positions=query.positions.detach(), supports=query.supports.detach())
-            reference_geometry = replace(reference, positions=reference.positions.detach(), supports=reference.supports.detach())
-            fixed_domain = replace(domain, min=domain.min.detach(), max=domain.max.detach())
+            # Search consumes geometry only. Keep the public particle/domain
+            # duck-typing contract, without mutating or reconstructing callers'
+            # simulation subclasses just to detach discrete topology.
+            query_geometry = SimpleNamespace(positions=query.positions.detach(), supports=query.supports.detach())
+            reference_geometry = SimpleNamespace(positions=reference.positions.detach(), supports=reference.supports.detach())
+            fixed_domain = SimpleNamespace(min=domain.min.detach(), max=domain.max.detach(),
+                                           periodic=domain.periodic, dim=domain.dim)
             adjacency = radiusSearch(query_geometry, fixed_domain, reference_geometry, properties.supportMode, backend='native')
     from ..radiusSearch.chunked import ChunkedAdjacency
     if isinstance(adjacency,ChunkedAdjacency):

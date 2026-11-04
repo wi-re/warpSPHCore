@@ -242,3 +242,17 @@ def test_parallel_cpu_rows_match_serial_and_oracle():
         torch.set_num_threads(threads)
     torch.testing.assert_close(parallel, serial, rtol=0, atol=0)
     torch.testing.assert_close(parallel, expected, rtol=3e-12, atol=3e-12)
+
+
+def test_automatic_topology_accepts_particle_and_domain_protocols(device):
+    from types import SimpleNamespace
+    from warpSPHCore.native._inputs import prepare_adjacency
+    q,r,d,_,_=case(device,dtype=torch.float64)
+    q.positions.requires_grad_();r.supports.requires_grad_()
+    query=SimpleNamespace(**vars(q));reference=SimpleNamespace(**vars(r));domain=SimpleNamespace(min=d.min,max=d.max,periodic=d.periodic,dim=d.dim)
+    expected=sph.radiusSearch(q,d,referenceParticles=r,mode=sph.SupportScheme.Gather)
+    actual=prepare_adjacency(query,reference,domain,sph.OperationProperties(kernel=sph.KernelFunctions.Wendland2),None)
+    for name in ('paddedJ','numNeighbors','edgeOffsets'):
+        torch.testing.assert_close(getattr(actual,name),getattr(expected,name),rtol=0,atol=0)
+    assert query.positions is q.positions and query.positions.requires_grad
+    assert reference.supports is r.supports and reference.supports.requires_grad

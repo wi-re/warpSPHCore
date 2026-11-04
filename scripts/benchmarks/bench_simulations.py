@@ -213,6 +213,7 @@ def main():
         options['adaptiveDt'] = True
         options['maxDt'] = args.dt
         options['integrationScheme'] = 'rungeKutta2'
+        options['storeMode'] = 'trajectory'  # No checkpoint export during timing-only runs.
         params.update(gamma=1.4, accelerationRMS=.1, thermalModel='adiabatic',
                       soundSpeed=args.sound_speed if args.sound_speed is not None else 1.)
     if args.scheme:
