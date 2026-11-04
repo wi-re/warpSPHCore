@@ -4,7 +4,7 @@
 #include "execution/dispatch.h"
 namespace sph_native::mfm {
 enum Field { Rho,Velocity,Pressure,GradientRho,GradientVelocity,GradientPressure,AlphaRho,AlphaVelocity,AlphaPressure,
-             Volume,Inverse,Potential,Bad,Beta,Kappa,Vector,Cell,FieldCount };
+             Volume,Inverse,Potential,Bad,Beta,Kappa,Vector,Cell,Gamma,Material,DeviceTimestep,FieldCount };
 enum Pass { Moments,Gradients,Limiter,Residual,Weights,Matvec,Coarse,Flux,Timestep };
 struct Options {
     double gamma=1.4,dt=0,psi1=.5,psi2=.25,power=1,massLimit=.1,closureCap=0,cfl=.2;
@@ -16,11 +16,14 @@ struct Buffers {Tensors values,output;Options options;};
 template<class T,int D,int Task> struct Row {
     RowArgs<T,D> args;
     const T* fields[FieldCount]={};
-    const int32_t *bad=nullptr,*cells=nullptr;
+    const int32_t *bad=nullptr,*cells=nullptr,*materials=nullptr;
     T* output[3]={};
     int32_t* counts=nullptr;
     Options options;
     using Vec=SmallVector<T,D>;using Mat=SmallMatrix<T,D>;
+    SPH_HD T gamma(int64_t i) const {return fields[Gamma]?fields[Gamma][i]:T(options.gamma);}
+    SPH_HD T timestep() const {return fields[DeviceTimestep]?fields[DeviceTimestep][0]:T(options.dt);}
+    SPH_HD int pair_mode(int64_t i,int64_t j) const {return materials&&materials[i]!=materials[j]?0:options.mode;}
     SPH_HD T scalar(int field,int64_t i) const {return fields[field][i];}
     SPH_HD Vec vector(int field,int64_t i) const {return load_vector<T,D>(fields[field],i);}
     SPH_HD Mat matrix(int field,int64_t i) const {return load_matrix<T,D>(fields[field],i);}
@@ -34,37 +37,38 @@ template<class T,int D,int Task> struct Row {
     }
     template<class Visit> SPH_HD void each(int64_t row,Visit visit) const {
         const auto begin=args.offsets[row];
-        for(int32_t k=0;k<args.counts[row];++k)visit(neighborhood::Neighbor{args.neighbors[begin+k],begin+k});
+        for(int64_t k=0;k<args.counts[row];++k)visit(neighborhood::Neighbor{args.neighbors[begin+k],begin+k});
     }
     SPH_HD FaceFlux<T,D> riemann(int64_t a,int64_t b,const Vec& normal,const Vec& frame,Primitive<T,D> left,Primitive<T,D> right) const {
         left.density=maximum(left.density,T(1e-30));right.density=maximum(right.density,T(1e-30));
         left.pressure=maximum(left.pressure,T(1e-30));right.pressure=maximum(right.pressure,T(1e-30));
         const T uL=dot(left.velocity,normal),uR=dot(right.velocity,normal);
-        return face_flux(left.density,uL,left.velocity-uL*normal,left.pressure,right.density,uR,right.velocity-uR*normal,right.pressure,
-            T(options.gamma),options.mode,normal,frame);
+        return face_flux_material(left.density,uL,left.velocity-uL*normal,left.pressure,right.density,uR,right.velocity-uR*normal,right.pressure,
+            gamma(a),pair_mode(a,b),normal,frame,gamma(b));
     }
     SPH_HD FaceFlux<T,D> flux(int64_t a,int64_t b,Vec d,Vec face,T area) const {
+        const T dt=timestep();
         const Vec normal=face/area,va=vector(Velocity,a),vb=vector(Velocity,b);
         const T fraction=args.rh[a]/(args.rh[a]+args.rh[b]);
         Vec halfA=va,halfB=vb;
-        if(options.order>=2 && options.dt>0 && options.timeCentred) {
+        if(options.order>=2 && dt>0 && options.timeCentred) {
             const auto da=time_derivative(scalar(Rho,a),va,scalar(Pressure,a),scalar(AlphaRho,a)*vector(GradientRho,a),
-                limited_gradient(matrix(GradientVelocity,a),vector(AlphaVelocity,a)),scalar(AlphaPressure,a)*vector(GradientPressure,a),T(options.gamma));
+                limited_gradient(matrix(GradientVelocity,a),vector(AlphaVelocity,a)),scalar(AlphaPressure,a)*vector(GradientPressure,a),gamma(a));
             const auto db=time_derivative(scalar(Rho,b),vb,scalar(Pressure,b),scalar(AlphaRho,b)*vector(GradientRho,b),
-                limited_gradient(matrix(GradientVelocity,b),vector(AlphaVelocity,b)),scalar(AlphaPressure,b)*vector(GradientPressure,b),T(options.gamma));
-            halfA=va+T(.5)*T(options.dt)*da.velocity;halfB=vb+T(.5)*T(options.dt)*db.velocity;
+                limited_gradient(matrix(GradientVelocity,b),vector(AlphaVelocity,b)),scalar(AlphaPressure,b)*vector(GradientPressure,b),gamma(b));
+            halfA=va+T(.5)*T(dt)*da.velocity;halfB=vb+T(.5)*T(dt)*db.velocity;
         }
         const Vec frame=halfA+fraction*(halfB-halfA);
         auto left=reconstruct(scalar(Rho,a),va,scalar(Pressure,a),scalar(Rho,b),vb,scalar(Pressure,b),vector(GradientRho,a),matrix(GradientVelocity,a),vector(GradientPressure,a),
-            scalar(AlphaRho,a),vector(AlphaVelocity,a),scalar(AlphaPressure,a),fraction*d,fraction,frame,T(options.dt),T(options.gamma),options.order,T(options.psi1),T(options.psi2));
+            scalar(AlphaRho,a),vector(AlphaVelocity,a),scalar(AlphaPressure,a),fraction*d,fraction,frame,T(dt),gamma(a),options.order,T(options.psi1),T(options.psi2));
         auto right=reconstruct(scalar(Rho,b),vb,scalar(Pressure,b),scalar(Rho,a),va,scalar(Pressure,a),vector(GradientRho,b),matrix(GradientVelocity,b),vector(GradientPressure,b),
-            scalar(AlphaRho,b),vector(AlphaVelocity,b),scalar(AlphaPressure,b),-(T(1)-fraction)*d,T(1)-fraction,frame,T(options.dt),T(options.gamma),options.order,T(options.psi1),T(options.psi2));
+            scalar(AlphaRho,b),vector(AlphaVelocity,b),scalar(AlphaPressure,b),-(T(1)-fraction)*d,T(1)-fraction,frame,T(dt),gamma(b),options.order,T(options.psi1),T(options.psi2));
         auto result=riemann(a,b,normal,frame,left,right);
         if(options.retry) {
             const T r=length(d),s1=maximum(T(0),-dot(vb-va,d)/maximum(r,T(1e-30))),s2=maximum(T(0),dot(va-vb,normal));
             const T speed=maximum(s1,s2),v2=speed*speed;
             T limit=T(1.1)*maximum(scalar(Pressure,a)+scalar(Rho,a)*v2,scalar(Pressure,b)+scalar(Rho,b)*v2);
-            if(options.mode==1)limit*=T(2);
+            if(pair_mode(a,b)==1)limit*=T(2);
             const bool valid=result.pressure>T(0) && finite(result.pressure) && finite(result.contact) && result.pressure<=T(1.4)*limit && finite(result.mass) && finite(result.energy);
             if(!valid) {
                 left={maximum(scalar(Rho,a),T(1e-30)),va-frame,maximum(scalar(Pressure,a),T(1e-30))};
@@ -75,11 +79,11 @@ template<class T,int D,int Task> struct Row {
                 }
             }
         }
-        if(options.mode==1 && options.massLimit>0 && options.dt>0) {
-            const T mass=area*result.mass*T(options.dt);
+        if(options.mode==1 && options.massLimit>0 && dt>0) {
+            const T mass=area*result.mass*T(dt);
             const auto donor=mass<T(0) ? b:a;
             const T cap=T(options.massLimit)*scalar(Rho,donor)*scalar(Volume,donor);
-            result.mass=maximum(minimum(mass,cap),-cap)/(area*T(options.dt));
+            result.mass=maximum(minimum(mass,cap),-cap)/(area*T(dt));
         }
         return result;
     }
@@ -157,9 +161,9 @@ template<class T,int D,int Task> struct Row {
                 mass+=sign*area*value.mass;momentum+=sign*area*value.momentum;energy+=sign*area*value.energy;});
             output[0][row]=mass;store_vector(output[1],row,momentum);output[2][row]=energy;
         } else if constexpr(Task==Timestep) {
-            const T sound=scalar_sqrt(T(options.gamma)*scalar(Pressure,i)/scalar(Rho,i));T signal=T(2)*sound;
+            const T sound=scalar_sqrt(gamma(i)*scalar(Pressure,i)/scalar(Rho,i));T signal=T(2)*sound;
             each(row,[&](auto edge){const auto j=edge.reference;const auto d=displacement(i,j);if(!admitted(i,j,d))return;
-                const T neighbor=scalar_sqrt(T(options.gamma)*scalar(Pressure,j)/scalar(Rho,j));
+                const T neighbor=scalar_sqrt(gamma(j)*scalar(Pressure,j)/scalar(Rho,j));
                 const T approach=minimum(T(0),dot(vector(Velocity,j)-vector(Velocity,i),d)/maximum(length(d),T(1e-30)));
                 signal=maximum(signal,sound+neighbor-approach);});
             output[0][row]=T(2)*T(options.cfl)*args.rh[i]/signal;
@@ -172,6 +176,7 @@ template<int Task> struct Dispatch {
         Row<T,D,Task> row{};row.args=args;row.options=buffers.options;
         for(int field=0;field<FieldCount;++field)if(buffers.values[field].defined()) {
             if(field==Bad)row.bad=buffers.values[field].const_data_ptr<int32_t>();
+            else if(field==Material)row.materials=buffers.values[field].const_data_ptr<int32_t>();
             else if(field==Cell)row.cells=buffers.values[field].const_data_ptr<int32_t>();
             else row.fields[field]=buffers.values[field].const_data_ptr<T>();
         }

@@ -90,3 +90,21 @@ def test_meshless_forward_only_boundary_and_torch_reference_ad(device):
                                      domain,sph.KernelFunctions.Wendland2,closure='none')
     gradient,=torch.autograd.grad(reference.omega.sum(),positions)
     assert torch.isfinite(gradient).all()
+
+
+def test_closure_workspace_never_narrows_reassigned_csr(device):
+    from dataclasses import replace
+    from warpSPHCore.mfm.native.nt_closure import mfmClosureMatvecCSR
+    state,domain=particles(device,1,torch.float64,n=5)
+    native=MeshlessNative.build(state.positions,state.supports,domain,sph.KernelFunctions.Wendland2,closure='none')
+    adjacency=native.adjacency
+    weights=torch.ones(adjacency.paddedJ.numel(),device=device,dtype=torch.float64)
+    workspace=mfmClosureMatvecCSR(adjacency,weights)
+    narrower=replace(adjacency,edgeOffsets=adjacency.edgeOffsets.to(torch.int32))
+    assert not workspace.assign(narrower,weights)
+    assert workspace.assign(adjacency,weights)
+    other=mfmClosureMatvecCSR(narrower,weights)
+    assert not other.assign(adjacency,weights)
+    value=torch.arange(len(state.supports),device=device,dtype=torch.float64)[:,None]
+    for left,right in zip(workspace(value),other(value)):
+        torch.testing.assert_close(left,right,rtol=0,atol=0)

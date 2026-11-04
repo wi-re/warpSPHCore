@@ -32,7 +32,7 @@ import math
 from typing import Callable, List, Optional
 
 import torch
-from .._backend import BACKEND
+from .._backend import BACKEND, resolve_backend
 if BACKEND == 'warp':
     import warp as wp
     from .wp_multigrid import _segmentSum_Kernel
@@ -76,7 +76,8 @@ class _SegmentSum:
     CPU) stays on ``_sumInto``. Every target row has a (possibly empty) range, so the buffers have a fixed size and
     :meth:`update` refills them in place (the closure workspace's CUDA graph reads them at fixed addresses)."""
 
-    def __init__(self, index: torch.Tensor, nrows: int):
+    def __init__(self, index: torch.Tensor, nrows: int, *, backend=None):
+        self.backend=resolve_backend(backend)
         self.nrows = int(nrows)
         self.cuda = index.is_cuda
         self.index = index.clone() if self.cuda else index
@@ -86,7 +87,7 @@ class _SegmentSum:
             self.starts = torch.empty(self.nrows, dtype=torch.int64, device=dev)
             self.ends = torch.empty(self.nrows, dtype=torch.int64, device=dev)
             self._rows = torch.arange(self.nrows, dtype=index.dtype, device=dev)
-            self._wa = (self.perm,self.starts,self.ends) if BACKEND == 'native' else (
+            self._wa = (self.perm,self.starts,self.ends) if self.backend == 'native' else (
                 wp.from_torch(self.perm),wp.from_torch(self.starts),wp.from_torch(self.ends))
             self._fill(index)
 
@@ -107,7 +108,7 @@ class _SegmentSum:
         if not self.cuda or src.dim() != 2 or src.shape[1] < 2 or src.dtype != out.dtype:
             return _sumInto(out, self.index, src)
         src = src.contiguous()
-        if BACKEND == 'native':
+        if self.backend == 'native':
             from ..native._build import build
             build().segment_sum(*self._wa,src,out)
         else:
@@ -125,7 +126,8 @@ class CellMultigrid:
     _levelCache: dict = {}
 
     def __init__(self, positions: torch.Tensor, hmax: float, domain, dim: int, maxCoarse: int = 512,
-                 smooth: int = 1, omega: float = 0.8):
+                 smooth: int = 1, omega: float = 0.8, *, backend=None):
+        self.backend=resolve_backend(backend)
         self.dim, self.omega, self.smooth = dim, omega, smooth
         dev, dt = positions.device, positions.dtype
         lo = domain.min.to(dev, dt)
@@ -161,7 +163,7 @@ class CellMultigrid:
         # the level maps depend only on the cell counts (not on the particles), so they are shared by every
         # hierarchy with the same grid -- in a time loop the grid rarely changes and the maps (~7 ms of small
         # torch ops at 4096 cells) are built once
-        key = (tuple(self.n0), tuple(self.periodic), dim, int(maxCoarse), str(dev))
+        key = (self.backend, tuple(self.n0), tuple(self.periodic), dim, int(maxCoarse), str(dev))
         cached = CellMultigrid._levelCache.get(key)
         if cached is None:
             self._buildLevels(dev, maxCoarse)
@@ -171,10 +173,10 @@ class CellMultigrid:
         else:
             self.levels = cached
             self.nLevels = len(cached)
-        self._toCells = _SegmentSum(cid, self.levels[0].size)
+        self._toCells = _SegmentSum(cid, self.levels[0].size, backend=self.backend)
         for l, lev in enumerate(self.levels[:-1]):     # the restrictions are fixed maps: built once, with the levels
             if getattr(lev, 'restrict', None) is None:
-                lev.restrict = _SegmentSum(lev.toCoarse, self.levels[l + 1].size)
+                lev.restrict = _SegmentSum(lev.toCoarse, self.levels[l + 1].size, backend=self.backend)
         self.W = None
 
     # ------------------------------------------------------------------
@@ -244,7 +246,7 @@ class CellMultigrid:
 
     # ------------------------------------------------------------------
     def sameGrid(self, other: "CellMultigrid") -> bool:
-        return (self.n0 == other.n0 and self.periodic == other.periodic and self.levels is other.levels
+        return (self.backend == other.backend and self.n0 == other.n0 and self.periodic == other.periodic and self.levels is other.levels
                 and self.cellId64.shape == other.cellId64.shape)
 
     def assign(self, other: "CellMultigrid") -> None:

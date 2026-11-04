@@ -22,7 +22,10 @@ def _local(adjacency, tag, function):
 
 def closureWeights(geometry, **extras):
     adjacency = geometry.adjacency
-    ctx = _ctx(geometry.particles, geometry.props, geometry.domain, adjacency)
+    operators = getattr(geometry, "_operators", None)
+    declaration = _CLOSURE_W_SPEC if operators is None else operators._CLOSURE_W_SPEC
+    context = _ctx if operators is None else operators._ctx
+    ctx = context(geometry.particles, geometry.props, geometry.domain, adjacency)
     def validate():
         validateContext(ctx)
         ChunkedPairField._checkLayout(adjacency, (), geometry.volume.dtype)
@@ -39,7 +42,7 @@ def closureWeights(geometry, **extras):
         for buffer, (interval, local) in zip(result.buffers, chunkContexts(ctx)):
             values = dict(extras, rowStart=interval.start)
             buffer.zero_()
-            weights = launchOperator(_CLOSURE_W_SPEC, local, **values)
+            weights = launchOperator(declaration, local, **values)
             live = int(local.adjacency.numEdges)
             buffer[:live].copy_(weights[:live])
         return result

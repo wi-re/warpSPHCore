@@ -21,6 +21,11 @@ class mfmClosureMatvecCSR:
     def assign(self,adjacency,kappa):
         size = adjacency.paddedJ.numel()
         if size > self.capacity or len(adjacency.numNeighbors) != self.N:return False
+        # A workspace owns typed indices/offsets. Rebuild it rather than narrow
+        # a later wide CSR into an older allocation during graph reassignment.
+        sources=(adjacency.edgeOffsets,adjacency.numNeighbors,adjacency.paddedJ,kappa)
+        if any(a.dtype!=b.dtype or a.device!=b.device for a,b in zip(self._keep,sources)):
+            return False
         for target,source in zip(self._keep[:2],(adjacency.edgeOffsets,adjacency.numNeighbors)):
             target.copy_(source)
         self._keep[2][:size].copy_(adjacency.paddedJ);self._keep[3][:size].copy_(kappa)

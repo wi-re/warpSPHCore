@@ -27,17 +27,9 @@ from .limiters import conditionBeta
 from .multigrid import CellMultigrid
 from .._backend import BACKEND
 if BACKEND == 'native':
-    from .native.nt_mfm import (PreparedLauncher, _CLOSURE_RES_SPEC, _CLOSURE_W_SPEC,
-        _COARSE_STENCIL_SPEC, _FLUX_SPEC, _GRADIENTS_SPEC, _LIMITER_SPEC, _MOMENTS_SPEC,
-        _TIMESTEP_SPEC, _CLOSURE_MV_SPEC, _ctx, mfmClosureMatvecWarp)
-    from .native.nt_closure import mfmClosureMatvecCSR
     scalar_t = float
 else:
     from ..type_config import scalar_t
-    from ..autograd.prepared import PreparedLauncher
-    from .wp_mfm import (_CLOSURE_RES_SPEC, _CLOSURE_W_SPEC, _COARSE_STENCIL_SPEC, _FLUX_SPEC, _GRADIENTS_SPEC,
-                         _LIMITER_SPEC, _MOMENTS_SPEC, _TIMESTEP_SPEC, _CLOSURE_MV_SPEC, _ctx, mfmClosureMatvecWarp)
-    from .wp_closure import mfmClosureMatvecCSR
 
 __all__ = ["Meshless"]
 
@@ -84,7 +76,11 @@ class _ClosureWorkspace:
     ~1 ms. Same ops on the same values, so bitwise the eager result."""
 
     def __init__(self, adjacency, kappa, mg, like):
-        self.mv = mfmClosureMatvecCSR(adjacency, kappa, capacity=int(adjacency.paddedJ.shape[0] * _WS_CAPACITY) + 1024)
+        if mg.backend == 'native':
+            from .native.nt_closure import mfmClosureMatvecCSR as factory
+        else:
+            from .wp_closure import mfmClosureMatvecCSR as factory
+        self.mv = factory(adjacency, kappa, capacity=int(adjacency.paddedJ.shape[0] * _WS_CAPACITY) + 1024)
         self.mg = mg                                     # the first hierarchy's tensors are the static ones
         self.diag = torch.empty(like.shape[0], dtype=like.dtype, device=like.device)
         self.target = torch.empty((), dtype=like.dtype, device=like.device)
@@ -129,7 +125,7 @@ _WORKSPACES: "dict" = {}
 
 
 def _closureWorkspace(adjacency, kappa, mg, like) -> _ClosureWorkspace:
-    key = (str(like.device), like.dtype, like.shape[0], like.shape[1], tuple(mg.n0), tuple(mg.periodic), mg.nLevels)
+    key = (mg.backend, str(like.device), like.dtype, like.shape[0], like.shape[1], tuple(mg.n0), tuple(mg.periodic), mg.nLevels)
     ws = _WORKSPACES.get(key)
     if ws is not None and ws.load(adjacency, kappa, mg):
         return ws
@@ -149,12 +145,23 @@ class Meshless:
     ``num_nbrs`` and ``lam`` (the closure potential, zero when ``closure="none"``)."""
 
     def __init__(self, particles: ParticleState, props: OperationProperties, domain: DomainDescription,
-                 adjacency, kernel: KernelFunctions, dim: int):
+                 adjacency, kernel: KernelFunctions, dim: int, *, backend=None):
         self.particles, self.props, self.domain, self.adjacency = particles, props, domain, adjacency
         self.kernel, self.dim = kernel, dim
         # every kernel of this geometry runs on the same particles / adjacency: the operator ABI prefix is
         # built once (fastLaunch.py) instead of on every launch
-        self._fast = PreparedLauncher(_ctx(particles, props, domain, adjacency))
+        from .._backend import resolve_backend
+        self.execution_backend = resolve_backend(backend)
+        if self.execution_backend == 'native':
+            from .native import nt_mfm as operators
+            from .native.nt_closure import mfmClosureMatvecCSR as matvec
+            launcher = operators.PreparedLauncher
+        else:
+            from . import wp_mfm as operators
+            from .wp_closure import mfmClosureMatvecCSR as matvec
+            from ..autograd.prepared import PreparedLauncher as launcher
+        self._operators, self._closureMatvecCSR = operators, matvec
+        self._fast = launcher(operators._ctx(particles, props, domain, adjacency))
 
     def _checkForwardOnly(self, *values):
         # Metadata can change after construction; inspect live inputs at each
@@ -170,7 +177,10 @@ class Meshless:
               cg_iters: int = 200, lam0: Optional[torch.Tensor] = None, guards: bool = True,
               face_cond_max: Optional[float] = None, centred_weights: bool = True, area_cap: bool = False,
               closure_solver: str = "auto", mg_min_particles: int = 2048,
-              mg_max_coarse: int = 512, lam_cap: float = 1e3, closure_cap: float = 0.0, storeI: bool = True) -> "Meshless":
+              mg_max_coarse: int = 512, lam_cap: float = 1e3, closure_cap: float = 0.0, storeI: bool = True,
+              backend=None) -> "Meshless":
+        from .._backend import resolve_backend
+        selected = resolve_backend(backend)
         _forwardOnly(positions, supports, domain.min, domain.max, lam0)
         if closure not in ("project", "none"):
             raise ValueError("closure must be 'project' or 'none'")
@@ -179,19 +189,32 @@ class Meshless:
         P = ParticleState(positions=positions, supports=supports, masses=ones, densities=ones,
                           kinds=torch.zeros(N, dtype=torch.int32, device=positions.device))
         if adjacency is None:
-            if BACKEND == 'native':
-                from ..radiusSearch import radiusSearch
-                adjacency = radiusSearch(P, domain, mode=SupportScheme.SuperSymmetric)
+            if selected == 'native':
+                from ..radiusSearch.native import radiusSearch
+                adjacency = radiusSearch(P, domain, mode=SupportScheme.SuperSymmetric, backend='native')
                 if storeI:
                     adjacency.paddedI = adjacency.cooRows()
             else:
                 from ..radiusSearch import radiusSearchCompactHashMap
                 adjacency = radiusSearchCompactHashMap(P, domain, mode=SupportScheme.SuperSymmetric, storeI=storeI)
+        if selected == 'native':
+            from .._models import AdjacencyList
+            from ..radiusSearch import ChunkedAdjacency
+            if not isinstance(adjacency, (AdjacencyList, ChunkedAdjacency)):
+                # A supplied Warp grid has no borrowed CSR view. Rebuild its
+                # geometry natively; reject unrelated objects rather than ignore them.
+                if BACKEND != 'warp':
+                    raise TypeError('Native meshless requires CSR or chunked adjacency')
+                from ..dataTypes import CompactHashMap
+                if not isinstance(adjacency, CompactHashMap):
+                    raise TypeError('Native meshless requires CSR, chunked adjacency or a compact grid')
+                from ..radiusSearch.native import radiusSearch
+                adjacency = radiusSearch(P, domain, mode=SupportScheme.SuperSymmetric, backend='native')
         props = OperationProperties(kernel=kernel, supportMode=SupportScheme.Gather,
                                     operationMode=OperationDirection.AllToAll)
-        self = cls(P, props, domain, adjacency, kernel, dim)
+        self = cls(P, props, domain, adjacency, kernel, dim, backend=selected)
 
-        omega, Ehat, cnt = self._fast.launch(_MOMENTS_SPEC, rowStart=0)
+        omega, Ehat, cnt = self._fast.launch(self._operators._MOMENTS_SPEC, rowStart=0)
         h = supports
         scale = (omega * h ** 2)[:, None, None]
         Es = Ehat / scale
@@ -277,7 +300,7 @@ class Meshless:
     def residual(self):
         """``(sum_j A_ij, face norm)`` of the paper's face vector: the ``(N, dim)`` closure residual and the global
         norm ``sqrt(sum_pairs |A|^2)`` it is measured against."""
-        a, a2 = self._fast.launch(_CLOSURE_RES_SPEC, vol=self.volume, Einv=self.Einv, condBad=self.condBad,
+        a, a2 = self._fast.launch(self._operators._CLOSURE_RES_SPEC, vol=self.volume, Einv=self.Einv, condBad=self.condBad,
                                   centred=int(self.centred), areaCap=int(self.areaCap), rowStart=0)
         return a, torch.sqrt(a2.sum() / 2.0)
 
@@ -311,7 +334,7 @@ class Meshless:
             from .chunked import closureWeights, multiply
             kappa = closureWeights(self, **options)
         else:
-            kappa = self._fast.launch(_CLOSURE_W_SPEC, **options, rowStart=0)
+            kappa = self._fast.launch(self._operators._CLOSURE_W_SPEC, **options, rowStart=0)
         if capScale is not None:
             kappa = multiply(kappa, capScale) if chunked else kappa * capScale
         # preconditioned CG; the diagonal sum_j kappa_ij comes out of the first matvec. The preconditioner is
@@ -324,9 +347,9 @@ class Meshless:
         ws = None
         if multigrid:
             mg = CellMultigrid(self.particles.positions, self.particles.supports.max(), self.domain, self.dim,
-                               maxCoarse=mgMaxCoarse)
+                               maxCoarse=mgMaxCoarse, backend=self.execution_backend)
             n, per = mg.ncells, mg.periodic
-            S = self._fast.launch(_COARSE_STENCIL_SPEC, kappa=kappa, cellId=mg.cellId, n0=int(n[0]), n1=int(n[1]),
+            S = self._fast.launch(self._operators._COARSE_STENCIL_SPEC, kappa=kappa, cellId=mg.cellId, n0=int(n[0]), n1=int(n[1]),
                                   n2=int(n[2]), p0=int(per[0]), p1=int(per[1]), p2=int(per[2]), rowStart=0)
             mg.setWeights(S)
             self.multigridLevels = mg.nLevels
@@ -336,9 +359,9 @@ class Meshless:
         if ws is not None:
             mv = ws.mv
         elif csr:
-            mv = mfmClosureMatvecCSR(self.adjacency, kappa)
+            mv = self._closureMatvecCSR(self.adjacency, kappa)
         else:
-            mv = lambda p: self._fast.launch(_CLOSURE_MV_SPEC,kappa=kappa,p=p.contiguous(),rowStart=0)
+            mv = lambda p: self._fast.launch(self._operators._CLOSURE_MV_SPEC,kappa=kappa,p=p.contiguous(),rowStart=0)
         Ax0, diag = mv(x0)
         if ws is not None:
             ws.diag.copy_(diag)
@@ -466,7 +489,7 @@ class Meshless:
     def gradients(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor):
         """Matrix least-squares gradients ``(grad rho (N,d), grad v (N,d,d), grad P (N,d))``."""
         self._checkForwardOnly(rho, vel, pres)
-        return self._fast.launch(_GRADIENTS_SPEC, rho=rho.contiguous(), vel=vel.contiguous(), pres=pres.contiguous(),
+        return self._fast.launch(self._operators._GRADIENTS_SPEC, rho=rho.contiguous(), vel=vel.contiguous(), pres=pres.contiguous(),
                                  Einv=self.Einv, deficient=self.deficient.to(torch.int32), rowStart=0)
 
     def rates(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor, gamma: float, dt: float = 0.0,
@@ -483,7 +506,7 @@ class Meshless:
         if order >= 2:
             gRho, gVel, gP = self.gradients(rho, vel, pres)
             beta = conditionBeta(self.cond, beta_min, beta_max, cond_crit)
-            aRho, aVel, aP = self._fast.launch(_LIMITER_SPEC, rho=rho, vel=vel, pres=pres, gRho=gRho, gVel=gVel,
+            aRho, aVel, aP = self._fast.launch(self._operators._LIMITER_SPEC, rho=rho, vel=vel, pres=pres, gRho=gRho, gVel=gVel,
                                                gP=gP, beta=beta, rowStart=0)
         else:
             gRho = torch.zeros(N, dim, dtype=rho.dtype, device=rho.device)
@@ -492,7 +515,7 @@ class Meshless:
             aRho, aP = torch.ones_like(rho), torch.ones_like(rho)
             aVel = torch.ones_like(vel)
         dm, dp, de = self._fast.launch(
-            _FLUX_SPEC, rho=rho, vel=vel, pres=pres, gRho=gRho, gVel=gVel, gP=gP, aRho=aRho, aVel=aVel, aP=aP,
+            self._operators._FLUX_SPEC, rho=rho, vel=vel, pres=pres, gRho=gRho, gVel=gVel, gP=gP, aRho=aRho, aVel=aVel, aP=aP,
             vol=self.volume, Einv=self.Einv, lam=self.lam, condBad=self.condBad, gamma=scalar_t(gamma), dt=scalar_t(dt),
             mode=int(0 if mode.upper() == "MFM" else 1), order=int(order), psi1=scalar_t(psi1), psi2=scalar_t(psi2),
             power=scalar_t(self.closure_power), timeCentred=int(timeCentredFrame), centred=int(self.centred),
@@ -503,5 +526,5 @@ class Meshless:
     def timestep(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor, gamma: float, cfl: float = 0.2):
         """Per-particle CFL time step ``2 C h_i / v_sig,i`` (Eq. 24-25)."""
         self._checkForwardOnly(rho, vel, pres)
-        return self._fast.launch(_TIMESTEP_SPEC, rho=rho.contiguous(), vel=vel.contiguous(), pres=pres.contiguous(),
+        return self._fast.launch(self._operators._TIMESTEP_SPEC, rho=rho.contiguous(), vel=vel.contiguous(), pres=pres.contiguous(),
                                  gamma=scalar_t(gamma), cfl=scalar_t(cfl), rowStart=0)

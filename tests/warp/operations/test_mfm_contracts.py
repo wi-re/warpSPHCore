@@ -267,3 +267,32 @@ def test_row_chunked_meshless_native_closure_and_flux(device, dim, closure, solv
         torch.testing.assert_close(ra, rb, rtol=tol, atol=tol)
         assert bool((rb.sum(0).abs() / rb.abs().sum(0).clamp_min(1) < tol).all())
     torch.testing.assert_close(a.timestep(rho, vel, pressure, 1.4), b.timestep(rho, vel, pressure, 1.4), rtol=tol, atol=tol)
+
+
+def test_per_geometry_backend_owns_closure_workspace_and_restrictions(device):
+    """A Warp frontend can select native meshless without changing its process backend."""
+    from warpSPHCore.mfm.multigrid import CellMultigrid
+    dtype=wp.dtype_to_torch(scalar_t)
+    tol=3e-4 if dtype==torch.float32 else 2e-10
+    axis=torch.arange(8,device=device,dtype=dtype)/8
+    x=torch.cartesian_prod(axis,axis)
+    x=(x+.005*torch.arange(x.numel(),device=device,dtype=x.dtype).reshape_as(x).sin())%1
+    h=x.new_full((len(x),),.38)
+    domain=DomainDescription(x.new_zeros(2),x.new_ones(2),torch.ones(2,device=device,dtype=torch.bool),2)
+    geometries=[]
+    for backend in ('warp','native'):
+        g=MeshlessWarp.build(x,h,domain,KernelFunctions.Wendland4,backend=backend,
+            closure_solver='mg',mg_max_coarse=4,cg_tol=1e-5 if dtype==torch.float32 else 1e-8,cg_iters=100,storeI=False)
+        assert g.execution_backend==backend
+        geometries.append(g)
+    for name in ('omega','volume','Einv'):
+        torch.testing.assert_close(getattr(geometries[1],name),getattr(geometries[0],name),rtol=tol,atol=tol)
+    rho=torch.ones_like(h);v=.1*torch.sin(x*6);p=1+.03*x[:,0]
+    torch.testing.assert_close(geometries[1].rates(rho,v,p,1.4,dt=.001,mode='MFV'),
+        geometries[0].rates(rho,v,p,1.4,dt=.001,mode='MFV'),rtol=tol,atol=tol)
+    grids=[CellMultigrid(x,h.max(),domain,2,maxCoarse=4,backend=b) for b in ('warp','native')]
+    assert not grids[0].sameGrid(grids[1])
+    assert grids[0].levels is not grids[1].levels
+    for backend,grid in zip(('warp','native'),grids):
+        assert grid._toCells.backend==backend
+        assert all(level.restrict.backend==backend for level in grid.levels[:-1])

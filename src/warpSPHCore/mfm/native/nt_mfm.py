@@ -6,7 +6,7 @@ from ...native._checks import check_execution
 from ...autograd.operator_spec import SPHContext,OperatorSpec,ExtraSpec,ExtraKind,RowRole,OutputSpec
 from ...native._row_dispatch import output
 
-_FIELDS = ('rho','vel','pres','gRho','gVel','gP','aRho','aVel','aP','vol','Einv','lam','condBad','beta','kappa','p','cellId')
+_FIELDS = ('rho','vel','pres','gRho','gVel','gP','aRho','aVel','aP','vol','Einv','lam','condBad','beta','kappa','p','cellId','gammas','materials','deviceDt')
 _FLOATS = dict(gamma=1.4,dt=0.,psi1=.5,psi2=.25,power=1.,massLimit=.1,closureCap=0.,cfl=.2)
 _INTS = dict(mode=0,order=2,timeCentred=1,centred=1,areaCap=0,retry=1,faceGuard=0,n0=1,n1=1,n2=1,p0=0,p1=0,p2=0,rowStart=0)
 
@@ -18,7 +18,19 @@ def _ctx(particles,props,domain,adjacency):
 class PreparedLauncher:
     def __init__(self,context):
         from ...radiusSearch.chunked import ChunkedAdjacency
+        if context.adjacency is not None:
+            from ..._backend import BACKEND
+            if BACKEND == 'warp':
+                from ...dataTypes import CompactHashMap
+                if isinstance(context.adjacency,CompactHashMap):
+                    from dataclasses import replace
+                    from ...radiusSearch.native import radiusSearch
+                    from ...enumTypes import SupportScheme
+                    reference=context.query if context.reference is None else context.reference
+                    adjacency=radiusSearch(context.query,context.domain,reference,SupportScheme.SuperSymmetric,backend='native')
+                    context=replace(context,adjacency=adjacency)
         self.context=context
+        self.useAdjacency=True
         self._chunks=None
         if isinstance(context.adjacency,ChunkedAdjacency):
             from ...autograd.row_dispatch import chunkContexts,validateContext
@@ -43,12 +55,19 @@ class PreparedLauncher:
                 raise ValueError('Build a new prepared launcher after replacing its chunked adjacency')
             from ...autograd.row_dispatch import launchRowChunks
             return launchRowChunks(spec,self.context,extras,prepared=self._chunks)
-        return self._launch(spec.kernel.task,extras)
+        if hasattr(spec.kernel,'task'):
+            return self._launch(spec.kernel.task,extras)
+        from ...autograd.operator_spec import launchOperator
+        return launchOperator(spec,self.context,**extras)
 
     def _launch(self,task,extras):
         from ...native._build import build
         check_execution(*(value for value in extras.values() if isinstance(value,torch.Tensor)))
         extras = dict(extras)
+        if isinstance(extras.get('gamma'),torch.Tensor):
+            extras['gammas']=extras.pop('gamma')
+        if isinstance(extras.get('dt'),torch.Tensor):
+            extras['deviceDt']=extras.pop('dt').reshape(1)
         if 'deficient' in extras: extras['condBad'] = extras.pop('deficient')
         unknown = extras.keys()-set(_FIELDS)-_FLOATS.keys()-_INTS.keys()
         if unknown: raise TypeError(f'Unknown meshless arguments: {sorted(unknown)}')
@@ -97,6 +116,13 @@ _COARSE_STENCIL_SPEC=_declaration(6,'coarse_stencil',[output(lambda ctx,e:(3**ct
 _FLUX_SPEC=_declaration(7,'flux',[output(),output(_vector),output()],
     ('rho','vel','pres','gRho','gVel','gP','aRho','aVel','aP','vol','Einv','lam','condBad'),
     ('gamma','dt','mode','order','psi1','psi2','power','timeCentred','centred','areaCap','retry','massLimit','faceGuard','closureCap'))
+# Material-aware flux uses reference-indexed caloric indices and a replicated
+# device timestep. Owned-row dispatch must never slice the latter by particle.
+from dataclasses import replace
+_MATERIAL_FLUX_SPEC=replace(_FLUX_SPEC,extras=tuple(
+    ExtraSpec(e.name,ExtraKind.TENSOR,RowRole.REFERENCE if e.name=='gamma' else RowRole.REPLICATED)
+    if e.name in ('gamma','dt') else e for e in _FLUX_SPEC.extras)+
+    (ExtraSpec('materials',ExtraKind.TENSOR,RowRole.REFERENCE),))
 _TIMESTEP_SPEC=_declaration(8,'timestep',[output()],('rho','vel','pres'),('gamma','cfl'))
 
 
@@ -138,13 +164,18 @@ def mfmClosureWeightsNative(particles, props, domain, adjacency, vol, Einv, cond
 def mfmFluxNative(
         particles, props, domain, adjacency, rho, vel, pres, gRho, gVel, gP, aRho, aVel, aP, vol, Einv, lam,
                 condBad, gamma, dt, mode, order, psi1, psi2, power, timeCentred, centred=1, areaCap=0, retry=1,
-                massLimit=0.1, faceGuard=0, closureCap=0.0):
-    return _call(_FLUX_SPEC,particles,props,domain,adjacency,
+                massLimit=0.1, faceGuard=0, closureCap=0.0, materials=None):
+    material = materials is not None or isinstance(gamma,torch.Tensor) or isinstance(dt,torch.Tensor)
+    if material:
+        if materials is None:materials=torch.zeros_like(rho,dtype=torch.int32)
+        if not isinstance(gamma,torch.Tensor):gamma=torch.full_like(rho,gamma)
+        if not isinstance(dt,torch.Tensor):dt=rho.new_tensor([dt])
+    return _call(_MATERIAL_FLUX_SPEC if material else _FLUX_SPEC,particles,props,domain,adjacency,
                 rho=rho, vel=vel, pres=pres, gRho=gRho, gVel=gVel, gP=gP, aRho=aRho, aVel=aVel, aP=aP,
         vol=vol, Einv=Einv, lam=lam, condBad=condBad, gamma=gamma, dt=dt, mode=int(mode), order=int(order),
         psi1=psi1, psi2=psi2, power=power, timeCentred=int(timeCentred), centred=int(centred),
         areaCap=int(areaCap), retry=int(retry), massLimit=massLimit, faceGuard=int(faceGuard),
-        closureCap=closureCap, rowStart=0)
+        closureCap=closureCap, rowStart=0, **({'materials':materials} if material else {}))
 
 
 def mfmTimestepNative(particles, props, domain, adjacency, rho, vel, pres, gamma, cfl):

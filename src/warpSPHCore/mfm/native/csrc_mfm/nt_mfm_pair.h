@@ -64,22 +64,23 @@ template<class T> SPH_HD Star<T> star_from_speeds(T left,T right,T rhoL,T uL,T p
     return {left,right,contact,pL+rhoL*(left-uL)*(contact-uL)};
 }
 template<class T> SPH_HD bool valid_star(const Star<T>& star) {return star.pressure>T(0) && finite(star.pressure) && finite(star.contact);}
-template<class T,int D> SPH_HD Star<T> hllc_star(T rhoL,T uL,const SmallVector<T,D>& vtL,T pL,T rhoR,T uR,const SmallVector<T,D>& vtR,T pR,T gamma) {
-    const T aL=scalar_sqrt(gamma*pL/rhoL),aR=scalar_sqrt(gamma*pR/rhoR);
+template<class T,int D> SPH_HD Star<T> hllc_star_material(T rhoL,T uL,const SmallVector<T,D>& vtL,T pL,T rhoR,T uR,const SmallVector<T,D>& vtR,T pR,T gamma,T gammaRight) {
+    const T aL=scalar_sqrt(gamma*pL/rhoL),aR=scalar_sqrt(gammaRight*pR/rhoR);
     auto star=star_from_speeds(minimum(uL,uR)-maximum(aL,aR),maximum(uL,uR)+maximum(aL,aR),rhoL,uL,pL,rhoR,uR,pR);
     if (!valid_star(star)) {
         const T ratio=scalar_sqrt(rhoR/rhoL);
         const T EL=pL/(gamma-T(1))+T(.5)*rhoL*(uL*uL+dot(vtL,vtL));
-        const T ER=pR/(gamma-T(1))+T(.5)*rhoR*(uR*uR+dot(vtR,vtR));
+        const T ER=pR/(gammaRight-T(1))+T(.5)*rhoR*(uR*uR+dot(vtR,vtR));
         const T ut=(uL+ratio*uR)/(T(1)+ratio);
         const auto vt=(vtL+ratio*vtR)/(T(1)+ratio);
         const T H=((EL+pL)/rhoL+ratio*(ER+pR)/rhoR)/(T(1)+ratio);
-        const T sound=scalar_sqrt(maximum((gamma-T(1))*(H-T(.5)*(ut*ut+dot(vt,vt))),T(0)));
+        const T gammaRoe=gammaRight==gamma?gamma:(gamma+ratio*gammaRight)/(T(1)+ratio);
+        const T sound=scalar_sqrt(maximum((gammaRoe-T(1))*(H-T(.5)*(ut*ut+dot(vt,vt))),T(0)));
         star=star_from_speeds(minimum(uL-aL,ut-sound),maximum(uR+aR,ut+sound),rhoL,uL,pL,rhoR,uR,pR);
         if (!valid_star(star)) {
             const T pressure=maximum(T(.5)*(pL+pR)-T(.5)*(uR-uL)*T(.5)*(rhoL+rhoR)*T(.5)*(aL+aR),T(0));
             const T qL=pressure>pL ? scalar_sqrt(T(1)+(gamma+T(1))/(T(2)*gamma)*(pressure/pL-T(1))):T(1);
-            const T qR=pressure>pR ? scalar_sqrt(T(1)+(gamma+T(1))/(T(2)*gamma)*(pressure/pR-T(1))):T(1);
+            const T qR=pressure>pR ? scalar_sqrt(T(1)+(gammaRight+T(1))/(T(2)*gammaRight)*(pressure/pR-T(1))):T(1);
             star=star_from_speeds(uL-aL*qL,uR+aR*qR,rhoL,uL,pL,rhoR,uR,pR);
             if (!valid_star(star)) {
                 const T speed=maximum(absolute(uL)+aL,absolute(uR)+aR);
@@ -88,6 +89,10 @@ template<class T,int D> SPH_HD Star<T> hllc_star(T rhoL,T uL,const SmallVector<T
         }
     }
     return star;
+}
+template<class T,int D> SPH_HD Star<T> hllc_star(T rhoL,T uL,const SmallVector<T,D>& vtL,T pL,
+        T rhoR,T uR,const SmallVector<T,D>& vtR,T pR,T gamma) {
+    return hllc_star_material(rhoL,uL,vtL,pL,rhoR,uR,vtR,pR,gamma,gamma);
 }
 template<class T,int D> struct SideFlux {T mass,normal;SmallVector<T,D> tangent;T energy;};
 template<class T,int D> SPH_HD SideFlux<T,D> hllc_side(T rho,T velocity,const SmallVector<T,D>& vt,T pressure,T speed,T contact,T gamma,bool star) {
@@ -103,17 +108,21 @@ template<class T,int D> SPH_HD SideFlux<T,D> hllc_side(T rho,T velocity,const Sm
     return flux;
 }
 template<class T,int D> struct FaceFlux {T mass;SmallVector<T,D> momentum;T energy,contact,pressure;};
-template<class T,int D> SPH_HD FaceFlux<T,D> face_flux(T rhoL,T uL,const SmallVector<T,D>& vtL,T pL,
-        T rhoR,T uR,const SmallVector<T,D>& vtR,T pR,T gamma,int mode,const SmallVector<T,D>& normal,const SmallVector<T,D>& frame) {
-    const auto star=hllc_star(rhoL,uL,vtL,pL,rhoR,uR,vtR,pR,gamma);
+template<class T,int D> SPH_HD FaceFlux<T,D> face_flux_material(T rhoL,T uL,const SmallVector<T,D>& vtL,T pL,
+        T rhoR,T uR,const SmallVector<T,D>& vtR,T pR,T gamma,int mode,const SmallVector<T,D>& normal,const SmallVector<T,D>& frame,T gammaRight) {
+    const auto star=hllc_star_material(rhoL,uL,vtL,pL,rhoR,uR,vtR,pR,gamma,gammaRight);
     if (mode==0) return {T(0),star.pressure*normal,star.pressure*(star.contact+dot(frame,normal)),star.contact,star.pressure};
     SideFlux<T,D> flux{};
     if (star.left>=T(0)) flux=hllc_side(rhoL,uL,vtL,pL,star.left,star.contact,gamma,false);
     else if (star.contact>=T(0)) flux=hllc_side(rhoL,uL,vtL,pL,star.left,star.contact,gamma,true);
-    else if (star.right>T(0)) flux=hllc_side(rhoR,uR,vtR,pR,star.right,star.contact,gamma,true);
-    else flux=hllc_side(rhoR,uR,vtR,pR,star.right,star.contact,gamma,false);
+    else if (star.right>T(0)) flux=hllc_side(rhoR,uR,vtR,pR,star.right,star.contact,gammaRight,true);
+    else flux=hllc_side(rhoR,uR,vtR,pR,star.right,star.contact,gammaRight,false);
     const auto momentum=flux.normal*normal+flux.tangent;
     return {flux.mass,momentum+flux.mass*frame,flux.energy+dot(frame,momentum)+T(.5)*dot(frame,frame)*flux.mass,star.contact,star.pressure};
+}
+template<class T,int D> SPH_HD FaceFlux<T,D> face_flux(T rhoL,T uL,const SmallVector<T,D>& vtL,T pL,
+        T rhoR,T uR,const SmallVector<T,D>& vtR,T pR,T gamma,int mode,const SmallVector<T,D>& normal,const SmallVector<T,D>& frame) {
+    return face_flux_material(rhoL,uL,vtL,pL,rhoR,uR,vtR,pR,gamma,mode,normal,frame,gamma);
 }
 template<class T,int D> struct Primitive {T density;SmallVector<T,D> velocity;T pressure;};
 template<class T,int D> SPH_HD Primitive<T,D> time_derivative(T rho,const SmallVector<T,D>& velocity,T pressure,
