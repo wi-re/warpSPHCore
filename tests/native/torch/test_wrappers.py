@@ -24,3 +24,18 @@ def test_module_local_native_wrappers_without_warp():
     with pytest.raises(ValueError, match='before importing'):
         resolve_backend('warp')
     assert 'warp' not in sys.modules
+
+
+def test_cpu_only_radius_rejects_device_pointers_before_index_build():
+    """CPU-only extensions must fail before borrowing CUDA memory for a CPU index."""
+    import os
+    import pytest
+    if os.environ.get('WARPSPHCORE_NATIVE_BUILD')!='cpu' or not torch.cuda.is_available():
+        pytest.skip('Requires CPU-only extension and CUDA-visible host')
+    from warpSPHCore.radiusSearch.native import radiusSearch
+    from warpSPHCore import ParticleState,DomainDescription
+    x=torch.tensor([[.1],[.4]],device='cuda');h=torch.full((2,),.5,device='cuda')
+    particles=ParticleState(x,h,torch.ones_like(h),torch.zeros(2,device='cuda',dtype=torch.int32),torch.ones_like(h))
+    domain=DomainDescription(h.new_zeros(1),h.new_ones(1),torch.ones(1,device='cuda',dtype=torch.bool),1)
+    with pytest.raises(RuntimeError,match='built for CPU only'):
+        radiusSearch(particles,domain)

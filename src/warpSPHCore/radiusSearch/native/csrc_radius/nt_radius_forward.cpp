@@ -28,6 +28,12 @@ std::tuple<Tensor, Tensor, Tensor> radius(const Tensor &qx, const Tensor &rx, co
     t[HI] = hi;
     t[PERIODIC] = periodic;
     geometry(t, support);
+#ifndef WITH_CUDA
+    // Reject before the framework-free index borrows device pointers. Its
+    // default CPU context must never interpret CUDA storage as host memory.
+    STD_TORCH_CHECK(!qx.is_cuda(), "Native extension was built for CPU only; select "
+                                  "WARPSPHCORE_NATIVE_BUILD=gpu and rebuild");
+#endif
     // The framework-free builder borrows Torch's existing tensor memory. Its
     // resulting index feeds the same traversal rows as the standalone API.
     auto buffer = [](const Tensor &value) {
