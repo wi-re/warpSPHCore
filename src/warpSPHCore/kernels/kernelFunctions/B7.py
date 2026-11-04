@@ -22,21 +22,39 @@ from warp.types import vector
 _B7_KNOT1 = 1.0 / 7.0
 _B7_KNOT3 = 3.0 / 7.0
 _B7_KNOT5 = 5.0 / 7.0
+# Exact central polynomial coefficients avoid subtracting O(1) terms for
+# derivatives that vanish at the origin. Named leaves also preserve FP64.
+_B7_CENTER_C0 = 3364.0 / 16807.0
+_B7_CENTER_C2 = -660.0 / 343.0
+_B7_CENTER_C4 = 60.0 / 7.0
+_B7_CENTER_C6 = -20.0
 
 @wp.func
 def B7_k(q: scalar_t, dim: wp.int32 = 2):
+    if q < scalar_t(_B7_KNOT1):
+        q2 = q * q
+        return scalar_t(_B7_CENTER_C0) + q2 * (scalar_t(_B7_CENTER_C2) + q2 * (scalar_t(_B7_CENTER_C4) + q2 * scalar_t(_B7_CENTER_C6)))
     return bpow_warp(q - scalar_t(1.0), 6) - scalar_t(7.0) * bpow_warp(q - scalar_t(_B7_KNOT5), 6) + scalar_t(21.0) * bpow_warp(q - scalar_t(_B7_KNOT3), 6) - scalar_t(35.0) * bpow_warp(q - scalar_t(_B7_KNOT1), 6)
 
 @wp.func
 def B7_dkdq(q: scalar_t, dim: wp.int32 = 2):
+    if q < scalar_t(_B7_KNOT1):
+        q2 = q * q
+        return q * (scalar_t(2.0) * scalar_t(_B7_CENTER_C2) + q2 * (scalar_t(4.0) * scalar_t(_B7_CENTER_C4) + q2 * scalar_t(6.0) * scalar_t(_B7_CENTER_C6)))
     return (bpow_warp(q - scalar_t(1.0), 5) - scalar_t(7.0) * bpow_warp(q - scalar_t(_B7_KNOT5), 5) + scalar_t(21.0) * bpow_warp(q - scalar_t(_B7_KNOT3), 5) - scalar_t(35.0) * bpow_warp(q - scalar_t(_B7_KNOT1), 5)) * scalar_t(6.0)
 
 @wp.func
 def B7_d2kdq2(q: scalar_t, dim: wp.int32 = 2):
+    if q < scalar_t(_B7_KNOT1):
+        q2 = q * q
+        return scalar_t(2.0) * scalar_t(_B7_CENTER_C2) + q2 * (scalar_t(12.0) * scalar_t(_B7_CENTER_C4) + q2 * scalar_t(30.0) * scalar_t(_B7_CENTER_C6))
     return (bpow_warp(q - scalar_t(1.0), 4) - scalar_t(7.0) * bpow_warp(q - scalar_t(_B7_KNOT5), 4) + scalar_t(21.0) * bpow_warp(q - scalar_t(_B7_KNOT3), 4) - scalar_t(35.0) * bpow_warp(q - scalar_t(_B7_KNOT1), 4)) * scalar_t(30.0)
 
 @wp.func
 def B7_d3kdq3(q: scalar_t, dim: wp.int32 = 2):
+    if q < scalar_t(_B7_KNOT1):
+        q2 = q * q
+        return q * (scalar_t(24.0) * scalar_t(_B7_CENTER_C4) + q2 * scalar_t(120.0) * scalar_t(_B7_CENTER_C6))
     return (bpow_warp(q - scalar_t(1.0), 3) - scalar_t(7.0) * bpow_warp(q - scalar_t(_B7_KNOT5), 3) + scalar_t(21.0) * bpow_warp(q - scalar_t(_B7_KNOT3), 3) - scalar_t(35.0) * bpow_warp(q - scalar_t(_B7_KNOT1), 3)) * scalar_t(120.0)
 
 @wp.func
