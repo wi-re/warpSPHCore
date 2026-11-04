@@ -16,7 +16,7 @@ void vector(const Tensor &x, const Tensor &example, ScalarType dtype, int64_t n,
     STD_TORCH_CHECK(x.dim() == 1 && x.size(0) == n, name, " has an incompatible shape");
 }
 
-void geometry(const Tensors &t, int support) {
+void geometry(const Tensors &t, int support, bool fixed_adjacency) {
     const auto &q = t[QX];
     const auto &r = t[RX];
     STD_TORCH_CHECK(q.device().is_cpu() || q.is_cuda(),
@@ -29,7 +29,10 @@ void geometry(const Tensors &t, int support) {
     tensor(r, q, q.scalar_type(), "reference positions");
     STD_TORCH_CHECK(r.dim() == 2 && r.size(1) == q.size(1),
                     "reference positions have an incompatible shape");
-    STD_TORCH_CHECK(r.size(0) <= std::numeric_limits<int32_t>::max(),
+    // Search currently stores generated per-row counts as int32. A supplied
+    // CSR already declares those counts; its global reference extent and IDs
+    // need not fit int32.
+    STD_TORCH_CHECK(fixed_adjacency || r.size(0) <= std::numeric_limits<int32_t>::max(),
                     "per-row neighbor counts must fit int32");
     vector(t[QH], q, q.scalar_type(), q.size(0), "query supports");
     vector(t[RH], q, q.scalar_type(), r.size(0), "reference supports");
@@ -45,7 +48,7 @@ Tensors prepare_pair_geometry(const Tensors &inputs, int support, int direction)
     STD_TORCH_CHECK(inputs.size() == OUTPUT, "invalid native operator tensor layout");
     Tensors t = inputs;
     t.resize(SLOTS);
-    geometry(t, support);
+    geometry(t, support, true);
     const auto &q = t[QX];
     const auto n = q.size(0), nr = t[RX].size(0);
     STD_TORCH_CHECK(direction >= 0 && direction <= 14, "invalid operation direction");

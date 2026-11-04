@@ -107,13 +107,13 @@ template <class T, int Components> struct CountedSums {
 
 template <class T> struct Maximum {
     T value = T(0);
-    int32_t index = -1;
+    int64_t index = -1;
 
     SPH_HD void combine(const Maximum& other) {
         if (other.index >= 0) consider(other.value, other.index);
     }
 
-    SPH_HD void consider(T candidate, int32_t candidate_index) {
+    SPH_HD void consider(T candidate, int64_t candidate_index) {
         if (index < 0 || candidate > value ||
             (candidate == value && candidate_index < index)) {
             value = candidate;

@@ -38,8 +38,10 @@ static Prepared describe(const Problem &v, Task task) {
             "Unknown precision");
     require(v.dimension >= 1 && v.dimension <= 3, "Dimension must be 1, 2 or 3");
     require(v.field_rank >= 0 && v.field_rank <= 2, "Field rank must be 0, 1 or 2");
-    require(p.rows >= 0 && p.references >= 0 && p.references <= std::numeric_limits<int32_t>::max(),
-            "Invalid population sizes");
+    require(p.rows >= 0 && p.references >= 0, "Invalid population sizes");
+    if (task == Task::Count || task == Task::Collect)
+        require(p.references <= std::numeric_limits<int32_t>::max(),
+                "Search reference population must fit int32 generated counts");
     auto op = v.properties.operation;
     int support = int(v.properties.support);
     require(support >= 11 && support <= 16, "Unknown or unsupported support policy");

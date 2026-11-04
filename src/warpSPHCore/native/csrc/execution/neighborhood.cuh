@@ -39,7 +39,7 @@ template <int Width> struct GroupReduction {
     template <class Selection> __device__ void winner(Selection& value) const {
         for (int distance = Width / 2; distance; distance /= 2) {
             const auto other_value = group_xor<Width>(value.value, distance);
-            const int other_index = group_xor<Width>(value.index, distance);
+            const int64_t other_index = group_xor<Width>(value.index, distance);
             if (other_index >= 0)
                 value.consider(other_value, other_index);
         }
