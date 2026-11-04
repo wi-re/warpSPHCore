@@ -4,6 +4,7 @@ import torch
 from ..autograd.operator_spec import (SPHContext,Corrections,OperatorSpec,OutputSpec,
                                       ExtraSpec,ExtraKind,RowRole,launchOperator)
 from .._models import GradHState,RenormalizationState
+from ..enumTypes import ExecutionMode
 
 
 @dataclass(frozen=True)
@@ -12,6 +13,8 @@ class Kernel:
     function: object
 
     def launch_native(self,context,extras):
+        if context.mode is ExecutionMode.FORWARD:
+            raise NotImplementedError('ExecutionMode.FORWARD is not implemented at the OperatorSpec boundary; use the explicit JVP API')
         return self.function(context,extras)
 
 

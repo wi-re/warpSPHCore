@@ -87,3 +87,16 @@ def test_jit_module_basename_collisions_preserve_relative_headers(tmp_path):
     Path(sources[0]).write_text('#include "local.h"\n// updated source')
     assert jit_source_paths([*sources, str(unique)], [], tmp_path / 'staged')[0] == cpu
     assert Path(cpu[0]).read_text() != before
+
+
+def test_native_kernel_keeps_explicit_context_mode_contract():
+    from warpSPHCore.native._row_dispatch import Kernel
+    from warpSPHCore.autograd import SPHContext
+    from warpSPHCore import ExecutionMode
+    kernel=Kernel('test.context',lambda context,extras:extras['value'])
+    context=SPHContext(None,None,None,mode=ExecutionMode.FORWARD)
+    with pytest.raises(NotImplementedError,match='ExecutionMode.FORWARD'):
+        kernel.launch_native(context,{'value':17})
+    for mode in (ExecutionMode.AUTO,ExecutionMode.NONE,ExecutionMode.REVERSE):
+        context.mode=mode
+        assert kernel.launch_native(context,{'value':17})==17
