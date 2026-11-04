@@ -204,3 +204,30 @@ its historical captures were observed. An initial probe's incorrect API
 assumption and a subsequent rejected wrong-stream replay remain external
 probe evidence; neither was a numerical operator failure. No timed workload
 or kernel policy was changed by this measurement correction.
+
+
+The refreshed `complete-r18` pair passes 564 frontend CUDA checks in each of
+FP32/FP64, 559 CPU checks (five device skips) in each precision, and 130 directly
+relevant core derivative/product checks on each device. Real prepared wide
+allocations pass again in both precisions. HIP additionally compiles both
+affected production derivative units, bringing this session's production GPU
+compile coverage to 29 frontend plus four shared core units; no AMD runtime.
+
+Long FP32 W2 TGV pointwise parity remains unqualified at 2e-4. The production
+route passes ten accepted steps with exact clocks, but at t=5 from identical
+saved initial fields the scaled errors reach 2.28e-4 position, 4.69e-3 velocity
+and 5.08e-3 pressure. IDs, mass, support and clocks match. In FP64, the same
+identical-state full replay differs by at most 1.60e-11. This supports precision
+sensitivity, not an equation change; it does not replace the FP32 failure.
+Native/Warp sampling itself can differ by 6.2e-5, which the common-state replay
+isolates. All records preserve initial hashes, UID order and original bounds.
+The final non-isentropic CRK bounded comparison reports six mismatches in its
+first failed block; only the earlier full-array checkpoint establishes a total
+of six, so no new global count is inferred from the short-circuiting rerun.
+
+The historical TGV deltaSPH matrix step cost regresses 3.60 to 7.86 ms. Current
+same-source Warp frontend over native core costs 9.44 ms, so the frontend port
+improves that route while the broader historical regression remains. ACSPH
+TGV completes at 36.4 ms versus 518 ms historically, with a metadata-only
+harness ABI fix after a preserved failure. These historical timings include
+broader core/runtime changes and do not replace the controlled W4 campaigns.
