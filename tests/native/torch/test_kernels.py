@@ -85,3 +85,16 @@ def test_smooth_origin_and_tiny_displacements(device,kernel,dim):
     torch.testing.assert_close(result.hessian[0],torch.eye(dim,device=device,dtype=x.dtype)*curvature,rtol=2e-12,atol=2e-12)
     torch.testing.assert_close(result.gradient[:,0],curvature*x[:,0]+.5*result.radial[0,3]*result.radial[0,4]*x[:,0].abs()*x[:,0],rtol=2e-9,atol=1e-30)
     torch.testing.assert_close(result.hessian[1],result.hessian[0],rtol=2e-12,atol=2e-12)
+
+
+@pytest.mark.parametrize('dtype',[torch.float32,torch.float64])
+@pytest.mark.parametrize('dim',[1,2,3])
+def test_wendland4_small_radial_slopes_do_not_subtract_product_terms(device,dtype,dim):
+    # Above the origin Taylor threshold: product-rule terms are O(1), but
+    # their difference is O(q). Compare with an independent FP64 polynomial.
+    q=torch.tensor([1e-4,1e-3,.037,.21,.63],device=device,dtype=dtype)
+    x=torch.zeros(len(q),dim,device=device,dtype=dtype);x[:,0]=q
+    first=evaluateKernel(x,torch.ones_like(q),sph.KernelFunctions.Wendland4).radial[:,1]
+    z=q.double();expected=(-14*z*(4*z+1)*(1-z)**4 if dim==1 else (-56/3)*z*(5*z+1)*(1-z)**5)
+    eps=torch.finfo(dtype).eps
+    torch.testing.assert_close(first.double(),expected,rtol=(8 if dtype==torch.float32 else 16)*eps,atol=0)

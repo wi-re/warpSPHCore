@@ -71,3 +71,17 @@ bounded by the existing scalar-list planner/collector policy; native full CSR
 has its separate wide-addressing route. Twenty owned-field tests pass on CPU and
 CUDA. Native CRK requests this storage explicitly; other force families retain
 their existing guards. Ownership and communication partitioning are unchanged.
+
+The IISPH conversion exposed an existing FP32 precision sensitivity: a native
+Wendland4 product-rule derivative subtracts two O(1) terms to obtain its O(q)
+slope. The unchanged dense-Jacobi check failed at 5.44e-5 against 2e-5 while
+its Warp control passed. Native now evaluates the identical spline's factored
+first, second and third derivatives, including the full RadialJet chain rule.
+The original failure remains external evidence. All 16 coupled CPU cases now
+pass the original bound. Kernel/independent small-slope checks pass 21 CPU and
+21 CUDA cases; seven CUDA reverse-family checks pass. The frontend converted
+family suite passes 405 CPU checks (four device skips) and 409 CUDA checks.
+The projection/routing suite passes 153 CPU checks, with ten existing skips and
+two derivative cases excluded from this primal qualification. No tolerances or
+physical equations changed. Timing measurements pinned before this change
+retain their original source hashes and are not relabeled as new performance.
