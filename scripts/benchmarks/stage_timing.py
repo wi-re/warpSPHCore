@@ -28,6 +28,7 @@ class StageTiming:
         self.restores = []
         self.event_pool = []
         self.event_index = 0
+        self.warp_launch_depth = 0
 
     def stamp(self):
         if self.cuda:
@@ -73,6 +74,33 @@ class StageTiming:
         self.restores.append((obj, name, getattr(obj, name)))
         setattr(obj, name, value)
 
+    def install_warp_launches(self, wp):
+        def wrapped(original):
+            @wraps(original)
+            def launch(*args, **kwargs):
+                # Some Warp versions implement tiled launch through launch.
+                # Attribute one physical call, including the outer API's work.
+                if self.warp_launch_depth:
+                    return original(*args, **kwargs)
+                self.warp_launch_depth += 1
+                try:
+                    kernel = kwargs.get('kernel', args[0] if args else None)
+                    if self.frame is not None and self.cuda:
+                        stream = kwargs.get('stream')
+                        if stream is None:
+                            stream = wp.get_stream('cuda')
+                        expected = self.torch.cuda.current_stream().cuda_stream
+                        if stream.cuda_stream != expected:
+                            raise RuntimeError('Stage timing requires Warp and Torch on the same stream')
+                    with self.region(engine='Warp', operation=getattr(kernel, 'key', str(kernel))):
+                        return original(*args, **kwargs)
+                finally:
+                    self.warp_launch_depth -= 1
+            return launch
+        for name in ('launch', 'launch_tiled'):
+            if hasattr(wp, name):
+                self.patch(wp, name, wrapped(getattr(wp, name)))
+
     def install(self):
         import warp as wp
         import warpSPHCore.profiling as profiling
@@ -84,21 +112,7 @@ class StageTiming:
         for name, module in list(sys.modules.items()):
             if name.startswith(('warpSPH', 'warpSPHCore')) and getattr(module, 'record_function', None) is original_gate:
                 self.patch(module, 'record_function', self.gate)
-        original_launch = wp.launch
-
-        @wraps(original_launch)
-        def launch(*args, **kwargs):
-            kernel = kwargs.get('kernel', args[0] if args else None)
-            if self.frame is not None and self.cuda:
-                stream = kwargs.get('stream')
-                if stream is None:
-                    stream = wp.get_stream('cuda')
-                expected = self.torch.cuda.current_stream().cuda_stream
-                if stream.cuda_stream != expected:
-                    raise RuntimeError('Stage timing requires Warp and Torch on the same stream')
-            with self.region(engine='Warp', operation=getattr(kernel, 'key', str(kernel))):
-                return original_launch(*args, **kwargs)
-        self.patch(wp, 'launch', launch)
+        self.install_warp_launches(wp)
         original_build = _build.build
         timing = self
 

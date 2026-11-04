@@ -193,3 +193,14 @@ Every raw slower run remains included. All matched initial/accepted/final
 fields and separate exclusive stage runs pass at 2e-4 with exact final times.
 These controlled campaigns refine the earlier CPU timing claims; medians do
 not guarantee uniform latency. Index-width tuning remains separate follow-up.
+
+
+The benchmark observer now also covers Warp's public `launch_tiled` API and
+suppresses nested launch double counting. Two exclusive-attribution CPU checks
+pass. A real CUDA four-lane CRK kernel replay through `launch_tiled` is counted
+once and preserves outputs bitwise on Torch's current stream. Core's existing
+cooperative launcher already uses `wp.launch` with explicit [rows,lanes], so
+its historical captures were observed. An initial probe's incorrect API
+assumption and a subsequent rejected wrong-stream replay remain external
+probe evidence; neither was a numerical operator failure. No timed workload
+or kernel policy was changed by this measurement correction.
