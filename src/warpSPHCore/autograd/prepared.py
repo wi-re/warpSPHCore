@@ -4,10 +4,10 @@
 correction / kernel-property structs) and runs the autograd bridge on every call -- ~0.5 ms of
 host work per launch, which made the meshless step host-bound (a ``MeshlessWarp`` build and its
 rates launch ~10 operator kernels on the same particles and adjacency). :class:`PreparedLauncher`
-does the prefix once, with the same ``extractStateInfo`` / ``build_fn`` code ``launchOperator``
+extracts borrowed bindings once, with the same ``extractStateInfo`` / ``build_fn`` code ``launchOperator``
 uses (so the kernels receive the same arguments and give bitwise the same results), and then
 launches a spec's kernel directly: outputs allocated on torch's allocator, extras converted like
-the operator's no-grad path.
+the operator's no-grad path. Warp views are materialized on the first Warp launch; native launch records go directly through the native dispatcher.
 
 No gradients: the MFM warp backend is forward-only (the torch reference is the differentiable
 path). A call with any extra that requires grad -- or under forward-mode AD -- goes through
@@ -65,6 +65,16 @@ class PreparedLauncher:
         flat, build_fn, device, dim = extractStateInfo(*state)
         self._flat = flat                                   # keep the viewed tensors alive
         self._ok = all(_inert(t) for t in flat if isinstance(t, torch.Tensor))
+        self._build_fn = build_fn
+        self._warp_ready = False
+
+    def _prepare_warp(self):
+        # Native launch records do not need Warp views or Warp array extents.
+        # Retain the original borrowed bindings, materializing this ABI only
+        # when a Warp spec actually consumes it.
+        if self._warp_ready:
+            return
+        flat, build_fn = self._flat, self._build_fn
         if self._ok:
             wa = []
             for t in flat:
@@ -78,15 +88,20 @@ class PreparedLauncher:
             self._wa = wa
             self.prefix = build_fn(wa, use_bundle=False)
 
+        self._warp_ready = True
+
     def launch(self, spec, **extras):
         if self._chunks is not None:
             if self.ctx.adjacency is not self._adjacency:
                 raise ValueError('Build a new prepared launcher after replacing its chunked adjacency.')
             from .row_dispatch import launchRowChunks
             return launchRowChunks(spec, self.ctx, extras, prepared=self._chunks)
+        if hasattr(spec.kernel, 'launch_native'):
+            return launchOperator(spec, self.ctx, **extras)
         tensors = [v for v in extras.values() if isinstance(v, torch.Tensor)]
         if not self._ok or (torch.is_grad_enabled() and not all(_inert(t) for t in tensors)):
             return launchOperator(spec, self.ctx, **extras)
+        self._prepare_warp()
         ctx = self.ctx
         args = []
         for e in spec.extras:

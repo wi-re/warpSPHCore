@@ -85,3 +85,12 @@ The projection/routing suite passes 153 CPU checks, with ten existing skips and
 two derivative cases excluded from this primal qualification. No tolerances or
 physical equations changed. Timing measurements pinned before this change
 retain their original source hashes and are not relabeled as new performance.
+
+PreparedLauncher now recognizes native launch records before converting extras or
+allocating Warp outputs. Its borrowed metadata is retained, while Warp tensor
+views are created only for an actual Warp consumer. This fixes native output
+descriptor handling and removes an unnecessary Warp extent limit from prepared
+wide CSR. Two CPU/two CUDA regressions reject every attempted Warp tensor view
+in native prepared flat/owned launches. Existing ownership/field/prepared checks
+pass 73 CPU (one device skip) and 76 CUDA cases. Both PESPH variants preserve
+bitwise flat/chunk/prepared results in eight CPU and eight CUDA checks.

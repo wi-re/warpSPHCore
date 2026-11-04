@@ -234,3 +234,20 @@ def test_conditional_tensor_roles_and_shape_guards_before_allocation(device, mon
     c = Corrections(crk=correction(q, q, 'crk')['crkState'][0])
     with pytest.raises(ValueError, match='reference CRK'):
         launchOperator(_COVARIANCE_SPEC, replace(ctx, corrections=c))
+
+
+@pytest.mark.parametrize('chunks', [False, True])
+def test_prepared_native_specs_do_not_materialize_warp_arrays(device, monkeypatch, chunks):
+    from warpSPHCore.autograd import PreparedLauncher, SPHContext, Corrections, launchOperator
+    from warpSPHCore.native._row_dispatch import spec, output
+    import warpSPHCore.autograd.prepared as prepared
+    q, _, domain, _, owned, flat = sample(device)
+    q = replace(q, kinds=torch.zeros_like(q.kinds))
+    properties = OperationProperties(KernelFunctions.Wendland2)
+    adjacency = owned if chunks else flat
+    ctx = SPHContext(q, properties, domain, adjacency, corrections=Corrections())
+    declaration = spec('native.test.prepared', lambda c, e: c.query.masses.square(), (output(),), {})
+    monkeypatch.setattr(prepared, 'getCachedWarpArray', lambda *a, **kw: pytest.fail('native launch built a Warp tensor view'))
+    actual = PreparedLauncher(ctx).launch(declaration)
+    torch.testing.assert_close(actual, q.masses.square(), rtol=0, atol=0)
+    torch.testing.assert_close(actual, launchOperator(declaration, ctx), rtol=0, atol=0)
