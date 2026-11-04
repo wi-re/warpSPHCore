@@ -62,3 +62,12 @@ attempts, snapshots and dispatch are retained there. Campaign sources are in
 `core/research/native-backend/experiments/frontend-operators` (initial research
 commit `459d31f`). The frontend coverage ledger carries reproduction details.
 The Isambard run remains stopped; no remote work was launched.
+
+Native owned pair fields now accept `backend='native'`. Byte budgets and dedicated
+per-chunk storage remain mandatory; scalar-flattened extents may exceed Warp's
+conservative int32 guard. Structured row dispatch revalidates the consuming
+backend, rejecting a Warp consumer before output allocation. J capacity remains
+bounded by the existing scalar-list planner/collector policy; native full CSR
+has its separate wide-addressing route. Twenty owned-field tests pass on CPU and
+CUDA. Native CRK requests this storage explicitly; other force families retain
+their existing guards. Ownership and communication partitioning are unchanged.

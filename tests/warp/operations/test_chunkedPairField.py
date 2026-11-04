@@ -193,3 +193,28 @@ def test_explicit_scalar_block_preserves_reverse_mode(device, block):
     output.sum().backward()
     torch.testing.assert_close(output,values.square(),rtol=0,atol=0)
     torch.testing.assert_close(values.grad,2*values,rtol=0,atol=0)
+
+
+def test_native_field_keeps_byte_budget_without_warp_vector_extent_rule(device,monkeypatch):
+    policy=RowChunkPolicy(edgeBudget=30,maxRows=2,maxElementsPerEdge=1,
+                          bytesPerEdge=4+2*torch.empty(0,dtype=get_torch_precision()).element_size())
+    p,domain,adjacency=sample(device,policy=policy)
+    native=ChunkedPairField.empty(adjacency,trailingShape=(2,),dtype=p.positions.dtype,backend='native')
+    native.validate(adjacency)
+    assert native.backend=='native'
+    with pytest.raises(ValueError,match='scalar extents'):
+        native.validate(adjacency,backend='warp')
+    ctx=SPHContext(p,OperationProperties(kernel=KernelFunctions.Wendland2),domain,adjacency)
+    dispatch=__import__('warpSPHCore.autograd.row_dispatch',fromlist=['_allocate_output'])
+    monkeypatch.setattr(dispatch,'_allocate_output',lambda *a,**kw:pytest.fail('Warp allocated before native-wide field rejection'))
+    with pytest.raises(ValueError,match='scalar extents'):
+        launchOperator(SPEC,ctx,work=native,rowStart=0)
+    tiny=replace(adjacency,plan=replace(adjacency.plan,policy=replace(policy,bytesPerEdge=4)))
+    with pytest.raises(ValueError,match='J/I plus field bytes'):
+        ChunkedPairField.empty(tiny,trailingShape=(2,),dtype=p.positions.dtype,backend='native')
+    # Metadata-only boundary test: no billion-element allocation is needed to
+    # verify the backend gate. Real CUDA addressing is qualified separately.
+    large=replace(adjacency,chunks=tuple(replace(chunk,metadata=replace(chunk.metadata,capacity=2**30)) for chunk in adjacency))
+    ChunkedPairField._checkLayout(large,(2,),p.positions.dtype,backend='native')
+    with pytest.raises(ValueError,match='scalar extents'):
+        ChunkedPairField._checkLayout(large,(2,),p.positions.dtype,backend='warp')

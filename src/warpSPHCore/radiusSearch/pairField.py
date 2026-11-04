@@ -2,7 +2,10 @@
 
 There is deliberately no flattened tensor view. The adjacency identity and its
 storage lease pin pair ordering for consumers; a new plan requires replay or
-an explicit migration. Policy bytes account for J/I plus this field.
+an explicit migration. Policy bytes account for J/I plus this field. The default
+Warp backend also requires its conservative scalar-extent policy. Explicit native
+fields keep byte/ownership bounds while allowing wide flattened scalar addresses;
+Warp consumers revalidate their own extent rule before launching.
 """
 from dataclasses import dataclass
 from math import prod
@@ -20,9 +23,12 @@ class ChunkedPairField:
     buffers: tuple[torch.Tensor, ...]
     trailingShape: tuple[int, ...]
     dtype: torch.dtype
+    backend: str = 'warp'
 
     @staticmethod
-    def _checkLayout(adjacency, trailingShape, dtype):
+    def _checkLayout(adjacency, trailingShape, dtype, *, backend='warp'):
+        if backend not in ('warp','native'):
+            raise ValueError("Pair-field backend must be 'warp' or 'native'.")
         adjacency.assertStorageValid()
         if not isinstance(trailingShape, tuple) or any(type(n) is not int or n < 1 for n in trailingShape):
             raise ValueError('Pair-field trailingShape must contain positive integer extents.')
@@ -30,12 +36,14 @@ class ChunkedPairField:
         policy = adjacency.plan.policy
         indexBytes = 4 if get_torch_index_dtype()==torch.int32 else 8
         pairBytes = indexBytes * (1 + adjacency.storeI) + width * torch.empty(0, dtype=dtype).element_size()
-        if policy.maxElementsPerEdge < width or policy.bytesPerEdge < pairBytes:
+        extentInvalid = backend == 'warp' and (policy.maxElementsPerEdge < width or
+            any(chunk.metadata.capacity * width > 2**31-1 for chunk in adjacency))
+        if extentInvalid or policy.bytesPerEdge < pairBytes:
             raise ValueError('RowChunkPolicy must account for pair-field scalar extents and J/I plus field bytes.')
 
     @classmethod
-    def empty(cls, adjacency, *, trailingShape, dtype):
-        cls._checkLayout(adjacency, trailingShape, dtype)
+    def empty(cls, adjacency, *, trailingShape, dtype, backend='warp'):
+        cls._checkLayout(adjacency, trailingShape, dtype, backend=backend)
         buffers = []
         try:
             for chunk in adjacency:
@@ -47,12 +55,12 @@ class ChunkedPairField:
                 requestedBytes=requested, completedChunks=len(buffers), generation=adjacency.plan.generation.number)
             buffers.clear()
             raise
-        return cls(adjacency, tuple(buffers), trailingShape, dtype)
+        return cls(adjacency, tuple(buffers), trailingShape, dtype, backend)
 
-    def validate(self, adjacency):
+    def validate(self, adjacency, *, backend=None):
         if self.adjacency is not adjacency:
             raise ValueError('Pair field belongs to another chunked adjacency generation/layout; replay or migrate explicitly.')
-        self._checkLayout(adjacency, self.trailingShape, self.dtype)
+        self._checkLayout(adjacency, self.trailingShape, self.dtype, backend=self.backend if backend is None else backend)
         if not isinstance(self.buffers, tuple) or len(self.buffers) != len(adjacency.chunks):
             raise ValueError('Pair field must supply exactly one buffer per owned chunk.')
         storages = set()

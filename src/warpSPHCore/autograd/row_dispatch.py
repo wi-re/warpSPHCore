@@ -144,7 +144,7 @@ def _validateSpec(spec, ctx, extras):
         if e.kind is ExtraKind.CHUNK_TENSOR and role is RowRole.CHUNK:
             if not isinstance(value, ChunkedPairField):
                 raise TypeError(f'Extra {name} requires an owned ChunkedPairField.')
-            value.validate(ctx.adjacency)
+            value.validate(ctx.adjacency, backend='native' if hasattr(spec.kernel, 'launch_native') else 'warp')
         elif e.kind in (ExtraKind.TENSOR, ExtraKind.CHUNK_TENSOR):
             if not isinstance(value, torch.Tensor):
                 raise TypeError(f'Extra {name} must be a tensor.')

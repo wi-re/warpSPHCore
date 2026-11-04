@@ -107,7 +107,7 @@ def main():
                 policy = RowChunkPolicy(edgeBudget=2**31-1,
                     maxRows=math.ceil(n/args.storage_chunks),
                     bytesPerEdge=index_bytes + width*state.positions.element_size(),
-                    maxElementsPerEdge=width)
+                    maxElementsPerEdge=1 if args.frontend_operators=='native' and args.scheme=='CRKSPH' else width)
                 return buildChunkedVerletList(state, config.domain, policy=policy,
                     supportMode=SupportScheme.SuperSymmetric,
                     verletScale=config.verletScale, storeI=False)
