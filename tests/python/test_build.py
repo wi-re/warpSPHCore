@@ -94,3 +94,22 @@ def test_hip_preprocessing_uses_private_tree(tmp_path):
     assert all(Path(p).is_relative_to(tmp_path / 'cache') for group in converted for p in group)
     assert {p.name: p.read_text() for p in package.iterdir()} == before
     assert prepare_hip_sources(*args) == converted
+
+
+def test_frontend_prebuilt_selector_and_dependency_guard(tmp_path,monkeypatch):
+    directory=tmp_path/'native/_lib';directory.mkdir(parents=True)
+    (directory/'library.so').touch()
+    (directory/'build.json').write_text(json.dumps({'library':'library.so','core_digest':'old'}))
+    monkeypatch.setenv('WARPSPHCORE_NATIVE_LOAD','jit')
+    monkeypatch.setenv('FRONTEND_NATIVE_LOAD','prebuilt')
+    monkeypatch.setattr(_loader,'incompatibility',lambda *args:None)
+    loaded=[];monkeypatch.setattr(torch.ops,'load_library',loaded.append)
+    def check(metadata):return None if metadata['core_digest']=='current' else 'core header dependency differs'
+    with pytest.raises(RuntimeError,match='core header dependency differs'):
+        _loader.load_prebuilt(tmp_path,environment='FRONTEND_NATIVE_LOAD',dependency_check=check)
+    assert not loaded
+    monkeypatch.setenv('FRONTEND_NATIVE_LOAD','auto')
+    assert not _loader.load_prebuilt(tmp_path,environment='FRONTEND_NATIVE_LOAD',dependency_check=check)
+    (directory/'build.json').write_text(json.dumps({'library':'library.so','core_digest':'current'}))
+    assert _loader.load_prebuilt(tmp_path,environment='FRONTEND_NATIVE_LOAD',dependency_check=check)
+    assert loaded==[str(directory/'library.so')]

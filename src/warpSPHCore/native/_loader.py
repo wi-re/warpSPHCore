@@ -62,10 +62,15 @@ def incompatibility(metadata, package, torch):
     return None
 
 
-def load_prebuilt(package):
-    mode = os.environ.get('WARPSPHCORE_NATIVE_LOAD', 'auto').lower()
+def load_prebuilt(package, *, environment='WARPSPHCORE_NATIVE_LOAD', dependency_check=None):
+    """Load a module-owned library using common ABI/device/source guards.
+
+    Frontends supply their own selector and an optional metadata dependency
+    guard. The callback returns an incompatibility reason or None, before dlopen.
+    """
+    mode = os.environ.get(environment, 'auto').lower()
     if mode not in ('auto', 'prebuilt', 'jit'):
-        raise ValueError('WARPSPHCORE_NATIVE_LOAD must be auto, prebuilt or jit')
+        raise ValueError(f'{environment} must be auto, prebuilt or jit')
     if mode == 'jit':
         return False
     import torch
@@ -74,6 +79,8 @@ def load_prebuilt(package):
     if manifest.is_file():
         metadata = json.loads(manifest.read_text())
         reason = incompatibility(metadata, package, torch)
+        if reason is None and dependency_check is not None:
+            reason = dependency_check(metadata)
         filename = metadata.get('library', '')
         library = manifest.parent / filename
         if not filename or Path(filename).name != filename or not library.is_file():
@@ -85,5 +92,5 @@ def load_prebuilt(package):
             return True
     if mode == 'prebuilt':
         raise RuntimeError(f'No compatible prebuilt native backend: {reason}. '
-                           'Install a matching wheel or select WARPSPHCORE_NATIVE_LOAD=jit.')
+                           f'Install a matching wheel or select {environment}=jit.')
     return False
