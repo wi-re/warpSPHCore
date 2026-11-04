@@ -188,16 +188,18 @@ class AdjacencyList:
     # Restored/foreign lists start unbound and conservatively rebuild.
     searchContext: Optional[tuple] = None
 
-    def cooRows(self, *, padded=True):
+    def cooRows(self, *, padded=True, backend=None):
         """Explicit temporary COO rows; CSR-only lists never cache this allocation.
 
         Normal operators use edgeOffsets/numNeighbors/paddedJ. Development,
-        differentiation and wall consumers may request rows explicitly.
+        differentiation and wall consumers may request rows explicitly. Select
+        backend="native" when a native consumer uses wide CSR in a Warp process.
         """
         n = self.paddedJ.numel() if padded or self.numEdges is None else self.numEdges
         if self.paddedI is not None:
             return self.paddedI[:n]
-        if BACKEND == 'native':
+        from ._backend import resolve_backend
+        if resolve_backend(backend) == 'native':
             live = torch.repeat_interleave(
                 torch.arange(self.numRows, dtype=self.paddedJ.dtype, device=self.paddedJ.device),
                 self.numNeighbors.long(), output_size=self.numEdges,
@@ -217,12 +219,12 @@ class AdjacencyList:
                       device=str(rows.device), stream=stream)
         return rows
 
-    def livePairs(self):
+    def livePairs(self, *, backend=None):
         """(i, j) views of the real entries only (the padding sliced off): the exact arrays the unpadded list used to
         have. Stored COO rows are views; CSR-only lists explicitly allocate temporary
         rows. Neither caches the reconstruction. Shapes follow rebuilds: eager consumers only."""
         n = self.paddedJ.shape[0] if self.numEdges is None else self.numEdges
-        return self.cooRows(padded=False), self.paddedJ[:n]
+        return self.cooRows(padded=False, backend=backend), self.paddedJ[:n]
 
 
 DEFAULT_CAPACITY = CapacityPolicy()

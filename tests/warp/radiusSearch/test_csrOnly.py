@@ -82,3 +82,26 @@ def test_empty_rows_and_no_padding():
     assert a.numEdges==0 and a.paddedI is None and a.paddedJ.numel()==0
     assert a.cooRows().numel()==0
     assert a.numNeighbors.tolist()==[0,0]
+
+
+@pytest.mark.parametrize('index_dtype',[torch.int32,torch.int64])
+@pytest.mark.parametrize('offset_dtype',[torch.int32,torch.int64])
+@pytest.mark.parametrize('counts',[[2,0,1], [0,0,0], []])
+def test_explicit_native_coo_with_wide_csr_in_warp_process(device,index_dtype,offset_dtype,counts,monkeypatch):
+    from warpSPHCore import AdjacencyList
+    # The native consumer owns its backend even while the process default is Warp.
+    # Reconstruction must not wrap the independently wide CSR in Warp arrays.
+    monkeypatch.setattr(wp,'launch',lambda *a,**k:pytest.fail('unexpected Warp launch'))
+    c=torch.tensor(counts,device=device,dtype=torch.int32)
+    offsets=torch.cat((torch.zeros(1,device=device,dtype=offset_dtype),c.to(offset_dtype).cumsum(0)))[:-1]
+    live=sum(counts)
+    j=torch.full((live+2,),-1,device=device,dtype=index_dtype)
+    j[:live]=torch.arange(live,device=device,dtype=index_dtype)
+    adj=AdjacencyList(None,j,c,offsets,len(counts),max(live,1),numEdges=live)
+    expected=torch.tensor([i for i,n in enumerate(counts) for _ in range(n)],device=device,dtype=index_dtype)
+    torch.testing.assert_close(adj.cooRows(padded=False,backend='native'),expected,rtol=0,atol=0)
+    torch.testing.assert_close(adj.cooRows(backend='native'),torch.cat((expected,j.new_full((2,),-1))),rtol=0,atol=0)
+    actual_i,actual_j=adj.livePairs(backend='native')
+    torch.testing.assert_close(actual_i,expected,rtol=0,atol=0)
+    torch.testing.assert_close(actual_j,j[:live],rtol=0,atol=0)
+    assert adj.paddedI is None

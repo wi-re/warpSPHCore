@@ -296,3 +296,20 @@ def test_per_geometry_backend_owns_closure_workspace_and_restrictions(device):
     for backend,grid in zip(('warp','native'),grids):
         assert grid._toCells.backend==backend
         assert all(level.restrict.backend==backend for level in grid.levels[:-1])
+
+
+def test_native_meshless_fallback_keeps_periodic_and_gradient_floor_policy(device):
+    dtype=wp.dtype_to_torch(scalar_t)
+    tiny=1e-9 if dtype==torch.float32 else 1e-17
+    x=torch.tensor([[0.],[tiny],[.23],[.47],[.72]],device=device,dtype=dtype)
+    h=x.new_full((len(x),),.6)
+    domain=DomainDescription(x.new_zeros(1),x.new_ones(1),torch.ones(1,device=device,dtype=torch.bool),1)
+    rates=[]
+    for backend in ('warp','native'):
+        geom=MeshlessWarp.build(x,h,domain,KernelFunctions.Wendland2,backend=backend,closure='none')
+        geom.condBad.fill_(1)  # Exercise the guarded gradient face, not moment inversion.
+        rho=1+.1*x[:,0];velocity=.1*x;pressure=1+.2*x[:,0]
+        rates.append(geom.rates(rho,velocity,pressure,1.4,dt=.001,mode='MFV'))
+    tolerance=3e-4 if dtype==torch.float32 else 2e-10
+    torch.testing.assert_close(rates[1],rates[0],rtol=tolerance,atol=tolerance)
+    assert torch.isfinite(rates[1]).all()

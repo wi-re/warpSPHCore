@@ -28,7 +28,7 @@ template<class T,int D,int Task> struct Row {
     SPH_HD Vec vector(int field,int64_t i) const {return load_vector<T,D>(fields[field],i);}
     SPH_HD Mat matrix(int field,int64_t i) const {return load_matrix<T,D>(fields[field],i);}
     SPH_HD Vec displacement(int64_t i,int64_t j) const {
-        Vec d{};QueryGeometry<T,D>(args.rx+i*D,args.lo,args.hi,args.periodic).distance(args.rx+j*D,d.values);return -d;
+        Vec d{};warp_compat::minimum_image_displacement<T,D>(args.rx+i*D,args.rx+j*D,args.lo,args.hi,args.periodic,d.values);return -d;
     }
     SPH_HD bool admitted(int64_t i,int64_t j,const Vec& d) const {return i!=j && length(d)<=maximum(args.rh[i],args.rh[j]);}
     SPH_HD Vec face(int64_t i,int64_t j,const Vec& d) const {

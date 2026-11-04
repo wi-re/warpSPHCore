@@ -193,7 +193,7 @@ class Meshless:
                 from ..radiusSearch.native import radiusSearch
                 adjacency = radiusSearch(P, domain, mode=SupportScheme.SuperSymmetric, backend='native')
                 if storeI:
-                    adjacency.paddedI = adjacency.cooRows()
+                    adjacency.paddedI = adjacency.cooRows(backend='native')
             else:
                 from ..radiusSearch import radiusSearchCompactHashMap
                 adjacency = radiusSearchCompactHashMap(P, domain, mode=SupportScheme.SuperSymmetric, storeI=storeI)

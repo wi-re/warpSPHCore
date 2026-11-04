@@ -1,6 +1,7 @@
 #pragma once
 #include "math/small.h"
 #include "kernels/kernel.h"
+#include "kernels/regularization.h"
 namespace sph_native::mfm {
 template<class T> SPH_HD T minimum(T a,T b) {return a<b ? a:b;}
 template<class T> SPH_HD T maximum(T a,T b) {return a>b ? a:b;}
@@ -32,6 +33,7 @@ template<class T,int D> SPH_HD SmallVector<T,D> guarded_face(const SmallVector<T
         T wi,gi,wj,gj;kernel_pair_value<T,D>(r,hi,kernel,wi,gi);kernel_pair_value<T,D>(r,hj,kernel,wj,gj);
         // radial is (dW/dr)/r. Retain the reference's finite origin limit.
         face=(-(wti*Vi*gi*r+wtj*Vj*gj*r)/maximum(r,tiny))*d;
+        face=face*warp_compat::gradient_scale(r);
     }
     if (areaCap) {
         T ai=2,aj=2;
