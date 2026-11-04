@@ -241,6 +241,23 @@ independently accept int32 or int64. An output's logical size is given by
 `output_elements(problem)`. The caller allocates it and retains all buffers
 until the work on its stream has completed.
 
+Supplied CSR forward/adjoint calls do not impose a global reference-population
+int32 limit: IDs and offsets select their own integer widths, while per-row
+counts remain int32. Automatic count/collect/search still rejects reference
+populations above INT32_MAX. This distinction applies to both Torch preparation
+and the standalone API; it does not enlarge search output counts. Shared
+maximum reductions retain winning reference indices in int64.
+
+The wide-address regression uses sparse virtual mappings with real live IDs
+and edge offsets above 2^31, including 3D flattened field addresses. CPU
+standalone checks additionally reject unsupported automatic search before
+reading reference storage. CUDA evidence covers interpolation, gradients and
+frontend characteristic-speed selection, with bounded physical storage and
+explicit borrowed-buffer lifetime checks. It does not certify every operator,
+wide-extent derivatives, or a billion-particle simulation. Existing chunk
+ownership and bounded storage remain separate contracts; integer-width
+performance tuning is deferred.
+
 ```cpp
 #include <api.h>
 using namespace sph_native;
