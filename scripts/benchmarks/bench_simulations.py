@@ -52,7 +52,7 @@ def main():
     parser.add_argument('--operators', choices=('warp', 'native'), required=True)
     parser.add_argument('--frontend-operators', choices=('warp', 'native'), default='warp',
                         help='Converted frontend families only; remaining stages may still use Warp')
-    parser.add_argument('--case', choices=('waveEquation', 'tgv-wc', 'tgv', 'linearWave', 'gresho'), required=True)
+    parser.add_argument('--case', choices=('waveEquation', 'tgv-wc', 'tgv', 'linearWave', 'gresho', 'drivenTurbulence'), required=True)
     parser.add_argument('--scheme')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
     parser.add_argument('--precision', choices=('float32', 'float64'), default='float32')
@@ -207,6 +207,14 @@ def main():
                    kernel='Wendland4', quiet=True, progress=False, plot=False,
                    video=False, store=False, cudaGraph=False, params=params,
                    particleOrder=args.order)
+    if args.case == 'drivenTurbulence':
+        # Preserve this case's adaptive source/timestep contract. A sufficiently
+        # small common cap gives matched accepted steps, verified in snapshots.
+        options['adaptiveDt'] = True
+        options['maxDt'] = args.dt
+        options['integrationScheme'] = 'rungeKutta2'
+        params.update(gamma=1.4, accelerationRMS=.1, thermalModel='adiabatic',
+                      soundSpeed=args.sound_speed if args.sound_speed is not None else 1.)
     if args.scheme:
         options['scheme'] = args.scheme
     if args.profile:
@@ -259,7 +267,22 @@ def main():
         metadata['peak_torch_bytes'] = torch.cuda.max_memory_allocated()
     metadata['operator_backend'] = warpSPHCore.operator_backend
     metadata['frontend_operator_backend'] = args.frontend_operators
-    metadata['execution_scope'] = 'mixed frontend (see actual dispatch and coverage ledger)'
+    metadata['case_parameters'] = params
+    metadata['time_policy'] = ('adaptive source contract with common maxDt cap' if args.case == 'drivenTurbulence'
+                               else 'fixed accepted timestep')
+    metadata['execution_scope'] = 'uninstrumented; use matched stage profile and source coverage ledger'
+    if args.stage_profile:
+        from collections import Counter
+        observed = Counter()
+        for frame in json.loads((args.out / 'stage-timing.json').read_text())['frames']:
+            observed.update(frame['calls'])
+        metadata['observed_numerical_dispatch'] = dict(observed)
+        has_warp = any(key.startswith('Warp:') and count for key, count in observed.items())
+        has_native = any(key.startswith('native:') and count for key, count in observed.items())
+        metadata['execution_scope'] = ('observed mixed Warp/native kernels' if has_warp and has_native else
+            'observed Warp numerical kernels' if has_warp else
+            'observed native kernels with Torch/Python controller; no Warp launches' if has_native else
+            'Torch/Python controller; no numerical kernel launches observed')
     metadata['cpu_execution'] = dict(torch_threads=torch.get_num_threads(),
                                     affinity=sorted(os.sched_getaffinity(0)))
     metadata['frontend_gpu_policies'] = frontend_gpu_policies(warpSPH)
