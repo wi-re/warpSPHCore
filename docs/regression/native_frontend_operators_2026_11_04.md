@@ -167,3 +167,29 @@ MFV 256² 3.956/1.759. All three repetitions per backend and separate exclusive
 stage runs pass every saved field at the original 2e-4 bound and exact final
 time. Largest scaled field error is 2.30e-5. These use native core in both
 controls, Warp 1.19, W4, n_h=4, matched physical settings and recorded policies.
+
+
+Refreshed portable CPU packages after core `70276cf` pass the complete frontend
+suite in both FP32 and FP64 (559 passed, five device skips each). The frozen
+`complete-r18` pair records frontend `04125a4` and core `70276cf`, refreshed
+CMake frontend dependency metadata and the rebuilt core GPU JIT snapshot. The
+frontend CUDA library is byte-identical to `complete-r14`. The final borrowed
+CSR boundary fixture also compiles for HIP gfx942; no AMD runtime is claimed.
+
+CPU performance has material run-to-run variability. A quiet dedicated repeat
+with builds/GPU work idle retains it. Subsequent four-thread runs cap OMP, MKL
+and OpenBLAS startup pools to four, before imports, with affinity 0/1/4/5.
+Three capped isolated native public-call probes observe four participating CPU
+threads and process-CPU/wall ratios approximately four. This is participation
+evidence, not instruction profiling. CRK/delta repetition medians stabilize;
+meshless retains slow native run medians near 394 ms MFM and 211 ms MFV.
+
+Preferred one-thread quiet medians Warp/native (ms): CRK 1228.21/636.55,
+delta 345.63/338.45, MFM 318.83/331.58, MFV 175.04/197.78. Single-thread MFM
+and MFV regress 4.0%/13.0%. Capped four-thread median/mean pairs are CRK
+1261.61/178.86 and 1245.75/191.83; delta 324.18/88.70 and 326.13/95.01;
+MFM 518.34/89.01 and 525.17/191.67; MFV 234.07/52.76 and 254.31/106.91.
+Every raw slower run remains included. All matched initial/accepted/final
+fields and separate exclusive stage runs pass at 2e-4 with exact final times.
+These controlled campaigns refine the earlier CPU timing claims; medians do
+not guarantee uniform latency. Index-width tuning remains separate follow-up.
