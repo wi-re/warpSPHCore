@@ -17,7 +17,8 @@ from matplotlib.patches import Patch
 from matplotlib.lines import Line2D
 
 ASPECTS = {
-    'Neighborhood / support': '#4477aa',
+    'Neighbor search': '#4477aa',
+    'Adaptive support': '#999933',
     'CRK factors': '#aa66aa',
     'Differential operators': '#228833',
     'Diffusion / switches': '#66ccee',
@@ -30,8 +31,10 @@ ENGINES = {'native': '', 'Warp': '///', 'Torch/Python': '...'}
 
 def aspect(stage):
     name = stage.lower()
-    if any(s in name for s in ('adjacency', 'optimal support', 'support clamp')):
-        return 'Neighborhood / support'
+    if any(s in name for s in ('optimal support', 'support clamp', 'support and thermodynamics')):
+        return 'Adaptive support'
+    if 'adjacency' in name:
+        return 'Neighbor search'
     if 'crk factors' in name:
         return 'CRK factors'
     if any(s in name for s in ('pressure force', 'pressure / viscosity', 'wall pressure', 'dudt',
