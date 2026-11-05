@@ -17,4 +17,4 @@ def radiusSearch(queryParticles: ParticleState, domain: DomainDescription,
     neighbors, counts, offsets = build().radius(*args, mode.value)
     return AdjacencyList(None, neighbors, counts, offsets,
                          queryParticles.positions.shape[0], reference.positions.shape[0],
-                         numEdges=neighbors.numel())
+                         numEdges=neighbors.numel(), searchBackend="native")

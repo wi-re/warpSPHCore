@@ -16,3 +16,6 @@ else:
         "filterVerletList",
         "updateNeighborsVerlet"
     ]
+
+# Public lifecycle dispatch is independent of the runtime type backend.
+from ..dispatch import buildVerletList, filterVerletList, verletStaleFlag, verletUsage, deferVerletChecks

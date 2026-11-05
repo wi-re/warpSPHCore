@@ -6,7 +6,7 @@ metrics and deferred checks otherwise stay on the current Torch stream.
 """
 from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import replace
+from types import SimpleNamespace
 
 import torch
 
@@ -62,7 +62,7 @@ def verletValidityMetrics(queryPositions, referencePositions, priorQueryPosition
     same = (queryPositions is referencePositions and priorQueryPositions is priorReferencePositions
             and querySupports is referenceSupports and supports_a is supports_b)
     scale = (verletScale.detach().to(dtype=querySupports.dtype, device=querySupports.device)
-             if isinstance(verletScale, torch.Tensor) else querySupports.new_tensor(verletScale))
+             if isinstance(verletScale, torch.Tensor) else torch.empty((), dtype=querySupports.dtype, device=querySupports.device).fill_(verletScale))
     scale = scale.reshape(1).contiguous()
     from ...native._build import build
     flag, values = build().verlet_metrics(
@@ -162,11 +162,12 @@ def buildVerletList(queryParticles, domain, verletScale=1., supportMode=SupportS
         if not bool(flag):
             return prior
     _capture_check(queryParticles.positions)
-    query = replace(queryParticles, supports=queryParticles.supports * verletScale)
-    references = query if reference is queryParticles else replace(reference, supports=reference.supports * verletScale)
+    query = SimpleNamespace(positions=queryParticles.positions, supports=queryParticles.supports * verletScale)
+    references = query if reference is queryParticles else SimpleNamespace(positions=reference.positions, supports=reference.supports * verletScale)
     adjacency = radiusSearch(query, domain, references, supportMode)
     result = _storage(adjacency.paddedJ, adjacency.numNeighbors, adjacency.edgeOffsets,
                       query, references, capacity, prior if compatible else None, storeI)
+    result.searchBackend = "native"
     result.searchContext = _context(domain, supportMode)
     result.queryPositions = query.positions.clone()
     result.referencePositions = result.queryPositions if reference is queryParticles else references.positions.clone()
@@ -196,6 +197,7 @@ def filterVerletList(queryParticles, domain, adjacency, supportMode=SupportSchem
         list(prepare_geometry(queryParticles, reference, domain, allow_reverse=True)),
         source.paddedJ, source.numNeighbors, source.edgeOffsets, supportMode.value)
     result = _storage(neighbors, counts, offsets, queryParticles, reference, capacity, None, storeI)
+    result.searchBackend = "native"
     result.queryPositions, result.referencePositions = queryParticles.positions, reference.positions
     result.querySupports, result.referenceSupports = queryParticles.supports, reference.supports
     return result

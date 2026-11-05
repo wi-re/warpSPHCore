@@ -1200,3 +1200,34 @@ The independent periodic-geometry regressions check tiny separations, translated
 images, the predecessor of the half-box cut, pair-force balance and piecewise
 coordinate derivatives. Historical floating-point trajectories can change even
 when the equations, interaction masks and tolerances are unchanged.
+
+
+### Per-call neighborhoods in a Warp runtime
+
+The public `buildVerletList` and `filterVerletList` lifecycle accepts
+`backend='native'` independently of runtime types. Native CSR keeps int64 IDs
+and offsets; returned adjacency records `searchBackend`, inherited by later
+validity/filter calls. An explicit producer change rebuilds the list. Native
+build/filter allocate variable-sized storage outside graph capture; fixed-list
+validity and deferred checks are capturable.
+
+`buildChunkedVerletList(..., backend='native')` uses the existing retained native
+index to count and collect directly into owned bounded chunks, including in a
+Warp-runtime process. Reference IDs remain global and the planner never creates
+a flat global J/work buffer. Checkpoint recipes record the producer (version 2)
+and continue to read version-1 recipes. Repartitioning preserves exact ordered
+neighbor IDs independently of storage index width.
+
+Fixed-shape compact grids also accept `GraphedBuild(slots, backend='native')` or
+`buildFixed(slots, backend='native')`. Torch-owned fixed buffers and graph
+structure are reused; native CPU/CUDA/HIP integer kernels form int64 linear keys
+and reproduce uint32 hash wrap exactly. The fixed table retains its int32 cell
+coordinate/table contract and validates int64 linear-key range. This bound is
+separate from wide native CSR addressing.
+
+The paired frontend exposes `neighborBackend='native'` in simulation options;
+None preserves historical module choices, and `auto` follows core operators.
+Search selection does not convert external boundaries or imply native AD.
+CPU/CUDA oracle, no-Warp-launch, graph, chunk and restart controls qualify the
+new lifecycle. The changed index GPU unit compiles for HIP gfx942; no AMD runtime
+or ROCm host/wheel linkage is qualified by that compile-only check.

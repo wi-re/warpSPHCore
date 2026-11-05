@@ -23,6 +23,7 @@ the same neighbour sets in a different order.
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+import math
 import numpy as np
 import torch
 import warp as wp
@@ -33,6 +34,7 @@ from ...dataTypes import *
 from ..csr import validateParticleCounts
 from ...enumTypes import *
 from ...profiling import record_function
+from ..._backend import resolve_backend
 from .grid import compute_h
 from .wp_hashCells import hashCells
 from .wp_index import indexCells
@@ -87,6 +89,8 @@ def makeHashMapSlots(n: int, domain: DomainDescription, radius: float, *, device
     raw = extent / hCell
     eps = 1e-6
     counts = [max(1, int(np.floor(r + eps)) if periodic[d] else int(np.ceil(r - eps))) for d, r in enumerate(raw)]
+    if any(c > 2**31-1 for c in counts) or math.prod(counts) > 2**63-1:
+        raise OverflowError('Fixed grid requires int32 cell coordinates and representable int64 linear cell keys')
     length = hashMapLength or n + 1
     offsets = torch.cartesian_prod(*[torch.arange(-1, 2, device=device) for _ in range(dim)]).to(torch.int32)
     offsets = offsets.reshape(-1, dim) if offsets.dim() == 1 else offsets
@@ -113,12 +117,13 @@ def _delinearize(linear: torch.Tensor, counts: Tuple[int, ...]) -> torch.Tensor:
     return grid
 
 
-def buildFixed(s: HashMapSlots) -> CompactHashMap:
+def buildFixed(s: HashMapSlots, *, backend=None) -> CompactHashMap:
     """Build the hash map for the positions / supports in `s`'s input slots, into `s`'s buffers. No host reads,
     no allocation that depends on the data; capturable."""
+    backend = resolve_backend(backend)
     n, H, dim = s.n, s.hashMapLength, s.dim
     dev = s.positions.device
-    stream = wp.stream_from_torch(torch.cuda.current_stream(dev)) if dev.type == 'cuda' else None
+    stream = wp.stream_from_torch(torch.cuda.current_stream(dev)) if backend == 'warp' and dev.type == 'cuda' else None
     with record_function("neighborSearch - buildFixed"):
         x = torch.stack([torch.remainder(s.positions[:, d] - s.qMin[d], s.qMax[d] - s.qMin[d]) + s.qMin[d] if s.periodic[d]
                          else s.positions[:, d] for d in range(dim)], dim=1)
@@ -130,8 +135,12 @@ def buildFixed(s: HashMapSlots) -> CompactHashMap:
         indices = torch.floor((x - s.qMin) / s.hCell).to(torch.int32)
         indices = torch.minimum(torch.maximum(indices, torch.zeros_like(indices)), (s.numCellsT - 1).view(1, -1))
         linear = torch.zeros((n,), dtype=torch.int64, device=dev)
-        wp.launch(indexCells, dim=n, inputs=[castTorchToWarp(indices), castTorchToWarp(s.numCellsT), castTorchToWarp(linear)],
-                  device=castTorchToWarp(indices).device, stream=stream)
+        if backend == 'native':
+            from ...native._build import build
+            build().fixed_grid_keys(indices.contiguous(), s.numCellsT, linear, 0)
+        else:
+            wp.launch(indexCells, dim=n, inputs=[castTorchToWarp(indices), castTorchToWarp(s.numCellsT), castTorchToWarp(linear)],
+                      device=castTorchToWarp(indices).device, stream=stream)
         order = torch.argsort(linear, stable=True)
         sortedLinear = linear[order]
         s.sortIndex.copy_(order)
@@ -149,9 +158,13 @@ def buildFixed(s: HashMapSlots) -> CompactHashMap:
         occupied = cellCount > 0
 
         grid = _delinearize(torch.where(occupied, cellLinear, torch.zeros_like(cellLinear)), s.numCells)
-        hashed, hashedWarp = allocateTorchWarp(n, wp.uint32, castTorchToWarp(grid).device)   # (int32 view of uint32)
-        wp.launch(hashCells, dim=n, inputs=[castTorchToWarp(grid), wp.uint32(H), hashedWarp],
-                  device=castTorchToWarp(grid).device, stream=stream)
+        if backend == 'native':
+            hashed = torch.empty(n, dtype=torch.int64, device=dev)
+            build().fixed_grid_keys(grid.contiguous(), s.numCellsT, hashed, H)
+        else:
+            hashed, hashedWarp = allocateTorchWarp(n, wp.uint32, castTorchToWarp(grid).device)   # (int32 view of uint32)
+            wp.launch(hashCells, dim=n, inputs=[castTorchToWarp(grid), wp.uint32(H), hashedWarp],
+                      device=castTorchToWarp(grid).device, stream=stream)
         key = torch.where(occupied, hashed.to(torch.int64) & 0xFFFFFFFF, torch.full_like(cellLinear, H))
         hashOrder = torch.argsort(key, stable=True)
         keySorted = key[hashOrder]
@@ -182,7 +195,8 @@ class GraphedBuild:
     """`buildFixed` captured in a CUDA graph on first use (after one eager warm-up) and replayed after: the caller
     copies positions / supports into `slots.positions` / `slots.supports` and calls `replay()`. CPU: runs eagerly."""
 
-    def __init__(self, slots: HashMapSlots):
+    def __init__(self, slots: HashMapSlots, *, backend=None):
+        self.backend = resolve_backend(backend)
         self.slots = slots
         self.graph = None
         self.calls = 0
@@ -190,20 +204,20 @@ class GraphedBuild:
     def replay(self) -> CompactHashMap:
         s = self.slots
         if s.positions.device.type != 'cuda' or torch.cuda.is_current_stream_capturing():
-            return buildFixed(s)               # (inside an outer capture the body is recorded inline: a graph cannot replay inside a capture)
+            return buildFixed(s, backend=self.backend)               # (inside an outer capture the body is recorded inline: a graph cannot replay inside a capture)
         if self.graph is None:
             if self.calls == 0:
                 self.calls = 1
-                return buildFixed(s)                                  # warm-up: compile kernels, size the allocator
+                return buildFixed(s, backend=self.backend)                                  # warm-up: compile kernels, size the allocator
             torch.cuda.synchronize()
             graph = torch.cuda.CUDAGraph()
             side = torch.cuda.Stream()
             side.wait_stream(torch.cuda.current_stream())
             with torch.cuda.stream(side):
-                buildFixed(s)
+                buildFixed(s, backend=self.backend)
             torch.cuda.current_stream().wait_stream(side)
             with torch.cuda.graph(graph):
-                buildFixed(s)
+                buildFixed(s, backend=self.backend)
             self.graph = graph
         self.graph.replay()
         return s.hashMap

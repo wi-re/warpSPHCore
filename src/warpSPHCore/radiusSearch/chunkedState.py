@@ -14,7 +14,7 @@ import torch
 from ..dataTypes import DomainDescription
 from ..enumTypes import SupportScheme
 from ..type_config import get_torch_precision
-from .._backend import BACKEND
+from .._backend import BACKEND, resolve_backend
 from .chunked import ChunkedAdjacency, _config, _search
 from .rowChunks import RowChunkGeneration, RowChunkPolicy, buildRowChunkPlan
 
@@ -33,13 +33,13 @@ def _digest(metadata, tensors):
 
 def rowChunkCheckpointRecipe(*, queryPositions, referencePositions, querySupports,
         referenceSupports, counts, domain, policy, mode, storeI, verletScale,
-        orderingKey='input', generation=0, sourceOwners=1):
+        orderingKey='input', generation=0, sourceOwners=1, backend=None):
     """Encode explicit frozen search inputs, e.g. from a legacy CSR checkpoint.
 
     No pair arrays are accepted. Restore validates this recipe and recounts the
     geometry before pair allocation; encoding alone is not validation.
     """
-    metadata = dict(version=1, algorithm=_ALGORITHM, numRows=len(queryPositions),
+    metadata = dict(version=2, searchBackend=resolve_backend(backend), algorithm=_ALGORITHM, numRows=len(queryPositions),
         numCols=len(referencePositions), dim=domain.dim, generation=generation,
         totalEdges=int(counts.sum(dtype=torch.int64)), policy=asdict(policy), mode=mode.name,
         storeI=storeI, verletScale=verletScale, orderingKey=orderingKey,
@@ -67,10 +67,10 @@ def rowChunkCheckpointState(adjacency):
     return rowChunkCheckpointRecipe(queryPositions=a.queryPositions, referencePositions=a.referencePositions,
         querySupports=a.querySupports, referenceSupports=a.referenceSupports, counts=a.numNeighbors,
         domain=a.domain, policy=a.plan.policy, mode=a.mode, storeI=a.storeI, verletScale=a.verletScale,
-        orderingKey=a.orderingKey, generation=a.plan.generation.number, sourceOwners=a.plan.numOwners)
+        orderingKey=a.orderingKey, generation=a.plan.generation.number, sourceOwners=a.plan.numOwners, backend=a.searchBackend)
 
 
-def restoreRowChunkCheckpointState(state, *, device, policy=None, communication=None, storeI=None):
+def restoreRowChunkCheckpointState(state, *, device, policy=None, communication=None, storeI=None, backend=None):
     """Reconstruct only owned J, preserving the saved global row traversal.
 
     Local offsets use the current configured offset width, independent of the
@@ -81,14 +81,18 @@ def restoreRowChunkCheckpointState(state, *, device, policy=None, communication=
     device = torch.device(device)
     if device.type == 'cuda' and device.index is None:
         device = torch.device('cuda', torch.cuda.current_device())
+    selectedBackend = None
     def prepare():
+        nonlocal selectedBackend
         if not isinstance(state, dict) or state.keys() != {'metadata','tensors','checksum'}:
             raise ValueError('Invalid row-chunk checkpoint recipe envelope.')
         m, tensors = state['metadata'], state['tensors']
         keys = {'version','algorithm','numRows','numCols','dim','generation','totalEdges',
                 'policy','mode','storeI','verletScale','orderingKey','sourceOwners','samePositions','sameSupports'}
-        if not isinstance(m, dict) or m.keys() != keys or m['version'] != 1 or m['algorithm'] != _ALGORITHM:
+        if isinstance(m, dict) and m.get('version') == 2:keys.add('searchBackend')
+        if not isinstance(m, dict) or m.keys() != keys or m['version'] not in (1,2) or m['algorithm'] != _ALGORITHM:
             raise ValueError('Unsupported row-chunk checkpoint recipe version/algorithm.')
+        selectedBackend = resolve_backend(m.get('searchBackend', BACKEND) if backend is None else backend)
         for name in ('storeI','samePositions','sameSupports'):
             if type(m[name]) is not bool:
                 raise TypeError(f'Checkpoint {name} must be a bool.')
@@ -114,7 +118,7 @@ def restoreRowChunkCheckpointState(state, *, device, policy=None, communication=
             or qh.shape != (len(q),) or rh.shape != (len(r),)
             or counts.shape != (len(q),) or counts.dtype != torch.int32):
             raise ValueError('Checkpoint snapshot/count dimensions are inconsistent.')
-        if any(t.dtype != (q.dtype if BACKEND == 'native' else get_torch_precision()) or not bool(torch.isfinite(t).all()) for t in (q,r,qh,rh)):
+        if any(t.dtype != (q.dtype if selectedBackend == 'native' else get_torch_precision()) or not bool(torch.isfinite(t).all()) for t in (q,r,qh,rh)):
             raise ValueError('Checkpoint particle snapshots must be finite and match configured precision.')
         if type(m['verletScale']) not in (int,float) or not math.isfinite(m['verletScale']) or m['verletScale'] < 1:
             raise ValueError('Invalid checkpoint Verlet scale.')
@@ -137,7 +141,7 @@ def restoreRowChunkCheckpointState(state, *, device, policy=None, communication=
                                    transfer(tensors['periodic']), m['dim'])
         owners, owner = (1,0) if communication is None else (communication.size,communication.rank)
         mode = SupportScheme[m['mode']]
-        config = _config(q,r,domain,mode,selected,selectedI,m['verletScale'],m['orderingKey'],owners,owner,'verlet')
+        config = _config(q,r,domain,mode,selected,selectedI,m['verletScale'],m['orderingKey'],owners,owner,'verlet',selectedBackend)
         expectedPlan = buildRowChunkPlan(counts,generation=RowChunkGeneration(m['generation'],len(r),config),
                                          policy=selected,numOwners=owners)
         if expectedPlan.totalEdges != m['totalEdges']:
@@ -150,4 +154,4 @@ def restoreRowChunkCheckpointState(state, *, device, policy=None, communication=
         numOwners=expectedPlan.numOwners,owner=0 if communication is None else communication.rank,
         generationNumber=expectedPlan.generation.number,reuse=None,inPlace=False,
         expectedSignature=expectedPlan.signature,orderingKey=state['metadata']['orderingKey'],
-        kind='verlet',scale=state['metadata']['verletScale'],reason='checkpoint reconstructed',communication=communication)
+        kind='verlet',scale=state['metadata']['verletScale'],reason='checkpoint reconstructed',backend=selectedBackend,communication=communication)

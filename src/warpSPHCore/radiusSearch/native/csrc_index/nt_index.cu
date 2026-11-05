@@ -10,3 +10,10 @@ void fill_gpu(const Tensor& offsets,const Tensor& counts,const Tensor& output,in
     const stable::accelerator::DeviceGuard guard(output.get_device_index());fill_rows(offsets,counts,output,start,GpuLauncher{current_stream(output)});
 }
 }
+
+namespace sph_native::search_index {
+void fixed_keys_gpu(const Tensor& cells,const Tensor& counts,const Tensor& output,int64_t buckets) {
+    const stable::accelerator::DeviceGuard guard(cells.get_device_index());
+    fixed_keys(cells,counts,output,buckets,GpuLauncher{current_stream(cells)});
+}
+}

@@ -46,3 +46,6 @@ __all__.append('ChunkedPairField')
 
 from .chunkedState import rowChunkCheckpointRecipe, rowChunkCheckpointState, restoreRowChunkCheckpointState
 __all__.extend(['rowChunkCheckpointRecipe', 'rowChunkCheckpointState', 'restoreRowChunkCheckpointState'])
+
+# Public lifecycle dispatch is independent of the runtime type backend.
+from .dispatch import buildVerletList, filterVerletList, verletStaleFlag, verletUsage, deferVerletChecks

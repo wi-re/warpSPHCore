@@ -68,6 +68,7 @@ def main():
     parser.add_argument('--operators', choices=('warp', 'native'), required=True)
     parser.add_argument('--frontend-operators', choices=('warp', 'native'), default='warp',
                         help='Converted frontend families only; remaining stages may still use Warp')
+    parser.add_argument('--search-backend', choices=('auto', 'warp', 'native'), default='auto', help='Neighborhood implementation; auto follows core operators')
     parser.add_argument('--case', choices=('waveEquation', 'tgv-wc', 'tgv', 'linearWave', 'gresho', 'sedov', 'drivenTurbulence'), required=True)
     parser.add_argument('--scheme')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
@@ -121,6 +122,7 @@ def main():
 
         def build_chunked(ctx):
             def factory(state, config):
+                from warpSPH.configurations.compute import neighborSearchBackend
                 n, dimension = state.positions.shape
                 width = dimension if args.scheme in ('CRKSPH', 'CompSPH') else 1
                 index_bytes = torch.empty(0, dtype=get_torch_index_dtype()).element_size()
@@ -130,7 +132,7 @@ def main():
                     maxElementsPerEdge=1 if args.frontend_operators=='native' and args.scheme in ('CRKSPH', 'CompSPH') else width)
                 return buildChunkedVerletList(state, config.domain, policy=policy,
                     supportMode=SupportScheme.SuperSymmetric,
-                    verletScale=config.verletScale, storeI=False)
+                    verletScale=config.verletScale, storeI=False, backend=neighborSearchBackend(config))
             import inspect
             if 'neighborhoodFactory' in inspect.signature(original_build).parameters:
                 return original_build(ctx, neighborhoodFactory=factory)
@@ -239,7 +241,7 @@ def main():
                    dt=args.dt, adaptiveDt=False, nSteps=args.warmup + args.steps,
                    kernel=args.kernel, quiet=True, progress=False, plot=False,
                    video=False, store=False, cudaGraph=False, params=params,
-                   particleOrder=args.order)
+                   particleOrder=args.order, neighborBackend=args.search_backend)
     if args.case == 'drivenTurbulence':
         # Preserve this case's adaptive source/timestep contract. A sufficiently
         # small common cap gives matched accepted steps, verified in snapshots.
@@ -340,7 +342,7 @@ def main():
         ('WARPSPHCORE_NATIVE_BUILD', 'WARPSPHCORE_NATIVE_CPU_ARCH', 'TORCH_CUDA_ARCH_LIST',
          'WARPSPHCORE_NEIGHBOR_LANES', 'MAX_JOBS')}
     from dataclasses import asdict
-    metadata['neighborhood'] = dict(kind=type(adjacency).__name__, source=adjacency_source,
+    metadata['neighborhood'] = dict(kind=type(adjacency).__name__, source=adjacency_source, search_backend=adjacency.searchBackend,
         num_edges=adjacency.numEdges,
         chunks=[asdict(chunk.metadata) for chunk in getattr(adjacency, 'chunks', ())],
         policy=asdict(adjacency.plan.policy) if hasattr(adjacency, 'plan') else None,

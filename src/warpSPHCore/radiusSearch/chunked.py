@@ -14,18 +14,16 @@ import math
 
 import torch
 import torch.autograd.forward_ad as fwAD
-from .._backend import BACKEND
+from .._backend import BACKEND, resolve_backend
 from ..dataTypes import AdjacencyList, DomainDescription, ParticleState
 from ..enumTypes import SupportScheme
 from ..type_config import get_torch_index_dtype, get_torch_offset_dtype, get_torch_precision
 from .csr import validateParticleCounts
 from .allocation import noteAllocationFailure
 from .rowChunks import RowChunk, RowChunkGeneration, RowChunkPlan, RowChunkPolicy, buildRowChunkPlan
-if BACKEND == 'native':
-    from .native.nt_index import SearchIndex
-    from .native.nt_verlet import _DEFERRED, verletValidityMetrics
-    def _deferred():return _DEFERRED.get()
-else:
+from .native.nt_index import SearchIndex
+from .native.nt_verlet import _DEFERRED, verletValidityMetrics as nativeValidityMetrics
+if BACKEND == 'warp':
     import warp as wp
     from ..type_config import index_t,offset_t,scalar_t
     from ..util import castTorchToWarp,castTorchToWarpAsBuiltins
@@ -36,9 +34,19 @@ else:
     from .verlet.build import _DEFERRED_CHECKS
     from .verlet.wp_countVerlet import countNeighborsVerlet
     from .verlet.wp_updateVerlet import updateNeighborsVerlet
-    from .verlet.wp_validity import verletValidityMetrics
+    from .verlet.wp_validity import verletValidityMetrics as warpValidityMetrics
     from .wp_chunked import _fillGlobalRows
-    def _deferred():return _DEFERRED_CHECKS[0]
+
+def _selected(backend, prior=None):
+    return resolve_backend(getattr(prior, 'searchBackend', BACKEND) if backend is None else backend)
+
+
+def _deferred():
+    return _DEFERRED.get() if BACKEND == 'native' or _DEFERRED.get() is not None else _DEFERRED_CHECKS[0]
+
+
+def _metrics(backend, *args):
+    return (nativeValidityMetrics if backend == 'native' else warpValidityMetrics)(*args)
 
 __all__ = ['OwnedRowChunk', 'ChunkedAdjacency', 'radiusSearchRowChunks_',
            'radiusSearchRowChunks', 'buildChunkedVerletList_', 'buildChunkedVerletList',
@@ -85,6 +93,7 @@ class ChunkedAdjacency:
     kind: str
     rebuildReason: str
     searchScratchBytes: int = 0
+    searchBackend: str = BACKEND
     sourceSignature: str | None = None
     communication: object | None = field(default=None, compare=False, repr=False)
     _storageLease: _StorageLease = field(default_factory=_StorageLease, compare=False, repr=False)
@@ -138,7 +147,7 @@ def _stream(device):
     return wp.stream_from_torch(torch.cuda.current_stream(device)) if device.type == 'cuda' else None
 
 
-def _checkInputs(q, r, qh, rh, domain, mode, policy, storeI):
+def _checkInputs(q, r, qh, rh, domain, mode, policy, storeI, backend):
     if not isinstance(policy, RowChunkPolicy):
         raise TypeError('policy must be a RowChunkPolicy.')
     if not isinstance(mode, SupportScheme):
@@ -151,11 +160,11 @@ def _checkInputs(q, r, qh, rh, domain, mode, policy, storeI):
         raise NotImplementedError('Chunked search does not support deferred/graph capture.')
     if any(t.requires_grad or fwAD.unpack_dual(t).tangent is not None for t in (q, r, qh, rh)):
         raise NotImplementedError('Chunked search AD is not supported.')
-    if q.ndim != 2 or r.ndim != 2 or q.shape[1] != r.shape[1] or q.shape[1] not in ((1,2,3) if BACKEND == 'native' else (2,3)):
+    if q.ndim != 2 or r.ndim != 2 or q.shape[1] != r.shape[1] or q.shape[1] not in ((1,2,3) if backend == 'native' else (2,3)):
         raise ValueError('Query/reference positions must have matching 2D or 3D coordinates.')
     if qh.shape != (len(q),) or rh.shape != (len(r),):
         raise ValueError('Each population requires one support per particle.')
-    if any(t.device != q.device or t.dtype != (q.dtype if BACKEND == 'native' else get_torch_precision()) for t in (q,r,qh,rh)) or (BACKEND == 'native' and q.dtype not in (torch.float32,torch.float64)):
+    if any(t.device != q.device or t.dtype != (q.dtype if backend == 'native' else get_torch_precision()) for t in (q,r,qh,rh)) or (backend == 'native' and q.dtype not in (torch.float32,torch.float64)):
         raise ValueError('Particle inputs must share the configured precision and device.')
     if domain.dim != q.shape[1] or any(not isinstance(t, torch.Tensor) or t.shape != (domain.dim,)
                                       or t.device != q.device for t in (domain.min, domain.max, domain.periodic)):
@@ -164,16 +173,16 @@ def _checkInputs(q, r, qh, rh, domain, mode, policy, storeI):
         raise ValueError('Domain bounds must use particle precision and periodicity must be bool.')
     if any(t.requires_grad or fwAD.unpack_dual(t).tangent is not None for t in (domain.min,domain.max)):
         raise NotImplementedError('Chunked search AD is not supported.')
-    validateParticleCounts(len(q), len(r))
+    if backend == 'warp':validateParticleCounts(len(q), len(r))
     pairBytes = torch.empty((), dtype=get_torch_index_dtype()).element_size() * (1 + storeI)
     if policy.bytesPerEdge < pairBytes:
         raise ValueError('bytesPerEdge must include J and optional stored I.')
 
 
-def _config(q, r, domain, mode, policy, storeI, scale, orderingKey, numOwners, owner, kind):
+def _config(q, r, domain, mode, policy, storeI, scale, orderingKey, numOwners, owner, kind, backend=BACKEND):
     if not isinstance(orderingKey, str):
         raise TypeError('orderingKey must be a string identifying particle ordering changes.')
-    data = dict(numRows=len(q), numCols=len(r), dim=domain.dim, dtype=str(q.dtype),
+    data = dict(backend=backend, numRows=len(q), numCols=len(r), dim=domain.dim, dtype=str(q.dtype),
                 deviceType=q.device.type, mode=mode.name, policy=asdict(policy), storeI=storeI,
                 scale=float(scale), orderingKey=orderingKey, numOwners=numOwners, kind=kind,
                 minimum=domain.min.tolist(), maximum=domain.max.tolist(), periodic=domain.periodic.tolist())
@@ -252,11 +261,11 @@ def _allocateChunks(plan, counts, prefix, owner, storeI, reuse, inPlace):
     return tuple(chunks)
 
 
-def _fillRows(chunks, device):
+def _fillRows(chunks, device, backend):
     for chunk in chunks:
         m, adj = chunk.metadata, chunk.adjacency
         if adj.paddedI is not None and m.liveEdges:
-            if BACKEND == 'native':
+            if backend == 'native':
                 from ..native._build import build
                 build().csr_global_rows(adj.edgeOffsets,adj.numNeighbors,adj.paddedI,m.rowStart)
                 continue
@@ -266,10 +275,10 @@ def _fillRows(chunks, device):
 
 
 def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
-            generationNumber, reuse, inPlace, expectedSignature, orderingKey, kind, scale, reason, communication=None):
+            generationNumber, reuse, inPlace, expectedSignature, orderingKey, kind, scale, reason, backend=BACKEND, communication=None):
     local = (lambda tag, fn: fn()) if communication is None else communication.localPhase
     def inputs():
-        _checkInputs(q, r, qh, rh, domain, mode, policy, storeI)
+        _checkInputs(q, r, qh, rh, domain, mode, policy, storeI, backend)
         if communication is not None and q.device != communication.device:
             raise ValueError('Search tensors must use the process group device.')
     local('search:inputs', inputs)
@@ -277,7 +286,7 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
         raise ValueError('owner must identify one of numOwners positive logical owners.')
     if reuse is not None:
         reuse.assertStorageValid()
-    config = local('search:config', lambda: _config(q, r, domain, mode, policy, storeI, scale, orderingKey, numOwners, owner, kind))
+    config = local('search:config', lambda: _config(q, r, domain, mode, policy, storeI, scale, orderingKey, numOwners, owner, kind, backend))
     if communication is not None:
         communication.agree('search:configuration', (config, generationNumber, expectedSignature))
     q, r, qh, rh, domain = local('search:snapshots', lambda: _snapshots(q, r, qh, rh, domain))
@@ -289,7 +298,7 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
         if not len(q) or not len(r):
             return grid, scratch, None, None
 
-        if BACKEND == 'native':
+        if backend == 'native':
             grid = SearchIndex(q,r,qh,rh,domain,mode)
             width,extra = divmod(len(q),numOwners)
             ranks = range(numOwners) if communication is None else (owner,)
@@ -330,7 +339,7 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
     def collect():
         if grid is None:
             return
-        if BACKEND == 'warp' and q.is_cuda:
+        if backend == 'warp' and q.is_cuda:
             targets = []
             for chunk in chunks:
                 m, adj = chunk.metadata, chunk.adjacency
@@ -356,7 +365,7 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
         for chunk in chunks:
             m, adj = chunk.metadata, chunk.adjacency
             if m.liveEdges:
-                if BACKEND == 'native':
+                if backend == 'native':
                     grid.apply(q[m.rowStart:m.rowStop],qh[m.rowStart:m.rowStop],adj.numNeighbors,adj.edgeOffsets,adj.paddedJ)
                     continue
                 wp.launch(radiusSearchCollectJOnly, dim=m.rowCount,
@@ -367,9 +376,9 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
     collectionMetadata = local('search:collect-owned', collect)
     if collectionMetadata is not None:
         scratch += collectionMetadata.capacity
-    local('search:fill-I', lambda: _fillRows(chunks, q.device))
+    local('search:fill-I', lambda: _fillRows(chunks, q.device, backend))
     return ChunkedAdjacency(plan, chunks, owner, counts, prefix, q, r, qh, rh, domain, mode,
-                            storeI, scale, orderingKey, kind, reason, scratch, communication=communication,
+                            storeI, scale, orderingKey, kind, reason, scratch, searchBackend=backend, communication=communication,
                             _collectionMetadata=collectionMetadata)
 
 
@@ -388,7 +397,7 @@ def _bindCommunication(communication, prior):
 
 def radiusSearchRowChunks_(queryPositions, referencePositions, querySupports, referenceSupports, domain,
                            *, policy, mode=SupportScheme.Gather, storeI=False, numOwners=1, owner=0,
-                           reuse=None, inPlace=False, generationNumber=None, expectedSignature=None, orderingKey='input', communication=None):
+                           reuse=None, inPlace=False, generationNumber=None, expectedSignature=None, orderingKey='input', communication=None, backend=None):
     """Count disjoint intervals, plan whole rows, allocate/collect ONLY this owner.
 
     Without communication, logical owners are a single-device sequencing fixture.
@@ -397,6 +406,7 @@ def radiusSearchRowChunks_(queryPositions, referencePositions, querySupports, re
     inPlace reuses only exact row intervals with matching planned capacities;
     views of the replaced list are then obsolete. Default rebuilds preserve them.
     """
+    backend = _selected(backend, reuse)
     communication = _bindCommunication(communication, reuse)
     local = (lambda tag, fn: fn()) if communication is None else communication.localPhase
     def validate():
@@ -414,46 +424,48 @@ def radiusSearchRowChunks_(queryPositions, referencePositions, querySupports, re
     return _search(queryPositions, referencePositions, querySupports, referenceSupports, domain,
                    policy=policy, mode=mode, storeI=storeI, numOwners=numOwners, owner=owner, reuse=reuse,
                    inPlace=inPlace, generationNumber=generationNumber, expectedSignature=expectedSignature,
-                   orderingKey=orderingKey, kind='search', scale=1.0, reason='explicit search', communication=communication)
+                   orderingKey=orderingKey, kind='search', scale=1.0, reason='explicit search', backend=backend, communication=communication)
 
 
 def chunkedVerletStaleFlag_(queryPositions, referencePositions, querySupports, referenceSupports,
-                           domain, adjacency, *, mode=None, verletScale=None, orderingKey=None, rebuildSlack=0.0):
+                           domain, adjacency, *, mode=None, verletScale=None, orderingKey=None, rebuildSlack=0.0, backend=None):
     """Use the existing validity reduction; configuration changes always rebuild."""
     if not isinstance(adjacency, ChunkedAdjacency):
         raise TypeError('adjacency must be a ChunkedAdjacency.')
     adjacency.assertStorageValid()
+    backend = _selected(backend, adjacency)
     mode = adjacency.mode if mode is None else mode
     _checkInputs(queryPositions, referencePositions, querySupports, referenceSupports, domain,
-                 mode, adjacency.plan.policy, adjacency.storeI)
+                 mode, adjacency.plan.policy, adjacency.storeI, backend)
     scale = adjacency.verletScale if verletScale is None else verletScale
     orderingKey = adjacency.orderingKey if orderingKey is None else orderingKey
     if queryPositions.device != adjacency.queryPositions.device or referencePositions.device != adjacency.referencePositions.device:
         return torch.ones((), dtype=torch.bool, device=queryPositions.device)
     config = _config(queryPositions, referencePositions, domain, mode, adjacency.plan.policy, adjacency.storeI,
-                     scale, orderingKey, adjacency.plan.numOwners, adjacency.owner, adjacency.kind)
+                     scale, orderingKey, adjacency.plan.numOwners, adjacency.owner, adjacency.kind, backend)
     if config != adjacency.plan.generation.configSignature:
         return torch.ones((), dtype=torch.bool, device=queryPositions.device)
     case = 0 if mode == SupportScheme.Gather else 1 if mode == SupportScheme.Scatter else 2
-    return verletValidityMetrics(queryPositions, referencePositions, adjacency.queryPositions, adjacency.referencePositions,
+    return _metrics(backend, queryPositions, referencePositions, adjacency.queryPositions, adjacency.referencePositions,
                                   querySupports, referenceSupports, adjacency.querySupports, adjacency.referenceSupports,
                                   domain.periodic, domain.min, domain.max, scale, case, rebuildSlack)[0]
 
 
 def buildChunkedVerletList_(queryPositions, referencePositions, querySupports, referenceSupports, domain,
                             *, policy, verletScale=1.0, mode=SupportScheme.SuperSymmetric, priorNeighborhood=None,
-                            storeI=False, inPlace=False, forceRebuild=False, rebuildSlack=0.0, orderingKey='input', communication=None):
+                            storeI=False, inPlace=False, forceRebuild=False, rebuildSlack=0.0, orderingKey='input', communication=None, backend=None):
     """Retain resident chunks until existing motion/support validity requests rebuild.
 
     Eager scalar-scale API. Deferred checks, graph capture
     and AD require later integration. An explicit process group coordinates
     distributed validity, counts, planning and owned collection.
     """
+    backend = _selected(backend, priorNeighborhood)
     communication = _bindCommunication(communication, priorNeighborhood)
     local = (lambda tag, fn: fn()) if communication is None else communication.localPhase
     numOwners, owner = (1, 0) if communication is None else (communication.size, communication.rank)
     def validate():
-        _checkInputs(queryPositions, referencePositions, querySupports, referenceSupports, domain, mode, policy, storeI)
+        _checkInputs(queryPositions, referencePositions, querySupports, referenceSupports, domain, mode, policy, storeI, backend)
         if isinstance(verletScale, torch.Tensor) or isinstance(verletScale, bool) or not isinstance(verletScale, (int, float)):
             raise TypeError('Chunked eager Verlet currently requires a scalar Python verletScale.')
         if not math.isfinite(verletScale) or verletScale < 1:
@@ -468,7 +480,7 @@ def buildChunkedVerletList_(queryPositions, referencePositions, querySupports, r
                 raise TypeError('priorNeighborhood must be a ChunkedAdjacency.')
             prior.assertStorageValid()
         return _config(queryPositions, referencePositions, domain, mode, policy, storeI, float(verletScale),
-                       orderingKey, numOwners, owner, 'verlet')
+                       orderingKey, numOwners, owner, 'verlet', backend)
     config = local('verlet:inputs', validate)
     prior = priorNeighborhood
     if communication is not None:
@@ -483,7 +495,7 @@ def buildChunkedVerletList_(queryPositions, referencePositions, querySupports, r
     def stale():
         return forceRebuild or not compatible or bool(chunkedVerletStaleFlag_(
             queryPositions, referencePositions, querySupports, referenceSupports,
-            domain, prior, rebuildSlack=rebuildSlack).item())
+            domain, prior, rebuildSlack=rebuildSlack, backend=backend).item())
     rebuild = local('verlet:validity', stale)
     if communication is not None:
         rebuild = communication.any(rebuild, tag='verlet:global-rebuild')
@@ -500,11 +512,11 @@ def buildChunkedVerletList_(queryPositions, referencePositions, querySupports, r
                    numOwners=numOwners, owner=owner, reuse=prior, inPlace=inPlace,
                    generationNumber=0 if prior is None else prior.plan.generation.number + 1,
                    expectedSignature=None, orderingKey=orderingKey, kind='verlet', scale=float(verletScale),
-                   reason=reason, communication=communication)
+                   reason=reason, backend=backend, communication=communication)
 
 
 def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, referenceSupports, domain,
-                             adjacency, *, policy=None, storeI=None, expectedSignature=None, communication=None):
+                             adjacency, *, policy=None, storeI=None, expectedSignature=None, communication=None, backend=None):
     """Filter resident rows, then redistribute bounded J slices to new owners.
 
     Local filtering preserves source traversal order. A distributed source chunk
@@ -512,6 +524,7 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
     gathers nor work-buffer migration occur. The old source lease remains valid.
     Changed list identity uses the native solver's existing fresh-stage replay.
     """
+    backend = _selected(backend, adjacency)
     communication=_bindCommunication(communication,adjacency)
     local=(lambda tag,fn:fn()) if communication is None else communication.localPhase
     def validate():
@@ -521,9 +534,9 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
             raise ValueError('Filtering requires a complete single-owner list or an explicit process group.')
         selected=adjacency.plan.policy if policy is None else policy
         stored=adjacency.storeI if storeI is None else storeI
-        _checkInputs(queryPositions,referencePositions,querySupports,referenceSupports,domain,adjacency.mode,selected,stored)
+        _checkInputs(queryPositions,referencePositions,querySupports,referenceSupports,domain,adjacency.mode,selected,stored,backend)
         config=_config(queryPositions,referencePositions,domain,adjacency.mode,selected,stored,1.0,
-                       adjacency.orderingKey,adjacency.plan.numOwners,adjacency.owner,'filtered')
+                       adjacency.orderingKey,adjacency.plan.numOwners,adjacency.owner,'filtered',backend)
         config=sha256((config+adjacency.plan.signature).encode()).hexdigest()
         return selected,stored,config
     policy,storeI,config=local('filter:inputs',validate)
@@ -532,14 +545,14 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
         communication.assertReplicated('filter:replicas',dict(q=queryPositions,r=referencePositions,
                                          qh=querySupports,rh=referenceSupports),exact=True)
     stale=local('filter:validity',lambda:bool(chunkedVerletStaleFlag_(
-        queryPositions,referencePositions,querySupports,referenceSupports,domain,adjacency).item()))
+        queryPositions,referencePositions,querySupports,referenceSupports,domain,adjacency,backend=backend).item()))
     if communication is not None:stale=communication.any(stale,tag='filter:global-stale')
     if stale:raise ValueError('Rebuild the stale chunked Verlet list before filtering.')
     q,r,qh,rh,domain=local('filter:snapshots',lambda:_snapshots(queryPositions,referencePositions,querySupports,referenceSupports,domain))
     counts=local('filter:count-allocation',lambda:torch.zeros(len(q),dtype=torch.int32,device=q.device))
     def arguments(a,b,source):
         adj,m=source.adjacency,source.metadata
-        if BACKEND == 'native':
+        if backend == 'native':
             return ([q[a:b],r,qh[a:b],rh,domain.min,domain.max,domain.periodic],adj.paddedJ,
                     adj.numNeighbors[a-m.rowStart:b-m.rowStart],adj.edgeOffsets[a-m.rowStart:b-m.rowStart])
         return [castTorchToWarpAsBuiltins(q[a:b]),castTorchToWarpAsBuiltins(r),
@@ -551,7 +564,7 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
         for source in adjacency:
             m=source.metadata
             if m.liveEdges:
-                if BACKEND == 'native':
+                if backend == 'native':
                     from ..native._build import build
                     build().verlet_filter_into(*arguments(m.rowStart,m.rowStop,source),counts[m.rowStart:m.rowStop],None,None,adjacency.mode.value)
                     continue
@@ -566,7 +579,7 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
     if communication is not None:communication.agree('filter:partition',plan.signature)
     chunks=local('filter:allocate-owned',lambda:_allocateChunks(plan,counts,prefix,adjacency.owner,storeI,None,False))
     def collect(a,b,source,target,base):
-        if BACKEND == 'native':
+        if backend == 'native':
             from ..native._build import build
             build().verlet_filter_into(*arguments(a,b,source),target.numNeighbors[a-base:b-base],
                                       target.edgeOffsets[a-base:b-base],target.paddedJ,adjacency.mode.value)
@@ -629,10 +642,10 @@ def filterChunkedVerletList_(queryPositions, referencePositions, querySupports, 
             # Release the previous temporary before allocating the next one.
             # Send/receive run on the caller's current stream, as do consumers.
             temporary=send=receive=None
-    local('filter:fill-I',lambda:_fillRows(chunks,q.device))
+    local('filter:fill-I',lambda:_fillRows(chunks,q.device,backend))
     return ChunkedAdjacency(plan,chunks,adjacency.owner,counts,prefix,q,r,qh,rh,domain,adjacency.mode,
                             storeI,1.0,adjacency.orderingKey,'filtered','filtered resident chunks',scratch,
-                            sourceSignature=adjacency.plan.signature,communication=communication)
+                            sourceSignature=adjacency.plan.signature,searchBackend=backend,communication=communication)
 
 
 def _particleArgs(queryParticles, referenceParticles):

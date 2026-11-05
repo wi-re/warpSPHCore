@@ -91,7 +91,21 @@ void rows(const Tensor& offsets,const Tensor& counts,const Tensor& output,int64_
 #endif
     } else fill_rows(offsets,counts,output,start,CpuLauncher{});
 }
+void fixed_keys_entry(const Tensor& cells,const Tensor& counts,const Tensor& output,int64_t buckets) {
+    tensor(cells,cells,ScalarType::Int,"fixed grid cells");tensor(counts,cells,ScalarType::Int,"fixed grid counts");
+    tensor(output,cells,ScalarType::Long,"fixed grid keys");
+    STD_TORCH_CHECK(cells.dim()==2 && cells.size(1)>=1 && cells.size(1)<=3 && counts.dim()==1 && counts.numel()==cells.size(1) && output.dim()==1 && output.numel()==cells.size(0),"Invalid fixed grid key shapes");
+    STD_TORCH_CHECK(buckets>=0 && uint64_t(buckets)<=UINT32_MAX,"Invalid fixed grid bucket count");
+    if(cells.is_cuda()) {
+#ifdef WITH_CUDA
+        fixed_keys_gpu(cells,counts,output,buckets);
+#else
+        STD_TORCH_CHECK(false,"Build native GPU support to use CUDA/HIP");
+#endif
+    } else fixed_keys(cells,counts,output,buckets,CpuLauncher{});
+}
 STABLE_TORCH_LIBRARY_FRAGMENT(warpsph_native,m) {
+    m.def("fixed_grid_keys(Tensor cells, Tensor counts, Tensor(a!) output, int buckets) -> ()");m.impl("fixed_grid_keys",TORCH_BOX(&fixed_keys_entry));
     m.def("search_index(Tensor[] geometry, Tensor(a!) metadata, int support) -> Tensor[]");m.impl("search_index",TORCH_BOX(&build));
     m.def("search_index_apply(Tensor[] geometry, Tensor metadata, Tensor[] arrays, Tensor(a!) counts, Tensor? offsets, Tensor(b!)? neighbors, int support) -> ()");m.impl("search_index_apply",TORCH_BOX(&search));
     m.def("csr_global_rows(Tensor offsets, Tensor counts, Tensor(a!) rows, int start) -> ()");m.impl("csr_global_rows",TORCH_BOX(&rows));

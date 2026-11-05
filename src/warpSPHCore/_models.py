@@ -187,6 +187,7 @@ class AdjacencyList:
     # Signature comparisons use host metadata only; bound domain owners are retained.
     # Restored/foreign lists start unbound and conservatively rebuild.
     searchContext: Optional[tuple] = None
+    searchBackend: str = BACKEND
 
     def cooRows(self, *, padded=True, backend=None):
         """Explicit temporary COO rows; CSR-only lists never cache this allocation.
@@ -199,7 +200,7 @@ class AdjacencyList:
         if self.paddedI is not None:
             return self.paddedI[:n]
         from ._backend import resolve_backend
-        if resolve_backend(backend) == 'native':
+        if resolve_backend(self.searchBackend if backend is None else backend) == 'native':
             live = torch.repeat_interleave(
                 torch.arange(self.numRows, dtype=self.paddedJ.dtype, device=self.paddedJ.device),
                 self.numNeighbors.long(), output_size=self.numEdges,
