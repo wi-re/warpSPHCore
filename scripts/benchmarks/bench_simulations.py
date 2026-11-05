@@ -13,12 +13,28 @@ import argparse
 from dataclasses import replace
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import statistics
 import subprocess
 import time
 import re
+
+
+def fixed_step_clock_status(trajectory, dt, precision='float32'):
+    """Detect material step clamps; retain small precision/safety margins."""
+    rows = [row for row in trajectory if 't' in row]
+    deviations = [(row['step'], float(row['t']) - float(previous['t']) - dt)
+                  for previous, row in zip(rows, rows[1:])]
+    epsilon = 2. ** (-23 if precision == 'float32' else -52)
+    relative_tolerance = 32 * epsilon
+    mismatches = [step for step, error in deviations
+                  if not math.isfinite(error) or abs(error) > max(1.e-15, abs(dt) * relative_tolerance)]
+    return dict(verified=bool(deviations) and not mismatches,
+                requested_dt=dt, relative_dt_tolerance=relative_tolerance,
+                mismatched_steps=mismatches,
+                maximum_dt_deviation=max((abs(error) for _, error in deviations), default=None))
 
 
 def revision(module):
@@ -172,12 +188,14 @@ def main():
         raise ValueError('Benchmark needs an explicit active neighborhood for this solver')
 
     initial_values = None
+    initial_uid_order = None
 
     def initial(ctx, system):
-        nonlocal initial_values
+        nonlocal initial_values, initial_uid_order
         if initial_hook:
             initial_hook(ctx, system)
         initial_values = state_values(system)
+        initial_uid_order = system.state.UIDs.detach().cpu().clone()
 
     def post(ctx, system, step):
         nonlocal last_boundary, measured_start, measured_end
@@ -289,6 +307,17 @@ def main():
     metadata['case_parameters'] = params
     metadata['time_policy'] = ('adaptive source contract with common maxDt cap' if args.case == 'drivenTurbulence'
                                else 'fixed accepted timestep')
+    if args.case != 'drivenTurbulence':
+        metadata['fixed_step_clock'] = fixed_step_clock_status(result.trajectory, args.dt, args.precision)
+        metadata['performance_window_qualified'] = metadata['fixed_step_clock']['verified']
+        if not metadata['performance_window_qualified']:
+            metadata['time_policy'] = 'requested fixed timestep was not preserved; timings are unqualified'
+    final_uid_order = result.state.state.UIDs.detach().cpu()
+    metadata['particle_order'] = dict(
+        requested=args.order, saved_state_order='ascending UID',
+        initial_storage_sha256=hashlib.sha256(initial_uid_order.numpy().tobytes()).hexdigest(),
+        final_storage_sha256=hashlib.sha256(final_uid_order.numpy().tobytes()).hexdigest(),
+        storage_order_preserved=torch.equal(initial_uid_order, final_uid_order))
     metadata['execution_scope'] = 'uninstrumented; use matched stage profile and source coverage ledger'
     if args.stage_profile:
         from collections import Counter

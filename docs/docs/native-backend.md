@@ -1070,6 +1070,12 @@ internal energy; omitting it retains the case default. For the warm-background
 matrix use `--kernel B7 --ambient-energy 1e-8`. This is an initial-condition
 choice, not a thermal floor. Use matched accepted clocks and separate ordinary,
 isolated-call and stage-profile processes, as for the periodic cases.
+Fixed-step runs record an accepted-clock qualification: an integrator's safety
+clamp can shorten a requested timestep even with adaptive stepping disabled.
+Such windows retain their raw timings but are marked unqualified. Check physical
+health and matched clocks between backends before reporting a speed ratio.
+Saved states use ascending UID order; separate live storage-order hashes expose
+permutations rather than treating sorted exports as proof of storage order.
 
 ### Native dense helpers and solvers
 
