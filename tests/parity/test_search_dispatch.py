@@ -149,3 +149,16 @@ def test_native_inplace_rebuild_retains_graph_snapshot_addresses(device):
     torch.testing.assert_close(current.queryPositions,moved.positions,rtol=0,atol=0)
     assert not bool(sph.verletStaleFlag(moved.positions,moved.supports,current,d,1.4))
     torch.testing.assert_close(pairs(sph.filterVerletList(moved,d,current,sph.SupportScheme.SuperSymmetric)),oracle(moved,d,sph.SupportScheme.SuperSymmetric),rtol=0,atol=0)
+
+
+
+def test_native_global_rows_keep_wide_ids_and_reject_narrow_overflow(device):
+    from warpSPHCore.native._build import build
+    counts=torch.tensor([1],dtype=torch.int32,device=device)
+    offsets=torch.tensor([1],dtype=torch.int64,device=device)
+    output=torch.full((3,),-1,dtype=torch.int64,device=device)
+    build().csr_global_rows(offsets,counts,output,3_000_000_000)
+    torch.testing.assert_close(output,torch.tensor([-1,3_000_000_000,-1],device=device),rtol=0,atol=0)
+    with pytest.raises(RuntimeError,match='do not fit int32'):
+        build().csr_global_rows(torch.zeros(2,dtype=torch.int64,device=device),
+            torch.ones(2,dtype=torch.int32,device=device),torch.empty(2,dtype=torch.int32,device=device),2**31-1)

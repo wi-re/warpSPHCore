@@ -81,6 +81,10 @@ void search(const Tensors& inputs,const Tensor& metadata,const Tensors& arrays,c
 void rows(const Tensor& offsets,const Tensor& counts,const Tensor& output,int64_t start) {
     STD_TORCH_CHECK(start>=0 && (output.scalar_type()==ScalarType::Int || output.scalar_type()==ScalarType::Long) &&
                     (offsets.scalar_type()==ScalarType::Int || offsets.scalar_type()==ScalarType::Long),"Invalid global-row storage");
+    const auto last=counts.numel() ? counts.numel()-1:0;
+    STD_TORCH_CHECK(start<=INT64_MAX-last,"Global row IDs overflow int64");
+    if(output.scalar_type()==ScalarType::Int)
+        STD_TORCH_CHECK(start<=INT32_MAX && last<=INT32_MAX-start,"Global row IDs do not fit int32 output");
     vector(counts,output,ScalarType::Int,counts.numel(),"row counts");vector(offsets,output,offsets.scalar_type(),counts.numel(),"row offsets");
     tensor(output,output,output.scalar_type(),"global rows");STD_TORCH_CHECK(output.dim()==1,"Global rows must be a vector");
     if(output.is_cuda()) {

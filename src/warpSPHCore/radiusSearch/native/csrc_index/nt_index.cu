@@ -1,5 +1,6 @@
 #include "nt_index.h"
 #include "execution/gpu.cuh"
+#include "execution/cooperative.cuh"
 namespace sph_native::search_index {
 void copy_gpu(const Tensor& target,const void* source,size_t bytes) {
     const stable::accelerator::DeviceGuard guard(target.get_device_index());
@@ -7,7 +8,7 @@ void copy_gpu(const Tensor& target,const void* source,size_t bytes) {
     if(status!=cudaSuccess)throw std::runtime_error(cudaGetErrorString(status));
 }
 void fill_gpu(const Tensor& offsets,const Tensor& counts,const Tensor& output,int64_t start) {
-    const stable::accelerator::DeviceGuard guard(output.get_device_index());fill_rows(offsets,counts,output,start,GpuLauncher{current_stream(output)});
+    const stable::accelerator::DeviceGuard guard(output.get_device_index());fill_rows_cooperative(offsets,counts,output,start,CooperativeGpuLauncher<32>{current_stream(output)});
 }
 }
 

@@ -8,10 +8,19 @@ enum Metadata { Version,Dimension,PrecisionBits,SupportMode,References,Occupied,
 // handle table. Fixed host metadata describes its three device-owned arrays.
 template<class Index> struct FillRows {
     IndexView offsets;const int32_t* counts;Index* output;int64_t start;
-    SPH_HD void operator()(int64_t i) const {
-        for(int32_t k=0;k<counts[i];++k)output[offsets[i]+k]=Index(start+i);
+    template<int Width> SPH_HD void write(int64_t i,int lane) const {
+        for(int64_t k=lane;k<int64_t(counts[i]);k+=Width)output[offsets[i]+k]=Index(start+i);
     }
+    SPH_HD void operator()(int64_t i) const {write<1>(i,0);}
 };
+template<class Index,int Width> struct CooperativeFillRows {
+    FillRows<Index> row;
+    SPH_HD void operator()(int64_t i,int lane) const {row.template write<Width>(i,lane);}
+};
+template<class Launch> void fill_rows_cooperative(const Tensor& offsets,const Tensor& counts,const Tensor& output,int64_t start,const Launch& launch) {
+    if(output.scalar_type()==ScalarType::Long)launch(counts.numel(),CooperativeFillRows<int64_t,Launch::width>{{index_view(offsets),counts.const_data_ptr<int32_t>(),output.mutable_data_ptr<int64_t>(),start}});
+    else launch(counts.numel(),CooperativeFillRows<int32_t,Launch::width>{{index_view(offsets),counts.const_data_ptr<int32_t>(),output.mutable_data_ptr<int32_t>(),start}});
+}
 template<class Launch> void fill_rows(const Tensor& offsets,const Tensor& counts,const Tensor& output,int64_t start,const Launch& launch) {
     if(output.scalar_type()==ScalarType::Long)launch(counts.numel(),FillRows<int64_t>{index_view(offsets),counts.const_data_ptr<int32_t>(),output.mutable_data_ptr<int64_t>(),start});
     else launch(counts.numel(),FillRows<int32_t>{index_view(offsets),counts.const_data_ptr<int32_t>(),output.mutable_data_ptr<int32_t>(),start});
