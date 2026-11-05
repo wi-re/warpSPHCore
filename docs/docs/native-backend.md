@@ -313,7 +313,19 @@ across count and collect. The Torch adapter builds the same native index directl
 from Torch memory and shares the count/collect rows; it no longer scans all pairs.
 The final CSR scan also uses the common native CPU/CUDA/HIP scan, rather than
 Torch tensor scans or scalar reductions. CSR rows preserve ascending original
-reference IDs using an in-place heap sort.
+reference IDs. CPU rows use an in-place heap sort. CUDA/HIP rows through 512
+entries use a 32-lane bitonic sort with at most 16 integer values per lane;
+longer rows retain the bounded in-place heap fallback. No edge-sized scratch,
+host count readback or index-width policy change is introduced.
+
+On the 274,625-particle B7 Sedov workload, replacing the former serial fallback
+above 64 entries reduces the completed native radius call from 18.15 to 6.80 ms.
+Matched complete MFM/MFV intervals improve from 61.12/31.78 to 36.78/20.83 ms;
+fresh Warp intervals are 41.00/22.88 ms. Compilation and instrumented runs are
+excluded. Full CSR hashes and all saved initial/final fields match exactly in
+the 2D and 3D checks. CUDA threshold/transpose/stream controls and independent
+32/64-bit integer extrema, duplicate, gap and high-ID oracles pass. The two
+changed GPU units also compile for HIP gfx942; AMD execution remains untested.
 
 An index owns its buffers, is movable, and stays bound to its build device,
 precision, dimensionality, reference count and domain. Queries may move or be
