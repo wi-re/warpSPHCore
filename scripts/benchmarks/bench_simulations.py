@@ -34,7 +34,7 @@ def revision(module):
 
 
 def frontend_gpu_policies(module):
-    """Record fixed launch widths from the pinned module-owned source manifests."""
+    """Source-declared widths; instrumented GPU events establish selected kernels."""
     package = Path(module.__file__).parent
     policies = {}
     for manifest in sorted(package.rglob('native/sources.json')):
@@ -43,7 +43,7 @@ def frontend_gpu_policies(module):
             text = source.read_text()
             widths = sorted(set(map(int, re.findall(r'CooperativeGpuLauncher<(\d+)>', text))))
             policies[str(source.relative_to(package))] = dict(cooperative_lanes=widths,
-                pointwise_launcher='GpuLauncher{' in text)
+                pointwise_launcher='GpuLauncher{' in text, source_sha256=hashlib.sha256(source.read_bytes()).hexdigest())
     return policies
 
 
@@ -117,6 +117,12 @@ def main():
             # Some released case samplers lack the construction hook. This
             # setup-only conversion is excluded from timing and recorded below.
             system = original_build(ctx)
+            if args.scheme in ('MFM', 'MFV'):
+                # Meshless geometry is rebuilt at every stage. Keep the bounded
+                # factory on clone lineage, rather than timing a CSR fallback
+                # after an initial chunked system.adjacency is discarded.
+                system.state._meshlessNeighborhoodFactory = factory
+                system.state._meshlessGeometry = None
             system.adjacency = factory(system.state, ctx.config)
             return system
         case = replace(case, buildSystem=build_chunked)
@@ -185,7 +191,10 @@ def main():
         if step >= args.warmup and last_boundary is not None:
             gaps.append(1000 * (now - last_boundary))
         last_boundary = now
-        adjacency_objects.append(id(active_adjacency(system)[0]))
+        active = active_adjacency(system)[0]
+        if args.storage_chunks and len(getattr(active, 'chunks', ())) != args.storage_chunks:
+            raise AssertionError('Requested row-chunk storage did not survive the accepted-stage lifecycle')
+        adjacency_objects.append(id(active))
         if args.snapshots:
             snapshots.append(state_values(system))
         if profiler is not None:
@@ -230,6 +239,9 @@ def main():
         events = {e.key: e.count for e in averages
                   if 'warpsph_native::' in e.key or 'warpsph_frontend::' in e.key}
         (args.out / 'native-dispatch.json').write_text(json.dumps(events, indent=2))
+        kernels = [dict(name=e.key, count=e.count) for e in averages
+                   if str(e.device_type).upper().endswith('CUDA')]
+        (args.out / 'observed-gpu-kernels.json').write_text(json.dumps(kernels, indent=2))
         (args.out / 'profile-cpu.txt').write_text(averages.table(sort_by='self_cpu_time_total', row_limit=30))
         if args.device == 'cuda':
             (args.out / 'profile-gpu.txt').write_text(averages.table(sort_by='self_device_time_total', row_limit=30))
@@ -287,6 +299,8 @@ def main():
     metadata['cpu_execution'] = dict(torch_threads=torch.get_num_threads(),
                                     affinity=sorted(os.sched_getaffinity(0)))
     metadata['frontend_gpu_policies'] = frontend_gpu_policies(warpSPH)
+    metadata['core_gpu_policies'] = frontend_gpu_policies(warpSPHCore)
+    metadata['kernel_policy_scope'] = ('Source-declared native launch widths with SHA256; the separate --profile run records actual GPU kernel names. Warp per-operator lane defaults are pinned in the source; explicit process override is recorded below.')
     metadata['native_build_environment'] = {name: os.environ.get(name) for name in
         ('WARPSPHCORE_NATIVE_BUILD', 'WARPSPHCORE_NATIVE_CPU_ARCH', 'TORCH_CUDA_ARCH_LIST',
          'WARPSPHCORE_NEIGHBOR_LANES', 'MAX_JOBS')}

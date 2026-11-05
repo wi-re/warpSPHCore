@@ -66,7 +66,7 @@ class StageTiming:
             if self.frame is not None:
                 self.frame['integrator'] = True
             return nullcontext()
-        if re.match(r'\[warpSPH\] - \[[^]]+ - \d+[a-z]?\]', name):
+        if name.startswith('[PESPH] ') or re.match(r'\[warpSPH\] - \[[^]]+ - \d+[a-z]?\]', name):
             return self.region(stage=name)
         return nullcontext()
 
