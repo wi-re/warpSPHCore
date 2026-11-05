@@ -46,6 +46,9 @@ template<class T,int D,int Task> struct Row {
         return face_flux_material(left.density,uL,left.velocity-uL*normal,left.pressure,right.density,uR,right.velocity-uR*normal,right.pressure,
             gamma(a),pair_mode(a,b),normal,frame,gamma(b));
     }
+    SPH_HD bool physical_vacuum(int64_t a,int64_t b,const Vec& normal,const Primitive<T,D>& left,const Primitive<T,D>& right)const {
+        return opens_vacuum(left.density,dot(left.velocity,normal),left.pressure,right.density,dot(right.velocity,normal),right.pressure,gamma(a),gamma(b));
+    }
     SPH_HD FaceFlux<T,D> flux(int64_t a,int64_t b,Vec d,Vec face,T area) const {
         const T dt=timestep();
         const Vec normal=face/area,va=vector(Velocity,a),vb=vector(Velocity,b);
@@ -69,12 +72,12 @@ template<class T,int D,int Task> struct Row {
             const T speed=maximum(s1,s2),v2=speed*speed;
             T limit=T(1.1)*maximum(scalar(Pressure,a)+scalar(Rho,a)*v2,scalar(Pressure,b)+scalar(Rho,b)*v2);
             if(pair_mode(a,b)==1)limit*=T(2);
-            const bool valid=result.pressure>T(0) && finite(result.pressure) && finite(result.contact) && result.pressure<=T(1.4)*limit && finite(result.mass) && finite(result.energy);
+            const bool valid=(result.pressure>T(0) || (result.pressure==T(0) && physical_vacuum(a,b,normal,left,right))) && finite(result.pressure) && finite(result.contact) && result.pressure<=T(1.4)*limit && finite(result.mass) && finite(result.energy);
             if(!valid) {
                 left={maximum(scalar(Rho,a),T(1e-30)),va-frame,maximum(scalar(Pressure,a),T(1e-30))};
                 right={maximum(scalar(Rho,b),T(1e-30)),vb-frame,maximum(scalar(Pressure,b),T(1e-30))};
                 result=riemann(a,b,normal,frame,left,right);
-                if(!(result.pressure>T(0) && finite(result.pressure) && finite(result.contact) && finite(result.mass) && finite(result.energy))) {
+                if(!((result.pressure>T(0) || (result.pressure==T(0) && physical_vacuum(a,b,normal,left,right))) && finite(result.pressure) && finite(result.contact) && finite(result.mass) && finite(result.energy))) {
                     left.velocity={};right.velocity={};result=riemann(a,b,normal,frame,left,right);
                 }
             }

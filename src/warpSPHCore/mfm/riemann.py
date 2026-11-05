@@ -13,7 +13,7 @@ Wave speeds follow GIZMO's fallback chain (``hydro/reimann.h``
 star pressure is not positive, the Roe-averaged (Einfeldt) estimates; where that
 fails too, the Toro PVRS-based estimates; and finally Rusanov's single speed.
 (The paper adds an exact solver as the last resort; it is not implemented here
--- a pair that fails all four is a vacuum-adjacent state.)
+-- the exact vacuum-opening branch is handled separately.)
 
 * **MFV** keeps the face at rest in that frame, so the full HLLC flux
   (including the mass flux) is used.
@@ -76,6 +76,32 @@ def _starSpeedPressure(SL, SR, rhoL, uL, PL, rhoR, uR, PR):
     return Ss, Ps
 
 
+def _vacuum_mask(rhoL,uL,PL,rhoR,uR,PR,gamma):
+    aL=torch.sqrt(gamma*PL/rhoL);aR=torch.sqrt(gamma*PR/rhoR)
+    return uR-uL>=2*aL/(gamma-1)+2*aR/(gamma-1)
+
+
+def _vacuum_flux(rhoL,uL,vtL,PL,rhoR,uR,vtR,PR,gamma,normal,frame):
+    """Sample the exact two-rarefaction vacuum solution at the face xi=0."""
+    aL=torch.sqrt(gamma*PL/rhoL);aR=torch.sqrt(gamma*PR/rhoR)
+    headL=uL-aL>=0;fanL=(~headL)&(uL+2*aL/(gamma-1)>0)
+    headR=(~headL)&(~fanL)&(uR+aR<=0)
+    fanR=(~headL)&(~fanL)&(~headR)&(uR-2*aR/(gamma-1)<0)
+    soundL=torch.where(fanL,(2*aL+(gamma-1)*uL)/(gamma+1),aL)
+    soundR=torch.where(fanR,(2*aR-(gamma-1)*uR)/(gamma+1),aR)
+    zero=torch.zeros_like(uL)
+    rho=torch.where(headL,rhoL,torch.where(fanL,rhoL*(soundL/aL).pow(2/(gamma-1)),
+        torch.where(headR,rhoR,torch.where(fanR,rhoR*(soundR/aR).pow(2/(gamma-1)),zero))))
+    u=torch.where(headL,uL,torch.where(fanL,soundL,torch.where(headR,uR,torch.where(fanR,-soundR,zero))))
+    P=torch.where(headL,PL,torch.where(fanL,PL*(soundL/aL).pow(2*gamma/(gamma-1)),
+        torch.where(headR,PR,torch.where(fanR,PR*(soundR/aR).pow(2*gamma/(gamma-1)),zero))))
+    vt=torch.where((headR|fanR)[:,None],vtR,vtL)
+    mass=rho*u;momentum=(mass*u+P)[:,None]*normal+mass[:,None]*vt
+    energy=(_energy(rho,u,vt,P,gamma)+P)*u
+    lab_energy=energy+(frame*momentum).sum(-1)+.5*frame.square().sum(-1)*mass
+    return torch.cat((mass[:,None],momentum+mass[:,None]*frame,lab_energy[:,None]),-1)
+
+
 def starState(rhoL, uL, vtL, PL, rhoR, uR, vtR, PR, gamma) -> Tuple[torch.Tensor, ...]:
     """``(S_L, S_R, S*, P*)`` of the HLLC model, with the wave-speed fallback chain."""
     aL = torch.sqrt(gamma * PL / rhoL)
@@ -90,7 +116,10 @@ def starState(rhoL, uL, vtL, PL, rhoR, uR, vtR, PR, gamma) -> Tuple[torch.Tensor
             continue
         bad = ~((best[3] > 0) & torch.isfinite(best[3]) & torch.isfinite(best[2]))
         best = tuple(torch.where(bad, c, b) for b, c in zip(best, cand))
-    return best
+    vacuum=_vacuum_mask(rhoL,uL,PL,rhoR,uR,PR,gamma)
+    contact=.5*(uL+2*aL/(gamma-1))+.5*(uR-2*aR/(gamma-1))
+    exact=(uL-aL,uR+aR,contact,torch.zeros_like(PL))
+    return tuple(torch.where(vacuum,e,b)for e,b in zip(exact,best))
 
 
 def faceFlux(rhoL, uL, vtL, PL, rhoR, uR, vtR, PR, gamma: float, mode: str,
@@ -152,7 +181,10 @@ def faceFlux(rhoL, uL, vtL, PL, rhoR, uR, vtR, PR, gamma: float, mode: str,
     # de-boost (Eq. A8)
     mom_lab = mom + vframe * Fm[:, None]
     e_lab = Fe + (vframe * mom).sum(-1) + 0.5 * (vframe * vframe).sum(-1) * Fm
-    return torch.cat([Fm[:, None], mom_lab, e_lab[:, None]], dim=-1), Ss, Ps
+    flux=torch.cat([Fm[:, None],mom_lab,e_lab[:, None]],dim=-1)
+    vacuum=_vacuum_mask(rhoL,uL,PL,rhoR,uR,PR,gamma)
+    exact=_vacuum_flux(rhoL,uL,vtL,PL,rhoR,uR,vtR,PR,gamma,normal,vframe)
+    return torch.where(vacuum[:,None],exact,flux),Ss,Ps
 
 
 def robustFaceFlux(primary, firstOrder, gamma: float, mode: str, normal: torch.Tensor, vframe: torch.Tensor,
@@ -167,13 +199,15 @@ def robustFaceFlux(primary, firstOrder, gamma: float, mode: str, normal: torch.T
     stage = torch.zeros(Ps.shape, dtype=torch.int8, device=Ps.device)
     if not retry:
         return flux, Ss, Ps, stage
-    bad = ~((Ps > 0) & torch.isfinite(Ps) & torch.isfinite(Ss) & (Ps <= 1.4 * pressureLimit)) | ~torch.isfinite(flux).all(-1)
+    physical_vacuum=(_vacuum_mask(primary[0],primary[1],primary[3],primary[4],primary[5],primary[7],gamma) if starFn is None else torch.zeros_like(Ps,dtype=torch.bool))
+    bad = ~(((Ps > 0) | ((Ps==0)&physical_vacuum)) & torch.isfinite(Ps) & torch.isfinite(Ss) & (Ps <= 1.4 * pressureLimit)) | ~torch.isfinite(flux).all(-1)
     if not bool(bad.any()):
         return flux, Ss, Ps, stage
     idx = torch.nonzero(bad).flatten()
     sub = lambda t: t[idx]
     f2, S2, P2 = faceFlux(*[sub(t) for t in firstOrder], gamma, mode, sub(normal), sub(vframe), starFn)
-    bad2 = ~((P2 > 0) & torch.isfinite(P2) & torch.isfinite(S2)) | ~torch.isfinite(f2).all(-1)
+    physical_vacuum2=(_vacuum_mask(sub(firstOrder[0]),sub(firstOrder[1]),sub(firstOrder[3]),sub(firstOrder[4]),sub(firstOrder[5]),sub(firstOrder[7]),gamma) if starFn is None else torch.zeros_like(P2,dtype=torch.bool))
+    bad2 = ~(((P2 > 0) | ((P2==0)&physical_vacuum2)) & torch.isfinite(P2) & torch.isfinite(S2)) | ~torch.isfinite(f2).all(-1)
     rL, uL, vtL, pL, rR, uR, vtR, pR = [sub(t) for t in firstOrder]
     zero = torch.zeros_like(uL)
     f3, S3, P3 = faceFlux(rL, zero, torch.zeros_like(vtL), pL, rR, zero, torch.zeros_like(vtR), pR, gamma, mode,

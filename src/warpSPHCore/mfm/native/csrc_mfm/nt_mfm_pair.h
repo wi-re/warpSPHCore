@@ -60,6 +60,12 @@ template<class T> SPH_HD T pair_limit(T i,T j,T face,T fraction,T psi1,T psi2) {
     if (sign(ceiling)!=sign(high)) ceiling=high/(T(1)+d1/maximum(absolute(high),T(1e-30)));
     return i<j ? maximum(floor,minimum(average+d2,face)):minimum(ceiling,maximum(average-d2,face));
 }
+template<class T> SPH_HD bool opens_vacuum(T rl,T ul,T pl,T rr,T ur,T pr,T gl,T gr) {
+    return ur-ul>=T(2)*scalar_sqrt(gl*pl/rl)/(gl-T(1))+T(2)*scalar_sqrt(gr*pr/rr)/(gr-T(1));
+}
+template<class T> SPH_HD T vacuum_contact(T rl,T ul,T pl,T rr,T ur,T pr,T gl,T gr) {
+    return T(.5)*(ul+T(2)*scalar_sqrt(gl*pl/rl)/(gl-T(1)))+T(.5)*(ur-T(2)*scalar_sqrt(gr*pr/rr)/(gr-T(1)));
+}
 template<class T> struct Star {T left,right,contact,pressure;};
 template<class T> SPH_HD Star<T> star_from_speeds(T left,T right,T rhoL,T uL,T pL,T rhoR,T uR,T pR) {
     const T contact=(pR-pL+rhoL*uL*(left-uL)-rhoR*uR*(right-uR))/(rhoL*(left-uL)-rhoR*(right-uR));
@@ -68,6 +74,7 @@ template<class T> SPH_HD Star<T> star_from_speeds(T left,T right,T rhoL,T uL,T p
 template<class T> SPH_HD bool valid_star(const Star<T>& star) {return star.pressure>T(0) && finite(star.pressure) && finite(star.contact);}
 template<class T,int D> SPH_HD Star<T> hllc_star_material(T rhoL,T uL,const SmallVector<T,D>& vtL,T pL,T rhoR,T uR,const SmallVector<T,D>& vtR,T pR,T gamma,T gammaRight) {
     const T aL=scalar_sqrt(gamma*pL/rhoL),aR=scalar_sqrt(gammaRight*pR/rhoR);
+    if(opens_vacuum(rhoL,uL,pL,rhoR,uR,pR,gamma,gammaRight))return {uL-aL,uR+aR,vacuum_contact(rhoL,uL,pL,rhoR,uR,pR,gamma,gammaRight),T(0)};
     auto star=star_from_speeds(minimum(uL,uR)-maximum(aL,aR),maximum(uL,uR)+maximum(aL,aR),rhoL,uL,pL,rhoR,uR,pR);
     if (!valid_star(star)) {
         const T ratio=scalar_sqrt(rhoR/rhoL);
@@ -110,8 +117,27 @@ template<class T,int D> SPH_HD SideFlux<T,D> hllc_side(T rho,T velocity,const Sm
     return flux;
 }
 template<class T,int D> struct FaceFlux {T mass;SmallVector<T,D> momentum;T energy,contact,pressure;};
+template<class T,int D> SPH_HD FaceFlux<T,D> vacuum_flux(T rl,T ul,const SmallVector<T,D>& vtl,T pl,T rr,T ur,const SmallVector<T,D>& vtr,T pr,T gl,int mode,const SmallVector<T,D>& normal,const SmallVector<T,D>& frame,T gr) {
+    const T contact=vacuum_contact(rl,ul,pl,rr,ur,pr,gl,gr);
+    if(mode==0)return {T(0),{},T(0),contact,T(0)};
+    const T al=scalar_sqrt(gl*pl/rl),ar=scalar_sqrt(gr*pr/rr);
+    T rho=T(0),u=T(0),p=T(0),g=gl;auto vt=vtl;
+    if(ul-al>=T(0)){rho=rl;u=ul;p=pl;}
+    else if(ul+T(2)*al/(gl-T(1))>T(0)){
+        const T sound=(T(2)*al+(gl-T(1))*ul)/(gl+T(1));u=sound;
+        rho=rl*scalar_power(sound/al,T(2)/(gl-T(1)));p=pl*scalar_power(sound/al,T(2)*gl/(gl-T(1)));
+    }else if(ur+ar<=T(0)){rho=rr;u=ur;p=pr;vt=vtr;g=gr;}
+    else if(ur-T(2)*ar/(gr-T(1))<T(0)){
+        const T sound=(T(2)*ar-(gr-T(1))*ur)/(gr+T(1));u=-sound;
+        rho=rr*scalar_power(sound/ar,T(2)/(gr-T(1)));p=pr*scalar_power(sound/ar,T(2)*gr/(gr-T(1)));vt=vtr;g=gr;
+    }
+    const T mass=rho*u;const auto mom=(mass*u+p)*normal+mass*vt;
+    const T energy=(p/(g-T(1))+T(.5)*rho*(u*u+dot(vt,vt))+p)*u;
+    return {mass,mom+mass*frame,energy+dot(frame,mom)+T(.5)*dot(frame,frame)*mass,contact,T(0)};
+}
 template<class T,int D> SPH_HD FaceFlux<T,D> face_flux_material(T rhoL,T uL,const SmallVector<T,D>& vtL,T pL,
         T rhoR,T uR,const SmallVector<T,D>& vtR,T pR,T gamma,int mode,const SmallVector<T,D>& normal,const SmallVector<T,D>& frame,T gammaRight) {
+    if(opens_vacuum(rhoL,uL,pL,rhoR,uR,pR,gamma,gammaRight))return vacuum_flux(rhoL,uL,vtL,pL,rhoR,uR,vtR,pR,gamma,mode,normal,frame,gammaRight);
     const auto star=hllc_star_material(rhoL,uL,vtL,pL,rhoR,uR,vtR,pR,gamma,gammaRight);
     if (mode==0) return {T(0),star.pressure*normal,star.pressure*(star.contact+dot(frame,normal)),star.contact,star.pressure};
     SideFlux<T,D> flux{};

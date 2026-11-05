@@ -30,6 +30,18 @@ preservation and angular-momentum conservation; noncentral faces do not
 automatically conserve angular momentum. Mode names are case insensitive.
 Unknown modes raise in both public backends.
 
+## Physical vacuum in expanding pairs
+
+If `uR-uL >= 2*cL/(gammaL-1) + 2*cR/(gammaR-1)`, the two
+rarefaction tails separate. Zero star pressure is then physical, rather than
+an HLLC failure. MFM transports no pressure through that contact; MFV samples
+the exact vacuum or rarefaction fan at the moving face. A face inside a fan
+can still carry nonzero flux. The retry chain preserves this solution instead
+of replacing the separating velocities with zero and introducing artificial
+pressure work. Core Warp, native CPU/CUDA/HIP source and the differentiable
+Torch reference share this behavior. The frontend material-aware Warp path
+uses the core's vacuum helpers.
+
 ## Geometry, gradients and faces
 
 Effective volumes come from geometry, not the input density:

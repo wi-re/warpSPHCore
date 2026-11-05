@@ -54,6 +54,8 @@ from ..enumTypes import *
 __all__ = ["mfmMomentsWarp", "mfmGradientsWarp", "mfmLimiterWarp", "mfmClosureResidualWarp",
            "mfmClosureMatvecWarp", "mfmClosureMatvecCSR", "mfmClosureWeightsWarp", "mfmFluxWarp", "mfmTimestepWarp", "mfmCoarseStencilWarp"]
 
+from .vacuum import opensVacuum, vacuumContact, vacuumFaceFlux
+
 _TINY = 1.0e-30            # (1e-300 underflows to 0 in float32)
 
 
@@ -226,6 +228,8 @@ def hllcStar(rhoL: scalar_t, uL: scalar_t, vtL: Any, PL: scalar_t,
     """``(S_L, S_R, S*, P*)`` with the Gaburov -> Roe -> PVRS -> Rusanov fallback chain (GIZMO)."""
     aL = wp.sqrt(gamma * PL / rhoL)
     aR = wp.sqrt(gamma * PR / rhoR)
+    if opensVacuum(rhoL,uL,PL,rhoR,uR,PR,gamma,gamma):
+        return uL-aL,uR+aR,vacuumContact(rhoL,uL,PL,rhoR,uR,PR,gamma,gamma),scalar_t(0.)
     SL, SR = _speedsGaburov(uL, uR, aL, aR)
     Ss, Ps = _starFromSpeeds(SL, SR, rhoL, uL, PL, rhoR, uR, PR)
     if not _okStar(Ss, Ps):
@@ -268,6 +272,8 @@ def faceFluxPair(rhoL: scalar_t, uL: scalar_t, vtL: Any, PL: scalar_t,
                  rhoR: scalar_t, uR: scalar_t, vtR: Any, PR: scalar_t, gamma: scalar_t,
                  mode: wp.int32, normal: Any, vframe: Any):
     """Lab-frame flux per unit face area: ``(mass, momentum vector, energy)``."""
+    if opensVacuum(rhoL,uL,PL,rhoR,uR,PR,gamma,gamma):
+        return vacuumFaceFlux(rhoL,uL,vtL,PL,rhoR,uR,vtR,PR,gamma,mode,normal,vframe,gamma)
     SL, SR, Ss, Ps = hllcStar(rhoL, uL, vtL, PL, rhoR, uR, vtR, PR, gamma)
     vn = wp.dot(vframe, normal)
     if mode == 0:  # MFM: the face moves with the contact -> no mass flux
@@ -972,7 +978,7 @@ def mfmFlux_Func_i(
             limit = scalar_t(1.1) * wp.max(pres[a] + rho[a] * v2, pres[b] + rho[b] * v2)
             if mode == 1:
                 limit = limit * scalar_t(2.0)
-            ok = Ps > scalar_t(0.0) and wp.isfinite(Ps) and wp.isfinite(Ss) and Ps <= scalar_t(1.4) * limit and wp.isfinite(Fm) and wp.isfinite(Fe)
+            ok = (Ps > scalar_t(0.0) or (Ps == scalar_t(0.0) and opensVacuum(rL,uL,pL,rR,uR,pR,gamma,gamma))) and wp.isfinite(Ps) and wp.isfinite(Ss) and Ps <= scalar_t(1.4) * limit and wp.isfinite(Fm) and wp.isfinite(Fe)
             if not ok:
                 vL1 = va - vframe
                 vR1 = vb - vframe
@@ -984,7 +990,7 @@ def mfmFlux_Func_i(
                 p1R = wp.max(pres[b], scalar_t(_TINY))
                 Fm, Fp, Fe, Ss, Ps = faceFluxPair(r1L, uL1, vL1 - uL1 * nrm, p1L, r1R, uR1, vR1 - uR1 * nrm, p1R,
                                                   gamma, mode, nrm, vframe)
-                ok2 = Ps > scalar_t(0.0) and wp.isfinite(Ps) and wp.isfinite(Ss) and wp.isfinite(Fm) and wp.isfinite(Fe)
+                ok2 = (Ps > scalar_t(0.0) or (Ps == scalar_t(0.0) and opensVacuum(r1L,uL1,p1L,r1R,uR1,p1R,gamma,gamma))) and wp.isfinite(Ps) and wp.isfinite(Ss) and wp.isfinite(Fm) and wp.isfinite(Fe)
                 if not ok2:
                     zero = scalar_t(0.0)
                     Fm, Fp, Fe, Ss, Ps = faceFluxPair(r1L, zero, vL1 * zero, p1L, r1R, zero, vR1 * zero, p1R,
