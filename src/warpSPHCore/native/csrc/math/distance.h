@@ -17,6 +17,17 @@ template <class T> SPH_HD T scalar_sqrt(T value) {
         return ::sqrt(value);
 }
 
+// Wrap the displacement without adding and then subtracting half a box.
+// This preserves close-pair separations and opposite-pair symmetry away from
+// the unavoidable half-box cut (+half maps to -half).
+template <class T> SPH_HD T minimum_image_delta(T delta, T length) {
+    const T half = length / T(2);
+    if (delta >= -half && delta < half) return delta;
+    if (delta >= half && delta < length) return delta - length;
+    if (delta < -half && delta >= -length) return delta + length;
+    return delta - length * scalar_floor((delta + half) / length);
+}
+
 template <typename T, int D>
 SPH_HD T minimum_image_displacement(const T *qx, const T *rx, const T *lo, const T *hi,
                                     const bool *periodic, T (&dx)[D]) {
@@ -25,10 +36,8 @@ SPH_HD T minimum_image_displacement(const T *qx, const T *rx, const T *lo, const
         T x = qx[d], y = rx[d];
         if (periodic[d]) {
             const T length = hi[d] - lo[d];
-            x -= length * scalar_floor((x - lo[d]) / length);
-            y -= length * scalar_floor((y - lo[d]) / length);
             T delta = x - y;
-            dx[d] = delta - length * scalar_floor((delta + length / T(2)) / length);
+            dx[d] = minimum_image_delta(delta, length);
         } else {
             dx[d] = x - y;
         }

@@ -1159,3 +1159,18 @@ The local CPU/CUDA qualification does not qualify GH200 hardware or an AMD runti
 Build a Grace/H100 wheel on the target aarch64 system with `--cpu-arch native`
 and `--gpu-arch 90`; AMD support remains experimental with compile-only evidence.
 See the [final core qualification](https://github.com/wi-re/warpSPHCore/blob/main/docs/regression/native_core_merge_2026_11_03.md).
+
+## Periodic displacement arithmetic
+
+Warp and native interactions wrap the relative displacement directly. They do
+not add and then subtract half a box, or project each position before taking a
+close-pair difference. Those algebraically equivalent forms can erase small
+FP32 separations and bias otherwise opposite pair forces. The half-box
+convention remains `[-L/2, L/2)`, with an exact positive half-box displacement
+mapped to the negative half. Ordinary floating-point rounding still applies;
+this is not an exact-arithmetic geometry API.
+
+The independent periodic-geometry regressions check tiny separations, translated
+images, the predecessor of the half-box cut, pair-force balance and piecewise
+coordinate derivatives. Historical floating-point trajectories can change even
+when the equations, interaction masks and tolerances are unchanged.

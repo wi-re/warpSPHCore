@@ -51,7 +51,17 @@ def computeCartesianDistance(
 @wp.func 
 def mod_warp(x : scalar_t, min: scalar_t, max: scalar_t):
     h = max - min
-    return ((x + h / scalar(2.0)) - wp.floor((x + h / scalar(2.0)) / h) * h) - h / scalar(2.0)
+    half = h / scalar_t(2.0)
+    # Keep the displacement as the quantity being wrapped. Adding half a box
+    # and subtracting it again can erase close pairs and break odd symmetry.
+    # The half-open convention is unchanged: +half maps to -half.
+    if x >= -half and x < half:
+        return x
+    if x >= half and x < h:
+        return x - h
+    if x < -half and x >= -h:
+        return x + h
+    return x - wp.floor((x + half) / h) * h
 
 @wp.func
 def moduloDistanceWarp(xij:wp.array(dtype = scalar_t), domainState: domainData):
@@ -64,17 +74,7 @@ def moduloDistanceWarp(xij:wp.array(dtype = scalar_t), domainState: domainData):
     return result
 @wp.func
 def minimumImageDistanceWarp(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t), domainState: domainData):
-    x_projected = wp.zeros_like(x)
-    y_projected = wp.zeros_like(y)
-    for i in range(domainState.periodicity.shape[0]):
-        if domainState.periodicity[i]:
-            x_projected[i] = wp.remainder(x[i] - domainState.domainMin[i], domainState.domainMax[i] - domainState.domainMin[i]) + domainState.domainMin[i]
-            y_projected[i] = wp.remainder(y[i] - domainState.domainMin[i], domainState.domainMax[i] - domainState.domainMin[i]) + domainState.domainMin[i]
-        else:
-            x_projected[i] = x[i]
-            y_projected[i] = y[i]
-    xij = x_projected - y_projected
-    return moduloDistanceWarp(xij, domainState)
+    return moduloDistanceWarp(x - y, domainState)
 
 @wp.func 
 def computeDistance(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t), domainState: domainData):
@@ -82,11 +82,6 @@ def computeDistance(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t)
     length = wp.sqrt(wp.sum(vectorDistance * vectorDistance))
     return length
 
-
-@wp.func 
-def mod_warp(x : scalar_t, min: scalar_t, max: scalar_t):
-    h = max - min
-    return ((x + h / scalar(2.0)) - wp.floor((x + h / scalar(2.0)) / h) * h) - h / scalar(2.0)
 
 @wp.func
 def project_mod(x : scalar_t, min: scalar_t, max: scalar_t):
@@ -100,10 +95,9 @@ def moduloDistanceComponent(
     x: scalar_t, y: scalar_t, periodic: bool, min: scalar_t, max: scalar_t
 ):
     if periodic:
-        x_projected = project_mod(x, min, max)
-        y_projected = project_mod(y, min, max)
-        xij = x_projected - y_projected
-        return mod_warp(xij, min, max)
+        # Wrapping each position first can itself erase a small separation
+        # across the edge (e.g. -2**-26 and 0 in a unit FP32 box).
+        return mod_warp(x - y, min, max)
     else:
         return x - y
 
