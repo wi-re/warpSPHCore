@@ -167,18 +167,19 @@ def test_periodic_halfbox_ties_and_images(device, dtype, operation):
 def test_search_preserves_sorted_rows_across_sort_thresholds(device, dtype):
     # Odd/even original IDs lie on opposite sides of a cell boundary. Cell
     # traversal therefore collects an unsorted interleaving for every row.
-    targets = torch.tensor([0, 1, 7, 8, 9, 31, 32, 33, 63, 64, 65, 97, 97], device=device)
-    ids = torch.arange(97, device=device)
-    radius = (ids.to(dtype) + .5) * .005
+    targets = torch.tensor([0, 1, 7, 8, 9, 31, 32, 33, 63, 64, 65, 97,
+                            127, 128, 129, 255, 256, 257, 511, 512, 513, 600, 600], device=device)
+    ids = torch.arange(600, device=device)
+    radius = (ids.to(dtype) + .5) * .001
     positions = (10 + torch.where(ids % 2 == 0, radius, -radius))[:, None]
-    supports = targets.to(dtype) * .005
+    supports = targets.to(dtype) * .001
     supports[-1] = 1  # Fix cell width to one, placing the queries at a cell boundary.
     query = sph.ParticleState(positions.new_full((len(targets), 1), 10), supports,
                               supports.new_ones(len(targets)), targets.new_zeros(len(targets), dtype=torch.int32),
                               supports.new_ones(len(targets)))
-    reference = sph.ParticleState(positions, positions.new_full((97,), .01),
-                                  positions.new_ones(97), ids.new_zeros(97, dtype=torch.int32),
-                                  positions.new_ones(97))
+    reference = sph.ParticleState(positions, positions.new_full((600,), .01),
+                                  positions.new_ones(600), ids.new_zeros(600, dtype=torch.int32),
+                                  positions.new_ones(600))
     domain = sph.DomainDescription(positions.new_tensor([0]), positions.new_tensor([20]),
                                    torch.tensor([False], device=device), 1)
     adjacency = sph.radiusSearch(query, domain, referenceParticles=reference)

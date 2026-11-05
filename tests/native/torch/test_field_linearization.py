@@ -202,10 +202,11 @@ def test_field_empty_populations(device, operation, population):
 
 
 @pytest.mark.parametrize('width', WIDTHS)
-def test_parallel_transpose_long_rows(device, width):
+@pytest.mark.parametrize('n', [129, 257])
+def test_parallel_transpose_long_rows(device, width, n):
     # More than one CPU scheduling grain and more than 64 entries per CSC
-    # row exercise parallel fill and the large-row GPU sorting fallback.
-    n, m = 257, 4
+    # row exercise parallel fill, cooperative sorting and the heap fallback.
+    m = 4
     counts = torch.full((n,), m + 1, device=device, dtype=torch.int32)
     offsets = (torch.arange(n, device=device) * (m + 2) + 1).to(width[1])
     ids = torch.full((n * (m + 2) + 3,), -1, device=device, dtype=width[0])

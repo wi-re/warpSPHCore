@@ -3,45 +3,45 @@
 #include "execution/rowSort.h"
 #include "dataTypes/array.h"
 namespace sph_native {
-// A row occupies one 32-lane group. Common degrees fit one or two register
-// values per lane; longer rows retain the general in-place heap fallback.
-template <bool Wide,class Index> __device__ void bitonic_row(Index *values, int count, int lane) {
+// A row occupies one 32-lane group. Up to 512 entries use bounded register
+// storage across the group; longer rows retain the in-place heap fallback.
+template <int Slots,class Index> __device__ void bitonic_row(Index *values, int count, int lane) {
     using Register = std::conditional_t<sizeof(Index)==4,int,long long>;
     constexpr Register maximum = sizeof(Index)==4 ? INT32_MAX:INT64_MAX;
-    Register first = lane < count ? values[lane] : maximum;
-    Register second = maximum;
-    if constexpr (Wide)
-        second = lane + 32 < count ? values[lane + 32] : maximum;
+    Register local[Slots];
 #pragma unroll
-    for (int size = 2; size <= (Wide ? 64 : 32); size *= 2) {
+    for (int slot = 0; slot < Slots; ++slot)
+        local[slot] = lane + 32 * slot < count ? values[lane + 32 * slot] : maximum;
+#pragma unroll
+    for (int size = 2; size <= 32 * Slots; size *= 2) {
 #pragma unroll
         for (int step = size / 2; step; step /= 2) {
-            Register partner_first, partner_second = maximum;
-            if (step == 32) {
-                partner_first = second;
-                partner_second = first;
+            if (step >= 32) {
+#pragma unroll
+                for (int slot = 0; slot < Slots; ++slot) {
+                    if ((slot & (step / 32)) == 0) {
+                        const int partner = slot ^ (step / 32);
+                        const Register a = local[slot], b = local[partner];
+                        const bool ascending = ((lane + 32 * slot) & size) == 0;
+                        local[slot] = ascending ? (a < b ? a : b) : (a > b ? a : b);
+                        local[partner] = ascending ? (a > b ? a : b) : (a < b ? a : b);
+                    }
+                }
             } else {
-                partner_first = group_xor<32>(first, step);
-                if constexpr (Wide)
-                    partner_second = group_xor<32>(second, step);
-            }
-            const bool low = ((lane & step) == 0) == ((lane & size) == 0);
-            first = low ? (first < partner_first ? first : partner_first)
-                        : (first > partner_first ? first : partner_first);
-            if constexpr (Wide) {
-                const int index = lane + 32;
-                const bool low_second = ((index & step) == 0) == ((index & size) == 0);
-                second = low_second ? (second < partner_second ? second : partner_second)
-                                    : (second > partner_second ? second : partner_second);
+#pragma unroll
+                for (int slot = 0; slot < Slots; ++slot) {
+                    const Register a = local[slot], b = group_xor<32>(a, step);
+                    const int index = lane + 32 * slot;
+                    const bool low = ((index & step) == 0) == ((index & size) == 0);
+                    local[slot] = low ? (a < b ? a : b) : (a > b ? a : b);
+                }
             }
         }
     }
-    if (lane < count)
-        values[lane] = first;
-    if constexpr (Wide) {
-        if (lane + 32 < count)
-            values[lane + 32] = second;
-    }
+#pragma unroll
+    for (int slot = 0; slot < Slots; ++slot)
+        if (lane + 32 * slot < count)
+            values[lane + 32 * slot] = local[slot];
 }
 template<class Index> struct SortCSRRow {
     IndexView offsets;
@@ -53,9 +53,15 @@ template<class Index> struct SortCSRRow {
             return;
         Index *row = indices + offsets[i];
         if (count <= 32)
-            bitonic_row<false>(row, count, lane);
+            bitonic_row<1>(row, count, lane);
         else if (count <= 64)
-            bitonic_row<true>(row, count, lane);
+            bitonic_row<2>(row, count, lane);
+        else if (count <= 128)
+            bitonic_row<4>(row, count, lane);
+        else if (count <= 256)
+            bitonic_row<8>(row, count, lane);
+        else if (count <= 512)
+            bitonic_row<16>(row, count, lane);
         else if (lane == 0)
             sort_row(row, count);
     }
