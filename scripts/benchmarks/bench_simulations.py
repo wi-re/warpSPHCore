@@ -52,16 +52,18 @@ def main():
     parser.add_argument('--operators', choices=('warp', 'native'), required=True)
     parser.add_argument('--frontend-operators', choices=('warp', 'native'), default='warp',
                         help='Converted frontend families only; remaining stages may still use Warp')
-    parser.add_argument('--case', choices=('waveEquation', 'tgv-wc', 'tgv', 'linearWave', 'gresho', 'drivenTurbulence'), required=True)
+    parser.add_argument('--case', choices=('waveEquation', 'tgv-wc', 'tgv', 'linearWave', 'gresho', 'sedov', 'drivenTurbulence'), required=True)
     parser.add_argument('--scheme')
     parser.add_argument('--device', choices=('cpu', 'cuda'), default='cpu')
     parser.add_argument('--precision', choices=('float32', 'float64'), default='float32')
     parser.add_argument('--dim', type=int, choices=(1, 2, 3), default=2)
     parser.add_argument('--nx', type=int, default=64)
     parser.add_argument('--n-h', type=float, default=4.)
+    parser.add_argument('--kernel', default='Wendland4', help='Explicit physical kernel policy; defaults to Wendland4')
     parser.add_argument('--order', choices=('input', 'morton'), default='morton')
     parser.add_argument('--dt', type=float, default=1.e-4)
     parser.add_argument('--sound-speed', type=float, help='Pin Delta-SPH sound speed independently of dt; otherwise the upstream case selects it')
+    parser.add_argument('--ambient-energy', type=float, help='Sedov initial uniform specific internal energy; otherwise preserve the case default')
     parser.add_argument('--warmup', type=int, default=5)
     parser.add_argument('--steps', type=int, default=30)
     parser.add_argument('--threads', type=int, default=24)
@@ -74,6 +76,8 @@ def main():
     args = parser.parse_args()
     if args.steps < 1 or args.warmup < 1:
         parser.error('steps and warmup must be positive')
+    if args.ambient_energy is not None and (args.case != 'sedov' or args.ambient_energy < 0):
+        parser.error('--ambient-energy requires the Sedov case and a nonnegative value')
     if args.case == 'waveEquation' and args.order != 'input':
         parser.error('the upstream wave runner has no Morton lifecycle adapter; use --order input')
     os.environ['WARPSPHCORE_BACKEND'] = 'warp'
@@ -211,9 +215,11 @@ def main():
             params['soundSpeed'] = args.sound_speed
     elif args.case == 'tgv':
         params = dict(relaxSteps=0, jitter=0., shifting=False)
+    elif args.case == 'sedov' and args.ambient_energy is not None:
+        params['uAmbient'] = args.ambient_energy
     options = dict(device=args.device, nx=args.nx, dim=args.dim, n_h=args.n_h,
                    dt=args.dt, adaptiveDt=False, nSteps=args.warmup + args.steps,
-                   kernel='Wendland4', quiet=True, progress=False, plot=False,
+                   kernel=args.kernel, quiet=True, progress=False, plot=False,
                    video=False, store=False, cudaGraph=False, params=params,
                    particleOrder=args.order)
     if args.case == 'drivenTurbulence':

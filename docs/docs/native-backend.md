@@ -1063,6 +1063,14 @@ because instrumentation itself adds cost. See the
 [stage attribution report](https://github.com/wi-re/warpSPHCore/blob/main/docs/regression/native_frontend_stages_2026_11_03.md)
 for scope, raw evidence and reproduction.
 
+The same harness supports 1D/2D/3D `--case sedov`. Record `--kernel` explicitly
+when comparing it with a physical matrix (the benchmark default remains
+`Wendland4`). `--ambient-energy` selects Sedov's initial uniform specific
+internal energy; omitting it retains the case default. For the warm-background
+matrix use `--kernel B7 --ambient-energy 1e-8`. This is an initial-condition
+choice, not a thermal floor. Use matched accepted clocks and separate ordinary,
+isolated-call and stage-profile processes, as for the periodic cases.
+
 ### Native dense helpers and solvers
 
 The native root exports the core `linalg` API and
