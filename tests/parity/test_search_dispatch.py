@@ -46,15 +46,16 @@ def test_native_flat_and_bounded_lifecycle_without_warp(device,monkeypatch,mode)
     from warpSPHCore.native._build import build
     build()
     monkeypatch.setattr(wp,'launch',lambda *a,**k:pytest.fail('native search launched Warp'))
-    flat=sph.buildVerletList(q,d,1.4,mode,backend='native',storeI=False)
+    storeI = mode==sph.SupportScheme.Gather
+    flat=sph.buildVerletList(q,d,1.4,mode,backend='native',storeI=storeI)
     assert flat.searchBackend=='native' and flat.edgeOffsets.dtype==torch.int64
     moved=SimpleNamespace(positions=q.positions+.001,supports=q.supports)
-    assert sph.buildVerletList(moved,d,1.4,mode,priorNeighborhood=flat,backend='native',storeI=False) is flat
+    assert sph.buildVerletList(moved,d,1.4,mode,priorNeighborhood=flat,backend='native',storeI=storeI) is flat
     assert not bool(sph.verletStaleFlag(moved.positions,moved.supports,flat,d,1.4,mode))
     exact=sph.filterVerletList(moved,d,flat,mode,capacity=None)
     torch.testing.assert_close(pairs(exact),oracle(moved,d,mode),rtol=0,atol=0)
     with sph.deferVerletChecks() as flags:
-        assert sph.buildVerletList(moved,d,1.4,mode,priorNeighborhood=flat,backend='native',storeI=False) is flat
+        assert sph.buildVerletList(moved,d,1.4,mode,priorNeighborhood=flat,backend='native',storeI=storeI) is flat
     assert len(flags)==1
     chunks=buildChunkedVerletList(q,d,policy=RowChunkPolicy(edgeBudget=2048,maxRows=12,bytesPerEdge=16),
         supportMode=mode,verletScale=1.4,storeI=True,backend='native')
@@ -115,3 +116,36 @@ def test_backend_transition_and_version1_checkpoint(device):
     restored=restoreRowChunkCheckpointState(state,device=device)
     assert restored.searchBackend=='warp'
     torch.testing.assert_close(pairs(restored),pairs(c),rtol=0,atol=0)
+
+
+def test_native_flat_rebuild_does_not_narrow_into_foreign_capacity(device):
+    q,d=scene(device)
+    policy=sph.CapacityPolicy(headroom=.1,shrinkBelow=0.,inPlace=True)
+    original=sph.buildVerletList(q,d,1.4,sph.SupportScheme.SuperSymmetric,
+        backend='native',capacity=policy,storeI=True)
+    foreign=replace(original,paddedI=original.paddedI.int(),paddedJ=original.paddedJ.int(),edgeOffsets=original.edgeOffsets.int())
+    snapshot=foreign.paddedJ.clone()
+    rebuilt=sph.buildVerletList(q,d,1.4,sph.SupportScheme.SuperSymmetric,
+        backend='native',capacity=policy,storeI=True,priorNeighborhood=foreign,forceRebuild=True)
+    assert rebuilt.paddedJ.dtype==rebuilt.edgeOffsets.dtype==torch.int64
+    assert rebuilt.paddedJ.data_ptr()!=foreign.paddedJ.data_ptr()
+    torch.testing.assert_close(foreign.paddedJ,snapshot,rtol=0,atol=0)
+    torch.testing.assert_close(pairs(rebuilt),pairs(original),rtol=0,atol=0)
+    assert bool((rebuilt.paddedJ[rebuilt.numEdges:]==-1).all())
+    assert bool((rebuilt.paddedI[rebuilt.numEdges:]==-1).all())
+
+
+
+def test_native_inplace_rebuild_retains_graph_snapshot_addresses(device):
+    q,d=scene(device)
+    policy=sph.CapacityPolicy(headroom=1.,shrinkBelow=0.,inPlace=True)
+    prior=sph.buildVerletList(q,d,1.4,sph.SupportScheme.SuperSymmetric,backend='native',capacity=policy)
+    names=('paddedJ','edgeOffsets','numNeighbors','queryPositions','referencePositions','querySupports','referenceSupports')
+    addresses={k:getattr(prior,k).data_ptr() for k in names}
+    moved=SimpleNamespace(positions=q.positions+.001,supports=q.supports)
+    current=sph.buildVerletList(moved,d,1.4,sph.SupportScheme.SuperSymmetric,backend='native',
+        priorNeighborhood=prior,capacity=policy,forceRebuild=True)
+    assert {k:getattr(current,k).data_ptr() for k in names}==addresses
+    torch.testing.assert_close(current.queryPositions,moved.positions,rtol=0,atol=0)
+    assert not bool(sph.verletStaleFlag(moved.positions,moved.supports,current,d,1.4))
+    torch.testing.assert_close(pairs(sph.filterVerletList(moved,d,current,sph.SupportScheme.SuperSymmetric)),oracle(moved,d,sph.SupportScheme.SuperSymmetric),rtol=0,atol=0)

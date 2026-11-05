@@ -96,7 +96,11 @@ def _storage(neighbors, counts, offsets, query, reference, capacity, reuse, stor
     """Apply capacity policy using scalar sizes already known by the builder."""
     edges = neighbors.numel()
     compatible = (reuse is not None and reuse.numRows == len(query.positions)
-                  and reuse.numCols == len(reference.positions) and reuse.paddedJ.device == neighbors.device)
+                  and reuse.numCols == len(reference.positions) and reuse.paddedJ.device == neighbors.device
+                  and reuse.paddedJ.dtype == neighbors.dtype and reuse.edgeOffsets.dtype == offsets.dtype
+                  and reuse.numNeighbors.dtype == counts.dtype and reuse.edgeOffsets.shape == offsets.shape
+                  and reuse.numNeighbors.shape == counts.shape
+                  and (reuse.paddedI is None or reuse.paddedI.dtype == neighbors.dtype))
     previous = reuse.paddedJ.numel() if compatible else None
     size = edges if capacity is None else capacity.capacityFor(edges, previous)
     if size < edges:
@@ -111,14 +115,15 @@ def _storage(neighbors, counts, offsets, query, reference, capacity, reuse, stor
         reuse.edgeOffsets.copy_(offsets)
         counts, offsets = reuse.numNeighbors, reuse.edgeOffsets
     else:
-        target = torch.full((size,), -1, dtype=neighbors.dtype, device=neighbors.device)
+        target = torch.empty((size,), dtype=neighbors.dtype, device=neighbors.device)
         target[:edges].copy_(neighbors)
+        target[edges:].fill_(-1)
     rows = None
     if storeI:
-        rows = reuse.paddedI if inplace else torch.full_like(target, -1)
-        live_rows = torch.repeat_interleave(torch.arange(len(counts), dtype=rows.dtype, device=rows.device),
-                                           counts.long(), output_size=edges)
-        rows[:edges].copy_(live_rows)
+        rows = reuse.paddedI if inplace else torch.empty_like(target)
+        # Fill final COO storage directly; do not allocate an O(edges) temporary.
+        from ...native._build import build
+        build().csr_global_rows(offsets, counts, rows, 0)
         rows[edges:].fill_(-1)
     return AdjacencyList(rows, target, counts, offsets, len(query.positions), len(reference.positions), numEdges=edges)
 
@@ -169,10 +174,23 @@ def buildVerletList(queryParticles, domain, verletScale=1., supportMode=SupportS
                       query, references, capacity, prior if compatible else None, storeI)
     result.searchBackend = "native"
     result.searchContext = _context(domain, supportMode)
-    result.queryPositions = query.positions.clone()
-    result.referencePositions = result.queryPositions if reference is queryParticles else references.positions.clone()
-    result.querySupports = query.supports.clone()
-    result.referenceSupports = result.querySupports if reference is queryParticles else references.supports.clone()
+    # Captured validity kernels retain these addresses just like CSR buffers.
+    # Reuse snapshots only when the in-place CSR and population aliasing match.
+    same = reference is queryParticles
+    retained = (prior if compatible and capacity is not None and capacity.inPlace
+                and result.paddedJ.data_ptr() == prior.paddedJ.data_ptr()
+                and (prior.queryPositions is prior.referencePositions) == same
+                and (prior.querySupports is prior.referenceSupports) == same else None)
+    def snapshot(name, value):
+        held = None if retained is None else getattr(retained, name)
+        if held is not None and held.shape == value.shape and held.dtype == value.dtype and held.device == value.device:
+            held.copy_(value)
+            return held
+        return value.clone()
+    result.queryPositions = snapshot('queryPositions', query.positions)
+    result.referencePositions = result.queryPositions if same else snapshot('referencePositions', references.positions)
+    result.querySupports = snapshot('querySupports', query.supports)
+    result.referenceSupports = result.querySupports if same else snapshot('referenceSupports', references.supports)
     if verbose:
         print(f'Built native Verlet CSR: {result.numRows} rows, {result.numEdges} edges, {result.paddedJ.numel()} capacity')
     return result

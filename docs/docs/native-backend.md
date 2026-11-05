@@ -1231,3 +1231,12 @@ Search selection does not convert external boundaries or imply native AD.
 CPU/CUDA oracle, no-Warp-launch, graph, chunk and restart controls qualify the
 new lifecycle. The changed index GPU unit compiles for HIP gfx942; no AMD runtime
 or ROCm host/wheel linkage is qualified by that compile-only check.
+
+
+Native flat CSR builds fill optional COO rows directly into final owned storage,
+without an O(edges) row temporary or redundant live-entry initialization.
+Padding remains -1, and reuse checks ID/offset widths before copying into an old
+capacity. In-place rebuilds also retain compatible query/reference snapshot
+addresses, so captured validity checks stay bound to the current generation.
+The paired frontend's 120-step CompSPH and CRK eager/graph controls pass exactly
+with explicit native search; this includes the CompSPH recapture-budget check.
