@@ -84,7 +84,9 @@ def sphOperation(queryParticles: ParticleState, operationProperties: OperationPr
         queryVolumes = referenceVolumes = crkState = gradHState = renormalizationState = None
         preScatteredQuantities = None
     elif operation == WarpOperation.Covariance:
-        queryValues = referenceValues = gradHState = None
+        # Fields are not part of this call; grad-h retains Warp's zero AD
+        # dependency even though covariance does not read its coefficients.
+        queryValues = referenceValues = None
         preScatteredQuantities = None
     elif operation == WarpOperation.Interpolate:
         queryValues = gradHState = renormalizationState = None

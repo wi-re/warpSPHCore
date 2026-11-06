@@ -227,3 +227,16 @@ def test_standalone_laplacian_all_kernel_variant_products(device,kernel,mode):
     cotangent=expected.detach().cos().contiguous();got=vjp(req,selected,slots,cotangent)
     want=torch.autograd.grad(expected,selected,cotangent,allow_unused=True)
     for a,b,x in zip(got,want,selected):torch.testing.assert_close(a,torch.zeros_like(x) if b is None else b,rtol=3e-8,atol=3e-8)
+
+
+@pytest.mark.parametrize('kernel',list(sph.KernelFunctions))
+def test_standalone_covariance_all_kernel_products(device,kernel):
+    from _support.covariance_contract import case,oracle
+    index=list(sph.KernelFunctions).index(kernel);dimension=1+index%3
+    q,r,d,p,g,v,states,_=case(device,dimension,kernel=kernel,support=list(sph.SupportScheme)[index%6])
+    q,r,d=states(v[:10]);slots=[0,1,2,3,4,7,8,16,15,14,13];selected=(*v[:7],v[8],v[9],v[10],v[14])
+    req=request(q,r,d,v[14],v[10],p,(g.edgeOffsets,g.numNeighbors,g.paddedJ));expected=oracle(v,d,p,g)
+    torch.testing.assert_close(output(req,torch.empty_like(expected)),expected,rtol=3e-8,atol=3e-8)
+    cotangent=expected.detach().cos().contiguous();got=vjp(req,selected,slots,cotangent)
+    want=torch.autograd.grad(expected,selected,cotangent,allow_unused=True)
+    for a,b,x in zip(got,want,selected):torch.testing.assert_close(a,torch.zeros_like(x) if b is None else b,rtol=3e-8,atol=3e-8)

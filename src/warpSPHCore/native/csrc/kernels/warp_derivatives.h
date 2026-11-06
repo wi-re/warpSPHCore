@@ -59,13 +59,32 @@ SPH_HD void kernel_derivatives(const T (&dx)[D],T r,T h,int kernel,
     w=C*f.v/hd;wh=-C*(T(D)*f.v+(r/h)*value_d1)/(hd*h);
     for(int a=0;a<D;++a) {
         g[a]=dx[a]/den*C*f.d1/(hd*h);wx[a]=dx[a]/den*C*value_d1/(hd*h);
-        gh[a]=-dx[a]/den*C*((r/h)*f.d2+T(D+1)*kd1)/(hd*h*h);
+        // The mixed partial stores each scalar term before reducing. Use
+        // rounded device intrinsics so inlining into a pullback cannot fuse
+        // the cancelling viscosity terms across that boundary.
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+        T support_shape;
+        if constexpr(sizeof(T)==4)
+            support_shape=__fadd_rn(__fmul_rn(r/h,f.d2),__fmul_rn(T(D+1),kd1));
+        else support_shape=__dadd_rn(__dmul_rn(r/h,f.d2),__dmul_rn(T(D+1),kd1));
+#else
+        volatile T support_left=(r/h)*f.d2,support_right=T(D+1)*kd1;
+        const T support_shape=support_left+support_right;
+#endif
+        gh[a]=-dx[a]/den*C*support_shape/(hd*h*h);
         for(int b=0;b<D;++b) {
             T A=dx[a]*dx[b]/(r*r+eps*eps*h*h);
             if(r/h<eps&&a==b)A=T(1);
             const T B=-dx[a]*dx[b]/(r*r*r+eps*eps*eps*h*h*h)
                        +(a==b?T(1)/(r+eps*eps*h):T(0));
-            gx[a*D+b]=A*k2+B*k1;
+            #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+            // Warp keeps the first matrix product materialized when the
+            // radial second derivative overflows; fusing it would turn its
+            // infinite Hessian into an Inf-Inf NaN.
+            gx[a*D+b]=std::isfinite(k2) ? A*k2+B*k1 : std::fma(B,k1,A*k2);
+#else
+            gx[a*D+b]=reference_weighted_sum(A,k2,B,k1);
+#endif
         }
     }
 }

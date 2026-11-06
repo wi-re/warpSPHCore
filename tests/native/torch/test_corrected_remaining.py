@@ -212,7 +212,9 @@ def test_unused_naive_laplacian_and_covariance_inputs(device):
     omega.referenceOmegas.requires_grad_()
     actual = sph.warpOperation(q, replace(properties, operation=sph.WarpOperation.Covariance), domain,
         referenceParticles=r, referenceVolumes=volume, gradHState=omega)
-    assert not actual.requires_grad
+    # Warp retains this unused input on its tape; the product is zero.
+    torch.testing.assert_close(torch.autograd.grad(actual.sum(),omega.referenceOmegas)[0],
+                               torch.zeros_like(omega.referenceOmegas))
 
 
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])

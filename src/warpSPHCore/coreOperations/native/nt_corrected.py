@@ -19,7 +19,7 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
                 adjacency.edgeOffsets,adjacency.numNeighbors,adjacency.paddedJ,None,None,None,None]
         return inputs,[None]*9,[*geometry,reference.masses]
     interpolation = operation == WarpOperation.Interpolate
-    if operation in (WarpOperation.Interpolate,WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl,WarpOperation.Laplacian) and type(adjacency).__name__ in ("CompactHashMap", "SearchIndex"):
+    if operation in (WarpOperation.Interpolate,WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl,WarpOperation.Laplacian,WarpOperation.Covariance) and type(adjacency).__name__ in ("CompactHashMap", "SearchIndex"):
         adjacency = None  # Rebuild native topology in the original population order.
     covariance = operation == WarpOperation.Covariance
     laplacian = operation == WarpOperation.Laplacian
@@ -86,7 +86,7 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
 
     # These operators never load a query volume. Its fallback reference role
     # is already resolved above; retain the unused Torch role at the bridge.
-    query_correction_volume=None if operation in (WarpOperation.Interpolate,WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl,WarpOperation.Laplacian) else query_volumes
+    query_correction_volume=None if operation in (WarpOperation.Interpolate,WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl,WarpOperation.Laplacian,WarpOperation.Covariance) else query_volumes
     corrections = [query_correction_volume, reference_volumes, A, B, gradA, gradB, omega, renorm, query_omega]
     used = [query.positions, reference.positions, query.supports, reference.supports,
             domain.min, domain.max, None if covariance else reference_values, reference_volumes, A, B, gradA, gradB, omega, renorm, query_omega]
@@ -169,5 +169,16 @@ def compute(query, reference, domain, properties, adjacency, query_values, refer
         if properties.laplacianMode==LaplacianScheme.Naive:
             ignored.append(renormalization_state.renormalizationMatrices if isinstance(renormalization_state,RenormalizationState) else renormalization_state)
         return apply(inputs,properties,corrections,query.masses,ignored,topology)
+    if properties.operation == WarpOperation.Covariance:
+        from .nt_covariance_backward import apply
+        states=crk_state if isinstance(crk_state,tuple) else (crk_state,)
+        ignored=[query_volumes]
+        if isinstance(grad_h_state,GradHState):
+            ignored.extend((grad_h_state.queryOmegas,grad_h_state.referenceOmegas))
+        elif isinstance(grad_h_state,tuple):ignored.extend(grad_h_state)
+        elif isinstance(grad_h_state,torch.Tensor):ignored.append(grad_h_state)
+        if len(states)==2 and states[1] is not None:
+            ignored.extend(getattr(states[1],name) for name in ('A','B','gradA','gradB'))
+        return apply(inputs,properties,corrections,query.masses,ignored,topology,counts=return_neighbor_counts)
     return apply_corrected(inputs, corrections, properties, consistent=consistent_divergence,
                            counts=return_neighbor_counts, topology=topology)

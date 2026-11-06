@@ -1,5 +1,6 @@
 #pragma once
 #include "coreOperations/native/csrc_correction/nt_correction.h"
+#include "nt_covariance_kernel.h"
 
 namespace sph_native::neighborhood {
 template <class T, int D> struct Covariance : SphOperation<T, D, 0> {
@@ -27,11 +28,33 @@ template <class T, int D> struct Covariance : SphOperation<T, D, 0> {
 };
 // No query/reference field is loaded for this geometric operator.
 template <class T, int D, int> struct CorrectedCovariance
-    : CorrectedKernel<T, D, SphOperation<T, D, 0, true>> {
-    using Base = CorrectedKernel<T, D, SphOperation<T, D, 0, true>>;
+    : CorrectedKernel<T, D, SphOperation<T, D, 0, true, true>> {
+    using Base = CorrectedKernel<T, D, SphOperation<T, D, 0, true, true>>;
     using typename Base::Query;
     using State = CountedSums<T, D * D>;
     SPH_HD State identity(const Query&) const { return {}; }
+    template<class Record>
+    SPH_HD void kernel_gradient(const Query& q,const Record& r,Neighbor edge,
+            T (&dx)[D],T& w,T (&gradient)[D]) const {
+        T unused;
+        this->evaluate(q,r,edge,dx,w,unused);
+        const T distance=q.geometry.distance(r.data,dx);
+        T raw[D];
+        covariance_kernel_gradient(dx,distance,q.support,this->reference_supports[edge.reference],this->kernel,this->support,raw);
+        if(this->corrections.crk.A) {
+            const T poly=crk::polynomial(q.correction,dx),Aw=q.correction.A*w;
+            for(int d=0;d<D;++d) {
+                T product=T(0);for(int c=0;c<D;++c)product+=q.correction.gradB[d*D+c]*dx[c];
+                gradient[d]=Aw*q.correction.B[d]+(q.correction.A*poly)*raw[d]+
+                    (poly*w)*q.correction.gradA[d]+Aw*product;
+            }
+        } else for(int d=0;d<D;++d)gradient[d]=raw[d];
+        if(this->corrections.renormalization) {
+            T transformed[D]={};
+            for(int d=0;d<D;++d)for(int c=0;c<D;++c)transformed[d]+=q.renormalization[d*D+c]*gradient[c];
+            for(int d=0;d<D;++d)gradient[d]=transformed[d];
+        }
+    }
     template <class Record>
     SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
         T dx[D], w, gradient[D];

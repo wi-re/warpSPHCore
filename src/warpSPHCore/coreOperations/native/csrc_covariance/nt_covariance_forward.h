@@ -1,14 +1,17 @@
 #pragma once
 #include "execution/fieldTraversal.h"
 #include "kernels/evaluation.h"
+#include "nt_covariance_kernel.h"
 namespace sph_native {
 template <class T, int D> struct CovariancePair {
     template <class Args>
     SPH_HD static void accumulate(const Args &a, int64_t i, int64_t j, const T (&dx)[D], T r, T w,
                                   T g, T (&sum)[D * D * D]) {
+        T gradient[D];
+        covariance_kernel_gradient(dx,r,a.qh[i],a.rh[j],a.kernel,a.support,gradient);
         for (int b = 0; b < D; ++b)
             for (int d = 0; d < D; ++d)
-                sum[b * D + d] -= dx[b] * reference_volume(a, j) * g * dx[d];
+                sum[b * D + d] -= dx[b] * reference_volume(a, j) * gradient[d];
     }
 };
 template <class T, int D> using CovarianceRow = FieldOperatorRow<T, D, CovariancePair<T, D>>;
