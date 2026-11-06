@@ -99,6 +99,12 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
             used=used_slots(flat,config[4])
             tangents=[t if slot in used else None for slot,t in enumerate(tangents)]
             result=product(config,flat,tangents)*factor
+        elif operation == WarpOperation.Laplacian:
+            from .nt_laplacian_backward import product, used_slots
+            flat=[value.contiguous() if value is not None else None for value in flat]
+            used=used_slots(flat,config[4])
+            tangents=[t if slot in used else None for slot,t in enumerate(tangents)]
+            result=product(config,flat,tangents)*factor
         else:
             example=_core_primal(config,flat)
             result=build().corrected_jvp(flat,tangents,example,*config[:8])*factor

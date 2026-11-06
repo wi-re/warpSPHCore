@@ -1,6 +1,7 @@
 #pragma once
 #include "kernels/radial.h"
 #include "math/pow.h"
+#include "kernels/gradient_shape.h"
 namespace sph_native {
 template <class T, int D> struct KernelEvaluation {
     T value, gradient[D], hessian[D * D], dh, gradient_dh[D], laplacian;
@@ -37,7 +38,8 @@ SPH_HD KernelEvaluation<T, D> evaluate_kernel(const T *x, T h, int kernel) {
     }
     if (q >= eps) {
         T re = r + eps * h;
-        result.laplacian = r2 / (re * re) * k2 + (-r2 / (re * re * re) + T(D) / re) * k1;
+        const T lap_k1 = warp_compat::gradient_shape_derivative<T,D>(q,kernel,f.d1) * C / power<T,D>(h,D+1);
+        result.laplacian = r2 / (re * re) * k2 + (-r2 / (re * re * re) + T(D) / re) * lap_k1;
     }
     return result;
 }

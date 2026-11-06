@@ -139,7 +139,10 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
                     T z=0,bzproj=0;
                     for (int d=0; d<D; ++d) { z+=p.weighted[base+d]*normal[d]; bzproj+=bar[base+d]*normal[d]; }
                     for (int d=0; d<D; ++d) {
-                        bz[base+d]+=factor*(bar[base+d]-T(D+2)*bzproj*normal[d]);
+                        // Keep the two reference output loops separate: at a
+                        // singular force value their opposing bars are NaN.
+                        bz[base+d]+=bar[base+d]*factor;
+                        bz[base+d]+=-T(D+2)*bzproj*factor*normal[d];
                         bn[d]-=T(D+2)*factor*(z*bar[base+d]+bzproj*p.weighted[base+d]);
                         bprojection+=bar[base+d]*(p.weighted[base+d]-T(D+2)*z*normal[d])/denominator;
                     }
@@ -232,9 +235,9 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         T bhi=0,bhj=0;
         if (blap!=0) {
             if (a.support==15) {
-                laplacian_vjp<T,D>(p.distance,p.hi,a.kernel,blap/T(2),br,bhi);
-                laplacian_vjp<T,D>(p.distance,p.hj,a.kernel,blap/T(2),br,bhj);
-            } else laplacian_vjp<T,D>(p.distance,p.h,a.kernel,blap,br,bh);
+                laplacian_pullback<T,D>(p.dx,p.distance,p.hi,a.kernel,blap/T(2),bx,bhi);
+                laplacian_pullback<T,D>(p.dx,p.distance,p.hj,a.kernel,blap/T(2),bx,bhj);
+            } else laplacian_pullback<T,D>(p.dx,p.distance,p.h,a.kernel,blap,bx,bh);
         }
         if(a.operation==1||a.operation==6) {
             auto value_pullback=[&](T h,T bar,T& support_bar) {
@@ -264,7 +267,8 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         else if ((a.operation==1||force_operation(a.operation)||a.operation==6) ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
         result.add(QH,0,bhi); result.add(RH,0,bhj);
         for (int d=0; d<D; ++d) {
-            const T b=bx[d]+(p.distance>0 ? br*p.dx[d]/p.distance:T(0));
+            const T radial=p.distance>T(0) ? (a.operation==5 ? T(2)*p.dx[d]*((T(.5)/p.distance)*br):br*p.dx[d]/p.distance):T(0);
+            const T b=bx[d]+radial;
             result.add(QX,d,b); result.add(RX,d,-b);
             if (a.periodic[d]) {
                 const T winding=T(round((a.qx[i*D+d]-a.rx[j*D+d]-p.dx[d])/(a.hi[d]-a.lo[d])));

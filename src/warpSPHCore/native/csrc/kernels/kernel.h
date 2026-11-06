@@ -5,7 +5,7 @@
 #include "math/pow.h"
 namespace sph_native {
 SPH_HD constexpr bool force_operation(int operation) {
-    return (operation>=2 && operation<=4) || operation==7;
+    return (operation>=2 && operation<=5) || operation==7;
 }
 template <class T, int D>
 SPH_HD void kernel_pair_value(T r, T h, int kernel, T &value, T &gradient) {

@@ -65,10 +65,10 @@ template <class T, int D, class Pair> struct AdjointRow {
             T bhi = T(0), bhj = T(0);
             if (b.lap_bar != T(0)) {
                 if (a.support == 15) {
-                    laplacian_vjp<T, D>(r, a.qh[i], a.kernel, b.lap_bar / T(2), b.br, bhi);
-                    laplacian_vjp<T, D>(r, a.rh[j], a.kernel, b.lap_bar / T(2), b.br, bhj);
+                    laplacian_pullback<T, D>(dx,r, a.qh[i], a.kernel, b.lap_bar / T(2), b.bx, bhi);
+                    laplacian_pullback<T, D>(dx,r, a.rh[j], a.kernel, b.lap_bar / T(2), b.bx, bhj);
                 } else
-                    laplacian_vjp<T, D>(r, a.radius(i, j), a.kernel, b.lap_bar, b.br, b.bh);
+                    laplacian_pullback<T, D>(dx,r, a.radius(i, j), a.kernel, b.lap_bar, b.bx, b.bh);
             }
             if (a.operation == 1 || a.operation == 6) {
                 auto value_pullback = [&](T h, T bar, T& support_bar) {
@@ -115,7 +115,8 @@ template <class T, int D, class Pair> struct AdjointRow {
             out.add(DENSITY, j, b.brr);
             out.add(QDENSITY, i, b.bqr);
             for (int d = 0; d < D; ++d) {
-                T bar = b.bx[d] + (r > T(0) ? b.br * dx[d] / r : T(0));
+                T radial = r>T(0) ? (a.operation==5 ? T(2)*dx[d]*((T(.5)/r)*b.br):b.br*dx[d]/r):T(0);
+                T bar = b.bx[d] + radial;
                 out.add(QX, i * D + d, bar);
                 out.add(RX, j * D + d, -bar);
                 if (a.periodic[d]) {

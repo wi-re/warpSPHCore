@@ -1,6 +1,160 @@
-"""Torch backward orchestration for the native laplacian operator."""
-from ...native._autograd import apply_operator
+"""First-order Laplacian products with deterministic CSR/CSC ownership.
+
+Packed fields are processed in bounded blocks; geometry and coefficient
+reductions retain one owner per physical row, with no floating atomics.
+"""
+import math
+import torch
+from torch.autograd import forward_ad
+from torch.autograd.function import once_differentiable
+from ..._models import AdjacencyList
+from ...native._topology import CSRTopology
+from ...native._differential import REFERENCE
 
 
-def apply(inputs, properties):
-    return apply_operator('laplacian', inputs, properties)
+def used_slots(flat,scheme):
+    used={0,1,2,3,7,8,13,14}
+    if scheme==2:used.update((4,15,16))
+    else:used.update((18,) if flat[18] is not None else (4,15))
+    used.update(slot for slot in range(19,26) if flat[slot] is not None)
+    return used
+
+
+def field_layout(config,flat):
+    q,ref=flat[13],flat[14];dimension=flat[0].shape[1]
+    width=math.prod(q.shape[1:])
+    if width!=math.prod(ref.shape[1:]):raise ValueError('Laplacian query/reference flattened field widths must match')
+    if not width:raise ValueError('Laplacian requires nonempty field axes')
+    if config[5]&15==3 and width%dimension:
+        raise ValueError('Dot Laplacian flattened field width must be a multiple of spatial dimension')
+    if config[5]&16 and width<dimension:
+        raise ValueError('Positive-divergence Laplacian requires at least D field components')
+    return width
+
+
+def pack_field(value,start,width,dimension):
+    packed=value.reshape(value.shape[0],math.prod(value.shape[1:]))[:,start:start+width]
+    shape=(dimension,dimension) if width==dimension**2 and dimension>1 else (dimension,) if width==dimension and dimension>1 else ()
+    return packed.reshape(value.shape[0],*shape).contiguous()
+
+
+def field_blocks(config,flat):
+    width=field_layout(config,flat);dimension=flat[0].shape[1]
+    if config[5]&16:blocks=[(0,dimension)]
+    else:
+        blocks=[];start=0
+        while start<width:
+            choices=(dimension**2,dimension) if config[5]&15==3 else (dimension**2,dimension,1)
+            block=next(size for size in choices if size<=width-start)
+            blocks.append((start,block));start+=block
+    for start,block in blocks:
+        values=list(flat)
+        for slot in (13,14):values[slot]=pack_field(flat[slot],start,block,dimension)
+        yield values,start,block
+
+
+def finish(config,flat,outputs):
+    n=flat[0].shape[0];width=field_layout(config,flat)
+    result=torch.cat([value.reshape(n,size) for value,size in outputs],1)
+    if result.shape[1]<width:result=torch.cat((result,result.new_zeros((n,width-result.shape[1]))),1)
+    return result.reshape(n,*flat[13].shape[1:])
+
+
+def primal(config,flat):
+    from ...native._build import build
+    from ...native._differential import _core_primal
+    if not config[5]&16 and all(value is None for value in flat[17:]):
+        empty=flat[0].new_empty(0)
+        borrowed=[value if value is not None else empty for value in flat[:17]]
+        return build().laplacian_forward(borrowed,*config[1:5],config[5],False)
+    return _core_primal(config,flat)
+
+
+def product(config,flat,tangents):
+    from ...native._build import build
+    outputs=[]
+    for values,start,width in field_blocks(config,flat):
+        directions=list(tangents)
+        for slot in (13,14):
+            if directions[slot] is not None:directions[slot]=pack_field(directions[slot],start,width,flat[0].shape[1])
+        example=primal(config,values)
+        result=(build().corrected_jvp(values,directions,example,*config[:8])
+                if any(t is not None for t in directions) else torch.zeros_like(example))
+        outputs.append((result,width))
+    return finish(config,flat,outputs)
+
+
+class _Laplacian(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, config, topology, *inputs):
+        ctx.config, ctx.topology, ctx.token = config, topology, topology.token()
+        ctx.used = used_slots(inputs,config[4])
+        ctx.mask = sum(1 << slot for slot in ctx.used if ctx.needs_input_grad[slot + 2])
+        ctx.set_materialize_grads(False)
+        ctx.save_for_backward(*inputs)
+        output = primal(config, list(inputs[:26]))
+        ctx.save_for_forward(*inputs, output)
+        return output
+
+    @staticmethod
+    @once_differentiable
+    def backward(ctx, cotangent):
+        from ...native._build import build
+        if ctx.topology.token() != ctx.token:
+            raise RuntimeError('CSR topology changed before native Laplacian backwards')
+        inputs = ctx.saved_tensors
+        if cotangent is None:
+            return (None,) * (len(inputs) + 2)
+        if any(value is not None and forward_ad.unpack_dual(value).tangent is not None
+               for value in (*inputs, cotangent)):
+            raise NotImplementedError('Laplacian reverse products are first-order; forward-over-backward is unsupported')
+        transpose = []
+        if any(ctx.mask & (1 << slot) for slot in REFERENCE):
+            csc = ctx.topology.transpose()
+            transpose = [csc.edgeOffsets, csc.numNeighbors, csc.paddedJ]
+        gradients = build().corrected_vjp(list(inputs[:26]), cotangent.contiguous(),
+                                        transpose, ctx.mask, None, *ctx.config[:8])
+        result = []
+        for slot, value in enumerate(inputs):
+            gradient = gradients[slot] if slot in ctx.used else None
+            if slot in (7, 8) and gradient is not None:
+                gradient = gradient.sum(0)
+            if gradient is None and ctx.needs_input_grad[slot + 2]:
+                gradient = torch.zeros_like(value)
+            result.append(gradient)
+        return (None, None, *result)
+
+    @staticmethod
+    def jvp(ctx, _config, _topology, *tangents):
+        from ...native._build import build
+        from ...native._differential import _FirstOrderTangent
+        inputs, example = ctx.saved_tensors[:-1], ctx.saved_tensors[-1]
+        directions = [t.contiguous() if slot in ctx.used and t is not None else None
+                      for slot, t in enumerate(tangents[:26])]
+        with torch.no_grad():
+            result = (build().corrected_jvp(list(inputs[:26]), directions, example, *ctx.config[:8])
+                      if any(t is not None for t in directions) else torch.zeros_like(example))
+        dependencies = [value for value in (*inputs, *tangents)
+                        if value is not None and value.requires_grad]
+        if torch.is_grad_enabled() and dependencies:
+            result = _FirstOrderTangent.apply(result, *dependencies)
+        return result
+
+
+def apply(inputs, properties, corrections=None, query_mass=None, ignored=(), topology=None):
+    flat = [value.contiguous() if value is not None else None
+            for value in (*inputs, *(corrections or [None] * 9))]
+    extras = [value.contiguous() if value is not None else None for value in (query_mass, *ignored)]
+    from ...native._options import laplacian_policy
+    config = (5, properties.supportMode.value, properties.operationMode.value,
+              properties.kernel.value, properties.gradientMode.value, laplacian_policy(properties), False, False, False)
+    differentiating = any(value is not None and (
+        (torch.is_grad_enabled() and value.requires_grad) or forward_ad.unpack_dual(value).tangent is not None)
+        for value in (*flat, *extras))
+    if not differentiating:
+        outputs = [(primal(config, values),width) for values, _, width in field_blocks(config,flat)]
+        return finish(config,flat,outputs)
+    if topology is None:
+        topology = CSRTopology(AdjacencyList(None, flat[12], flat[11], flat[10], len(flat[0]), len(flat[1])))
+    outputs = [(_Laplacian.apply(config, topology, *values, *extras),width) for values, _, width in field_blocks(config,flat)]
+    return finish(config,flat,outputs)

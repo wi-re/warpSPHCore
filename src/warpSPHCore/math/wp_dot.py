@@ -12,12 +12,14 @@ def positiveDotProduct(
     f_ij: vector(dtype = scalar_t, length=Any), # type: ignore
     dim: wp.int32
 ):
+    # Static bounds unroll the spatial lanes. A runtime reduction consumed by
+    # this branch gives a wrong generated reverse in Warp (even in 1D).
     dot = scalar_t(scalar_t(0.0))
-    for d in range(dim):
+    for d in range(wp.static(len(x_ij))):
         dot += x_ij[d] * fq_ij[d]
 
     result = type(f_ij)(scalar_t(0.0))
     if dot >= scalar_t(0.0):
-        for d in range(dim):
+        for d in range(wp.static(len(x_ij))):
             result[d] = f_ij[d]
     return result

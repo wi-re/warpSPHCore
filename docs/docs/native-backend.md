@@ -7,13 +7,13 @@ title: Experimental native backend
 The native backend builds neighbourhoods, evaluates all 15 radial kernel families,
 and runs the seven standard SPH operators without importing Warp. The Python
 package installs Warp for the default backend and other parts of the SPH stack.
-Density, interpolation, gradient, divergence and curl have first-order backward/VJP and JVP products for all 15 kernel families;
+Density, interpolation, gradient, divergence, curl and Laplacian have first-order backward/VJP and JVP products for all 15 kernel families;
 the other standard operators retain the smooth-kernel qualification described below. CPU, CUDA and HIP
 share the same numerical headers; Warp remains the default backend. All seven standard operations, native CRK
 preparation and all six applicable corrected core operations support first-order
 Torch backwards and forward AD, including derivatives through the prepared CRK
 coefficients. Fixed-geometry solver products remain available through
-`native.linearizeFields`. Nonsmooth/singular geometry contracts outside density/interpolation/gradient/divergence/curl, higher-order native
+`native.linearizeFields`. Nonsmooth/singular geometry contracts outside density/interpolation/gradient/divergence/curl/Laplacian, higher-order native
 derivatives and a completely native frontend remain unported. The 0.7.1 frontend
 can run complete eager simulations with native core operators and Warp frontend
 kernels using the explicit compatibility selection below.
@@ -368,7 +368,7 @@ provides a cotangent matching the logical output, selects floating-point roles
 with `gradient_bit(QX)` etc., and supplies corresponding `Adjoints.slots` buffers.
 By default these buffers are zeroed before accumulation; `accumulate=true` adds
 to existing values. Exact aliases between gradient buffers combine role
-contributions; partial overlap is rejected. Density/interpolation/gradient/divergence/curl accept all 15
+contributions; partial overlap is rejected. Density/interpolation/gradient/divergence/curl/Laplacian accept all 15
 kernels; the other operations retain the smooth-kernel restriction. This interface does not record an AD graph,
 manage saved tensors, or implement a second graph engine.
 
@@ -409,15 +409,15 @@ GPU test. No performance measurements were made.
 | Neighbours | Compact-hash radius search, minimum images, canonical CSR, ascending reference IDs |
 | Kernels | Wendland2/4/6, cubic/quartic/quintic spline, B7/B8, HOCT4, Gaussian, Poly6, Spiky, Viscosity, Cohesion, Adhesion |
 | Operators | Density, Interpolate, Gradient, Divergence, Curl, Laplacian, Covariance |
-| Fields | Scalar, vector and matrix fields with extent D; public interpolation, gradient and divergence preserve arbitrary nonempty packed field axes; curl preserves its reference flattened packed layouts |
+| Fields | Scalar, vector and matrix fields with extent D; public interpolation, gradient, divergence and Laplacian preserve arbitrary nonempty packed field axes; curl preserves its reference flattened packed layouts |
 | Schemes | All four gradient schemes; all four Laplacian schemes; both divergence contractions |
-| Reverse AD | Density/interpolation/gradient/divergence/curl: all 15 kernels, deterministic Torch CSR/CSC products; other operators: first-order VJPs for the 11 smooth-origin kernels; fixed topology |
+| Reverse AD | Density/interpolation/gradient/divergence/curl/Laplacian: all 15 kernels, deterministic Torch CSR/CSC products; other operators: first-order VJPs for the 11 smooth-origin kernels; fixed topology |
 | Supports | Gather, Scatter, MeanSymmetric, KernelMeanSymmetric, SuperSymmetric |
 | Categories | All existing operation-direction enums, preserving query/reference roles |
 | Geometry | Independent query/reference populations; mixed periodic axes; unwrapped positions |
 | CSR input | int32/int64 particle IDs and offsets independently; int32 counts; padded tails ignored |
 | Empty sets | Zero query/reference populations and finite zero sums |
-| Tensor access | Direct Torch storage on the same device; density/interpolation/gradient/divergence/curl normalize noncontiguous floating inputs |
+| Tensor access | Direct Torch storage on the same device; density/interpolation/gradient/divergence/curl/Laplacian normalize noncontiguous floating inputs |
 
 ### Density derivative contract
 
@@ -509,11 +509,12 @@ are discrete and have no derivative.
 Density ignores common correction bundles, matching its unchanged Warp equation.
 The corrected `warpOperation` paths and CRK preparation support first-order
 backwards and Torch forward AD (`torch.autograd.forward_ad`). Correction inputs
-and field-only products support all kernels; geometry derivatives retain the
-11 smooth-kernel restriction. For repeated field-only products on fixed geometry,
+and field-only products support all kernels. Density, interpolation, gradient,
+divergence, curl and Laplacian geometry products cover all 15 kernels; the
+remaining operators retain the 11 smooth-kernel restriction. For repeated field-only products on fixed geometry,
 use the explicit linearization below. Calibration, positive divergence,
 partial support policies, capacity/rebuild reuse and general graph capture remain
-unsupported. Dot Laplacian requires a vector or matrix field outside 1D.
+unsupported. Dot Laplacian requires a flattened field width divisible by the spatial dimension.
 Unsupported requests raise explicitly.
 
 `warpSPHCore.kernels.evaluateKernel(displacements, supports, kernel)` returns value,
@@ -530,6 +531,46 @@ live separately under `tests/verify`, and callers explicitly invoke them when
 investigating input data. Exact-sized search still returns counts needed for
 allocation to the host; that is part of search construction rather than operator
 verification. Graph capture remains unsupported by the Torch wrapper.
+
+### Laplacian derivative contract
+
+All four estimators (Naive, Brookshaw, Dot and Default) support first-order
+scalar backward, weighted VJP, classic Torch duals and the explicit native JVP
+for all 15 kernels. The public wrapper preserves arbitrary nonempty field axes.
+Dot groups flattened fields into trailing spatial blocks and requires their
+width to be a multiple of `D`. Positive-divergence filtering writes only the
+first `D` flattened components and leaves the rest zero, matching Warp.
+The filter's comparison is discrete; its generated Warp reverse now uses
+statically unrolled spatial loops, eliminating a reproduced gradient error.
+
+The six support enums, operation directions and four coefficient schemes retain
+the reference equations. Every nonsymmetric scheme uses a field difference;
+symmetric weighting uses the query and reference densities. Products include
+positions, supports, periodic bounds, both fields, mass/density or supplied
+reference volumes, both grad-h roles, query CRK spatial coefficients and
+renormalization. Naive ignores CRK and renormalization. A query volume is a
+reference-volume fallback only when a separate reference volume is absent.
+Unread roles have zero products, including when they are the sole AD input.
+The explicit JVP API has no omega-tangent argument; classic duals carry those
+and periodic-bound directions.
+
+Torch reverse owns query rows in CSR and reference rows in CSC, without floating
+atomics. Packed blocks bound native storage. The standalone ABI retains its
+uncorrected scalar/vector/matrix primal and scatter-adjoint interface; it does
+not acquire a correction or JVP interface. Graph replay, noncontiguous tensors,
+aliases, sparse/empty populations, native search, grid rebuilding, calibration
+and topology lifetime are covered by maintained tests.
+
+Primal, taped reverse and analytic JVP keep their separate reference arithmetic
+at singular kernels, support ties, regularization clamps and compact cutoffs.
+In particular, Naive's taped quotient/power reverse can overflow where its
+analytic JVP remains finite. Field/coefficient-only products hold the force
+kernel fixed and avoid multiplying an undefined Hessian by zero; shared
+gradient/divergence/curl regressions cover this boundary too. Such points do not carry a smooth-gradcheck claim.
+Gradient-based estimators retain the exact-zero self branch. General higher
+products, functional/batched transforms and row-chunk AD remain outside the
+inherited first-order interface. Three-step field/geometry feedback checks AD;
+accepted wave-equation steps qualify primal execution separately.
 
 ## Source ownership and common wrappers
 
@@ -975,8 +1016,9 @@ grad-h roles, query renormalization, positions/supports and periodic domain boun
 Unused inputs retain their primal meaning: interpolation ignores query fields and
 spatial CRK coefficients, covariance ignores fields/grad-h, and Naive Laplacian
 ignores CRK/renormalization. Field-only requests reuse the existing optimized field
-policies. Geometry requests support the same 11 smooth-origin kernels as ordinary
-native reverse mode; coefficient and field requests support all 15 kernels.
+policies. Density, interpolation, gradient, divergence, curl and Laplacian geometry
+requests cover all 15 kernels; remaining geometry products retain the 11
+smooth-origin kernel qualification. Coefficient/field requests cover all 15.
 Density retains its tuned primal and existing reverse path. Its forward products
 now use the shared analytic pair bridge as well.
 

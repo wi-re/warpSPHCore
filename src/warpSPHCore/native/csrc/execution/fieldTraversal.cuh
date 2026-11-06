@@ -39,7 +39,7 @@ struct CooperativeFieldRow {
                     kernel.evaluate(r, w, g);
                 else
                     pair_kernel(a, i, j, r, w, g);
-                if (prepared && (a.operation == 3 || a.operation == 4) && r < (sizeof(T)==4 ? T(1e-7):T(1e-15)))
+                if (prepared && (a.operation == 3 || a.operation == 4 || a.operation == 5) && r < (sizeof(T)==4 ? T(1e-7):T(1e-15)))
                     pair_kernel(a, i, j, r, w, g);
                 Pair::accumulate(a, i, j, dx, r, w, g, sum);
             }

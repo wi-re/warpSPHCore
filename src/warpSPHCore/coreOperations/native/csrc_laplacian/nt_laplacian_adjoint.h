@@ -1,5 +1,6 @@
 #pragma once
 #include "execution/adjointTraversal.h"
+#include "nt_laplacian_kernel.h"
 namespace sph_native {
 template <class T, int D> struct LaplacianAdjointPair {
     SPH_HD static void backward(const RowArgs<T, D> &a, int64_t i, int64_t j, const T (&dx)[D], T r,
@@ -23,8 +24,11 @@ template <class T, int D> struct LaplacianAdjointPair {
             b.lap_bar = bp;
         } else if (r > T(0)) {
             T A = r + T(1e-8) * h;
+            T gradient[D],projection=T(0);
+            laplacian_kernel_gradient(a,i,j,dx,r,gradient);
+            for(int d=0;d<D;++d)projection+=gradient[d]*(dx[d]/A);
             if (a.laplacian_mode == 3) {
-                T n[D], bn[D] = {}, F = g * r2 / (A * A), bF = T(0), bA = T(0);
+                T n[D], bn[D] = {}, F = projection / A, bF = T(0), bA = T(0);
                 for (int d = 0; d < D; ++d)
                     n[d] = dx[d] / A;
                 for (int base = 0; base < a.fields; base += D) {
@@ -45,7 +49,7 @@ template <class T, int D> struct LaplacianAdjointPair {
                 }
                 T ng = T(0);
                 for (int d = 0; d < D; ++d) {
-                    T G = g * dx[d];
+                    T G = gradient[d];
                     ng += n[d] * G;
                     bn[d] += bF * G / A;
                     b.bg[d] += bF * n[d] / A;
@@ -59,17 +63,21 @@ template <class T, int D> struct LaplacianAdjointPair {
                 b.bh += T(1e-8) * bA;
             } else {
                 T e2 = a.laplacian_mode == 4 ? T(1e-12) : T(1e-8), B = r + e2 * h,
-                  P = -T(2) * g * r2 / (A * B), bp = T(0);
+                  P = -T(2) * projection / B, bp = T(0);
                 for (int c = 0; c < a.fields; ++c) {
                     weighted_vjp(a, i, j, c, bar[c] * P, true, b, out);
                     bp += bar[c] * field_weight(a, i, j, c, true);
                 }
+                const T bprojection=-T(2)*bp/B,bdivisor=-bp*P/B;
+                T bden=T(0);
                 for (int d = 0; d < D; ++d) {
-                    b.bg[d] -= bp * T(2) * dx[d] / (A * B);
-                    b.bx[d] -= bp * T(2) * g * dx[d] / (A * B);
+                    const T bn=bprojection*gradient[d];
+                    b.bg[d] += bprojection*(dx[d]/A);
+                    b.bx[d] += bn/A;
+                    bden-=bn*dx[d]/(A*A);
                 }
-                b.br -= bp * P * (T(1) / A + T(1) / B);
-                b.bh -= bp * P * (T(1e-8) / A + e2 / B);
+                b.br += bdivisor+bden;
+                b.bh += e2*bdivisor+T(1e-8)*bden;
             }
         }
     }

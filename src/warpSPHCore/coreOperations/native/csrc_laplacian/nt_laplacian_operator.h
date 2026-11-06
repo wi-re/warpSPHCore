@@ -58,9 +58,9 @@ template <class T, int D, int Fields> struct CorrectedLaplacian
                 for (int d = 0; d < D; ++d)
                     field_projection += values[base + d] * dx[d] / regularized;
                 for (int d = 0; d < D; ++d)
-                    result[base + d] += (values[base + d] -
-                        T(D + 2) * field_projection * dx[d] / regularized) * factor;
+                    result[base + d] += -T(D + 2) * field_projection * (dx[d] / regularized) * factor;
             }
+            for(int c=0;c<Fields;++c)result[c]+=values[c]*factor;
         } else {
             const T denominator = mode == 4 ? distance + T(1e-12) * h : regularized;
             const T factor = -T(2) * projection / denominator;

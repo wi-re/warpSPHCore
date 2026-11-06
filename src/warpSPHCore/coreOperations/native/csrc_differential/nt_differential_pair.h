@@ -64,7 +64,8 @@ SPH_HD void kernel(const S (&dx)[D], S h, int name, S& w, S (&gradient)[D], S& l
                 dw+=e.gradient[d]*dx[d].tangent;
                 dg[d]=e.gradient_dh[d]*h.tangent;
                 for (int c=0; c<D; ++c) dg[d]+=e.hessian[d*D+c]*dx[c].tangent;
-                if (r>0) dr+=x[d]*dx[d].tangent/r;
+                const T eps=sizeof(T)==4?T(1e-7):T(1e-15);
+                if (r>0) dr+=x[d]*dx[d].tangent/(r>eps?r:eps);
             }
         }
         T br=0,bh=0;
@@ -92,7 +93,7 @@ SPH_HD void density_kernel(const S (&dx)[D],S h,int name,S& w,S (&g)[D],S& lap) 
 }
 
 template<class T,int D,class S>
-SPH_HD void force_kernel(const S (&dx)[D],S h,int name,S& w,S (&g)[D],S& lap) {
+SPH_HD void force_kernel(const S (&dx)[D],S h,int name,S& w,S (&g)[D],S& lap,bool geometry) {
     T x[D],r2=0;
     for(int d=0;d<D;++d){x[d]=ScalarValue<S>::get(dx[d]);r2+=x[d]*x[d];}
     T value=0,gradient[D]={},wx[D]={},wh=0,gx[D*D]={},gh[D]={};
@@ -100,12 +101,21 @@ SPH_HD void force_kernel(const S (&dx)[D],S h,int name,S& w,S (&g)[D],S& lap) {
     if constexpr(std::is_same_v<T,S>) {
         w=value;for(int d=0;d<D;++d)g[d]=gradient[d];
     } else {
-        T dw=wh*h.tangent;
-        for(int d=0;d<D;++d)dw+=wx[d]*dx[d].tangent;
+        // Field/coefficient-only directions hold the force kernel fixed.
+        // Its primal can be finite while its Hessian overflows; an omitted
+        // geometric direction must not turn that product into 0 * Inf.
+        T dw=0;
+        if(geometry) {
+            dw=wh*h.tangent;
+            for(int d=0;d<D;++d)dw+=wx[d]*dx[d].tangent;
+        }
         w={value,dw};
         for(int d=0;d<D;++d) {
-            T tangent=gh[d]*h.tangent;
-            for(int c=0;c<D;++c)tangent+=gx[d*D+c]*dx[c].tangent;
+            T tangent=0;
+            if(geometry) {
+                tangent=gh[d]*h.tangent;
+                for(int c=0;c<D;++c)tangent+=gx[d*D+c]*dx[c].tangent;
+            }
             g[d]={gradient[d],tangent};
         }
     }
@@ -116,6 +126,8 @@ template <class T, int D, class S>
 SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
                          int64_t i, int64_t j, bool consistent) {
     Pair<S,D> p{};
+    const bool geometry=arrays.tangents[QX]||arrays.tangents[RX]||arrays.tangents[QH]||
+        arrays.tangents[RH]||arrays.tangents[LO]||arrays.tangents[HI];
     auto read=[&](int slot,int64_t at,T fallback=T(0)) { return arrays.template read<S>(slot,at,fallback); };
     T dx[D];
     const T distance=QueryGeometry<T,D>(args.qx+i*D,args.lo,args.hi,args.periodic).distance(args.rx+j*D,dx);
@@ -136,19 +148,27 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
     p.h=args.support==11 ? p.hi : args.support==12 ? p.hj : args.support==13 ?
         (p.hi+p.hj)/S(2) : ScalarValue<S>::get(p.hi)>=ScalarValue<S>::get(p.hj) ? p.hi : p.hj;
     if(args.operation==1||args.operation==6)density_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
-    else if(force_operation(args.operation))force_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
+    else if(force_operation(args.operation))force_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap,geometry);
     else kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
+    if(args.operation==5) {
+        S unused_w,unused_g[D];kernel<T,D>(p.dx,p.h,args.kernel,unused_w,unused_g,p.lap);
+    }
     if (args.support==14 || args.support==15) {
         S wi,wj,gi[D],gj[D],li,lj;
         if(args.operation==1||args.operation==6) {
             density_kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
             density_kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
         } else if(force_operation(args.operation)) {
-            force_kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
-            force_kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
+            force_kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li,geometry);
+            force_kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj,geometry);
         } else {
             kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
             kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
+        }
+        if(args.operation==5) {
+            S unused_w,unused_g[D];
+            kernel<T,D>(p.dx,p.hi,args.kernel,unused_w,unused_g,li);
+            kernel<T,D>(p.dx,p.hj,args.kernel,unused_w,unused_g,lj);
         }
         p.raw_w=(wi+wj)/S(2);
         for (int d=0; d<D; ++d) p.raw_g[d]=(gi[d]+gj[d])/S(2);
@@ -301,8 +321,9 @@ SPH_HD void forward(const RowArgs<T,D>& a, const Pair<S,D>& p, S* out) {
             if (a.laplacian_mode==3) {
                 for (int base=0; base<fields; base+=D) {
                     S z=S(0); for (int d=0; d<D; ++d) z+=p.weighted[base+d]*n[d];
-                    for (int d=0; d<D; ++d) out[base+d]+=(p.weighted[base+d]-S(D+2)*z*n[d])*projection/denominator;
+                    for (int d=0; d<D; ++d) out[base+d]+=-S(D+2)*z*n[d]*(projection/denominator);
                 }
+                for(int c=0;c<fields;++c)out[c]+=p.weighted[c]*(projection/denominator);
             } else {
                 const S divisor=p.distance+S(a.laplacian_mode==4 ? 1e-12 : 1e-8)*p.h;
                 for (int c=0; c<fields; ++c) out[c]-=S(2)*p.weighted[c]*projection/divisor;
