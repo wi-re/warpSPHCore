@@ -14,6 +14,11 @@ def _product(kind,query,reference,domain,properties,adjacency,query_tangent,refe
     from ...native._build import build
     from ...radiusSearch.chunked import ChunkedAdjacency
     if isinstance(adjacency,ChunkedAdjacency):raise NotImplementedError('Row-chunk operators do not support AD')
+    if kind==8:
+        from .nt_volume import computeCRKVolume
+        from .nt_volume_jvp import compute
+        primal=computeCRKVolume(query,properties,domain,adjacency,reference)
+        return primal,compute(query,reference,domain,properties,adjacency,primal,query_tangent,reference_tangent)
     inputs,options,topology=prepare(query,reference,domain,properties,adjacency,volumes)
     inputs[4]=None  # These two passes have no mass dependence.
     flat=[*inputs,None,volumes,*([None]*7)]
@@ -49,8 +54,9 @@ def computeCRKVolumeGeometryJVP(queryParticles,domain,kernel,adjacency,apparentV
         queryTangentState,referenceParticles=None,referenceTangentState=None,
         operationMode=OperationDirection.AllToAll):
     properties=OperationProperties(kernel,supportMode=SupportScheme.Gather,operationMode=operationMode)
-    return _product(8,queryParticles,referenceParticles,domain,properties,adjacency,
-                    queryTangentState,referenceTangentState)[1]
+    from .nt_volume_jvp import compute
+    return compute(queryParticles,referenceParticles,domain,properties,adjacency,
+                   apparentVolumes,queryTangentState,referenceTangentState)
 
 
 def computeCRKMomentsGeometryJVP(queryParticles,domain,kernel,adjacency,referenceVolumes,

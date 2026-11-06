@@ -239,12 +239,24 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
                 laplacian_pullback<T,D>(p.dx,p.distance,p.hj,a.kernel,blap/T(2),bx,bhj);
             } else laplacian_pullback<T,D>(p.dx,p.distance,p.h,a.kernel,blap,bx,bh);
         }
-        if(a.operation==1||a.operation==6) {
+        if(a.operation==1||a.operation==6||a.operation==Volume) {
             auto value_pullback=[&](T h,T bar,T& support_bar) {
                 T w=0,wx[D]={},wh=0;
                 warp_compat::value_derivatives<T,D>(p.dx,p.distance,h,a.kernel,w,wx,wh);
                 for(int d=0;d<D;++d)bx[d]+=bar*wx[d];
-                support_bar+=bar*wh;
+                if(a.operation==Volume && !std::isfinite(bar)) {
+                    // The reciprocal can overflow its adjoint while its value
+                    // remains finite. Warp tapes the support normalization and
+                    // shape terms separately: opposing infinite bars are NaN.
+                    if(h>T(0) && p.distance<=h) {
+                        const T q=p.distance/h,C=normalization<T,D>(a.kernel),hd=power<T,D>(h,D);
+                        const auto f=radial_shape_raw<T,D>(q,a.kernel);
+                        const T d1=warp_compat::value_shape_derivative<T,D>(q,a.kernel,f.d1);
+                        volatile T scale_bar=bar*(-T(D)*C*f.v/(hd*h));
+                        volatile T shape_bar=bar*(-C*q*d1/(hd*h));
+                        support_bar+=scale_bar;support_bar+=shape_bar;
+                    }
+                } else support_bar+=bar*wh;
             };
             if(a.support==14||a.support==15) {
                 value_pullback(p.hi,raw_bw/T(2),bhi);
@@ -264,7 +276,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         if (a.support==11) bhi+=bh;
         else if (a.support==12) bhj+=bh;
         else if (a.support==13) { bhi+=bh/T(2); bhj+=bh/T(2); }
-        else if ((a.operation==1||force_operation(a.operation)||a.operation==6) ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
+        else if ((a.operation==1||force_operation(a.operation)||a.operation==6||a.operation==Volume) ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
         result.add(QH,0,bhi); result.add(RH,0,bhj);
         for (int d=0; d<D; ++d) {
             const T radial=p.distance>T(0) ? (a.operation==5 ? T(2)*p.dx[d]*((T(.5)/p.distance)*br):br*p.dx[d]/p.distance):T(0);
