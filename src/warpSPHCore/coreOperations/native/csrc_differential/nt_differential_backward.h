@@ -229,7 +229,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
                 laplacian_vjp<T,D>(p.distance,p.hj,a.kernel,blap/T(2),br,bhj);
             } else laplacian_vjp<T,D>(p.distance,p.h,a.kernel,blap,br,bh);
         }
-        if(a.operation==6) {
+        if(a.operation==1||a.operation==6) {
             auto value_pullback=[&](T h,T bar,T& support_bar) {
                 T w=0,wx[D]={},wh=0;
                 warp_compat::value_derivatives<T,D>(p.dx,p.distance,h,a.kernel,w,wx,wh);
@@ -248,7 +248,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         if (a.support==11) bhi+=bh;
         else if (a.support==12) bhj+=bh;
         else if (a.support==13) { bhi+=bh/T(2); bhj+=bh/T(2); }
-        else if (a.operation==6 ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
+        else if ((a.operation==1||a.operation==6) ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
         result.add(QH,0,bhi); result.add(RH,0,bhj);
         for (int d=0; d<D; ++d) {
             const T b=bx[d]+(p.distance>0 ? br*p.dx[d]/p.distance:T(0));

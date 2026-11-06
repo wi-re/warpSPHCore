@@ -75,7 +75,14 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
         properties.divergenceDotMode,consistentDivergence,False)
     _check_geometry(config,flat,tangents)
     with torch.no_grad():
-        example=_core_primal(config,flat)
-        result=build().corrected_jvp(flat,tangents,example,*config[:8])*factor
+        if operation == WarpOperation.Interpolate:
+            from .nt_interpolate_backward import product, used_slots
+            flat=[value.contiguous() if value is not None else None for value in flat]
+            used=used_slots(flat)
+            tangents=[t if slot in used else None for slot,t in enumerate(tangents)]
+            result=product(config,flat,tangents)*factor
+        else:
+            example=_core_primal(config,flat)
+            result=build().corrected_jvp(flat,tangents,example,*config[:8])*factor
     dependencies=[t for t in (*flat,*tangents) if isinstance(t,torch.Tensor) and t.requires_grad]
     return _FirstOrderTangent.apply(result,*dependencies) if torch.is_grad_enabled() and dependencies else result

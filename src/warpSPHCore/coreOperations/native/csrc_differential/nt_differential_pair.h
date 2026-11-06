@@ -85,7 +85,7 @@ SPH_HD void density_kernel(const S (&dx)[D],S h,int name,S& w,S (&g)[D],S& lap) 
         for(int d=0;d<D;++d)tangent+=wx[d]*dx[d].tangent;
         w={value,tangent};
     }
-    // No force-kernel gradient/Hessian is consumed by density.
+    // Density and interpolation consume values, never force-kernel Hessians.
     lap=S(0);for(int d=0;d<D;++d)g[d]=S(0);
 }
 
@@ -112,11 +112,11 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
     p.hi=read(QH,i); p.hj=read(RH,j);
     p.h=args.support==11 ? p.hi : args.support==12 ? p.hj : args.support==13 ?
         (p.hi+p.hj)/S(2) : ScalarValue<S>::get(p.hi)>=ScalarValue<S>::get(p.hj) ? p.hi : p.hj;
-    if(args.operation==6)density_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
+    if(args.operation==1||args.operation==6)density_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
     else kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
     if (args.support==14 || args.support==15) {
         S wi,wj,gi[D],gj[D],li,lj;
-        if(args.operation==6) {
+        if(args.operation==1||args.operation==6) {
             density_kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
             density_kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
         } else {

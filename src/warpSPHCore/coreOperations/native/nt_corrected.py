@@ -19,6 +19,8 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
                 adjacency.edgeOffsets,adjacency.numNeighbors,adjacency.paddedJ,None,None,None,None]
         return inputs,[None]*9,[*geometry,reference.masses]
     interpolation = operation == WarpOperation.Interpolate
+    if interpolation and type(adjacency).__name__ in ("CompactHashMap", "SearchIndex"):
+        adjacency = None  # Rebuild native topology in the original population order.
     covariance = operation == WarpOperation.Covariance
     laplacian = operation == WarpOperation.Laplacian
     if operation not in (WarpOperation.Interpolate, WarpOperation.Gradient, WarpOperation.Divergence,
@@ -121,5 +123,15 @@ def compute(query, reference, domain, properties, adjacency, query_values, refer
         query_values, reference_values, query_volumes, reference_volumes, crk_state,
         grad_h_state, renormalization_state, consistent_divergence=consistent_divergence,
         return_neighbor_counts=return_neighbor_counts, allow_forward=True)
+    if properties.operation == WarpOperation.Interpolate:
+        from .nt_interpolate_backward import apply
+        states = crk_state if isinstance(crk_state, tuple) else (crk_state,)
+        ignored = []
+        for index, state in enumerate(states):
+            if state is not None:
+                ignored.extend((state.gradA, state.gradB))
+                if index:
+                    ignored.extend((state.A, state.B))
+        return apply(inputs, properties, corrections, query.masses, ignored, topology)
     return apply_corrected(inputs, corrections, properties, consistent=consistent_divergence,
                            counts=return_neighbor_counts, topology=topology)

@@ -54,9 +54,9 @@ def prepare_adjacency(query, reference, domain, properties, adjacency):
             # Search consumes geometry only. Keep the public particle/domain
             # duck-typing contract, without mutating or reconstructing callers'
             # simulation subclasses just to detach discrete topology.
-            query_geometry = SimpleNamespace(positions=query.positions.detach(), supports=query.supports.detach())
-            reference_geometry = SimpleNamespace(positions=reference.positions.detach(), supports=reference.supports.detach())
-            fixed_domain = SimpleNamespace(min=domain.min.detach(), max=domain.max.detach(),
+            query_geometry = SimpleNamespace(positions=query.positions.detach().contiguous(), supports=query.supports.detach().contiguous())
+            reference_geometry = SimpleNamespace(positions=reference.positions.detach().contiguous(), supports=reference.supports.detach().contiguous())
+            fixed_domain = SimpleNamespace(min=domain.min.detach().contiguous(), max=domain.max.detach().contiguous(),
                                            periodic=domain.periodic, dim=domain.dim)
             adjacency = radiusSearch(query_geometry, fixed_domain, reference_geometry, properties.supportMode, backend='native')
     from ..radiusSearch.chunked import ChunkedAdjacency

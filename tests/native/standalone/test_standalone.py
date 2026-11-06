@@ -153,3 +153,20 @@ def test_standalone_density_all_kernel_products(device, kernel):
     wanted = torch.autograd.grad(expected,selected,cotangent,allow_unused=True)
     for got,want,value in zip(actual,wanted,selected):
         torch.testing.assert_close(got,torch.zeros_like(value) if want is None else want,rtol=3e-8,atol=3e-8)
+
+
+@pytest.mark.parametrize('kernel', list(sph.KernelFunctions))
+def test_standalone_interpolation_all_kernel_products(device, kernel):
+    from _support.interpolate_contract import case, oracle
+    index=list(sph.KernelFunctions).index(kernel);dimension=1+index%3
+    q,r,d,p,g,values,states,_=case(device,dimension,kernel=kernel,
+        support=list(sph.SupportScheme)[index%6],field_shape=(dimension,)*(index%3))
+    q,r,d=states(values[:10]);qfield=values[10].new_empty((2,*values[10].shape[1:]))
+    slots=[0,1,2,3,4,7,8,16,15,14];selected=(*values[:7],values[8],values[9],values[10])
+    req=request(q,r,d,qfield,values[10],p,(g.edgeOffsets,g.numNeighbors,g.paddedJ))
+    expected=oracle(values,d,p,g)
+    torch.testing.assert_close(output(req,torch.empty_like(expected)),expected,rtol=3e-8,atol=3e-8)
+    cotangent=expected.detach().cos().contiguous();actual=vjp(req,selected,slots,cotangent)
+    wanted=torch.autograd.grad(expected,selected,cotangent,allow_unused=True)
+    for got,want,value in zip(actual,wanted,selected):
+        torch.testing.assert_close(got,torch.zeros_like(value) if want is None else want,rtol=3e-8,atol=3e-8)

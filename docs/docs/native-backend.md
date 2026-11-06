@@ -7,13 +7,13 @@ title: Experimental native backend
 The native backend builds neighbourhoods, evaluates all 15 radial kernel families,
 and runs the seven standard SPH operators without importing Warp. The Python
 package installs Warp for the default backend and other parts of the SPH stack.
-Density has first-order backward/VJP and JVP products for all 15 kernel families;
+Density and interpolation have first-order backward/VJP and JVP products for all 15 kernel families;
 the other standard operators retain the smooth-kernel qualification described below. CPU, CUDA and HIP
 share the same numerical headers; Warp remains the default backend. All seven standard operations, native CRK
 preparation and all six applicable corrected core operations support first-order
 Torch backwards and forward AD, including derivatives through the prepared CRK
 coefficients. Fixed-geometry solver products remain available through
-`native.linearizeFields`. Nonsmooth/singular geometry contracts outside density, higher-order native
+`native.linearizeFields`. Nonsmooth/singular geometry contracts outside density/interpolation, higher-order native
 derivatives and a completely native frontend remain unported. The 0.7.1 frontend
 can run complete eager simulations with native core operators and Warp frontend
 kernels using the explicit compatibility selection below.
@@ -368,8 +368,8 @@ provides a cotangent matching the logical output, selects floating-point roles
 with `gradient_bit(QX)` etc., and supplies corresponding `Adjoints.slots` buffers.
 By default these buffers are zeroed before accumulation; `accumulate=true` adds
 to existing values. Exact aliases between gradient buffers combine role
-contributions; partial overlap is rejected. The same smooth-kernel restrictions
-apply as for Torch reverse mode. This interface does not record an AD graph,
+contributions; partial overlap is rejected. Density/interpolation accept all 15
+kernels; the other operations retain the smooth-kernel restriction. This interface does not record an AD graph,
 manage saved tensors, or implement a second graph engine.
 
 The standalone library supplies operations, not a complete solver or file-format
@@ -409,15 +409,15 @@ GPU test. No performance measurements were made.
 | Neighbours | Compact-hash radius search, minimum images, canonical CSR, ascending reference IDs |
 | Kernels | Wendland2/4/6, cubic/quartic/quintic spline, B7/B8, HOCT4, Gaussian, Poly6, Spiky, Viscosity, Cohesion, Adhesion |
 | Operators | Density, Interpolate, Gradient, Divergence, Curl, Laplacian, Covariance |
-| Fields | Scalar, vector and matrix fields; each field axis has spatial extent D |
+| Fields | Scalar, vector and matrix fields with extent D; public interpolation also preserves arbitrary nonempty packed field axes |
 | Schemes | All four gradient schemes; all four Laplacian schemes; both divergence contractions |
-| Reverse AD | Density: all 15 kernels, deterministic CSR/CSC products; other operators: first-order VJPs for the 11 smooth-origin kernels; fixed topology |
+| Reverse AD | Density/interpolation: all 15 kernels, deterministic Torch CSR/CSC products; other operators: first-order VJPs for the 11 smooth-origin kernels; fixed topology |
 | Supports | Gather, Scatter, MeanSymmetric, KernelMeanSymmetric, SuperSymmetric |
 | Categories | All existing operation-direction enums, preserving query/reference roles |
 | Geometry | Independent query/reference populations; mixed periodic axes; unwrapped positions |
 | CSR input | int32/int64 particle IDs and offsets independently; int32 counts; padded tails ignored |
 | Empty sets | Zero query/reference populations and finite zero sums |
-| Tensor access | Direct Torch storage; inputs must be contiguous and on the same device |
+| Tensor access | Direct Torch storage on the same device; density/interpolation normalize noncontiguous floating inputs |
 
 ### Density derivative contract
 
@@ -464,6 +464,21 @@ gradcheck, independent equations, three-step density-feedback products,
 reference edge behavior, deterministic repeats, grid/calibration routing and
 CUDA stream/capture controls. Accepted Inutsuka Sod steps are additionally
 checked in the paired frontend; those are primal simulation evidence.
+
+### Interpolation derivative contract
+
+[Interpolation](operations/interpolate.md#native-derivative-contract) now shares
+density's value-only kernel pullback and deterministic Torch CSR/CSC ownership.
+All 15 kernels, supports and directions have first-order products for geometry,
+periodic bounds, reference fields, mass/density or explicit-volume weights and
+query CRK $A,B$ coefficients. Packed field axes, unread-role zero products,
+noncontiguous search inputs, aliases, fixed-CSR capture/replay and normalization
+calibration are qualified. The existing fast uncorrected primal is retained.
+Framework-free C++ interpolation adjoints accept all 15 kernels within that
+ABI's scalar/vector/matrix interface; standalone JVP/correction APIs do not
+exist. Warp's detached reverse, functional-transform and row-chunk AD limits
+remain inherited bounds. Native additionally supports classic forward duals
+and explicit CRK-coefficient JVPs.
 
 Use `radiusSearch(particles, domain, referenceParticles=None, mode=...)` to build
 an unpadded CSR list. Use `warpOperation(...)` or its native alias

@@ -69,7 +69,7 @@ template <class T, int D, class Pair> struct AdjointRow {
                 } else
                     laplacian_vjp<T, D>(r, a.radius(i, j), a.kernel, b.lap_bar, b.br, b.bh);
             }
-            if (a.operation == 6) {
+            if (a.operation == 1 || a.operation == 6) {
                 auto value_pullback = [&](T h, T bar, T& support_bar) {
                     T value = T(0), gradient[D] = {}, dh = T(0);
                     warp_compat::value_derivatives<T,D>(dx, r, h, a.kernel, value, gradient, dh);
@@ -98,7 +98,7 @@ template <class T, int D, class Pair> struct AdjointRow {
             else if (a.support == 13) {
                 bhi += b.bh / T(2);
                 bhj += b.bh / T(2);
-            } else if (a.operation == 6 ? a.qh[i] > a.rh[j] : a.qh[i] >= a.rh[j])
+            } else if ((a.operation == 1 || a.operation == 6) ? a.qh[i] > a.rh[j] : a.qh[i] >= a.rh[j])
                 bhi += b.bh;
             else
                 bhj += b.bh;

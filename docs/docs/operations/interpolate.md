@@ -88,11 +88,11 @@ dV_j = \frac{dm_j}{\rho_j}
 \quad\text{(or the supplied apparent-volume tangent)},
 $$
 
-$dW_{ij}$ from `sphKernelJVP`. Interpolate has **no query-side density
-term at all** and no CRK/renorm/grad-h tangent support (the geometry
-JVP has no CRK correction path, enforced centrally in
-`operations.py`); query-mass tangents are rejected. Omitted tangent
-fields default to zero.
+$dW_{ij}$ from `sphKernelJVP`. Interpolate has **no query-side density term**. The Warp explicit geometry
+JVP has no CRK correction path and rejects query-mass tangents; omitted
+tangents default to zero. Native JVPs additionally support query-side CRK
+$A_i,B_i$ products and classic forward duals; unused particle/correction
+roles have zero products.
 
 Gated by `tests/operations/test_forward_mode_geometry_jvp_interpolate.py`.
 
@@ -112,3 +112,35 @@ No HVP exists for Interpolate.
 
 [Density](density) · [CRK overview](../crk/crk-overview) ·
 [CRK volume](../crk/crk-volume)
+
+## Native derivative contract
+
+The native Torch-facing path supports all 15 kernels, six support schemes,
+all operation directions, FP32/FP64 and 1D–3D. It preserves arbitrary nonempty
+trailing field shapes by launching bounded scalar/vector/matrix blocks.
+Mass/density volume weights or explicit reference volumes and query CRK
+$A_i,B_i$ participate in backward/VJP and JVP. Unread query fields, grad-h,
+renormalization and CRK gradient/reference coefficients do not enter the
+interpolation equation. Supplied query volumes are the reference-volume
+fallback when reference volumes are omitted.
+
+Reverse uses deterministic query CSR/reference CSC ownership with no floating
+atomics or per-edge Jacobians. Supplied CSR, native auto-search and rebuilding
+supplied Warp grids retain original particle order. Noncontiguous floating
+inputs, shared query/reference tensors, empty populations, sparse/duplicate
+edges and fixed-CSR CUDA capture/replay are covered. Normalization calibration
+is a constant output factor.
+
+Products are first-order, matching Warp's detached taped reverse. Functional
+transforms, higher products and row-chunk AD are inherited unsupported paths.
+At singular self pairs/cutoffs, native preserves the reference nonfinites and
+its separate reverse/analytic-JVP conventions, including max-support ties.
+The framework-free C++ ABI supports its declared scalar/vector/matrix fields
+and raw uncorrected interpolation adjoint for all 15 kernels; that ABI exposes
+no JVP or correction bundles. Deterministic ownership describes the Torch
+bridge, not the standalone scatter/accumulation API.
+
+Maintained qualification: `tests/native/torch/test_interpolate_contract.py`,
+`tests/parity/test_interpolate_contract.py` and the standalone interpolation
+product checks. Accepted frontend PESPH steps qualify primal simulation use;
+independent three-step feedback products are toy AD evidence.
