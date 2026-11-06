@@ -133,3 +133,29 @@ def test_dense_current_stream_and_graph_replay(device):
     torch.cuda.current_stream().wait_stream(stream)
     torch.testing.assert_close(inverse,torch.eye(3,device=device)[None]/4)
     torch.testing.assert_close(output,values/4)
+
+
+@pytest.mark.parametrize('dimension',[1,2,3])
+@pytest.mark.parametrize('branch',['full','repeated','rank_deficient','truncated'])
+def test_general_square_pinv_products_match_torch(device,dimension,branch):
+    """Shared rules retain asymmetric perturbations and higher product graphs."""
+    from warpSPHCore.pinv.products import pinv_jvp,pinv_vjp
+    generator=torch.Generator(device=device).manual_seed(187)
+    def rand(*shape):return torch.randn(*shape,generator=generator,device=device,dtype=torch.float64)
+    left=torch.linalg.qr(rand(2,dimension,dimension)).Q
+    right=torch.linalg.qr(rand(2,dimension,dimension)).Q
+    spectrum=torch.arange(1,dimension+1,device=device,dtype=torch.float64).expand(2,-1).clone()
+    if branch=='repeated':spectrum[:]=2
+    elif branch=='rank_deficient':spectrum[:,-1]=0
+    elif branch=='truncated':spectrum[:,-1]=torch.finfo(torch.float64).eps*.1
+    matrix=(left@torch.diag_embed(spectrum)@right.mT).requires_grad_()
+    direction,bar=rand(*matrix.shape),rand(*matrix.shape)
+    inverse,pullback=torch.func.vjp(torch.linalg.pinv,matrix)
+    expected=torch.func.jvp(torch.linalg.pinv,(matrix,),(direction,))[1]
+    actual=pinv_jvp(matrix,inverse,direction)
+    torch.testing.assert_close(actual,expected,rtol=2e-12,atol=2e-12)
+    torch.testing.assert_close(pinv_vjp(matrix,inverse,bar),pullback(bar)[0],rtol=2e-12,atol=2e-12)
+    # Differentiate products, including the saved inverse's dependence on A.
+    a=torch.autograd.grad((actual*bar).sum(),matrix,retain_graph=True)[0]
+    b=torch.autograd.grad((expected*bar).sum(),matrix)[0]
+    torch.testing.assert_close(a,b,rtol=2e-11,atol=2e-11)
