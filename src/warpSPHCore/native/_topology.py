@@ -43,12 +43,18 @@ class CSRTopology:
         if token != self._cached_token or current != self._transpose_token:
             from ._build import build
             a = self.adjacency
+            # Public wrappers normalize strided CSR tensors for pair kernels;
+            # transpose construction needs the same views. Keep cache tokens
+            # tied to the original borrowed arrays and their versions.
+            source_offsets=a.edgeOffsets.contiguous()
+            source_counts=a.numNeighbors.contiguous()
+            source_ids=a.paddedJ.contiguous()
             counts = torch.zeros(a.numCols, device=a.paddedJ.device, dtype=torch.int32)
             with torch.no_grad():
-                build().csr_transpose_count(a.edgeOffsets, a.numNeighbors, a.paddedJ, counts)
+                build().csr_transpose_count(source_offsets, source_counts, source_ids, counts)
                 offsets = counts.long().cumsum(0) - counts
                 ids = torch.full((a.paddedJ.numel(),), -1, device=counts.device, dtype=torch.int64)
-                build().csr_transpose_fill(a.edgeOffsets, a.numNeighbors, a.paddedJ,
+                build().csr_transpose_fill(source_offsets, source_counts, source_ids,
                                            offsets, counts, torch.zeros_like(counts), ids)
             self._transpose = AdjacencyList(None, ids, counts, offsets, a.numCols, a.numRows)
             self._cached_token = token

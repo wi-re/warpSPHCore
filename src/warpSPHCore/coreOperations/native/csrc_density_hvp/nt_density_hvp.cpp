@@ -3,6 +3,7 @@
 #include "execution/cpu.h"
 namespace sph_native {
 void density_hvp_gpu(const Tensors&,const density_hvp::Buffers&,int,int,int);
+void density_hvp_matrices_gpu(const Tensors&,const Tensor&,int,int,int,int64_t);
 Tensors density_position_hvp(const OptionalTensors& inputs,const Tensors& transpose,
         const std::optional<Tensor>& cotangent,int64_t support,int64_t direction,int64_t kernel,int64_t row_start) {
     STD_TORCH_CHECK(valid_kernel(kernel),"Unknown native kernel");
@@ -36,8 +37,29 @@ Tensors density_position_hvp(const OptionalTensors& inputs,const Tensors& transp
     } else execute(density_hvp::Rows{buffers},t,support,direction,6,CpuLauncher{},kernel);
     return result;
 }
+Tensors density_position_hvp_matrices(const OptionalTensors& inputs,int64_t support,
+        int64_t direction,int64_t kernel,int64_t row_start) {
+    STD_TORCH_CHECK(valid_kernel(kernel),"Unknown native kernel");
+    STD_TORCH_CHECK(row_start>=0,"row start must be nonnegative");
+    Tensors borrowed;for(const auto& value:inputs)borrowed.push_back(value ? *value:Tensor{});
+    auto t=prepare_pair_geometry(borrowed,support,direction);
+    const auto& x=t[QX];const auto edges=t[NEIGHBORS].numel(),d=x.size(1);
+    auto matrices=stable::new_zeros(x,{edges,d,d});
+    auto rows=stable::new_zeros(x,{edges},ScalarType::Long);
+    t[OUTPUT]=matrices;
+    if(x.is_cuda()) {
+#ifdef WITH_CUDA
+        density_hvp_matrices_gpu(t,rows,support,direction,kernel,row_start);
+#else
+        STD_TORCH_CHECK(false,"Native extension was built for CPU only");
+#endif
+    } else execute(density_hvp::MatrixRows{rows,row_start},t,support,direction,6,CpuLauncher{},kernel);
+    return {matrices,rows};
+}
 STABLE_TORCH_LIBRARY_FRAGMENT(warpsph_native,m) {
     m.def("density_position_hvp(Tensor?[] inputs, Tensor[] transpose, Tensor? cotangent, int support, int direction, int kernel, int row_start) -> Tensor[]");
     m.impl("density_position_hvp",TORCH_BOX(&density_position_hvp));
+    m.def("density_position_hvp_matrices(Tensor?[] inputs, int support, int direction, int kernel, int row_start) -> Tensor[]");
+    m.impl("density_position_hvp_matrices",TORCH_BOX(&density_position_hvp_matrices));
 }
 } // namespace sph_native

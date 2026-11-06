@@ -115,9 +115,10 @@ def test_density_position_block_finite_difference_transpose_and_self_policy(devi
         single=sph.radiusSearch(one,domain)
         assert not sph.computeSPHDensityPositionHVP(one,domain,properties.kernel,support,single,
                                                     torch.ones_like(one.positions)).any()
-        with pytest.raises(NotImplementedError,match='forward-only'):
-            sph.computeSPHDensityPositionHVP(replace(q,positions=q.positions.requires_grad_()),domain,
-                properties.kernel,support,graph,vq,r,vr)
+        fixed=sph.computeSPHDensityPositionHVP(replace(q,positions=q.positions.requires_grad_()),domain,
+            properties.kernel,support,graph,vq,r,vr)
+        assert not fixed.requires_grad
+        torch.testing.assert_close(fixed,actual)
 
 
 def test_explicit_jvp_roles_and_first_order_boundary(device):
