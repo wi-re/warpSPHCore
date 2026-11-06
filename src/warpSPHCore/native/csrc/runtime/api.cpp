@@ -188,7 +188,7 @@ void adjoint(const Context &c, const Problem &view, ConstBuffer cot, const Adjoi
     check_context(c);
     auto p = prepare(view, Task::Adjoint);
     int k = int(p.properties.kernel);
-    require(k != 21 && k != 35 && k != 40 && k != 42,
+    require(p.properties.operation == Operation::Density || (k != 21 && k != 35 && k != 40 && k != 42),
             "Cusp/singular kernel reverse mode is not qualified");
     size_t item = element_size(p, QX);
     check_buffer(cot, p.output_size, item, "cotangent");

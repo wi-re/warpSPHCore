@@ -2,6 +2,7 @@
 #include "execution/fieldTraversal.h"
 #include "execution/atomic.h"
 #include "kernels/adjoint.h"
+#include "kernels/warp_derivatives.h"
 #include "dataTypes/slots.h"
 namespace sph_native {
 template <class T> struct GradientBuffers {
@@ -68,7 +69,18 @@ template <class T, int D, class Pair> struct AdjointRow {
                 } else
                     laplacian_vjp<T, D>(r, a.radius(i, j), a.kernel, b.lap_bar, b.br, b.bh);
             }
-            if (a.support == 14 || a.support == 15) {
+            if (a.operation == 6) {
+                auto value_pullback = [&](T h, T bar, T& support_bar) {
+                    T value = T(0), gradient[D] = {}, dh = T(0);
+                    warp_compat::value_derivatives<T,D>(dx, r, h, a.kernel, value, gradient, dh);
+                    for (int d = 0; d < D; ++d) b.bx[d] += bar * gradient[d];
+                    support_bar += bar * dh;
+                };
+                if (a.support == 14 || a.support == 15) {
+                    value_pullback(a.qh[i], b.bw / T(2), bhi);
+                    value_pullback(a.rh[j], b.bw / T(2), bhj);
+                } else value_pullback(a.radius(i, j), b.bw, b.bh);
+            } else if (a.support == 14 || a.support == 15) {
                 T bg[D];
                 for (int d = 0; d < D; ++d)
                     bg[d] = b.bg[d] / T(2);
@@ -86,7 +98,7 @@ template <class T, int D, class Pair> struct AdjointRow {
             else if (a.support == 13) {
                 bhi += b.bh / T(2);
                 bhj += b.bh / T(2);
-            } else if (a.qh[i] >= a.rh[j])
+            } else if (a.operation == 6 ? a.qh[i] > a.rh[j] : a.qh[i] >= a.rh[j])
                 bhi += b.bh;
             else
                 bhj += b.bh;

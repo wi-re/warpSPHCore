@@ -5,6 +5,7 @@
 #include "util/directionality.h"
 #include "kernels/kernel.h"
 #include "kernels/adjoint.h"
+#include "kernels/warp_derivatives.h"
 #include "coreOperations/native/csrc_correction/nt_correction_torch.h"
 
 namespace sph_native::differential {
@@ -71,6 +72,23 @@ SPH_HD void kernel(const S (&dx)[D], S h, int name, S& w, S (&gradient)[D], S& l
     }
 }
 
+template <class T,int D,class S>
+SPH_HD void density_kernel(const S (&dx)[D],S h,int name,S& w,S (&g)[D],S& lap) {
+    T x[D],r2=0;
+    for(int d=0;d<D;++d){x[d]=ScalarValue<S>::get(dx[d]);r2+=x[d]*x[d];}
+    const T radius=ScalarValue<S>::get(h);
+    T value=0,wx[D]={},wh=0;
+    warp_compat::value_derivatives<T,D>(x,scalar_sqrt(r2),radius,name,value,wx,wh,false);
+    if constexpr(std::is_same_v<T,S>)w=value;
+    else {
+        T tangent=wh*h.tangent;
+        for(int d=0;d<D;++d)tangent+=wx[d]*dx[d].tangent;
+        w={value,tangent};
+    }
+    // No force-kernel gradient/Hessian is consumed by density.
+    lap=S(0);for(int d=0;d<D;++d)g[d]=S(0);
+}
+
 template <class T, int D, class S>
 SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
                          int64_t i, int64_t j, bool consistent) {
@@ -94,11 +112,17 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
     p.hi=read(QH,i); p.hj=read(RH,j);
     p.h=args.support==11 ? p.hi : args.support==12 ? p.hj : args.support==13 ?
         (p.hi+p.hj)/S(2) : ScalarValue<S>::get(p.hi)>=ScalarValue<S>::get(p.hj) ? p.hi : p.hj;
-    kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
+    if(args.operation==6)density_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
+    else kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
     if (args.support==14 || args.support==15) {
         S wi,wj,gi[D],gj[D],li,lj;
-        kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
-        kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
+        if(args.operation==6) {
+            density_kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
+            density_kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
+        } else {
+            kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
+            kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
+        }
         p.raw_w=(wi+wj)/S(2);
         for (int d=0; d<D; ++d) p.raw_g[d]=(gi[d]+gj[d])/S(2);
         if (args.support==15) p.lap=(li+lj)/S(2);

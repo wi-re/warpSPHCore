@@ -7,12 +7,13 @@ title: Experimental native backend
 The native backend builds neighbourhoods, evaluates all 15 radial kernel families,
 and runs the seven standard SPH operators without importing Warp. The Python
 package installs Warp for the default backend and other parts of the SPH stack.
-It includes manual first-order adjoints for smooth kernels. CPU, CUDA and HIP
+Density has first-order backward/VJP and JVP products for all 15 kernel families;
+the other standard operators retain the smooth-kernel qualification described below. CPU, CUDA and HIP
 share the same numerical headers; Warp remains the default backend. All seven standard operations, native CRK
 preparation and all six applicable corrected core operations support first-order
 Torch backwards and forward AD, including derivatives through the prepared CRK
 coefficients. Fixed-geometry solver products remain available through
-`native.linearizeFields`. Nonsmooth/singular geometry contracts, higher-order native
+`native.linearizeFields`. Nonsmooth/singular geometry contracts outside density, higher-order native
 derivatives and a completely native frontend remain unported. The 0.7.1 frontend
 can run complete eager simulations with native core operators and Warp frontend
 kernels using the explicit compatibility selection below.
@@ -410,13 +411,59 @@ GPU test. No performance measurements were made.
 | Operators | Density, Interpolate, Gradient, Divergence, Curl, Laplacian, Covariance |
 | Fields | Scalar, vector and matrix fields; each field axis has spatial extent D |
 | Schemes | All four gradient schemes; all four Laplacian schemes; both divergence contractions |
-| Reverse AD | Manual first-order VJPs for the 11 smooth-origin kernels; fixed CSR topology |
+| Reverse AD | Density: all 15 kernels, deterministic CSR/CSC products; other operators: first-order VJPs for the 11 smooth-origin kernels; fixed topology |
 | Supports | Gather, Scatter, MeanSymmetric, KernelMeanSymmetric, SuperSymmetric |
 | Categories | All existing operation-direction enums, preserving query/reference roles |
 | Geometry | Independent query/reference populations; mixed periodic axes; unwrapped positions |
 | CSR input | int32/int64 particle IDs and offsets independently; int32 counts; padded tails ignored |
 | Empty sets | Zero query/reference populations and finite zero sums |
 | Tensor access | Direct Torch storage; inputs must be contiguous and on the same device |
+
+### Density derivative contract
+
+Density now supports first-order backward/VJP and forward products for all 15
+kernel families, all six support enums, all operation-direction enums and 1D–3D
+FP32/FP64 inputs. Products cover query/reference positions and supports,
+reference masses and periodic bounds. Unused query masses and particle
+densities receive zero gradients. Query/reference aliases accumulate their
+physical roles; noncontiguous floating inputs are normalized with Torch-owned
+copies at the density boundary.
+
+Torch-facing reverse products use query-owned CSR and reference-owned, sorted CSC reductions
+without floating-point atomics. Strict deterministic execution is supported.
+Only integer topology and row outputs are stored; no per-edge Jacobians are
+materialized. Supplied CSR offsets and particle IDs have independent int32/int64
+widths; unused prefixes, gaps, duplicate edges and empty rows are retained.
+Topology mutation before backward is rejected. Auto-search fixes topology per
+forward; a supplied Warp grid is rebuilt natively in original population order.
+Density's direct entry point also preserves normalization calibration. The
+framework-free C++ adjoint accepts the same 15 density kernels and shares their
+value pullback math; it retains its existing runtime scatter/accumulation API.
+Caller-stream execution and fixed-CSR capture/replay cover primal, reverse and
+JVP products with changed input values.
+
+The taped Warp reverse is first-order and detached even with
+`create_graph=True`; functional transforms and legacy batched reverse are not
+part of its supported contract. Native density retains that scope and adds
+classic forward duals alongside the explicit JVP API. Row-chunk AD remains
+unsupported in both backends. The reference's singular values are preserved:
+viscosity self pairs have nonfinite density/geometry products, and adhesion's
+exact outer cutoff has nonfinite reverse geometry products. These points are
+compared against Warp rather than assigned a fabricated finite limit.
+
+At nonsmooth boundaries the reference has separate conventions: taped reverse
+of maximum support gives a tie to the reference support; the explicit JVP gives
+it to the query support. Near the origin the taped value differentiates rounded
+clamp factors while the explicit JVP uses analytic kernel derivatives. Native
+matches each path. Gradcheck and adjoint identities apply at differentiable
+fixtures; direct Warp parity covers the boundary conventions independently.
+
+Maintained checks live in `tests/native/torch/test_density_contract.py` and
+`tests/parity/test_density_contract.py`. They include all-kernel reverse/forward
+gradcheck, independent equations, three-step density-feedback products,
+reference edge behavior, deterministic repeats, grid/calibration routing and
+CUDA stream/capture controls. Accepted Inutsuka Sod steps are additionally
+checked in the paired frontend; those are primal simulation evidence.
 
 Use `radiusSearch(particles, domain, referenceParticles=None, mode=...)` to build
 an unpadded CSR list. Use `warpOperation(...)` or its native alias

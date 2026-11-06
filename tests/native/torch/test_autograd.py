@@ -95,15 +95,15 @@ def test_aliasing_chained_density_and_input_versions(device):
 
 def test_explicit_ad_capability_limits(device):
     q,r,d,qf,rf,values=differentiable_case(device,2,0)
-    prop=sph.OperationProperties(sph.KernelFunctions.Spiky,operation=sph.WarpOperation.Density)
-    with pytest.raises(NotImplementedError,match='cusp/singular'):sph.warpOperation(q,prop,d,referenceParticles=r)
+    prop=sph.OperationProperties(sph.KernelFunctions.Spiky,operation=sph.WarpOperation.Gradient)
+    with pytest.raises(NotImplementedError,match='cusp/singular'):sph.warpOperation(q,prop,d,qf,rf,referenceParticles=r)
     prop=replace(prop,kernel=sph.KernelFunctions.Wendland2)
     previous=torch.are_deterministic_algorithms_enabled()
     try:
         torch.use_deterministic_algorithms(True)
-        with pytest.raises(NotImplementedError,match='deterministic'):sph.warpOperation(q,prop,d,referenceParticles=r)
+        with pytest.raises(NotImplementedError,match='deterministic'):sph.warpOperation(q,prop,d,qf,rf,referenceParticles=r)
     finally:torch.use_deterministic_algorithms(previous)
-    output=sph.warpOperation(q,prop,d,referenceParticles=r)
+    output=sph.warpOperation(q,prop,d,qf,rf,referenceParticles=r)
     first=torch.autograd.grad(output.sum(),q.positions,create_graph=True)[0]
     with pytest.raises(RuntimeError):torch.autograd.grad(first.sum(),q.positions)
 
@@ -141,12 +141,12 @@ def test_float32_zero_mass_adjoints(device,op):
     compare_vjp(q,r,d,values[7],values[8],values,prop)
 
 
-def test_unused_density_grad_does_not_enable_reverse(device):
+def test_unused_density_grad_has_reference_zero_product(device):
     q,r,d,_,_=fixture(device,2,0)
     q=replace(q,densities=q.densities.detach().requires_grad_())
     prop=sph.OperationProperties(sph.KernelFunctions.Spiky,operation=sph.WarpOperation.Density)
     result=sph.warpOperation(q,prop,d,referenceParticles=r)
-    assert not result.requires_grad
+    torch.testing.assert_close(torch.autograd.grad(result.sum(),q.densities)[0],torch.zeros_like(q.densities))
 
 
 @pytest.mark.parametrize('op',[sph.WarpOperation.Density,sph.WarpOperation.Gradient])

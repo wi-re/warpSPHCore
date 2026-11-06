@@ -137,7 +137,8 @@ def test_explicit_jvp_roles_and_first_order_boundary(device):
         with pytest.raises(NotImplementedError,match='first-order'):
             sph.warpOperationJVP(dual,properties,domain,queryTangentState=direction,adjacency=graph)
     cusp=replace(properties,kernel=sph.KernelFunctions.Spiky)
-    with pytest.raises(NotImplementedError,match='cusp'):sph.warpOperationJVP(q,cusp,domain,queryTangentState=direction,adjacency=graph)
+    cusp_product=sph.warpOperationJVP(q,cusp,domain,queryTangentState=direction,adjacency=graph)
+    assert torch.isfinite(cusp_product).all()
 
 
 def test_explicit_crk_chain_and_public_module_imports(device):

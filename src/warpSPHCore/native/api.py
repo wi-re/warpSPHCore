@@ -47,5 +47,9 @@ def nativeCapabilities():
                 corrected_geometry_kernels=tuple(k.name for k in KernelFunctions if k.value in REVERSE_KERNELS),
                 corrected_adjoint_ownership='csr_csc', corrected_adjoint_floating_atomics=False,
                 crk_preparation_forward_ad=True, crk_preparation_ad_order=1,
+                density_reverse_kernels=tuple(k.name for k in KernelFunctions),
+                density_forward_ad=True, density_ad_order=1,
+                density_adjoint_deterministic=True, density_adjoint_ownership='csr_csc',
+                density_adjoint_floating_atomics=False, density_fixed_csr_capture=True,
                 explicit_jvp=True, density_position_hvp=True,
                 density_position_hvp_geometry_ad=False, density_position_hvp_vector_mass_ad_order=1)

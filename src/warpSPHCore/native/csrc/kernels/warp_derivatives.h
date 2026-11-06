@@ -51,6 +51,25 @@ template<class T,int D>SPH_HD T gradient_shape_derivative(T q,int kernel,T analy
     default:return analytic;
     }
 }
+// Value-only products never need a force-kernel Hessian. Keep the taped
+// value's clamp derivatives separate from the explicit analytic JVP convention.
+template<class T,int D>
+SPH_HD void value_derivatives(const T (&dx)[D],T r,T h,int kernel,
+    T& w,T (&wx)[D],T& wh,bool reverse=true) {
+    if(h<=T(0)||r>h)return;
+    const T q=r/h,C=normalization<T,D>(kernel),hd=power<T,D>(h,D);
+    const auto f=radial_shape_raw<T,D>(q,kernel);
+    // At the adhesion cutoff the taped fractional power distributes infinite
+    // bars through opposing polynomial terms: its radial bar is NaN.
+    const T d1=reverse && kernel==42 && q==T(1) ? T(NAN)
+                      : reverse ? value_shape_derivative<T,D>(q,kernel,f.d1)
+                      : gradient_shape_derivative<T,D>(q,kernel,radial_shape<T,D>(q,kernel).d1);
+    const T eps=sizeof(T)==4?T(1e-7):T(1e-15),den=r>eps?r:eps;
+    w=C*f.v/hd;
+    wh=-C*(T(D)*f.v+q*d1)/(hd*h);
+    for(int d=0;d<D;++d)wx[d]=dx[d]/den*C*d1/(hd*h);
+}
+
 // Use the reference's custom gradient adjoint, including its near-origin
 // Hessian regularization, while sharing core radial values and derivatives.
 template<class T,int D>

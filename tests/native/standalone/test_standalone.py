@@ -131,3 +131,25 @@ def test_float32_adjoints_and_zero_mass(device,op):
     got=vjp(req,values,[0,1,2,3,4,16,15,13,14,7,8],cot)
     want=torch.autograd.grad(expected,values,cot,allow_unused=True)
     for g,w,v in zip(got,want,values):torch.testing.assert_close(g,torch.zeros_like(v) if w is None else w,rtol=5e-4,atol=5e-4)
+
+
+@pytest.mark.parametrize('kernel', list(sph.KernelFunctions))
+def test_standalone_density_all_kernel_products(device, kernel):
+    from _support.density_contract import case, oracle
+    index = list(sph.KernelFunctions).index(kernel)
+    q,r,d,p,g,values,states,_ = case(device, 1+index%3, kernel=kernel,
+                                  support=list(sph.SupportScheme)[index%6])
+    q,r,d = states(values)
+    # Framework-free ABI has no query-mass slot; its unused density slots
+    # remain zero. Query masses are absent from the density equation.
+    slots = [0,1,2,3,4,7,8,16,15]
+    selected = (*values[:7], values[8], values[9])
+    field = q.supports.new_empty(0)
+    req = request(q,r,d,field,field,p,(g.edgeOffsets,g.numNeighbors,g.paddedJ))
+    expected = oracle(values,d,p,g)
+    torch.testing.assert_close(output(req,torch.empty_like(expected)),expected,rtol=3e-8,atol=3e-8)
+    cotangent = expected.detach().cos().contiguous()
+    actual = vjp(req,selected,slots,cotangent)
+    wanted = torch.autograd.grad(expected,selected,cotangent,allow_unused=True)
+    for got,want,value in zip(actual,wanted,selected):
+        torch.testing.assert_close(got,torch.zeros_like(value) if want is None else want,rtol=3e-8,atol=3e-8)
