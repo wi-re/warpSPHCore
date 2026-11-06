@@ -23,11 +23,10 @@ Only the combination with the gradient differs:
   $\sum_{\alpha=1}^{d} \mathrm{coeff}_{ij}[\alpha]\;
    \partial_\alpha W_{ij}$, contracted over the spatial axis —
   a vector field `[N, d]` yields a scalar output `[N]`;
-- **dot mode** (`divergenceDotMode=True`): the field is a matrix
-  `[N, d, d]` and the contraction is over the *last* index only,
-  $\sum_\alpha \mathrm{coeff}_{ij}[\beta, \alpha]\; \partial_\alpha
-  W_{ij}$ for each remaining index $\beta$ — a tensor field yields
-  `[N, d]`.
+- **dot mode** (`divergenceDotMode=True`): for a field `[N, d, ...]`,
+  the first field axis is spatial. The contribution contracts
+  $\sum_\alpha \mathrm{coeff}_{ij}[\alpha, \beta]\; \partial_\alpha
+  W_{ij}$ for each remaining component $\beta$. A matrix yields `[N, d]`.
 
 **Output shape:** `inputShape[:-1]` in standard mode,
 `inputShape[1:]` in dot mode (see `_computeSPHDivergence_stateBackend`).
@@ -50,7 +49,7 @@ with `operation == WarpOperation.Divergence`.
 | Option | Default | Effect |
 |---|---|---|
 | `gradientMode` | `Naive` | coefficient scheme (same table as Gradient) |
-| `divergenceDotMode` | `False` | matrix-field contraction over the last index (output keeps one axis) |
+| `divergenceDotMode` | `False` | contraction over the first field axis (remaining axes are preserved) |
 | `consistentDivergence` | `False` | scales the apparent volume by the density ratio: $V_j \leftarrow V_j\,\rho_j/\rho_i$ (or $V_j \leftarrow m_j/\rho_i$ without supplied volumes) — the "consistent" form of $\nabla\!\cdot\!(\rho^{-1}\nabla f)$-type bookkeeping |
 | `supportMode` / `operationMode` / corrections / calibration | — | as in [Gradient](gradient#public-api) |
 
@@ -100,3 +99,41 @@ No HVP exists for Divergence.
 ## See also
 
 [Gradient](gradient) · [Curl](curl) · [Laplacian](laplacian)
+
+
+## Native derivative contract
+
+Native divergence supports primal, first-order backward/VJP and JVP for all
+15 kernels, six support enums, directions and four coefficient schemes in
+FP32/FP64 and 1D–3D. Both contraction modes preserve arbitrary nonempty packed
+field axes, with the contracted axis required to have spatial extent D.
+Scalar fields are supported in 1D. Compiled scalar/vector/matrix blocks bound
+native per-row storage.
+
+Products include fields, positions/supports, bounds, mass/density or supplied
+volumes, query CRK A/B/gradA/gradB, both grad-h omega roles and renormalization.
+The consistency option uses `mass_j / density_i` directly when no volume is
+supplied, so an unread zero reference density cannot introduce a spurious
+singularity. With supplied volumes it uses `volume_j * density_j / density_i`.
+The symmetric scheme retains its ordinary density weighting. Query-volume
+fallback and unused roles preserve their reference semantics.
+
+Torch reverse uses deterministic query CSR/reference CSC ownership without
+floating atomics. Noncontiguous tensors, aliases, sparse/duplicate/empty CSR,
+native search, grid rebuilding, calibration, topology lifetime, current streams
+and fixed-CSR capture/replay are covered. Standalone C++ retains its uncorrected
+scalar/vector/matrix adjoint ABI and scatter policy; it has no JVP/correction API.
+
+Geometry products preserve Warp's custom regularized gradient Hessian at
+self/tiny pairs, singular nonfinites and separate reverse/JVP max-support ties.
+The reference reverse remains detached and first-order; functional/batched
+transforms and row-chunk AD remain unsupported. Native classic duals and its
+explicit JVP additionally handle packed contractions, consistency, and omega or
+bound products as permitted by their APIs. The explicit API has no omega-tangent
+argument. Warp's explicit geometry JVP remains limited to ordinary vector
+contraction without consistency/grad-h; numerical comparisons respect that scope.
+
+Maintained checks are `tests/native/torch/test_divergence_contract.py`,
+`tests/parity/test_divergence_contract.py`, standalone all-kernel products and
+the paired frontend's accepted Monaghan steps. Accepted steps qualify primal
+simulation use; three-step feedback qualifies toy AD.

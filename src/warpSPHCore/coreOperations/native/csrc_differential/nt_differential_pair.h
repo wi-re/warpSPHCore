@@ -181,6 +181,8 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
     }
     p.mass=read(MASS,j,T(1)); p.rhoi=read(QDENSITY,i,T(1)); p.rhoj=read(DENSITY,j,T(1));
     p.volume=arrays.values[VOLUME] ? read(VOLUME,j) : p.mass/p.rhoj;
+    if(consistent && args.operation==3 && args.scheme!=2)
+        p.volume=arrays.values[VOLUME] ? read(VOLUME,j)*p.rhoj/p.rhoi : p.mass/p.rhoi;
     p.query_omega=read(QO,i,T(1)); p.reference_omega=read(RO,j,T(1));
     for (int c=0; c<args.fields; ++c) {
         p.fi[c]=read(QVALUE,i*args.fields+c);
@@ -192,7 +194,6 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
             p.mass*p.rhoi/(p.rhoj*p.rhoj) : p.volume);
         else if (args.scheme==2) p.weighted[c]=p.mass*(p.fi[c]/p.rhoi+p.rhoi*p.fj[c]/(p.rhoj*p.rhoj));
         else p.weighted[c]=p.volume*(args.scheme==1 ? p.fj[c] : args.scheme==3 ? p.fj[c]-p.fi[c] : p.fj[c]+p.fi[c]);
-        if (consistent && args.operation==3 && args.scheme!=2) p.weighted[c]=p.weighted[c]*p.rhoj/p.rhoi;
     }
     return p;
 }

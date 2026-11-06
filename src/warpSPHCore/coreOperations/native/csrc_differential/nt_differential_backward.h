@@ -159,11 +159,6 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
     // kernel algebra. grad-h divisions belong to their original field roles.
     if (a.operation<=5) for (int c=0; c<a.fields; ++c) {
         T bfi=0,bfj=0,b=bz[c];
-        if (consistent && a.operation==3 && a.scheme!=2) {
-            result.add(QDENSITY,0,-b*p.weighted[c]/p.rhoi);
-            result.add(DENSITY,0,b*p.weighted[c]/p.rhoj);
-            b*=p.rhoj/p.rhoi;
-        }
         if (a.operation==1) { bfj=b*p.volume; bv+=b*p.fj[c]; }
         else if (a.scheme==2 && a.operation!=5) {
             bfi=b*p.mass/p.rhoi; bfj=b*p.mass*p.rhoi/(p.rhoj*p.rhoj);
@@ -189,7 +184,13 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         if (qo) result.add(QO,0,-bfi*p.fi[c]/p.query_omega);
         if (a.operation!=1) result.add(RO,0,-bfj*p.fj[c]/p.reference_omega);
     }
-    if (arrays.values[VOLUME]) result.add(VOLUME,0,bv);
+    if(consistent && a.operation==3 && a.scheme!=2) {
+        result.add(QDENSITY,0,-bv*p.volume/p.rhoi);
+        if(arrays.values[VOLUME]) {
+            result.add(VOLUME,0,bv*p.rhoj/p.rhoi);
+            result.add(DENSITY,0,bv*arrays.values[VOLUME][j]/p.rhoi);
+        } else result.add(MASS,0,bv/p.rhoi);
+    } else if (arrays.values[VOLUME]) result.add(VOLUME,0,bv);
     else if (a.operation!=6) {
         result.add(MASS,0,bv/p.rhoj);
         result.add(DENSITY,0,-bv*p.mass/(p.rhoj*p.rhoj));

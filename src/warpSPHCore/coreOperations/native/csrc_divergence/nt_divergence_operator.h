@@ -16,12 +16,16 @@ template <class T, int D, int Fields> struct CorrectedDivergence
     SPH_HD State identity(const Query&) const { return {}; }
     template <class Record>
     SPH_HD FieldScales<T> field_scales(const Query& q, const Record& r, Neighbor edge) const {
-        auto result = Base::field_scales(q, r, edge);
-        if (consistent && this->scheme != 2) {
-            const T ratio = this->fields.density[edge.reference] / this->query_density[q.index];
-            result.query *= ratio; result.reference *= ratio;
+        if(consistent && this->scheme!=2) {
+            const T v=consistent_volume(q,edge);
+            return this->scale_fields(q.index,edge,FieldScales<T>{this->scheme==1 ? T(0):this->scheme==3 ? -v:v,v});
         }
-        return result;
+        return Base::field_scales(q,r,edge);
+    }
+    SPH_HD T consistent_volume(const Query& q,Neighbor edge) const {
+        const auto j=edge.reference;
+        return this->fields.volumes ? this->fields.volumes[j]*this->fields.density[j]/this->query_density[q.index] :
+            this->fields.mass[j]/this->query_density[q.index];
     }
     template <class Record>
     SPH_HD void field_contract(const Query& q, const Record& r, Neighbor edge,
@@ -43,8 +47,10 @@ template <class T, int D, int Fields> struct CorrectedDivergence
                 T weighted = this->weighted_value(q, r, edge, field, this->reference_value(r, edge, field));
                 // Symmetric's mass/density formula is unchanged by the
                 // consistency option, just as in the reference operator.
-                if (consistent && this->scheme != 2)
-                    weighted *= this->fields.density[edge.reference] / this->query_density[q.index];
+                if (consistent && this->scheme != 2) {
+                    const T fi=q.values[field],fj=this->reference_value(r,edge,field);
+                    weighted=(this->scheme==1 ? fj:this->scheme==3 ? fj-fi:fj+fi)*consistent_volume(q,edge);
+                }
                 sum.values[c] += weighted * gradient[d];
             }
     }

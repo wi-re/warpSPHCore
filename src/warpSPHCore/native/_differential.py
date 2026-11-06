@@ -16,7 +16,7 @@ def _check_geometry(config, flat, tangents=None):
     moving = any((tangents[slot] is not None if tangents is not None else
                   torch.is_grad_enabled() and flat[slot] is not None and flat[slot].requires_grad)
                  for slot in GEOMETRY)
-    if moving and config[0] not in (1, 2, 6) and config[3] not in REVERSE_KERNELS:
+    if moving and config[0] not in (1, 2, 3, 6) and config[3] not in REVERSE_KERNELS:
         raise NotImplementedError('Corrected geometry AD for cusp/singular kernels is not qualified')
 
 
