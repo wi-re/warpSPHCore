@@ -66,5 +66,10 @@ def nativeCapabilities():
                 divergence_adjoint_deterministic=True, divergence_adjoint_ownership='csr_csc',
                 divergence_adjoint_floating_atomics=False, divergence_fixed_csr_capture=True,
                 divergence_packed_field_axes=True,
+                curl_reverse_kernels=tuple(k.name for k in KernelFunctions),
+                curl_forward_ad=True, curl_ad_order=1,
+                curl_adjoint_deterministic=True, curl_adjoint_ownership='csr_csc',
+                curl_adjoint_floating_atomics=False, curl_fixed_csr_capture=True,
+                curl_packed_field_layouts=True,
                 explicit_jvp=True, density_position_hvp=True,
                 density_position_hvp_geometry_ad=False, density_position_hvp_vector_mass_ad_order=1)

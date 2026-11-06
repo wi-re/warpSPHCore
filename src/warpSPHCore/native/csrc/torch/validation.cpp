@@ -91,11 +91,11 @@ Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot, c
         STD_TORCH_CHECK(t[RVALUE].dim() >= 1 && t[RVALUE].dim() <= 3 && t[RVALUE].size(0) == nr,
                         "reference values must be scalar, vector or matrix fields");
         for (int d = 1; d < t[RVALUE].dim(); ++d) {
-            STD_TORCH_CHECK((op == 1 || op == 2) || t[RVALUE].size(d) == D, "field axes must match spatial dimension");
+            STD_TORCH_CHECK((op == 1 || op == 2 || op == 4) || t[RVALUE].size(d) == D, "field axes must match spatial dimension");
             shape.push_back(t[RVALUE].size(d));
         }
 
-        if (op == 1 || op == 2) {
+        if (op == 1 || op == 2 || op == 4) {
             int64_t fields = 1;
             for (auto width : shape) fields *= width;
             STD_TORCH_CHECK(fields == 1 || fields == D || fields == D * D,
@@ -116,7 +116,7 @@ Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot, c
             if (!shape.empty()) shape.erase(dot ? shape.begin() : shape.end() - 1);
         }
         if (op == 4) {
-            STD_TORCH_CHECK(D == 1 || !shape.empty(), "Curl requires a vector or matrix field");
+            STD_TORCH_CHECK(D != 2 || !shape.empty(), "2D curl requires at least two field components");
             if (D == 1)
                 shape.clear();
             else if (D == 2) {

@@ -1,5 +1,6 @@
 #pragma once
 #include "nt_differential_pair.h"
+#include "coreOperations/native/csrc_curl/nt_curl_contract.h"
 namespace sph_native::differential {
 // Compact per-pair bars. Shared scalars belong to their physical population;
 // domain bounds are query-owned partial sums, reduced after the native gather.
@@ -33,7 +34,9 @@ template <int D> struct Layout {
 };
 template <class T,int D> struct PairBars {
     T query[Layout<D>::Q]={},reference[Layout<D>::Ref]={};
+    bool reference_scalar_products=false;
     SPH_HD void add(int slot,int component,T value) {
+        if(reference_scalar_products)value=warp_compat::rounded_scalar_term(value);
         const int at=Layout<D>::offset(slot)+component;
         if (Layout<D>::reference(slot)) reference[at]+=value;
         else query[at]+=value;
@@ -44,6 +47,8 @@ template <class T,int D>
 SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         int64_t i,int64_t j,const Pair<T,D>& p,const T* bar,bool consistent,bool geometry) {
     PairBars<T,D> result{};
+    result.reference_scalar_products=a.operation==4;
+    auto coefficient_term=[&](T value) {return a.operation==4 ? warp_compat::rounded_scalar_term(value):value;};
     T clipped_bar[MaxOutputs]={};
     if (a.operation==5 && a.positive_divergence) {
         T gate=0;
@@ -113,10 +118,11 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
             }
         } else if constexpr (D==3) {
             const int stride=a.fields/3;
-            for (int c=0; c<stride; ++c) for (int d=0; d<3; ++d) {
-                const T b=bar[d*stride+c]; const int u=(d+1)%3,v=(d+2)%3;
-                bz[v*stride+c]+=b*p.gradient[u]; bz[u*stride+c]-=b*p.gradient[v];
-                bg[u]+=b*p.weighted[v*stride+c]; bg[v]-=b*p.weighted[u*stride+c];
+            for (int c=0;c<stride;++c) {
+                T u[3],f[3],bf[3],bgradient[3];
+                for(int d=0;d<3;++d) {u[d]=bar[d*stride+c];f[d]=p.weighted[d*stride+c];}
+                curl_pair_bars(u,f,p.gradient,bf,bgradient);
+                for(int d=0;d<3;++d) {bz[d*stride+c]+=bf[d];bg[d]+=bgradient[d];}
             }
         }
     } else if (a.operation==5) {
@@ -174,7 +180,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
                 result.add(MASS,0,b*combination*p.rhoi/(p.rhoj*p.rhoj));
                 result.add(QDENSITY,0,b*combination*p.mass/(p.rhoj*p.rhoj));
                 result.add(DENSITY,0,-T(2)*b*combination*scale/p.rhoj);
-            } else bv+=b*combination;
+            } else bv+=coefficient_term(b*combination);
             bfj=b*scale;
             if (difference || a.scheme!=1) bfi=difference ? -bfj:bfj;
         }

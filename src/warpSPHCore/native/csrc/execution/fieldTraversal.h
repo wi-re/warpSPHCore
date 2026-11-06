@@ -54,9 +54,9 @@ template <class T, int D, class Pair> struct FieldOperatorRow {
                 kernel.evaluate(r, w, g);
             else
                 pair_kernel(a, i, j, r, w, g);
-            if (prepared && a.operation == 3 && r < (sizeof(T)==4 ? T(1e-7):T(1e-15)))
-                    pair_kernel(a, i, j, r, w, g);
-                Pair::accumulate(a, i, j, dx, r, w, g, sum);
+            if (prepared && (a.operation == 3 || a.operation == 4) && r < (sizeof(T)==4 ? T(1e-7):T(1e-15)))
+                pair_kernel(a, i, j, r, w, g);
+            Pair::accumulate(a, i, j, dx, r, w, g, sum);
         }
         for (int c = 0; c < a.outputs; ++c)
             a.output[i * a.outputs + c] = sum[c];

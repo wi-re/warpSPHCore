@@ -30,7 +30,9 @@ template <class T> struct Arrays {
     }
 };
 
-template <class S, int D> struct Pair {
+template<class S> struct CurlFieldDirections {};
+template<class T> struct CurlFieldDirections<Directional<T>> {T curl_value[MaxFields]={};};
+template <class S, int D> struct Pair : CurlFieldDirections<S> {
     S dx[D], distance, hi, hj, h;
     S raw_w, raw_g[D], lap, w, gradient[D], before_R[D];
     S coefficient_A, coefficient_B[D], grad_A[D], grad_B[D*D], matrix[D*D], polynomial;
@@ -195,6 +197,26 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
         else if (args.scheme==2) p.weighted[c]=p.mass*(p.fi[c]/p.rhoi+p.rhoi*p.fj[c]/(p.rhoj*p.rhoj));
         else p.weighted[c]=p.volume*(args.scheme==1 ? p.fj[c] : args.scheme==3 ? p.fj[c]-p.fi[c] : p.fj[c]+p.fi[c]);
     }
+    if constexpr(!std::is_same_v<T,S>) {
+        if(args.operation==4) {
+            const T m=p.mass.value,ri=p.rhoi.value,rj=p.rhoj.value;
+            const T dm=p.mass.tangent,dri=p.rhoi.tangent,drj=p.rhoj.tangent;
+            const T volume=p.volume.value;
+            const T dvolume=arrays.values[VOLUME] ? p.volume.tangent : dm/rj-m*drj/(rj*rj);
+            T A=0,B=volume,dA=0,dB=dvolume;
+            if(args.scheme==3) {A=-volume;dA=-dvolume;}
+            else if(args.scheme==4) {A=volume;dA=dvolume;}
+            else if(args.scheme==2) {
+                A=m/ri;dA=dm/ri-m*dri/(ri*ri);
+                B=m*ri/(rj*rj);
+                dB=dm*ri/(rj*rj)+m*dri/(rj*rj)-T(2)*m*ri*drj/(rj*rj*rj);
+            }
+            for(int c=0;c<args.fields;++c) {
+                p.weighted[c]={p.fi[c].value*A+p.fj[c].value*B,p.fi[c].value*dA+p.fj[c].value*dB};
+                p.curl_value[c]=p.fi[c].tangent*A+p.fj[c].tangent*B;
+            }
+        }
+    }
     return p;
 }
 
@@ -233,13 +255,35 @@ SPH_HD void forward(const RowArgs<T,D>& a, const Pair<S,D>& p, S* out) {
         for (int c=0; c<components; ++c) for (int d=0; d<D; ++d)
             out[c]+=p.gradient[d]*p.weighted[a.dot_mode ? d*components+c : c*D+d];
     } else if (a.operation==4) {
-        if constexpr (D==2) {
+        if constexpr(D==2) {
             const int stride=a.fields/2;
-            for (int c=0; c<stride; ++c) out[c]+=p.gradient[0]*p.weighted[stride+c]-p.gradient[1]*p.weighted[c];
-        } else if constexpr (D==3) {
+            for(int c=0;c<stride;++c) {
+                if constexpr(std::is_same_v<T,S>)out[c]+=p.gradient[0]*p.weighted[stride+c]-p.gradient[1]*p.weighted[c];
+                else {
+                    const auto gx=p.gradient[0],gy=p.gradient[1],x=p.weighted[c],y=p.weighted[stride+c];
+                    // Match the public reference curl JVP's geometry, then
+                    // value contribution ordering instead of regrouped dual products.
+                    const T tangent=warp_compat::rounded_scalar_term(gx.value*y.tangent)-warp_compat::rounded_scalar_term(gy.value*x.tangent)+
+                        warp_compat::rounded_scalar_term(gx.tangent*y.value)-warp_compat::rounded_scalar_term(gy.tangent*x.value)+
+                        warp_compat::rounded_scalar_term(gx.value*p.curl_value[stride+c])-warp_compat::rounded_scalar_term(gy.value*p.curl_value[c]);
+                    out[c].tangent+=tangent;
+                    out[c].value+=gx.value*y.value-gy.value*x.value;
+                }
+            }
+        } else if constexpr(D==3) {
             const int stride=a.fields/3;
-            for (int c=0; c<stride; ++c) for (int d=0; d<3; ++d)
-                out[d*stride+c]+=p.gradient[(d+1)%3]*p.weighted[((d+2)%3)*stride+c]-p.gradient[(d+2)%3]*p.weighted[((d+1)%3)*stride+c];
+            for(int c=0;c<stride;++c)for(int d=0;d<3;++d) {
+                const int u=(d+2)%3,v=(d+1)%3,iu=u*stride+c,iv=v*stride+c;
+                if constexpr(std::is_same_v<T,S>)out[d*stride+c]+=p.gradient[v]*p.weighted[iu]-p.gradient[u]*p.weighted[iv];
+                else {
+                    const auto gu=p.gradient[u],gv=p.gradient[v],fu=p.weighted[iu],fv=p.weighted[iv];
+                    // Round scalar gradient contributions before the cross subtraction.
+                    volatile T positive=warp_compat::rounded_scalar_term(fu.tangent*gv.value)+warp_compat::rounded_scalar_term(fu.value*gv.tangent)+warp_compat::rounded_scalar_term(p.curl_value[iu]*gv.value);
+                    volatile T negative=warp_compat::rounded_scalar_term(fv.tangent*gu.value)+warp_compat::rounded_scalar_term(fv.value*gu.tangent)+warp_compat::rounded_scalar_term(p.curl_value[iv]*gu.value);
+                    out[d*stride+c].tangent+=positive-negative;
+                    out[d*stride+c].value+=gv.value*fu.value-gu.value*fv.value;
+                }
+            }
         }
     } else if (a.operation==5) {
         if (a.positive_divergence) {

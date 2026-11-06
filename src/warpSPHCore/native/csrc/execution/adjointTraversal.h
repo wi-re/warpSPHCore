@@ -17,18 +17,19 @@ template <class T, int D> struct PairBars {
     T bw = T(0), bg[D] = {}, bx[D] = {}, br = T(0), bh = T(0), bm = T(0), bqr = T(0), brr = T(0),
       lap_bar = T(0);
 };
-template <class T, int D>
+template <class T, int D, bool ReferenceScalarProducts=false>
 SPH_HD void weighted_vjp(const RowArgs<T, D> &a, int64_t i, int64_t j, int c, T bar, bool lap,
                          PairBars<T, D> &b, const GradientBuffers<T> &out) {
+    auto term=[](T value) {if constexpr(ReferenceScalarProducts)return warp_compat::rounded_scalar_term(value);else return value;};
     T fi = a.qvalue[i * a.fields + c], fj = a.rvalue[j * a.fields + c], m = a.mass[j],
       rho = a.density[j];
     if (a.scheme == 2 && !lap) {
         T qi = a.qdensity[i];
         out.add(QVALUE, i * a.fields + c, bar * m / qi);
         out.add(RVALUE, j * a.fields + c, bar * m * qi / (rho * rho));
-        b.bm += bar * (fi / qi + fj * qi / (rho * rho));
-        b.bqr += bar * m * (-fi / (qi * qi) + fj / (rho * rho));
-        b.brr -= bar * T(2) * m * qi * fj / (rho * rho * rho);
+        b.bm += term(bar * (fi / qi + fj * qi / (rho * rho)));
+        b.bqr += term(bar * m * (-fi / (qi * qi) + fj / (rho * rho)));
+        b.brr -= term(bar * T(2) * m * qi * fj / (rho * rho * rho));
     } else {
         T combination = lap || a.scheme == 3 ? fj - fi : (a.scheme == 1 ? fj : fj + fi);
         T coefficient = m / rho, dm = T(1) / rho, dr = -m / (rho * rho);
@@ -36,13 +37,13 @@ SPH_HD void weighted_vjp(const RowArgs<T, D> &a, int64_t i, int64_t j, int c, T 
             coefficient = m * a.qdensity[i] / (rho * rho);
             dm = a.qdensity[i] / (rho * rho);
             dr = -T(2) * coefficient / rho;
-            b.bqr += bar * combination * m / (rho * rho);
+            b.bqr += term(bar * combination * m / (rho * rho));
         }
         out.add(RVALUE, j * a.fields + c, bar * coefficient);
         if (lap || a.scheme != 1)
             out.add(QVALUE, i * a.fields + c, (lap || a.scheme == 3 ? -bar : bar) * coefficient);
-        b.bm += bar * combination * dm;
-        b.brr += bar * combination * dr;
+        b.bm += term(bar * combination * dm);
+        b.brr += term(bar * combination * dr);
     }
 }
 template <class T, int D, class Pair> struct AdjointRow {

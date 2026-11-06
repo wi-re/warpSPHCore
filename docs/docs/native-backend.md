@@ -7,13 +7,13 @@ title: Experimental native backend
 The native backend builds neighbourhoods, evaluates all 15 radial kernel families,
 and runs the seven standard SPH operators without importing Warp. The Python
 package installs Warp for the default backend and other parts of the SPH stack.
-Density, interpolation, gradient and divergence have first-order backward/VJP and JVP products for all 15 kernel families;
+Density, interpolation, gradient, divergence and curl have first-order backward/VJP and JVP products for all 15 kernel families;
 the other standard operators retain the smooth-kernel qualification described below. CPU, CUDA and HIP
 share the same numerical headers; Warp remains the default backend. All seven standard operations, native CRK
 preparation and all six applicable corrected core operations support first-order
 Torch backwards and forward AD, including derivatives through the prepared CRK
 coefficients. Fixed-geometry solver products remain available through
-`native.linearizeFields`. Nonsmooth/singular geometry contracts outside density/interpolation/gradient/divergence, higher-order native
+`native.linearizeFields`. Nonsmooth/singular geometry contracts outside density/interpolation/gradient/divergence/curl, higher-order native
 derivatives and a completely native frontend remain unported. The 0.7.1 frontend
 can run complete eager simulations with native core operators and Warp frontend
 kernels using the explicit compatibility selection below.
@@ -368,7 +368,7 @@ provides a cotangent matching the logical output, selects floating-point roles
 with `gradient_bit(QX)` etc., and supplies corresponding `Adjoints.slots` buffers.
 By default these buffers are zeroed before accumulation; `accumulate=true` adds
 to existing values. Exact aliases between gradient buffers combine role
-contributions; partial overlap is rejected. Density/interpolation/gradient/divergence accept all 15
+contributions; partial overlap is rejected. Density/interpolation/gradient/divergence/curl accept all 15
 kernels; the other operations retain the smooth-kernel restriction. This interface does not record an AD graph,
 manage saved tensors, or implement a second graph engine.
 
@@ -409,15 +409,15 @@ GPU test. No performance measurements were made.
 | Neighbours | Compact-hash radius search, minimum images, canonical CSR, ascending reference IDs |
 | Kernels | Wendland2/4/6, cubic/quartic/quintic spline, B7/B8, HOCT4, Gaussian, Poly6, Spiky, Viscosity, Cohesion, Adhesion |
 | Operators | Density, Interpolate, Gradient, Divergence, Curl, Laplacian, Covariance |
-| Fields | Scalar, vector and matrix fields with extent D; public interpolation, gradient and divergence also preserve arbitrary nonempty packed field axes |
+| Fields | Scalar, vector and matrix fields with extent D; public interpolation, gradient and divergence preserve arbitrary nonempty packed field axes; curl preserves its reference flattened packed layouts |
 | Schemes | All four gradient schemes; all four Laplacian schemes; both divergence contractions |
-| Reverse AD | Density/interpolation/gradient/divergence: all 15 kernels, deterministic Torch CSR/CSC products; other operators: first-order VJPs for the 11 smooth-origin kernels; fixed topology |
+| Reverse AD | Density/interpolation/gradient/divergence/curl: all 15 kernels, deterministic Torch CSR/CSC products; other operators: first-order VJPs for the 11 smooth-origin kernels; fixed topology |
 | Supports | Gather, Scatter, MeanSymmetric, KernelMeanSymmetric, SuperSymmetric |
 | Categories | All existing operation-direction enums, preserving query/reference roles |
 | Geometry | Independent query/reference populations; mixed periodic axes; unwrapped positions |
 | CSR input | int32/int64 particle IDs and offsets independently; int32 counts; padded tails ignored |
 | Empty sets | Zero query/reference populations and finite zero sums |
-| Tensor access | Direct Torch storage on the same device; density/interpolation/gradient/divergence normalize noncontiguous floating inputs |
+| Tensor access | Direct Torch storage on the same device; density/interpolation/gradient/divergence/curl normalize noncontiguous floating inputs |
 
 ### Density derivative contract
 

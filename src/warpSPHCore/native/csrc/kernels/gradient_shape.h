@@ -1,6 +1,15 @@
 #pragma once
 #include "kernels/radial.h"
 namespace sph_native::warp_compat {
+// Warp CPU vector adjoints round each scalar contribution before reducing.
+// Device compilers retain their ordinary fused accumulation policy.
+template<class T>SPH_HD T rounded_scalar_term(T value) {
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+    return value;
+#else
+    volatile T rounded=value;return rounded;
+#endif
+}
 template<class T>SPH_HD T clamped_power(T x,int n) {
     x=x<T(0)?T(0):x>T(1)?T(1):x;T result=T(1);
     for(int i=0;i<n;++i)result*=x;return result;
