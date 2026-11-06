@@ -160,7 +160,12 @@ def test_corrected_metadata_validation(device, invalid):
     if invalid == 'B_shape':kw['crkState'].B = kw['crkState'].B[:, :1]
     elif invalid == 'A_dtype':kw['crkState'].A = kw['crkState'].A.float()
     elif invalid == 'volume_shape':kw['referenceVolumes'] = kw['referenceVolumes'][:-1]
-    elif invalid == 'renorm_contiguous':kw['renormalizationState'] = kw['renormalizationState'].renormalizationMatrices.transpose(1,2)
+    elif invalid == 'renorm_contiguous':
+        kw['renormalizationState']=kw['renormalizationState'].renormalizationMatrices.transpose(1,2)
+        expected=oracle(q,r,d,prop,qf,rf,**kw)
+        actual=sph.warpOperation(q,prop,d,qf,rf,referenceParticles=r,**kw)
+        torch.testing.assert_close(actual,expected,rtol=3e-9,atol=3e-9)
+        return
     else:kw['crkState'].gradA = None
     with pytest.raises((ValueError, RuntimeError), match='shape|dtype|axes|contiguous|gradA'):
         sph.warpOperation(q, prop, d, qf, rf, referenceParticles=r, **kw)

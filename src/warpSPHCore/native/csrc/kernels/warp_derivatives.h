@@ -1,5 +1,6 @@
 #pragma once
 #include "kernels/kernel.h"
+#include "kernels/gradient_shape.h"
 
 namespace sph_native::warp_compat {
 // Kernel values are differentiated by Warp through their clamped polynomial
@@ -24,33 +25,6 @@ template<class T,int D>SPH_HD T value_shape_derivative(T q,int kernel,T analytic
 // The reference evaluates these spline first derivatives as differences of
 // powers. Their cancellation is observable in the custom Hessian near zero;
 // the core's smooth-origin expansion is a different, analytic convention.
-template<class T>SPH_HD T clamped_power(T x,int n) {
-    x=x<T(0)?T(0):x>T(1)?T(1):x;T result=T(1);
-    for(int i=0;i<n;++i)result*=x;return result;
-}
-template<class T>SPH_HD T reference_weighted_sum(T ca,T a,T cb,T b) {
-#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-    return std::fma(cb,b,ca*a);
-#else
-    // Warp's CPU kernel compiler rounds these scalar polynomial terms before
-    // adding. Contracting them on a CPU with FMA changes its near-zero Hessian.
-    volatile T left=ca*a,right=cb*b;return left+right;
-#endif
-}
-template<class T,int D>SPH_HD T gradient_shape_derivative(T q,int kernel,T analytic) {
-    if(q>=(sizeof(T)==4?T(1e-5):T(1e-9)))return analytic;
-    switch(kernel) {
-    case 30:return reference_weighted_sum(T(-3),clamped_power(T(1)-q,2),T(12),clamped_power(T(.5)-q,2));
-    case 31:{const T first=reference_weighted_sum(T(-4),clamped_power(T(1)-q,3),T(20),clamped_power(T(.6)-q,3));
-        return reference_weighted_sum(T(1),first,T(-40),clamped_power(T(.2)-q,3));}
-    case 32:{const T first=reference_weighted_sum(T(-5),clamped_power(T(1)-q,4),T(30),clamped_power(T(2)/T(3)-q,4));
-        return reference_weighted_sum(T(1),first,T(-75),clamped_power(T(1)/T(3)-q,4));}
-    case 33:{const T first=reference_weighted_sum(T(56),clamped_power(T(.25)-q,6),T(-28),clamped_power(T(.5)-q,6));
-        const T second=reference_weighted_sum(T(1),first,T(8),clamped_power(T(.75)-q,6));
-        return (second-clamped_power(T(1)-q,6))*T(7);}
-    default:return analytic;
-    }
-}
 // Value-only products never need a force-kernel Hessian. Keep the taped
 // value's clamp derivatives separate from the explicit analytic JVP convention.
 template<class T,int D>
@@ -95,4 +69,29 @@ SPH_HD void kernel_derivatives(const T (&dx)[D],T r,T h,int kernel,
         }
     }
 }
+// Force operators use Warp's analytic custom gradient adjoint. The value
+// polynomial has a distinct taped reverse, needed only by CRK corrections.
+template<class T,int D>
+SPH_HD void force_derivatives(const T (&dx)[D],T r,T h,int kernel,
+    T& w,T (&g)[D],T (&wx)[D],T& wh,T (&gx)[D*D],T (&gh)[D],bool reverse=true) {
+    kernel_derivatives<T,D>(dx,r,h,kernel,w,g,wx,wh,gx,gh);
+    value_derivatives<T,D>(dx,r,h,kernel,w,wx,wh,reverse);
+    if(h<=T(0)||r>h)return;
+    const T eps=sizeof(T)==4?T(1e-7):T(1e-15),den=r>eps?r:eps;
+    const T d1=gradient_shape_derivative<T,D>(r/h,kernel,radial_shape<T,D>(r/h,kernel).d1);
+    for(int d=0;d<D;++d)g[d]=dx[d]/den*normalization<T,D>(kernel)*d1/power<T,D>(h,D+1);
+}
+template<class T,int D>
+SPH_HD void force_pullback(const T (&dx)[D],T r,T h,int kernel,T bw,const T (&bg)[D],
+    T (&bx)[D],T& bh,bool value_used=false) {
+    T w=0,g[D]={},wx[D]={},wh=0,gx[D*D]={},gh[D]={};
+    force_derivatives<T,D>(dx,r,h,kernel,w,g,wx,wh,gx,gh);
+    for(int d=0;d<D;++d) {
+        if(value_used)bx[d]+=bw*wx[d];
+        bh+=bg[d]*gh[d];
+        for(int c=0;c<D;++c)bx[d]+=gx[d*D+c]*bg[c];
+    }
+    if(value_used)bh+=bw*wh;
+}
+
 }

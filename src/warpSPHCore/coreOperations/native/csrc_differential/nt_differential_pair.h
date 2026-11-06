@@ -89,6 +89,27 @@ SPH_HD void density_kernel(const S (&dx)[D],S h,int name,S& w,S (&g)[D],S& lap) 
     lap=S(0);for(int d=0;d<D;++d)g[d]=S(0);
 }
 
+template<class T,int D,class S>
+SPH_HD void force_kernel(const S (&dx)[D],S h,int name,S& w,S (&g)[D],S& lap) {
+    T x[D],r2=0;
+    for(int d=0;d<D;++d){x[d]=ScalarValue<S>::get(dx[d]);r2+=x[d]*x[d];}
+    T value=0,gradient[D]={},wx[D]={},wh=0,gx[D*D]={},gh[D]={};
+    warp_compat::force_derivatives<T,D>(x,scalar_sqrt(r2),ScalarValue<S>::get(h),name,value,gradient,wx,wh,gx,gh,false);
+    if constexpr(std::is_same_v<T,S>) {
+        w=value;for(int d=0;d<D;++d)g[d]=gradient[d];
+    } else {
+        T dw=wh*h.tangent;
+        for(int d=0;d<D;++d)dw+=wx[d]*dx[d].tangent;
+        w={value,dw};
+        for(int d=0;d<D;++d) {
+            T tangent=gh[d]*h.tangent;
+            for(int c=0;c<D;++c)tangent+=gx[d*D+c]*dx[c].tangent;
+            g[d]={gradient[d],tangent};
+        }
+    }
+    lap=S(0);
+}
+
 template <class T, int D, class S>
 SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
                          int64_t i, int64_t j, bool consistent) {
@@ -113,12 +134,16 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
     p.h=args.support==11 ? p.hi : args.support==12 ? p.hj : args.support==13 ?
         (p.hi+p.hj)/S(2) : ScalarValue<S>::get(p.hi)>=ScalarValue<S>::get(p.hj) ? p.hi : p.hj;
     if(args.operation==1||args.operation==6)density_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
+    else if(force_operation(args.operation))force_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
     else kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
     if (args.support==14 || args.support==15) {
         S wi,wj,gi[D],gj[D],li,lj;
         if(args.operation==1||args.operation==6) {
             density_kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
             density_kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
+        } else if(force_operation(args.operation)) {
+            force_kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
+            force_kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
         } else {
             kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
             kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);

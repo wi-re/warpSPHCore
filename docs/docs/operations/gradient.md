@@ -175,3 +175,42 @@ No HVP exists for Gradient.
 
 [Divergence](divergence) · [Curl](curl) · [Laplacian](laplacian) ·
 [CRK overview](../crk/crk-overview) · [Renormalization](../renorm)
+
+## Native derivative contract
+
+Native gradient supports first-order backward/VJP and JVP for all 15 kernels,
+six support enums, operation directions and gradient schemes in FP32/FP64 and
+1D–3D. Scalar and arbitrary nonempty packed field axes preserve their output
+shape with a final spatial derivative axis. Native launches use bounded
+scalar/vector/matrix blocks rather than per-edge Jacobians.
+
+The complete product rule includes positions, supports, reference mass/density
+weights or supplied volumes, symmetric query densities, query/reference fields,
+query CRK A/B/gradA/gradB, reference grad-h omega, renormalization matrices and
+periodic bounds. Unread roles return zero products, including query mass,
+query grad-h omega and supplied volumes under the symmetric scheme. Query-volume
+fallback retains the reference-volume role even for unequal populations; an
+unread query volume need not have query-population length when an explicit
+reference volume is supplied.
+
+Torch reverse has deterministic query CSR/reference CSC ownership with no
+floating atomics. Aliases, noncontiguous inputs/search, sparse/duplicate/empty
+CSR, grid rebuilding, calibration, topology lifetime and fixed-CSR CUDA graph
+replay are covered. The standalone uncorrected C++ scalar/vector/matrix ABI
+accepts all kernels through its existing scatter/accumulation adjoint; it
+exposes no JVP or correction bundle.
+
+Native matches Warp's analytic custom gradient adjoint and regularized Hessian
+at self/tiny pairs, including finite regularized cusp values, inherited
+singular nonfinites and raw spline cancellation. Max-support reverse ties
+belong to the reference support; analytic JVP ties belong to the query.
+Warp's detached first-order reverse and unsupported functional/row-chunk AD
+remain the reference scope. Explicit JVPs include CRK and renormalization;
+classic native forward duals also carry omega and bound tangents. The explicit
+API has no omega-tangent argument. Numerical gradcheck uses differentiable
+fixtures; direct Warp parity tests the boundary conventions.
+
+Maintained checks: `tests/native/torch/test_gradient_contract.py`,
+`tests/parity/test_gradient_contract.py`, standalone all-kernel products and
+the paired frontend's accepted Inutsuka steps. Simulation evidence is primal;
+independent three-step gradient feedback qualifies toy AD.

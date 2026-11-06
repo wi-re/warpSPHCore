@@ -96,12 +96,13 @@ def test_aliasing_chained_density_and_input_versions(device):
 def test_explicit_ad_capability_limits(device):
     q,r,d,qf,rf,values=differentiable_case(device,2,0)
     prop=sph.OperationProperties(sph.KernelFunctions.Spiky,operation=sph.WarpOperation.Gradient)
-    with pytest.raises(NotImplementedError,match='cusp/singular'):sph.warpOperation(q,prop,d,qf,rf,referenceParticles=r)
+    assert torch.isfinite(sph.warpOperation(q,prop,d,qf,rf,referenceParticles=r)).all()
     prop=replace(prop,kernel=sph.KernelFunctions.Wendland2)
     previous=torch.are_deterministic_algorithms_enabled()
     try:
         torch.use_deterministic_algorithms(True)
-        with pytest.raises(NotImplementedError,match='deterministic'):sph.warpOperation(q,prop,d,qf,rf,referenceParticles=r)
+        out=sph.warpOperation(q,prop,d,qf,rf,referenceParticles=r)
+        assert torch.isfinite(torch.autograd.grad(out.sum(),q.positions)[0]).all()
     finally:torch.use_deterministic_algorithms(previous)
     output=sph.warpOperation(q,prop,d,qf,rf,referenceParticles=r)
     first=torch.autograd.grad(output.sum(),q.positions,create_graph=True)[0]

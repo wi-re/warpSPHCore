@@ -240,6 +240,12 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
                 value_pullback(p.hi,raw_bw/T(2),bhi);
                 value_pullback(p.hj,raw_bw/T(2),bhj);
             } else value_pullback(p.h,raw_bw,bh);
+        } else if(force_operation(a.operation)) {
+            if(a.support==14||a.support==15) {
+                T half[D];for(int d=0;d<D;++d)half[d]=raw_bg[d]/T(2);
+                warp_compat::force_pullback<T,D>(p.dx,p.distance,p.hi,a.kernel,raw_bw/T(2),half,bx,bhi,p.crk);
+                warp_compat::force_pullback<T,D>(p.dx,p.distance,p.hj,a.kernel,raw_bw/T(2),half,bx,bhj,p.crk);
+            } else warp_compat::force_pullback<T,D>(p.dx,p.distance,p.h,a.kernel,raw_bw,raw_bg,bx,bh,p.crk);
         } else if (a.support==14 || a.support==15) {
             T half[D]; for (int d=0; d<D; ++d) half[d]=raw_bg[d]/T(2);
             kernel_vjp<T,D>(p.dx,p.hi,a.kernel,raw_bw/T(2),half,bx,bhi);
@@ -248,7 +254,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         if (a.support==11) bhi+=bh;
         else if (a.support==12) bhj+=bh;
         else if (a.support==13) { bhi+=bh/T(2); bhj+=bh/T(2); }
-        else if ((a.operation==1||a.operation==6) ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
+        else if ((a.operation==1||force_operation(a.operation)||a.operation==6) ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
         result.add(QH,0,bhi); result.add(RH,0,bhj);
         for (int d=0; d<D; ++d) {
             const T b=bx[d]+(p.distance>0 ? br*p.dx[d]/p.distance:T(0));

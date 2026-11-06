@@ -80,6 +80,12 @@ template <class T, int D, class Pair> struct AdjointRow {
                     value_pullback(a.qh[i], b.bw / T(2), bhi);
                     value_pullback(a.rh[j], b.bw / T(2), bhj);
                 } else value_pullback(a.radius(i, j), b.bw, b.bh);
+            } else if(force_operation(a.operation)) {
+                if(a.support==14||a.support==15) {
+                    T half[D];for(int d=0;d<D;++d)half[d]=b.bg[d]/T(2);
+                    warp_compat::force_pullback<T,D>(dx,r,a.qh[i],a.kernel,T(0),half,b.bx,bhi);
+                    warp_compat::force_pullback<T,D>(dx,r,a.rh[j],a.kernel,T(0),half,b.bx,bhj);
+                } else warp_compat::force_pullback<T,D>(dx,r,a.radius(i,j),a.kernel,T(0),b.bg,b.bx,b.bh);
             } else if (a.support == 14 || a.support == 15) {
                 T bg[D];
                 for (int d = 0; d < D; ++d)
@@ -98,7 +104,7 @@ template <class T, int D, class Pair> struct AdjointRow {
             else if (a.support == 13) {
                 bhi += b.bh / T(2);
                 bhj += b.bh / T(2);
-            } else if ((a.operation == 1 || a.operation == 6) ? a.qh[i] > a.rh[j] : a.qh[i] >= a.rh[j])
+            } else if ((a.operation == 1 || force_operation(a.operation) || a.operation == 6) ? a.qh[i] > a.rh[j] : a.qh[i] >= a.rh[j])
                 bhi += b.bh;
             else
                 bhj += b.bh;

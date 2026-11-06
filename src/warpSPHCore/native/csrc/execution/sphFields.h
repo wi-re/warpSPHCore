@@ -1,4 +1,5 @@
 #pragma once
+#include "kernels/warp_derivatives.h"
 
 #include "execution/neighborhood.h"
 #include "math/queryGeometry.h"
@@ -150,7 +151,7 @@ template <class T, int D, int Fields, Weight Kind> struct BorrowedReferenceLoade
     }
 };
 
-template <class T, int D, int Fields, bool General = false>
+template <class T, int D, int Fields, bool General = false, bool ReferenceGradient = false>
 struct SphOperation : KernelMetadata<T, General> {
     static constexpr int field_count = Fields;
     static constexpr bool uses_query_values = false;
@@ -183,8 +184,7 @@ struct SphOperation : KernelMetadata<T, General> {
             // reconstructing them for every edge.
             if (this->kernel == 0 && this->support == 11) {
                 q.kernel.evaluate(distance, value, gradient);
-                return;
-            }
+            } else {
             const T hj = this->reference_supports[edge.reference];
             if (this->support == 14 || this->support == 15) {
                 T reference_value, reference_gradient;
@@ -196,6 +196,23 @@ struct SphOperation : KernelMetadata<T, General> {
             } else {
                 const T h = pairwise_support(q.support, hj, this->support);
                 kernel_pair_value<T, D>(distance, h, this->kernel, value, gradient);
+            }
+            }
+        }
+        if constexpr (ReferenceGradient) {
+            const T threshold=sizeof(T)==4?T(1e-5):T(1e-9);
+            T hj=q.support;int kernel=0,support=11;
+            if constexpr(General){hj=this->reference_supports[edge.reference];kernel=this->kernel;support=this->support;}
+            if(distance<threshold*(q.support>hj?q.support:hj)) {
+                auto radial=[&](T h) {
+                    if(h<=T(0)||distance>h)return T(0);
+                    const T eps=sizeof(T)==4?T(1e-7):T(1e-15);
+                    const auto f=radial_shape<T,D>(distance/h,kernel);
+                    return warp_compat::gradient_shape_derivative<T,D>(distance/h,kernel,f.d1)*normalization<T,D>(kernel)/
+                        (power<T,D>(h,D+1)*(distance>eps?distance:eps));
+                };
+                gradient=(support==14||support==15)?(radial(q.support)+radial(hj))/T(2):
+                    radial(pairwise_support(q.support,hj,support));
             }
         }
     }

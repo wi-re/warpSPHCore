@@ -5,9 +5,9 @@
 
 namespace sph_native::neighborhood {
 template <class T, int D, int Fields = 1, bool General = false>
-struct Gradient : SphOperation<T, D, Fields, General> {
+struct Gradient : SphOperation<T, D, Fields, General, true> {
     static constexpr bool uses_query_values = true;
-    using Base = SphOperation<T, D, Fields, General>;
+    using Base = SphOperation<T, D, Fields, General, true>;
     using typename Base::Query;
     using typename Base::Reference;
     using State = Sums<T, Fields * D>;

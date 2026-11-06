@@ -326,8 +326,8 @@ def test_fixed_origin_force_coefficients_and_geometry_policy(device):
     q,r,domain,fi,fj = fixture(device,2,1)
     r = replace(q,positions=q.positions.clone())
     state,(_,volume),_,_ = correction_fixture(q,r)
-    # A single self edge per row has a singular geometric Hessian for Spiky,
-    # but fixed-origin coefficient and field derivatives remain well defined.
+    # Warp defines a regularized custom Hessian even for a Spiky self pair;
+    # coefficient/field products and that geometry convention are supported.
     graph = sph.AdjacencyList(None,torch.arange(len(fi),device=device,dtype=torch.int32),
         torch.ones(len(fi),device=device,dtype=torch.int32),
         torch.arange(len(fi),device=device,dtype=torch.int64),len(fi),len(fi))
@@ -342,8 +342,9 @@ def test_fixed_origin_force_coefficients_and_geometry_policy(device):
     with torch.autograd.forward_ad.dual_level():
         dual = torch.autograd.forward_ad.make_dual(state.A.detach(),torch.ones_like(state.A))
         assert torch.isfinite(torch.autograd.forward_ad.unpack_dual(action(dual)).tangent).all()
-    with pytest.raises(NotImplementedError,match='cusp/singular'):
-        action(state.A.detach(),replace(q,positions=q.positions.requires_grad_()))
+    moving=replace(q,positions=q.positions.requires_grad_())
+    geometry=torch.autograd.grad(action(state.A.detach(),moving).sum(),moving.positions)[0]
+    assert torch.isfinite(geometry).all()
 
 
 def test_owned_corrected_determinism_and_mutation(device):

@@ -56,5 +56,10 @@ def nativeCapabilities():
                 interpolation_adjoint_deterministic=True, interpolation_adjoint_ownership='csr_csc',
                 interpolation_adjoint_floating_atomics=False, interpolation_fixed_csr_capture=True,
                 interpolation_packed_field_axes=True,
+                gradient_reverse_kernels=tuple(k.name for k in KernelFunctions),
+                gradient_forward_ad=True, gradient_ad_order=1,
+                gradient_adjoint_deterministic=True, gradient_adjoint_ownership='csr_csc',
+                gradient_adjoint_floating_atomics=False, gradient_fixed_csr_capture=True,
+                gradient_packed_field_axes=True,
                 explicit_jvp=True, density_position_hvp=True,
                 density_position_hvp_geometry_ad=False, density_position_hvp_vector_mass_ad_order=1)

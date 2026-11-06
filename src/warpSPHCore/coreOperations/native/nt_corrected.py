@@ -19,7 +19,7 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
                 adjacency.edgeOffsets,adjacency.numNeighbors,adjacency.paddedJ,None,None,None,None]
         return inputs,[None]*9,[*geometry,reference.masses]
     interpolation = operation == WarpOperation.Interpolate
-    if interpolation and type(adjacency).__name__ in ("CompactHashMap", "SearchIndex"):
+    if operation in (WarpOperation.Interpolate,WarpOperation.Gradient) and type(adjacency).__name__ in ("CompactHashMap", "SearchIndex"):
         adjacency = None  # Rebuild native topology in the original population order.
     covariance = operation == WarpOperation.Covariance
     laplacian = operation == WarpOperation.Laplacian
@@ -84,7 +84,10 @@ def _prepare(query, reference, domain, properties, adjacency, query_values, refe
     if renorm is not None and not isinstance(renorm, torch.Tensor):
         raise TypeError('renormalizationState must be a RenormalizationState or tensor')
 
-    corrections = [query_volumes, reference_volumes, A, B, gradA, gradB, omega, renorm, query_omega]
+    # These operators never load a query volume. Its fallback reference role
+    # is already resolved above; retain the unused Torch role at the bridge.
+    query_correction_volume=None if operation in (WarpOperation.Interpolate,WarpOperation.Gradient) else query_volumes
+    corrections = [query_correction_volume, reference_volumes, A, B, gradA, gradB, omega, renorm, query_omega]
     used = [query.positions, reference.positions, query.supports, reference.supports,
             domain.min, domain.max, None if covariance else reference_values, reference_volumes, A, B, gradA, gradB, omega, renorm, query_omega]
     if not interpolation and not covariance:
@@ -126,12 +129,21 @@ def compute(query, reference, domain, properties, adjacency, query_values, refer
     if properties.operation == WarpOperation.Interpolate:
         from .nt_interpolate_backward import apply
         states = crk_state if isinstance(crk_state, tuple) else (crk_state,)
-        ignored = []
+        ignored = [query_volumes]
         for index, state in enumerate(states):
             if state is not None:
                 ignored.extend((state.gradA, state.gradB))
                 if index:
                     ignored.extend((state.A, state.B))
         return apply(inputs, properties, corrections, query.masses, ignored, topology)
+    if properties.operation == WarpOperation.Gradient:
+        from .nt_gradient_backward import apply
+        states=crk_state if isinstance(crk_state,tuple) else (crk_state,)
+        ignored=[query_volumes]
+        if len(states)==2 and states[1] is not None:
+            ignored.extend(getattr(states[1],name) for name in ('A','B','gradA','gradB'))
+        if isinstance(grad_h_state,GradHState):ignored.append(grad_h_state.queryOmegas)
+        elif isinstance(grad_h_state,tuple):ignored.append(grad_h_state[0])
+        return apply(inputs,properties,corrections,query.masses,ignored,topology)
     return apply_corrected(inputs, corrections, properties, consistent=consistent_divergence,
                            counts=return_neighbor_counts, topology=topology)

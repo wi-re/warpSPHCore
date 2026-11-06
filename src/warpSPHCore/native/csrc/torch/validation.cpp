@@ -91,23 +91,23 @@ Tensors prepare_field_output(Tensors t, int op, int scheme, int lap, bool dot, c
         STD_TORCH_CHECK(t[RVALUE].dim() >= 1 && t[RVALUE].dim() <= 3 && t[RVALUE].size(0) == nr,
                         "reference values must be scalar, vector or matrix fields");
         for (int d = 1; d < t[RVALUE].dim(); ++d) {
-            STD_TORCH_CHECK(op == 1 || t[RVALUE].size(d) == D, "field axes must match spatial dimension");
+            STD_TORCH_CHECK((op == 1 || op == 2) || t[RVALUE].size(d) == D, "field axes must match spatial dimension");
             shape.push_back(t[RVALUE].size(d));
         }
 
-        if (op == 1) {
+        if (op == 1 || op == 2) {
             int64_t fields = 1;
             for (auto width : shape) fields *= width;
             STD_TORCH_CHECK(fields == 1 || fields == D || fields == D * D,
-                            "native interpolation launch requires a scalar/vector/matrix block; use the public packed-field bridge");
+                            "native field launch requires a scalar/vector/matrix block; use the public packed-field bridge");
         }
         if (op != 1) {
             tensor(t[QVALUE], x, x.scalar_type(), "query values");
             STD_TORCH_CHECK(t[QVALUE].dim() == t[RVALUE].dim() && t[QVALUE].size(0) == n,
                             "query values have an incompatible shape");
             for (int d = 1; d < t[QVALUE].dim(); ++d)
-                STD_TORCH_CHECK(t[QVALUE].size(d) == D,
-                                "query field axes must match spatial dimension");
+                STD_TORCH_CHECK(t[QVALUE].size(d) == t[RVALUE].size(d),
+                                "query field axes must match reference fields");
         }
         if (op == 2)
             shape.push_back(D);
