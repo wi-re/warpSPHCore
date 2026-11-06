@@ -1,4 +1,4 @@
-"""Explicit first-order products with independent query/reference tangent roles."""
+"""Explicit products with independent query/reference tangent roles."""
 import torch
 from torch.autograd import forward_ad
 from ..._models import RenormalizationTangentState
@@ -18,7 +18,8 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
     Unlike an implicit dual-valued call, this helper never aliases a query
     tangent into the reference role. It also works inside an existing dual level.
     Support selection, minimum-image winding and clipped branches stay fixed.
-    Higher derivatives of this product are deliberately unsupported.
+    Density supports the reference first reverse of its explicit product.
+    Other owners retain their individually documented derivative limits.
     """
     from .nt_corrected import _prepare
     from ...native._differential import _core_primal, _check_geometry, _FirstOrderTangent
@@ -45,6 +46,9 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
     from dataclasses import replace
     factor=normalization_factor(properties,domain.dim) if properties.calibrateNormalization else 1.
     properties=replace(properties,calibrateNormalization=False)
+    if operation==WarpOperation.Density:
+        from .nt_density_jvp import compute
+        return compute(queryParticles,reference,domain,properties,adjacency,queryTangentState,referenceTangentState)*factor
     inputs,corrections,_=_prepare(queryParticles,reference,domain,properties,adjacency,
         queryValues,referenceValues,queryVolumes,referenceVolumes,crkState,gradHState,
         renormalizationState,consistent_divergence=consistentDivergence,allow_forward=True)

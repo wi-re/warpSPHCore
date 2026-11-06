@@ -49,6 +49,8 @@ def nativeCapabilities():
                 crk_preparation_forward_ad=True, crk_preparation_ad_order=1,
                 density_reverse_kernels=tuple(k.name for k in KernelFunctions),
                 density_forward_ad=True, density_ad_order=1,
+                density_explicit_jvp_reverse_order=1, density_explicit_jvp_bounds_ad=False,
+                crk_volume_explicit_jvp_reverse_order=1,
                 density_adjoint_deterministic=True, density_adjoint_ownership='csr_csc',
                 density_adjoint_floating_atomics=False, density_fixed_csr_capture=True,
                 interpolation_reverse_kernels=tuple(k.name for k in KernelFunctions),

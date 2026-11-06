@@ -54,3 +54,11 @@ void density_forward_gpu(const Tensors &t, int support, int direction, int kerne
     }
 }
 } // namespace sph_native
+
+#include "nt_density_jvp.h"
+namespace sph_native {
+void density_product_gpu(const Tensors& t,const density_jvp::Buffers& buffers,int support,int direction,int kernel){
+    const stable::accelerator::DeviceGuard guard(t[QX].get_device_index());
+    execute(density_jvp::Rows{buffers},t,support,direction,6,GpuLauncher{current_stream(t[QX])},kernel);
+}
+}

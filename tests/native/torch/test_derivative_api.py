@@ -121,7 +121,7 @@ def test_density_position_block_finite_difference_transpose_and_self_policy(devi
         torch.testing.assert_close(fixed,actual)
 
 
-def test_explicit_jvp_roles_and_first_order_boundary(device):
+def test_explicit_jvp_roles_and_reverse_contract(device):
     q,_,domain=problem(device);graph=sph.radiusSearch(q,domain)
     properties=sph.OperationProperties(sph.KernelFunctions.Wendland2,operation=sph.WarpOperation.Density)
     direction=sph.ParticleTangentState(torch.ones_like(q.positions),None,None,None)
@@ -132,10 +132,11 @@ def test_explicit_jvp_roles_and_first_order_boundary(device):
     torch.testing.assert_close(both,torch.zeros_like(both),atol=1e-12,rtol=0)
     moving=replace(q,positions=q.positions.clone().requires_grad_())
     product=sph.warpOperationJVP(moving,properties,domain,queryTangentState=direction,adjacency=graph)
-    with pytest.raises(NotImplementedError,match='first-order'):torch.autograd.grad(product.sum(),moving.positions)
+    reverse=torch.autograd.grad(product.sum(),moving.positions,create_graph=True)[0]
+    assert torch.isfinite(reverse).all() and not reverse.requires_grad
     with forward_ad.dual_level():
         dual=replace(q,positions=forward_ad.make_dual(q.positions,torch.ones_like(q.positions)))
-        with pytest.raises(NotImplementedError,match='first-order'):
+        with pytest.raises(NotImplementedError,match='no classic dual'):
             sph.warpOperationJVP(dual,properties,domain,queryTangentState=direction,adjacency=graph)
     cusp=replace(properties,kernel=sph.KernelFunctions.Spiky)
     cusp_product=sph.warpOperationJVP(q,cusp,domain,queryTangentState=direction,adjacency=graph)

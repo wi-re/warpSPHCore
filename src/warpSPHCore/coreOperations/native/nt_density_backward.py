@@ -2,8 +2,8 @@
 
 Floating reductions have one owner per query/reference row. The transposed
 integer topology is sorted and cached by CSRTopology; no floating atomics or
-per-edge Jacobians are required. Warp's unsupported higher/functional products
-remain outside the reference contract.
+per-edge Jacobians are required. This bridge owns the ordinary density map;
+nt_density_jvp separately owns the explicit product and its supported reverse.
 """
 import torch
 from torch.autograd import forward_ad
