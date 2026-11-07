@@ -69,7 +69,10 @@ def test_capture_explicit_product_and_its_reverse(device,dimension,volume,crk):
     gc.collect();enabled=gc.isenabled();gc.disable()
     try:
         q,r,d,p,g,v,states,functions=case(device,dimension,dtype=torch.float32,field_shape=(2,3,2) if dimension==2 else (3,2,3),volume=volume,crk=crk,renorm=crk)
-        run=functions('native');inputs=[x for x in v if x.requires_grad];example=run(*v);seed=torch.linspace(-.3,.7,example.numel(),device=device).reshape_as(example)
+        run=functions('native');inputs=[x for x in v if x.requires_grad]
+        with torch.no_grad():example=run(*v)
+        seed=torch.linspace(-.3,.7,example.numel(),device=device).reshape_as(example)
+        del example
         def products():
             y=run(*v);bars=torch.autograd.grad(y,inputs,seed,allow_unused=True)
             return y,*(torch.zeros_like(x) if z is None else z for x,z in zip(inputs,bars))
