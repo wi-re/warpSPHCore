@@ -8,6 +8,7 @@ import warp as wp
 
 from warpSPHCore.linalg import applyPinv, pinvSymmetric
 from warpSPHCore import get_torch_precision
+from warpSPHCore._backend import OPERATORS
 
 
 @pytest.fixture(scope='module', autouse=True)
@@ -100,6 +101,7 @@ def test_selected_nonzero_discarded_eigenvalue_ad(device, dim, apply):
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA sync check')
+@pytest.mark.gpu
 def test_noHostSync():
     device = 'cuda'
     M = _matrices(3, device=device)
@@ -184,12 +186,16 @@ def test_native_precision_and_value_dtype_are_explicit(device):
     dt = get_torch_precision()
     other = torch.float64 if dt == torch.float32 else torch.float32
     M = torch.eye(2, dtype=dt, device=device)[None]
-    with pytest.raises(ValueError, match='process precision'):
-        pinvSymmetric(M.to(other))
-    with pytest.raises(ValueError, match='same dtype'):
+    if OPERATORS == 'warp':
+        with pytest.raises(ValueError, match='process precision'):
+            pinvSymmetric(M.to(other))
+    else:
+        torch.testing.assert_close(pinvSymmetric(M.to(other)), M.to(other))
+    with pytest.raises(ValueError, match='dtype'):
         applyPinv(M.to(other), M)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA stream/capture check')
 def test_nondefault_stream_and_graph_replay(monkeypatch):
     dt = get_torch_precision()
@@ -214,6 +220,9 @@ def test_nondefault_stream_and_graph_replay(monkeypatch):
         graph.replay()
         Pcopy, outcopy = P.clone(), out.clone()
     side.synchronize()
-    assert launched and all(stream == side.cuda_stream for stream in launched)
+    if OPERATORS == 'warp':
+        assert launched and all(stream == side.cuda_stream for stream in launched)
+    else:
+        assert not launched  # Tensor entry points must stay off Warp's launcher.
     torch.testing.assert_close(Pcopy, torch.eye(2, dtype=dt, device='cuda')[None].expand_as(Pcopy) / 2)
     torch.testing.assert_close(outcopy, V / 2)

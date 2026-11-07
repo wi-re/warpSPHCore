@@ -782,9 +782,13 @@ and signed eigenvalue reciprocals. Use a general matrix routine for
 nonsymmetric matrices.
 
 The cutoff drops eigenvalues with magnitude at most `rtol * max(abs(lambda))`.
-Default `rtol` is `d * eps(dtype)`. Native inputs must match the process
-precision, selected with `warpSPHCore_PRECISION` before importing the package.
-The supported public dtypes are float32 and float64. Empty batches and inputs
+Default `rtol` is `d * eps(dtype)`. Tensor entry points follow
+`WARPSPHCORE_OPERATORS`, which defaults to `WARPSPHCORE_BACKEND`. With a Warp
+runtime and native operators, `pinvSymmetric` and `applyPinv` use the compiled
+native tensor API while kernel-callable helpers retain their Warp declarations.
+Native tensor inputs follow their float32/float64 dtype independently of process
+precision. The Warp tensor implementation requires primal inputs to match
+`warpSPHCore_PRECISION`, selected before importing the package. Empty batches and inputs
 carrying reverse or forward AD use a Torch symmetric spectral implementation
 with a fixed-retained-set derivative. Reverse AD, Torch duals and `torch.func.jvp`
 include retained/discarded subspace rotation even for a nonzero discarded
@@ -795,7 +799,9 @@ These fallback operations can incur Torch dense-solver synchronization.
 Native strided inputs are copied as necessary; outputs are contiguous and
 newly allocated. CUDA launches use Torch's current stream and can be captured
 after initialization and kernel warmup. `symmetricPinv3` and `loadPadded3x3`
-are exported Warp functions for callers that need the arithmetic inline.
+follow the runtime backend: they remain exported Warp functions when
+`WARPSPHCORE_BACKEND=warp`, including when tensor operators are native. Native-only
+processes retain their existing tensor helpers.
 
 This API is distinct from `pinv_warp`, which also applies renormalization
 policies such as the low-neighbor identity fallback and eigenvalue diagnostics.
