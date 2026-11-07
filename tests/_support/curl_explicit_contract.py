@@ -12,7 +12,8 @@ def case(*args,volume=False,crk=False,renorm=False,gradh=False,geometry=True,**k
     v=list(v);v[5]=v[5].detach();v[6]=v[6].detach();v=tuple(v)
     values=(*v,*(x.detach().cos().mul(.03).requires_grad_() for x in (v[k] for k in DIRECTION_SLOTS)))
     def functions(backend,properties=p,adjacency=g):
-        if backend=='native':from warpSPHCore.native.api import warpOperationJVP as compute
+        if backend in ('native','native_components'):from warpSPHCore.native.api import warpOperationJVP as compute
+        elif backend in ('warp3d','warp_components'):from warpSPHCore.coreOperations.wp_gradientJVP import computeSPHGradientGeometryJVP as compute
         else:from warpSPHCore.coreOperations.wp_curlJVP import computeSPHCurlGeometryJVP as compute
         def run(*x):
             qi,rj,domain=states(x[:10]);directions=dict(zip(DIRECTION_SLOTS,x[20:]));qt=sph.ParticleTangentState(directions[0] if geometry else None,directions[2] if geometry else None,None,directions[8]);rt=sph.ParticleTangentState(directions[1] if geometry else None,directions[3] if geometry else None,directions[4],directions[9])
@@ -24,6 +25,18 @@ def case(*args,volume=False,crk=False,renorm=False,gradh=False,geometry=True,**k
                 if gradh:options['gradHState']=sph.GradHState(x[19],x[17])
                 return compute(qi,properties,domain,queryTangentState=qt,adjacency=adjacency,**options)
             if not geometry:qt=replace(qt,positions=torch.zeros_like(qi.positions))
+            if backend in ('warp3d','warp_components','native_components'):
+                assert qi.positions.shape[1]==3
+                outputs=[]
+                for c in range(3):
+                    arguments=dict(options)
+                    for name in ('queryValues','referenceValues','tangentQueryValues','tangentReferenceValues'):arguments[name]=arguments[name][:,c].contiguous()
+                    if backend=='native_components':
+                        outputs.append(compute(qi,replace(properties,operation=sph.WarpOperation.Gradient),domain,queryTangentState=qt,adjacency=adjacency,**arguments))
+                    else:outputs.append(compute(qi,domain,properties.kernel,properties.supportMode,adjacency,qt,gradientMode=properties.gradientMode,operationMode=properties.operationMode,**arguments))
+                gradient=torch.stack(outputs,1)
+                if backend.endswith('_components'):return gradient
+                return torch.stack((gradient[:,2,1]-gradient[:,1,2],gradient[:,0,2]-gradient[:,2,0],gradient[:,1,0]-gradient[:,0,1]),1)
             return compute(qi,domain,properties.kernel,properties.supportMode,adjacency,qt,gradientMode=properties.gradientMode,operationMode=properties.operationMode,**options)
         return run
     return q,r,d,p,g,values,states,functions

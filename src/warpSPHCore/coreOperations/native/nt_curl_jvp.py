@@ -37,6 +37,27 @@ def apply(config,flat,tangents,query_mass=None):
         for slot in (13,14):
             if directions[slot] is not None:
                 directions[slot]=pack_field(directions[slot],start,width,flat[0].shape[1],components)
-        inputs=[v.contiguous() if v is not None else None for v in (*values,*directions,query_mass)]
-        result.append((_Product.apply(config[1:5],topology,*inputs),width))
+        if flat[0].shape[1]==3 and components:
+            # Preserve the established 3D extension as differences of scalar
+            # gradient products, including their separate reverse reductions.
+            # Combining kernel cotangents before those reductions changes
+            # singular cancellation even when the smooth equations agree.
+            from .nt_gradient_jvp import apply as gradient_product
+            gradients=[]
+            for c in range(3):
+                scalar=list(values);tangent=list(directions)
+                for slot in (13,14):
+                    scalar[slot]=values[slot].reshape(len(values[slot]),3,width)[:,c,:].contiguous()
+                    if directions[slot] is not None:tangent[slot]=directions[slot].reshape(len(directions[slot]),3,width)[:,c,:].contiguous()
+                if scalar[25] is not None and config[4]!=1:
+                    omega=scalar[25][:,None]
+                    scalar[13]=scalar[13]/omega
+                    if tangent[13] is not None:tangent[13]=tangent[13]/omega
+                gradients.append(gradient_product(config,scalar,tangent,query_mass))
+            x,y,z=gradients
+            output=torch.stack((z[...,1]-y[...,2],x[...,2]-z[...,0],y[...,0]-x[...,1]),1)
+            result.append((output,width))
+        else:
+            inputs=[v.contiguous() if v is not None else None for v in (*values,*directions,query_mass)]
+            result.append((_Product.apply(config[1:5],topology,*inputs),width))
     return finish(flat,result)

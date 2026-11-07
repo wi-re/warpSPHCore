@@ -154,21 +154,15 @@ template<class T,int D,int Operation>struct Pair{
                 const S result=first+second+third;
                 if constexpr(Reverse)result.seed(cot[i*groups+group]);else sum[group]+=result.v;}
         }
-        if constexpr(Operation==4&&D>1){
-            const S qomega=read(25,0,1);const int groups=a.fields/D;
-            for(int group=0;group<groups;++group){S dc[D],coeff[D],df[D];
-                for(int c=0;c<D;++c){const int f=c*groups+group;
+        if constexpr(Operation==4&&D==2){
+            const S qomega=read(25,0,1);const int groups=a.fields/2;
+            for(int group=0;group<groups;++group){S dc[2],coeff[2],df[2];
+                for(int c=0;c<2;++c){const int f=c*groups+group;
                     const S fi=explicit_ad::divide(read(13,f),qomega),fj=explicit_ad::divide(read(14,f),omega);
                     const S dfi=explicit_ad::divide(read(39,f),qomega),dfj=explicit_ad::divide(read(40,f),omega);
                     coeff[c]=fi*A+fj*B;dc[c]=fi*dA+fj*dB;df[c]=dfi*A+dfj*B;}
-                if constexpr(D==2){
-                    const S result=G[0]*dc[1]-G[1]*dc[0]+dG[0]*coeff[1]-dG[1]*coeff[0]+G[0]*df[1]-G[1]*df[0];
-                    if constexpr(Reverse)result.seed(cot[i*groups+group]);else sum[group]+=result.v;
-                }else{
-                    for(int c=0;c<3;++c){const int e=(c+1)%3,f=(c+2)%3;
-                        const S result=G[e]*dc[f]-G[f]*dc[e]+dG[e]*coeff[f]-dG[f]*coeff[e]+G[e]*df[f]-G[f]*df[e];
-                        if constexpr(Reverse)result.seed(cot[i*a.fields+c*groups+group]);else sum[c*groups+group]+=result.v;}
-                }
+                const S result=G[0]*dc[1]-G[1]*dc[0]+dG[0]*coeff[1]-dG[1]*coeff[0]+G[0]*df[1]-G[1]*df[0];
+                if constexpr(Reverse)result.seed(cot[i*groups+group]);else sum[group]+=result.v;
             }
         }
         if constexpr(Reverse){trace->reverse();T bw=0,bdw=0,bg[D]={},bdg[D]={};

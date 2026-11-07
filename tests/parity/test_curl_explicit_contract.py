@@ -178,3 +178,55 @@ def test_packed_field_only_empty_correction_tangent_bundles(device,dimension,sch
             return (native if backend=='native' else sph.warpOperationJVP)(qi,p,domain,**options)
         return run
     compare(values,functions,6e-3 if v[0].dtype==torch.float32 else 8e-8)
+
+
+@pytest.mark.parametrize('kernel',list(sph.KernelFunctions))
+@pytest.mark.parametrize('separation',['self','ultratiny','epsilon','near','cutoff','outside','interior'])
+def test_three_dimensional_boundary_reverse_gradient_composition(device,kernel,separation):
+    from _support.curl_explicit_contract import boundary_case
+    dtype=get_torch_precision();eps=1e-7 if dtype==torch.float32 else 1e-15
+    delta={'self':0.,'ultratiny':eps*1e-9,'epsilon':eps,'near':eps*10,'cutoff':.8,'outside':.81,'interior':.56}[separation]
+    v,functions=boundary_case(device,3,dtype,kernel,sph.SupportScheme.PartialSymmetric,delta,False)
+    v=list(v)
+    # Nonparallel fields and geometry directions isolate the singular kernel
+    # adjoint from the cross-product's separately checked zero identity.
+    for slot,shift in ((10,[.03,-.11,.17]),(14,[-.07,.13,.29]),(27,[.02,.04,-.01]),(31,[-.03,.01,.05]),(20,[.01,-.02,.04]),(21,[-.02,.01,-.01])):
+        v[slot]=(v[slot].detach()+v[slot].new_tensor(shift)).requires_grad_()
+    v=tuple(v)
+    compare(v,lambda backend:functions('native' if backend=='native' else 'warp3d'),8e-3 if dtype==torch.float32 else 6e-7)
+
+
+@pytest.mark.parametrize('kernel',[sph.KernelFunctions.QuarticSpline,sph.KernelFunctions.QuinticSpline,sph.KernelFunctions.HOCT4,sph.KernelFunctions.Spiky])
+@pytest.mark.parametrize('separation',['self','ultratiny','epsilon'])
+def test_three_dimensional_zero_identity_roundoff(device,kernel,separation):
+    from _support.curl_explicit_contract import boundary_case
+    dtype=get_torch_precision();eps=1e-7 if dtype==torch.float32 else 1e-15;delta={'self':0.,'ultratiny':eps*1e-9,'epsilon':eps}[separation]
+    v,functions=boundary_case(device,3,dtype,kernel,sph.SupportScheme.PartialSymmetric,delta,False)
+    v=list(v)
+    for k in (10,14,27,31):v[k]=v[k].detach()[:,:1].expand(-1,3).clone().requires_grad_()
+    v=tuple(v)
+    slots=[k for k,x in enumerate(v) if x.requires_grad];inputs=[v[k] for k in slots];geometry=[k for k in slots if k not in (10,14,27,31)]
+    tolerance=8e-3 if dtype==torch.float32 else 6e-7;machine=torch.finfo(dtype).eps;gamma=256*machine/(1-256*machine)
+    # Equal field components imply sum(curl)==0 identically for every shared
+    # geometry/weight/direction role. Test both backends against that exact
+    # identity, with a condition bound from individual scalar-gradient axes.
+    for weighted in (False,True):
+        weight=v[2].new_tensor([-.3,.7]) if weighted else torch.ones_like(v[2])
+        observed=[]
+        for backend,component_backend in (('native','native_components'),('warp3d','warp_components')):
+            y=functions(backend)(*v);seed=weight[:,None].expand_as(y)
+            bars=torch.autograd.grad(y,inputs,seed,allow_unused=True)
+            bars={k:torch.zeros_like(x) if a is None else a for k,x,a in zip(slots,inputs,bars)};observed.append(bars)
+            components=functions(component_backend)(*v);condition={k:torch.zeros_like(v[k]) for k in geometry}
+            for field in range(3):
+                for axis in range(3):
+                    basis=torch.zeros_like(components);basis[:,field,axis]=weight.abs()
+                    partial=torch.autograd.grad(components,inputs,basis,allow_unused=True,retain_graph=True)
+                    for k,a in zip(slots,partial):
+                        if k in condition and a is not None:condition[k]+=a.abs()
+            for k in geometry:
+                finite=torch.isfinite(bars[k]);assert torch.isfinite(condition[k][finite]).all(),(backend,k,'nonfinite condition for finite identity residual')
+                assert bool((bars[k].abs()[finite]<=(tolerance+gamma*condition[k])[finite]).all()),(backend,k,'zero identity exceeds expanded cross-product roundoff bound')
+        for k in geometry:
+            a,b=observed[0][k],observed[1][k];finite=torch.isfinite(a)&torch.isfinite(b)
+            torch.testing.assert_close(a[~finite],b[~finite],rtol=tolerance,atol=tolerance,equal_nan=True)

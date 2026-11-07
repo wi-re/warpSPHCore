@@ -59,6 +59,7 @@ Tensors curl_product(const OptionalTensors& flat,const OptionalTensors& directio
     auto t=prepare_corrected_operator(inputs,corrections,support,direction,4,scheme,2,false,false,cotangent?&*cotangent:nullptr);
     const auto& x=t[QX];const auto m=t[RX].size(0),d=x.size(1);
     STD_TORCH_CHECK(field_components(t)>0&&field_components(t)<=d*d,"Curl JVP field block");
+    STD_TORCH_CHECK(d!=3||field_components(t)<3,"Nonzero 3D curl products use native scalar gradient composition");
     for(int k=0;k<26;++k)if(directions[k]){
         STD_TORCH_CHECK(flat[k],"Curl JVP tangent requires a primal");tensor(*directions[k],x,x.scalar_type(),"Curl JVP tangent");
         STD_TORCH_CHECK(directions[k]->sizes()==flat[k]->sizes(),"Curl JVP tangent shape");
