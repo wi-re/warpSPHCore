@@ -148,7 +148,7 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
     p.h=args.support==11 ? p.hi : args.support==12 ? p.hj : args.support==13 ?
         (p.hi+p.hj)/S(2) : ScalarValue<S>::get(p.hi)>=ScalarValue<S>::get(p.hj) ? p.hi : p.hj;
     if(args.operation==1||args.operation==6||args.operation==Volume)density_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
-    else if(force_operation(args.operation))force_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap,geometry);
+    else if(force_operation(args.operation)||args.operation==Moments)force_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap,geometry);
     else kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
     if(args.operation==5) {
         S unused_w,unused_g[D];kernel<T,D>(p.dx,p.h,args.kernel,unused_w,unused_g,p.lap);
@@ -158,7 +158,7 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
         if(args.operation==1||args.operation==6||args.operation==Volume) {
             density_kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li);
             density_kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj);
-        } else if(force_operation(args.operation)) {
+        } else if(force_operation(args.operation)||args.operation==Moments) {
             force_kernel<T,D>(p.dx,p.hi,args.kernel,wi,gi,li,geometry);
             force_kernel<T,D>(p.dx,p.hj,args.kernel,wj,gj,lj,geometry);
         } else {

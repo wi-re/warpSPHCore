@@ -1,5 +1,6 @@
 #pragma once
 #include "nt_differential_pair.h"
+#include "kernels/explicit_value_derivatives.h"
 #include "coreOperations/native/csrc_curl/nt_curl_contract.h"
 namespace sph_native::differential {
 // Compact per-pair bars. Shared scalars belong to their physical population;
@@ -262,6 +263,14 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
                 value_pullback(p.hi,raw_bw/T(2),bhi);
                 value_pullback(p.hj,raw_bw/T(2),bhj);
             } else value_pullback(p.h,raw_bw,bh);
+        } else if(a.operation==Moments) {
+            auto moment_kernel_pullback=[&](T h,T weight,T& support_bar) {
+                T bg[D];for(int c=0;c<D;++c)bg[c]=raw_bg[c]*weight;
+                warp_compat::force_pullback<T,D>(p.dx,p.distance,h,a.kernel,T(0),bg,bx,support_bar);
+                warp_compat::value_pullback<T,D>(p.dx,p.distance,h,a.kernel,raw_bw*weight,bx,support_bar);
+            };
+            if(a.support==14||a.support==15){moment_kernel_pullback(p.hi,T(.5),bhi);moment_kernel_pullback(p.hj,T(.5),bhj);}
+            else moment_kernel_pullback(p.h,T(1),bh);
         } else if(force_operation(a.operation)) {
             if(a.support==14||a.support==15) {
                 T half[D];for(int d=0;d<D;++d)half[d]=raw_bg[d]/T(2);
@@ -276,7 +285,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         if (a.support==11) bhi+=bh;
         else if (a.support==12) bhj+=bh;
         else if (a.support==13) { bhi+=bh/T(2); bhj+=bh/T(2); }
-        else if ((a.operation==1||force_operation(a.operation)||a.operation==6||a.operation==Volume) ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
+        else if ((a.operation==1||force_operation(a.operation)||a.operation==6||a.operation==Volume||a.operation==Moments) ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
         result.add(QH,0,bhi); result.add(RH,0,bhj);
         for (int d=0; d<D; ++d) {
             const T radial=p.distance>T(0) ? (a.operation==5 ? T(2)*p.dx[d]*((T(.5)/p.distance)*br):br*p.dx[d]/p.distance):T(0);

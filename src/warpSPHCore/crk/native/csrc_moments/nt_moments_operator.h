@@ -20,20 +20,34 @@ template <class T, int D, bool General = false> struct Moments : SphOperation<T,
     SPH_HD void interact(const Query& q, const Record& r, Neighbor edge, State& sum) const {
         T dx[D], w, g;
         this->evaluate(q, r, edge, dx, w, g);
+        T gradient[D]={};
+        if constexpr(General) {
+            T squared=0;for(int c=0;c<D;++c)squared+=dx[c]*dx[c];const T distance=scalar_sqrt(squared);
+            const T eps=sizeof(T)==4?T(1e-7):T(1e-15),den=distance>eps?distance:eps;
+            auto one=[&](T h,T scale) {
+                if(h<=T(0)||distance>h)return;
+                const T slope=warp_compat::gradient_shape_derivative<T,D>(distance/h,this->kernel,radial_shape<T,D>(distance/h,this->kernel).d1);
+                const T factor=slope*normalization<T,D>(this->kernel)/power<T,D>(h,D+1);
+                for(int c=0;c<D;++c)gradient[c]+=scale*((dx[c]/den)*factor);
+            };
+            const T hj=this->reference_supports[edge.reference];
+            if(this->support==14||this->support==15){one(q.support,T(.5));one(hj,T(.5));}
+            else one(pairwise_support(q.support,hj,this->support),T(1));
+        } else for(int c=0;c<D;++c)gradient[c]=g*dx[c];
         const T volume = r.weight();
         constexpr int m1 = 1, m2 = m1 + D, dm0 = m2 + D * D;
         constexpr int dm1 = dm0 + D, dm2 = dm1 + D * D;
         sum.values[0] += volume * w;
         for (int a = 0; a < D; ++a) {
-            sum.values[m1 + a] += volume * w * dx[a];
-            sum.values[dm0 + a] += volume * g * dx[a];
+            sum.values[m1 + a] += dx[a] * (volume * w);
+            sum.values[dm0 + a] += volume * gradient[a];
             for (int b = 0; b < D; ++b) {
-                sum.values[m2 + a * D + b] += volume * w * dx[a] * dx[b];
-                sum.values[dm1 + a * D + b] += volume * (dx[a] * g * dx[b] + (a == b ? w : T(0)));
+                sum.values[m2 + a * D + b] += (dx[a] * dx[b]) * (volume * w);
+                sum.values[dm1 + a * D + b] += volume * (dx[a] * gradient[b] + w * T(a == b));
                 for (int c = 0; c < D; ++c)
                     sum.values[dm2 + c * D * D + a * D + b] += volume *
-                        (g * dx[c] * dx[a] * dx[b] + w *
-                         ((a == c ? dx[b] : T(0)) + (b == c ? dx[a] : T(0))));
+                        (dx[a] * dx[b] * gradient[c] + w *
+                         (dx[a] * T(b == c) + T(a == c) * dx[b]));
             }
         }
         if constexpr (General) ++sum.count;

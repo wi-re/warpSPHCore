@@ -147,6 +147,9 @@ class _Corrected(torch.autograd.Function):
 
 
 def apply_preparation(kind, inputs, options, topology, volumes=None, A=None, B=None):
+    if kind == 9:
+        from ..crk.native.nt_moments_backward import apply
+        return apply(inputs, options, topology, volumes)
     corrections = [None, volumes, A, B, None, None, None, None, None]
     flat = [*inputs, *corrections]
     # Apparent volumes and moments have no mass dependency. Do not retain an
