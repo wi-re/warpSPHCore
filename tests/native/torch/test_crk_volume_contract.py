@@ -205,3 +205,12 @@ def test_explicit_sparse_strided_deterministic_reverse(device,index,offset):
     finally:torch.use_deterministic_algorithms(prior)
     out=run(*values);g.paddedJ[2]=1
     with pytest.raises(RuntimeError,match='topology changed|modified by an inplace'):torch.autograd.grad(out,V,torch.ones_like(out))
+
+
+def test_ordinary_reverse_materializes_efficient_zero_cotangent(device):
+    *_,values,states,functions=case(device)
+    y=functions('native')(*values)
+    seed=torch._efficientzerotensor(y.shape,device=y.device,dtype=y.dtype)
+    bars=torch.autograd.grad(y,[x for x in values if x.requires_grad],seed,allow_unused=True)
+    for bar in bars:
+        if bar is not None:torch.testing.assert_close(bar,torch.zeros_like(bar),rtol=0,atol=0)

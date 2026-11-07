@@ -403,7 +403,7 @@ def warpOperationJVP(
         "referenceTangentState.densities": referenceTangentState.densities if referenceTangentState is not None else None,
     }
     providedGeometryTangents = [name for name, value in geometryTangentArgs.items() if value is not None]
-    if operationProperties.operation in _VALUE_JVP_OPERATIONS:
+    if operationProperties.operation in (*_VALUE_JVP_OPERATIONS, WarpOperation.Covariance):
         # Correction-only products use the same geometry launcher,
         # including ordinary forward AD through a field-only JVP relaunch.
         correctionTangents = {"tangentReferenceVolumes": tangentReferenceVolumes}

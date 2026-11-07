@@ -82,5 +82,6 @@ def nativeCapabilities():
                 curl_packed_field_layouts=True,
                 laplacian_explicit_jvp_reverse_order=1, laplacian_explicit_jvp_bounds_ad=False,
                 laplacian_field_only_jvp_bounds_ad=True,
+                covariance_explicit_jvp_reverse_order=1, covariance_explicit_jvp_bounds_ad=False,
                 explicit_jvp=True, density_position_hvp=True,
                 density_position_hvp_geometry_ad=False, density_position_hvp_vector_mass_ad_order=1)

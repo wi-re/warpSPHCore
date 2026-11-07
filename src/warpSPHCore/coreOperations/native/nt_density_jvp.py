@@ -1,5 +1,6 @@
 """Explicit density JVP and its first reverse, matching the Warp API."""
 import torch
+from ...native._inputs import materialize_cotangent
 from torch.autograd import forward_ad
 from torch.autograd.function import once_differentiable
 
@@ -21,7 +22,7 @@ class _Product(torch.autograd.Function):
         if cotangent is None:return (None,)*(len(values)+2)
         if ctx.topology.token()!=ctx.token:raise RuntimeError('CSR topology changed before native density JVP reverse')
         csc=ctx.topology.transpose()
-        bars=build().density_product(list(values[:17]),list(values[17:22]),cotangent.contiguous(),
+        bars=build().density_product(list(values[:17]),list(values[17:22]),materialize_cotangent(cotangent),
             [csc.edgeOffsets,csc.numNeighbors,csc.paddedJ],*ctx.options)
         mapping={0:0,1:1,2:2,3:3,4:4,17:5,18:6,19:7,20:8,21:9}
         result=[]
@@ -52,3 +53,14 @@ def compute(query,reference,domain,properties,adjacency,qt,rt):
     topology=CSRTopology(AdjacencyList(None,inputs[12],inputs[11],inputs[10],len(inputs[0]),len(inputs[1])))
     options=(properties.supportMode.value,properties.operationMode.value,properties.kernel.value)
     return _Product.apply(options,topology,*values)
+
+
+def apply(config,flat,tangents,query_mass=None,ignored=()):
+    """Reuse the density product for an ordinary classic-dual tangent."""
+    from ..._models import AdjacencyList
+    from ...native._topology import CSRTopology
+    flat=list(flat[:17]);flat[7]=flat[7].detach();flat[8]=flat[8].detach()
+    directions=[tangents[k] for k in (0,1,2,3,4)]
+    topology=CSRTopology(AdjacencyList(None,flat[12],flat[11],flat[10],len(flat[0]),len(flat[1])))
+    values=[v.contiguous() if v is not None else None for v in (*flat,*directions,query_mass,*ignored)]
+    return _Product.apply(config[1:4],topology,*values)

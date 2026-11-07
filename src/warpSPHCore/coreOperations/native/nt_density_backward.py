@@ -6,6 +6,7 @@ per-edge Jacobians are required. This bridge owns the ordinary density map;
 nt_density_jvp separately owns the explicit product and its supported reverse.
 """
 import torch
+from ...native._inputs import materialize_cotangent
 from torch.autograd import forward_ad
 from torch.autograd.function import once_differentiable
 from ..._models import AdjacencyList
@@ -49,7 +50,7 @@ class _Density(torch.autograd.Function):
         if any(ctx.mask & (1 << slot) for slot in _REFERENCE):
             csc = ctx.topology.transpose()
             transpose = [csc.edgeOffsets, csc.numNeighbors, csc.paddedJ]
-        gradients = build().corrected_vjp(_flat(inputs), cotangent.contiguous(),
+        gradients = build().corrected_vjp(_flat(inputs), materialize_cotangent(cotangent),
                                         transpose, ctx.mask, None, *ctx.config)
         result = []
         for slot, value in enumerate(inputs):
@@ -63,6 +64,11 @@ class _Density(torch.autograd.Function):
 
     @staticmethod
     def jvp(ctx, _config, _topology, *tangents):
+        from .nt_classic_jvp import product as classic_product
+        inputs=ctx.saved_tensors[:-1]
+        result=classic_product(ctx.config,inputs,tangents)
+        if result is not None:
+            return result
         from ...native._build import build
         from ...native._differential import _FirstOrderTangent
         inputs, example = ctx.saved_tensors[:-1], ctx.saved_tensors[-1]

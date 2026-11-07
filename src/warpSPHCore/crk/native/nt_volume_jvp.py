@@ -1,5 +1,6 @@
 """Explicit given-volume JVP and its first reverse, matching the Warp API."""
 import torch
+from ...native._inputs import materialize_cotangent
 from torch.autograd import forward_ad
 from torch.autograd.function import once_differentiable
 from .nt_preparation import prepare
@@ -21,7 +22,7 @@ class _Product(torch.autograd.Function):
         if cotangent is None:return (None,)*(len(values)+2)
         if ctx.topology.token()!=ctx.token:raise RuntimeError('CSR topology changed before native volume JVP reverse')
         csc=ctx.topology.transpose()
-        bars=build().crk_volume_product(list(values[:17]),list(values[18:22]),values[17],cotangent.contiguous(),
+        bars=build().crk_volume_product(list(values[:17]),list(values[18:22]),values[17],materialize_cotangent(cotangent),
             [csc.edgeOffsets,csc.numNeighbors,csc.paddedJ],ctx.options[1],ctx.options[2])
         mapping={0:0,1:1,2:2,3:3,17:8,18:4,19:5,20:6,21:7}
         result=[]

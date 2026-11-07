@@ -45,10 +45,32 @@ template<class T,int D>struct LaplacianProductPolicy {
             p.template reverse_kernel<true>(x,r,hi,hj,dt,ti,tj,bw,bdw,bg,bdg,bars,trace);
         }
     }
+    template<bool Reverse,int C,class PairType,class Read,class Raw>SPH_HD static void field_only(const PairType&p,Read read,Raw raw,const T(&x)[D],T radius,T hi,T hj,T lp,
+            pair_ad::Number<T,Reverse,C>B,pair_ad::Number<T,Reverse,C>omega,const pair_ad::Number<T,Reverse,C>(&G)[D],int64_t i,T* sum){
+        using S=pair_ad::Number<T,Reverse,C>;const S qi=read(25,0,1);S coeff[9];
+        const int fields=p.a.positive_divergence?D:p.a.fields;
+        for(int f=0;f<fields;++f)coeff[f]=(explicit_ad::divide(read(40,f),omega)-explicit_ad::divide(read(39,f),qi))*B;
+        auto emit=[&](int f,S value){if constexpr(Reverse)value.seed(p.cot[i*p.a.fields+f]);else sum[f]+=value.v;};
+        if(p.a.laplacian_mode==1){const S L=raw(lp,56,0);for(int f=0;f<fields;++f)emit(f,coeff[f]*L);return;}
+        if(radius<=T(0))return;
+        S xx[D],squared(0);for(int c=0;c<D;++c){xx[c]=read(0,c)-read(1,c);xx[c].v=x[c];squared+=xx[c]*xx[c];}
+        S rr=pair_ad::sqrt(squared);rr.v=radius;
+        const S hi_value=read(2,0),hj_value=read(3,0);
+        const S h=p.a.support==11?hi_value:p.a.support==12?hj_value:p.a.support==13?(hi_value+hj_value)/S(2):hi>hj?hi_value:hj_value;
+        const S den=rr+S(1e-8)*h;S normal[D];for(int c=0;c<D;++c)normal[c]=explicit_ad::matrix_divide(xx[c],den);
+        S projection(0);
+        if(p.a.laplacian_mode==4){const S second=rr+S(1e-12)*h;for(int c=0;c<D;++c)projection+=explicit_ad::matrix_divide(normal[c],second)*G[c];}
+        else{for(int c=0;c<D;++c)projection+=G[c]*normal[c];projection=explicit_ad::divide(projection,den);}
+        if(p.a.laplacian_mode==3){for(int base=0;base<fields;base+=D){S along(0);for(int c=0;c<D;++c)along+=coeff[base+c]*normal[c];
+            for(int c=0;c<D;++c)emit(base+c,(coeff[base+c]-S(D+2)*along*normal[c])*projection);}}
+        else for(int f=0;f<fields;++f)emit(f,S(-2)*coeff[f]*projection);
+    }
+
     template<bool Reverse,int C,class PairType,class Read,class Raw>SPH_HD static void field(const PairType& p,Read read,Raw raw,const T(&x)[D],T radius,T hi,T hj,T lp,T dlp,
         pair_ad::Number<T,Reverse,C> B,pair_ad::Number<T,Reverse,C> dB,pair_ad::Number<T,Reverse,C> omega,
-        const pair_ad::Number<T,Reverse,C>(&G)[D],const pair_ad::Number<T,Reverse,C>(&dG)[D],int64_t i,T* sum){
+        const pair_ad::Number<T,Reverse,C>(&G)[D],const pair_ad::Number<T,Reverse,C>(&dG)[D],int64_t i,int64_t j,T* sum){
         using S=pair_ad::Number<T,Reverse,C>;
+            if(p.only_fields){field_only<Reverse,C>(p,read,raw,x,radius,hi,hj,lp,B,omega,G,i,sum);return;}
             const S L=raw(lp,56,0),dL=raw(dlp,57,0),qomega=read(25,0,1);
             S q[9],dq[9];const int fields=p.a.positive_divergence?D:p.a.fields;
             // Default computes the field weights before its self-pair guard.
@@ -56,8 +78,13 @@ template<class T,int D>struct LaplacianProductPolicy {
             if(read_fields)for(int f=0;f<fields;++f){const S fi=explicit_ad::divide(read(13,f),qomega),fj=explicit_ad::divide(read(14,f),omega);
                 const S dfi=explicit_ad::divide(read(39,f),qomega),dfj=explicit_ad::divide(read(40,f),omega);
                 q[f]=(fj-fi)*B;dq[f]=(fj-fi)*dB+(dfj-dfi)*B;}
-            S xx[D],dd[D];for(int c=0;c<D;++c){xx[c]=read(0,c)-read(1,c);xx[c].v=x[c];dd[c]=read(26,c)-read(27,c);}
-            bool allowed=true;if(p.a.positive_divergence){S gate(0);for(int c=0;c<D;++c)gate+=xx[c]*q[c];allowed=gate.v>=0;}
+            S xx[D],dd[D];for(int c=0;c<D;++c){xx[c]=read(0,c)-read(1,c);xx[c].v=x[c];dd[c]=read(26,c)-read(27,c);if(p.bounds_ad)dd[c].v=p.relative_tangent(i,j,c);}
+            bool allowed=true;if(p.a.positive_divergence){
+                if(p.gate_query&&p.gate_reference){T gate=0;for(int c=0;c<D;++c)
+                    gate+=x[c]*((p.gate_reference[j*p.a.fields+c]/omega.v-p.gate_query[i*p.a.fields+c]/qomega.v)*B.v);
+                    allowed=gate>=0;
+                }else{S gate(0);for(int c=0;c<D;++c)gate+=xx[c]*q[c];allowed=gate.v>=0;}
+            }
             auto emit=[&](int f,S result){if constexpr(Reverse)result.seed(p.cot[i*p.a.fields+f]);else sum[f]+=result.v;};
             if(allowed&&p.a.laplacian_mode==1){for(int f=0;f<fields;++f)emit(f,dq[f]*L+q[f]*dL);}
             else if(allowed&&radius>0){

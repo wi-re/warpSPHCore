@@ -1,5 +1,6 @@
 """First-order covariance products with deterministic CSR/CSC ownership."""
 import torch
+from ...native._inputs import materialize_cotangent
 from torch.autograd import forward_ad
 from torch.autograd.function import once_differentiable
 from ..._models import AdjacencyList
@@ -56,7 +57,7 @@ class _Covariance(torch.autograd.Function):
         transpose=[]
         if any(ctx.mask&(1<<slot) for slot in REFERENCE):
             csc=ctx.topology.transpose();transpose=[csc.edgeOffsets,csc.numNeighbors,csc.paddedJ]
-        gradients=build().corrected_vjp(list(inputs[:26]),cotangent.contiguous(),transpose,ctx.mask,None,*ctx.config[:8])
+        gradients=build().corrected_vjp(list(inputs[:26]),materialize_cotangent(cotangent),transpose,ctx.mask,None,*ctx.config[:8])
         result=[]
         for slot,value in enumerate(inputs):
             gradient=gradients[slot] if slot in ctx.used else None
@@ -67,6 +68,11 @@ class _Covariance(torch.autograd.Function):
 
     @staticmethod
     def jvp(ctx,_config,_topology,*tangents):
+        from .nt_classic_jvp import product as classic_product
+        inputs=ctx.saved_tensors[:-1]
+        result=classic_product(ctx.config,inputs,tangents)
+        if result is not None:
+            return (result,None) if ctx.config[8] else result
         from ...native._differential import _FirstOrderTangent
         inputs=ctx.saved_tensors[:-1]
         directions=[t.contiguous() if slot in ctx.used and t is not None else None for slot,t in enumerate(tangents[:26])]

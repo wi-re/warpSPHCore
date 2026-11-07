@@ -1,5 +1,6 @@
 """Full explicit curl products and their owned CSR/CSC first reverse."""
 import torch
+from ...native._inputs import materialize_cotangent
 from torch.autograd.function import once_differentiable
 from ..._models import AdjacencyList
 from ...native._topology import CSRTopology
@@ -22,13 +23,13 @@ class _Product(torch.autograd.Function):
         if cotangent is None:return (None,)*(len(values)+2)
         if ctx.topology.token()!=ctx.token:raise RuntimeError('CSR topology changed before native curl JVP reverse')
         csc=ctx.topology.transpose()
-        bars=build().curl_product(list(values[:26]),list(values[26:52]),cotangent.contiguous(),
+        bars=build().curl_product(list(values[:26]),list(values[26:52]),materialize_cotangent(cotangent),
             [csc.edgeOffsets,csc.numNeighbors,csc.paddedJ],*ctx.options)
         return None,None,*(None if value is None or not ctx.needs_input_grad[k+2] or k in (7,8) else
             bars[k] if k<52 else torch.zeros_like(value) for k,value in enumerate(values))
 
 
-def apply(config,flat,tangents,query_mass=None):
+def apply(config,flat,tangents,query_mass=None,ignored=()):
     flat=list(flat);flat[7]=flat[7].detach();flat[8]=flat[8].detach();tangents=list(tangents)
     topology=CSRTopology(AdjacencyList(None,flat[12],flat[11],flat[10],len(flat[0]),len(flat[1])))
     result=[];_,components=field_layout(flat)
@@ -53,11 +54,11 @@ def apply(config,flat,tangents,query_mass=None):
                     omega=scalar[25][:,None]
                     scalar[13]=scalar[13]/omega
                     if tangent[13] is not None:tangent[13]=tangent[13]/omega
-                gradients.append(gradient_product(config,scalar,tangent,query_mass))
+                gradients.append(gradient_product(config,scalar,tangent,query_mass,ignored=ignored))
             x,y,z=gradients
             output=torch.stack((z[...,1]-y[...,2],x[...,2]-z[...,0],y[...,0]-x[...,1]),1)
             result.append((output,width))
         else:
-            inputs=[v.contiguous() if v is not None else None for v in (*values,*directions,query_mass)]
+            inputs=[v.contiguous() if v is not None else None for v in (*values,*directions,query_mass,*ignored)]
             result.append((_Product.apply(config[1:5],topology,*inputs),width))
     return finish(flat,result)

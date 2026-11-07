@@ -1,6 +1,7 @@
 """Full interpolation product and owned reverse, including coefficient roles."""
 import math
 import torch
+from ...native._inputs import materialize_cotangent
 from torch.autograd.function import once_differentiable
 from ..._models import AdjacencyList
 from ...native._topology import CSRTopology
@@ -25,7 +26,7 @@ class _Product(torch.autograd.Function):
         if cotangent is None:return (None,)*(len(values)+2)
         if ctx.topology.token()!=ctx.token:raise RuntimeError('CSR topology changed before native interpolation JVP reverse')
         csc=ctx.topology.transpose()
-        bars=build().interpolate_product(list(values[:26]),list(values[26:52]),cotangent.contiguous(),
+        bars=build().interpolate_product(list(values[:26]),list(values[26:52]),materialize_cotangent(cotangent),
             [csc.edgeOffsets,csc.numNeighbors,csc.paddedJ],*ctx.options)
         mapping={slot:k for k,slot in enumerate(_SLOTS)};mapping.update({slot+26:k+10 for k,slot in enumerate(_SLOTS)})
         volume=values[18] is not None;crk=values[19] is not None;result=[]
@@ -39,7 +40,7 @@ class _Product(torch.autograd.Function):
         return None,None,*result
 
 
-def apply(config,flat,tangents,query_mass=None):
+def apply(config,flat,tangents,query_mass=None,ignored=()):
     flat=list(flat);flat[7]=flat[7].detach();flat[8]=flat[8].detach()
     # The explicit reference launcher never receives query densities.
     flat[16]=None;tangents=list(tangents);tangents[16]=None
@@ -49,6 +50,6 @@ def apply(config,flat,tangents,query_mass=None):
         directions=list(tangents)
         if directions[14] is not None:
             field=directions[14];directions[14]=field.reshape(len(field),math.prod(field.shape[1:]))[:,start:start+width].contiguous()
-        inputs=[v.contiguous() if v is not None else None for v in (*values,*directions,query_mass)]
+        inputs=[v.contiguous() if v is not None else None for v in (*values,*directions,query_mass,*ignored)]
         result.append(_Product.apply(config[1:4],topology,*inputs))
     return torch.cat(result,1).reshape(flat[0].shape[0],*flat[14].shape[1:])

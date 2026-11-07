@@ -9,6 +9,7 @@
 namespace sph_native::force_jvp {
 using neighborhood::Owner;
 template<class T,int D>struct LaplacianProductPolicy;
+template<class T,int D>struct CovarianceProductPolicy;
 constexpr int Slots=26,Capacity=1536;
 // The Laplacian field trace is consumed before its kernel pullback. Reuse its
 // storage for those later traces instead of stacking all estimator branches.
@@ -18,21 +19,43 @@ template<class T>union LaplacianTraceStorage {
     explicit_ad::Trace<T,512> force;
     SPH_HD LaplacianTraceStorage(){}
 };
-struct Buffers{OptionalTensors flat,directions;Tensors transpose,outputs;Tensor cotangent;bool consistent=false;};
+struct Buffers{OptionalTensors flat,directions;Tensors transpose,outputs;Tensor cotangent;bool consistent=false,bounds_ad=false;OptionalTensors gates;};
 template<int D>struct Layout{
     SPH_HD static bool query(int k){k%=Slots;return !(k==1||k==3||k==4||k==14||k==15||k==18||k==23);}
-    SPH_HD static int width(int k,int f){k%=Slots;switch(k){case 0:case 1:case 20:case 21:return D;
+    SPH_HD static int width(int k,int f){k%=Slots;switch(k){case 0:case 1:case 7:case 8:case 20:case 21:return D;
         case 22:case 24:return D*D;case 13:case 14:return f;
         case 2:case 3:case 4:case 15:case 16:case 17:case 18:case 19:case 23:case 25:return 1;default:return 0;}}
     SPH_HD static int offset(int k,int f){const bool owner=query(k);int at=0;for(int c=0;c<k;++c)if(query(c)==owner)at+=width(c,f);return at;}
-    static constexpr int Q=3*D+3*D*D+5,R=D+D*D+5;
+    static constexpr int Q=5*D+3*D*D+5,R=D+D*D+5;
 };
 template<class T,int D>struct Bars{T q[2*Layout<D>::Q]={},r[2*Layout<D>::R]={};
     SPH_HD void add(int slot,int at,int fields,T value){(Layout<D>::query(slot)?q:r)[Layout<D>::offset(slot,fields)+at]+=value;}
 };
 template<class T,int D,int Operation>struct Pair{
-    RowArgs<T,D> a;const T *v[Slots],*t[Slots],*cot;T* output[52];bool consistent=false;
-    SPH_HD bool geometry()const{return t[0]||t[1]||t[2]||t[3];}
+    RowArgs<T,D> a;const T *v[Slots],*t[Slots],*cot;T* output[52];bool consistent=false,bounds_ad=false,only_fields=false;const T* gate_query=nullptr;const T* gate_reference=nullptr;
+    SPH_HD bool geometry()const{return t[0]||t[1]||t[2]||t[3]||(bounds_ad&&(t[7]||t[8]));}
+    SPH_HD bool positive_pair(int64_t i,int64_t j,const T(&x)[D])const{
+        const T m=value(4,j),rhoi=value(16,i,T(1)),rhoj=value(15,j,T(1));
+        const T weight=a.scheme==2?m*rhoi/(rhoj*rhoj):v[18]?value(18,j):m/rhoj;
+        const T qi=value(25,i,T(1)),rj=value(23,j,T(1));T gate=0;
+        for(int c=0;c<D;++c){const T fi=(gate_query?gate_query[i*a.fields+c]:value(13,i*a.fields+c))/qi;
+            const T fj=(gate_reference?gate_reference[j*a.fields+c]:value(14,j*a.fields+c))/rj;
+            gate+=x[c]*((fj-fi)*weight);}
+        return gate>=0;
+    }
+    SPH_HD T winding(int64_t i,int64_t j,int c)const{
+        if(!a.periodic[c])return T(0);
+        const T length=a.hi[c]-a.lo[c],half=length/T(2),delta=a.qx[i*D+c]-a.rx[j*D+c];
+        if(delta>=-half&&delta<half)return T(0);
+        if(delta>=half&&delta<length)return T(1);
+        if(delta<-half&&delta>=-length)return T(-1);
+        return scalar_floor((delta+half)/length);
+    }
+    SPH_HD T relative_tangent(int64_t i,int64_t j,int c)const{
+        T result=tangent(0,i*D+c)-tangent(1,j*D+c);
+        if(bounds_ad)result+=winding(i,j,c)*(tangent(7,c)-tangent(8,c));
+        return result;
+    }
     SPH_HD T value(int slot,int64_t at,T fallback=T(0))const{return v[slot]?v[slot][at]:fallback;}
     SPH_HD T tangent(int slot,int64_t at)const{return t[slot]?t[slot][at]:T(0);}
     SPH_HD void gradient_value(const T(&x)[D],T radius,T h,T(&g)[D])const{
@@ -89,7 +112,8 @@ template<class T,int D,int Operation>struct Pair{
         Bars<T,D> bars{};if(!query_allowed(a.qkind[i],a.direction)||!reference_allowed(a.rkind[j],a.direction))return bars;
         if constexpr(Operation==4){if constexpr(D==1)return bars;else if(a.fields<D)return bars;}
         T x[D],dt[D];const T radius=QueryGeometry<T,D>(a.qx+i*D,a.lo,a.hi,a.periodic).distance(a.rx+j*D,x);
-        for(int c=0;c<D;++c)dt[c]=tangent(0,i*D+c)-tangent(1,j*D+c);
+        if constexpr(Operation==5)if(bounds_ad&&a.positive_divergence&&(only_fields||(gate_query&&gate_reference))&&!positive_pair(i,j,x))return bars;
+        for(int c=0;c<D;++c)dt[c]=relative_tangent(i,j,c);
         const T hi=a.qh[i],hj=a.rh[j],ti=tangent(2,i),tj=tangent(3,j);
         T w=0,dw=0,g[D]={},dg[D]={},lp=0,dlp=0;
         if constexpr(Operation==5)LaplacianProductPolicy<T,D>::kernel(*this,x,radius,hi,hj,dt,ti,tj,w,dw,g,dg,lp,dlp);
@@ -104,10 +128,16 @@ template<class T,int D,int Operation>struct Pair{
             return S::leaf(data?data[at]:fallback,0,trace,slot,c,Reverse&&data);};
         auto raw=[&](T number,int slot,int c){const bool active=(slot!=53&&slot!=55&&slot!=57)||geometry();return S::leaf(number,0,trace,slot,c,Reverse&&active);};
         S W=raw(w,52,0),dW=raw(dw,53,0),G[D],dG[D];for(int c=0;c<D;++c){G[c]=raw(g[c],54,c);dG[c]=raw(dg[c],55,c);}
-        if(v[19]){
+        if(v[19]&&Operation==5&&only_fields){
+            const S A=read(19,0);S poly(1),xx[D],B[D],ga[D],gb[D*D];
+            for(int c=0;c<D;++c){B[c]=read(20,c);ga[c]=read(21,c);xx[c]=read(0,c)-read(1,c);xx[c].v=x[c];poly+=B[c]*xx[c];}
+            for(int c=0;c<D*D;++c)gb[c]=read(22,c);
+            for(int c=0;c<D;++c){S product(0);for(int e=0;e<D;++e)product+=gb[c*D+e]*xx[e];
+                G[c]=(A*W)*B[c]+(A*poly)*G[c]+(poly*W)*ga[c]+(A*W)*product;}
+        }else if(v[19]){
             const S A=read(19,0),dA=read(45,0);S B[D],dB[D],ga[D],dga[D],xx[D],dd[D],gb[D*D],dgb[D*D],poly(1),dp1(0),dp2(0);
             for(int c=0;c<D;++c){B[c]=read(20,c);dB[c]=read(46,c);ga[c]=read(21,c);dga[c]=read(47,c);
-                xx[c]=read(0,c)-read(1,c);xx[c].v=x[c];dd[c]=read(26,c)-read(27,c);
+                xx[c]=read(0,c)-read(1,c);xx[c].v=x[c];dd[c]=read(26,c)-read(27,c);if(bounds_ad)dd[c].v=dt[c];
                 poly+=B[c]*xx[c];dp1+=dB[c]*xx[c];dp2+=B[c]*dd[c];}
             for(int c=0;c<D*D;++c){gb[c]=read(22,c);dgb[c]=read(48,c);}
             const S dp=dp1+dp2;
@@ -126,14 +156,18 @@ template<class T,int D,int Operation>struct Pair{
             for(int c=0;c<D;++c)dout[c]=dterm1[c]+dterm2[c]+dterm3[c]+dterm4[c];
             for(int c=0;c<D;++c){G[c]=out[c];dG[c]=dout[c];}
         }
-        if(v[24]){S L[D*D],dL[D*D],o[D],dO[D],dO1[D],dO2[D];for(int c=0;c<D*D;++c){L[c]=read(24,c);dL[c]=read(50,c);}
+        if(v[24]&&Operation==5&&only_fields){S out[D];for(int c=0;c<D;++c){out[c]=S(0);for(int e=0;e<D;++e)out[c]+=read(24,c*D+e)*G[e];}for(int c=0;c<D;++c)G[c]=out[c];}
+        else if(v[24]){S L[D*D],dL[D*D],o[D],dO[D],dO1[D],dO2[D];for(int c=0;c<D*D;++c){L[c]=read(24,c);dL[c]=read(50,c);}
             for(int c=0;c<D;++c){dO1[c]=S(0);for(int e=0;e<D;++e)dO1[c]+=dL[c*D+e]*G[e];}
             for(int c=0;c<D;++c){dO2[c]=S(0);for(int e=0;e<D;++e)dO2[c]+=L[c*D+e]*dG[e];}
             for(int c=0;c<D;++c)dO[c]=dO1[c]+dO2[c];
             for(int c=0;c<D;++c){o[c]=S(0);for(int e=0;e<D;++e)o[c]+=L[c*D+e]*G[e];}
             for(int c=0;c<D;++c){G[c]=o[c];dG[c]=dO[c];}}
         const S m=read(4,0),rhoi=read(16,0,1),rhoj=read(15,0,1),tm=read(30,0),tri=read(42,0),trj=read(41,0);
-        S V(0),dV(0);
+        S V(0),dV(0),A(0),B(0),dA(0),dB(0);
+        if(Operation==5&&only_fields){B=a.scheme==2?explicit_ad::divide(m*rhoi,rhoj*rhoj):v[18]?read(18,0):explicit_ad::divide(m,rhoj);}
+        else{
+
         if constexpr(Operation==3){if(consistent&&a.scheme!=2){
             if(v[18]){const S volume=read(18,0),dv=read(44,0);V=explicit_ad::divide(volume*rhoj,rhoi);
                 dV=explicit_ad::divide(dv*rhoj+volume*trj,rhoi)-explicit_ad::divide(volume*rhoj*tri,rhoi*rhoi);}
@@ -145,10 +179,13 @@ template<class T,int D,int Operation>struct Pair{
             V=v[18]?read(18,0):explicit_ad::divide(m,rhoj);
             dV=v[18]?read(44,0):explicit_ad::divide(tm,rhoj)-explicit_ad::divide(m*trj,rhoj*rhoj);
         }
-        S A(0),B=V,dA(0),dB=dV;
+        B=V;dB=dV;
+        if constexpr(Operation!=7){
         if(a.scheme==3){A=-V;dA=-dV;}else if(a.scheme==4){A=V;dA=dV;}
         else if(a.scheme==2){A=explicit_ad::divide(m,rhoi);dA=explicit_ad::divide(tm,rhoi)-explicit_ad::divide(m*tri,rhoi*rhoi);
             B=explicit_ad::divide(m*rhoi,rhoj*rhoj);dB=explicit_ad::divide(tm*rhoi,rhoj*rhoj)+explicit_ad::divide(m*tri,rhoj*rhoj)-explicit_ad::divide(S(2)*m*rhoi*trj,rhoj*rhoj*rhoj);}
+        }
+        }
         const S omega=read(23,0,1);
         if constexpr(Operation==2){
             for(int f=0;f<a.fields;++f){const S fi=read(13,f),fj=explicit_ad::divide(read(14,f),omega),dfi=read(39,f),dfj=explicit_ad::divide(read(40,f),omega);
@@ -180,13 +217,19 @@ template<class T,int D,int Operation>struct Pair{
                 if constexpr(Reverse)result.seed(cot[i*groups+group]);else sum[group]+=result.v;
             }
         }
-        if constexpr(Operation==5)LaplacianProductPolicy<T,D>::template field<Reverse,Capacity>(*this,read,raw,x,radius,hi,hj,lp,dlp,B,dB,omega,G,dG,i,sum);
+        if constexpr(Operation==7)CovarianceProductPolicy<T,D>::template field<Reverse,Capacity>(*this,read,x,V,dV,G,dG,i,sum);
+        if constexpr(Operation==5)LaplacianProductPolicy<T,D>::template field<Reverse,Capacity>(*this,read,raw,x,radius,hi,hj,lp,dlp,B,dB,omega,G,dG,i,j,sum);
         if constexpr(Reverse){trace->reverse();T bw=0,bdw=0,bg[D]={},bdg[D]={},bl=0,bdl=0;
             for(int k=0;k<trace->inputs;++k){const auto leaf=trace->leaves[k];const T bar=trace->nodes[leaf.node].bar;
                 if(leaf.slot==52)bw+=bar;else if(leaf.slot==53)bdw+=bar;else if(leaf.slot==54)bg[leaf.at]+=bar;else if(leaf.slot==55)bdg[leaf.at]+=bar;
                 else if(leaf.slot==56)bl+=bar;else if(leaf.slot==57)bdl+=bar;else bars.add(leaf.slot,leaf.at,a.fields,bar);}
             if constexpr(Operation==5)LaplacianProductPolicy<T,D>::backward(*this,x,radius,hi,hj,dt,ti,tj,bw,bdw,bg,bdg,bl,bdl,bars,storage);
-            else reverse_kernel(x,radius,hi,hj,dt,ti,tj,bw,bdw,bg,bdg,bars);}
+            else reverse_kernel(x,radius,hi,hj,dt,ti,tj,bw,bdw,bg,bdg,bars);
+            if(bounds_ad)for(int c=0;c<D;++c){const T turns=winding(i,j,c);if(turns==T(0))continue;
+                const T bx=bars.q[Layout<D>::offset(0,a.fields)+c],bt=bars.q[Layout<D>::offset(26,a.fields)+c];
+                bars.add(7,c,a.fields,turns*bx);bars.add(8,c,a.fields,-turns*bx);
+                bars.add(33,c,a.fields,turns*bt);bars.add(34,c,a.fields,-turns*bt);
+            }}
         return bars;
     }
 };
@@ -197,14 +240,16 @@ template<class T,int D,int Operation>struct Pullback{Pair<T,D,Operation> p;
         const auto bars=p.template interact<true>(Side==Owner::Query?owner:n.reference,Side==Owner::Query?n.reference:owner,nullptr);
         for(int c=0;c<2*(Side==Owner::Query?Layout<D>::Q:Layout<D>::R);++c)sum.values[c]+=(Side==Owner::Query?bars.q:bars.r)[c];}
     template<Owner Side,class State>SPH_HD void finish(int64_t owner,const State& sum)const{
-        for(int k=0;k<52;++k)if(Layout<D>::query(k)==(Side==Owner::Query)&&p.output[k]){const int width=Layout<D>::width(k,p.a.fields),at=Layout<D>::offset(k,p.a.fields);
+        for(int k=0;k<52;++k)if(((k%26!=7&&k%26!=8)||p.bounds_ad)&&Layout<D>::query(k)==(Side==Owner::Query)&&p.output[k]){const int width=Layout<D>::width(k,p.a.fields),at=Layout<D>::offset(k,p.a.fields);
             for(int c=0;c<width;++c)p.output[k][owner*width+c]=sum.values[at+c];}}
 };
 template<class T,int D,int Operation>struct ProductRow{Pair<T,D,Operation> p;SPH_HD void operator()(int64_t i)const{
     T sum[27]={};for(int64_t k=0;k<p.a.counts[i];++k)p.template interact<false>(i,p.a.neighbors[p.a.offsets[i]+k],sum);
-    const int width=Operation==2?p.a.fields*D:Operation==3?p.a.fields/D:Operation==4?(D==1?1:D==2?p.a.fields/2:p.a.fields):p.a.fields;for(int c=0;c<width;++c)p.a.output[i*width+c]=sum[c];}};
+    const int width=Operation==7?D*D:Operation==2?p.a.fields*D:Operation==3?p.a.fields/D:Operation==4?(D==1?1:D==2?p.a.fields/2:p.a.fields):p.a.fields;for(int c=0;c<width;++c)p.a.output[i*width+c]=sum[c];}};
 template<int Operation>struct Rows{const Buffers& b;template<class T,int D,class Launch>void operator()(int64_t n,RowArgs<T,D>a,const Launch&launch)const{
-    Pair<T,D,Operation>p{a,{}, {},b.cotangent.defined()?ptr<T>(b.cotangent):nullptr,{},b.consistent};
+    Pair<T,D,Operation>p{a,{}, {},b.cotangent.defined()?ptr<T>(b.cotangent):nullptr,{},b.consistent,b.bounds_ad,false};
+    p.only_fields=Operation==5&&b.bounds_ad;for(int k=0;k<Slots;++k)if(k!=13&&k!=14&&b.directions[k])p.only_fields=false;
+    if(b.gates.size()==2){p.gate_query=ptr<T>(*b.gates[0]);p.gate_reference=ptr<T>(*b.gates[1]);}
     for(int k=0;k<Slots;++k){p.v[k]=b.flat[k]&&(b.flat[k]->scalar_type()==ScalarType::Float||b.flat[k]->scalar_type()==ScalarType::Double)?ptr<T>(*b.flat[k]):nullptr;p.t[k]=b.directions[k]?ptr<T>(*b.directions[k]):nullptr;}
     if(!b.cotangent.defined()){launch(n,ProductRow<T,D,Operation>{p});return;}
     for(int k=0;k<52;++k)p.output[k]=b.outputs[k].numel()?b.outputs[k].mutable_data_ptr<T>():nullptr;

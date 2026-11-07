@@ -1,5 +1,6 @@
 """First-order CRK volume products with deterministic CSR/CSC ownership."""
 import torch
+from ...native._inputs import materialize_cotangent
 from torch.autograd import forward_ad
 from torch.autograd.function import once_differentiable
 from ...native._differential import REFERENCE
@@ -44,7 +45,7 @@ class _Volume(torch.autograd.Function):
         transpose=[]
         if any(ctx.mask&(1<<slot) for slot in REFERENCE):
             csc=ctx.topology.transpose();transpose=[csc.edgeOffsets,csc.numNeighbors,csc.paddedJ]
-        gradients=build().corrected_vjp(list(inputs[:26]),cotangent.reshape(-1,1).contiguous(),transpose,ctx.mask,cache,*ctx.config[:8])
+        gradients=build().corrected_vjp(list(inputs[:26]),materialize_cotangent(cotangent).reshape(-1,1),transpose,ctx.mask,cache,*ctx.config[:8])
         result=[]
         for slot,value in enumerate(inputs):
             gradient=gradients[slot] if slot in ctx.used else None

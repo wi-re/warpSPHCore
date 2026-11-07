@@ -120,6 +120,14 @@ def test_field_only_reverse_retains_bounds_and_corrections(device,mode,scheme,co
             if corrected:options.update(referenceVolumes=x[13],crkState=sph.CRKState(x[11],x[12],x[15],x[16]),gradHState=sph.GradHState(x[19],x[17]),renormalizationState=sph.RenormalizationState(x[18]))
             return (native if backend=='native' else sph.warpOperationJVP)(qi,p,domain,**options)
         return run
+    if positive:
+        # Warp's public field-only helper filters the supplied direction as a
+        # fresh primal. That is not the derivative of the primal-mask branch.
+        # Qualify the native extension against the ordinary Warp equation on
+        # an independently frozen primal mask, including packed tails.
+        from _support.positive_field_product_contract import case as positive_case
+        values,product,reference,_=positive_case(device,mode,dtype=get_torch_precision(),corrected=corrected,scheme=scheme,field_shape=shape)
+        functions=lambda backend:product if backend=='native' else lambda *x:reference('warp',*x)
     compare(values,functions,1e-2 if v[0].dtype==torch.float32 else 2e-7)
 
 

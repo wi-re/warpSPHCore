@@ -33,7 +33,9 @@ template <class T, int D> SPH_HD void laplacian_vjp(T r, T h, int kernel, T bar,
                  t * (-T(D + 1) * k1 / h - q * k2));
 }
 // Naive Laplacian's taped reverse is distinct from its explicit analytic JVP.
-// Keep quotient/power pullbacks before their reductions: refactoring these
+// Preserve adj_div's seed * quotient / denominator order, including weighted
+// seeds near the singular overflow threshold. Keep quotient/power pullbacks
+// before their reductions: refactoring these
 // products suppresses observable overflow in the singular viscosity kernel.
 template<class T,int D> SPH_HD void laplacian_pullback(const T (&dx)[D],T r,T h,
         int kernel,T bar,T (&bx)[D],T& bh) {
@@ -46,23 +48,23 @@ template<class T,int D> SPH_HD void laplacian_pullback(const T (&dx)[D],T r,T h,
     const T A=r+eps*h,A2=A*A,A3=A2*A,s=R/A2,t=-R/A3+T(D)/A;
     const T bs=k2*bar,bt=k1*bar,bk1=t*bar,bk2=s*bar;
     const T bR=bs/A2-bt/A3;
-    T bA=-T(D)/(A*A)*bt;
-    const T bA3=R/(A3*A3)*bt;
+    T bA=-bt*(T(D)/A)/A;
+    const T bA3=bt*(R/A3)/A3;
     bA+=A2*bA3+A*(A*bA3)+A*(A*bA3);
-    const T bA2=-R/(A2*A2)*bs;
+    const T bA2=-bs*(R/A2)/A2;
     bA+=A*bA2+A*bA2;
-    const T b1=C/h1*bk1,b2=C/h2*bk2;
+    const T b1=(bk1/h1)*C,b2=(bk2/h2)*C;
     T bq=b1*f.d2+b2*f.d3;
     if(kernel==40) {
         const T q2=q*q,q3=q2*q;
-        const T bq2=T(.5)/(q2*q2)*b1,bq3=-T(1)/(q3*q3)*b2;
+        const T bq2=b1*(T(.5)/q2)/q2,bq3=-b2*(T(1)/q3)/q3;
         bq=(-T(3)*q+T(2))*b1-T(3)*b2;
         bq+=q*bq2+q*bq2;
         bq+=q2*bq3+q*(q*bq3)+q*(q*bq3);
     }
-    bh+=-r/(h*h)*bq+eps*bA;
-    bh+=-d1*C/(h1*h1)*bk1*T(D+1)*power<T,D>(h,D);
-    bh+=-f.d2*C/(h2*h2)*bk2*T(D+2)*power<T,D>(h,D+1);
+    bh+=-bq*(r/h)/h+eps*bA;
+    bh+=(-bk1*k1/h1)*T(D+1)*power<T,D>(h,D);
+    bh+=(-bk2*k2/h2)*T(D+2)*power<T,D>(h,D+1);
     const T den=r>eps?r:eps,br=bA+bq/h;
     for(int d=0;d<D;++d)bx[d]+=T(2)*dx[d]*bR+(dx[d]/den)*br;
 }

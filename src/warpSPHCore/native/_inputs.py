@@ -10,6 +10,15 @@ import torch
 from ._checks import check_execution
 
 
+def materialize_cotangent(value):
+    """Give native pointer consumers allocated, contiguous cotangent storage.
+
+    Forward-AD composition can supply an efficient zero tensor: its logical
+    shape is nonempty but contiguous() retains the null data pointer.
+    """
+    return value.clone() if torch._is_zerotensor(value) else value.contiguous()
+
+
 def prepare_geometry(query, reference, domain, *, allow_reverse=False, allow_forward=False):
     """Pack particle/domain geometry shared by search and pair operators."""
     if domain.dim != query.positions.shape[-1]:

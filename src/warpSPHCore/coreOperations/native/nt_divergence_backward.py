@@ -5,6 +5,7 @@ reductions retain one owner per physical row, with no floating atomics.
 """
 import math
 import torch
+from ...native._inputs import materialize_cotangent
 from torch.autograd import forward_ad
 from torch.autograd.function import once_differentiable
 from ..._models import AdjacencyList
@@ -112,7 +113,7 @@ class _Divergence(torch.autograd.Function):
         if any(ctx.mask & (1 << slot) for slot in REFERENCE):
             csc = ctx.topology.transpose()
             transpose = [csc.edgeOffsets, csc.numNeighbors, csc.paddedJ]
-        gradients = build().corrected_vjp(list(inputs[:26]), cotangent.contiguous(),
+        gradients = build().corrected_vjp(list(inputs[:26]), materialize_cotangent(cotangent),
                                         transpose, ctx.mask, None, *ctx.config[:8])
         result = []
         for slot, value in enumerate(inputs):
@@ -126,6 +127,11 @@ class _Divergence(torch.autograd.Function):
 
     @staticmethod
     def jvp(ctx, _config, _topology, *tangents):
+        from .nt_classic_jvp import product as classic_product
+        inputs=ctx.saved_tensors[:-1]
+        result=classic_product(ctx.config,inputs,tangents)
+        if result is not None:
+            return result
         from ...native._build import build
         from ...native._differential import _FirstOrderTangent
         inputs, example = ctx.saved_tensors[:-1], ctx.saved_tensors[-1]
