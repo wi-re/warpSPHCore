@@ -35,7 +35,7 @@ template <class T,int D> struct Pullback {
             final_bars[0]=total==0 ? T(0):-incoming[0]/(total*total); incoming=final_bars;
         } else if (args.operation==Consistency) {
             const T numerator=cache[i*cache_width],denominator=cache[i*cache_width+1];
-            if (denominator!=0) { final_bars[0]=incoming[0]/denominator; final_bars[1]=-incoming[0]*numerator/(denominator*denominator); }
+            if (denominator!=0) { final_bars[0]=incoming[0]/denominator; final_bars[1]=-(incoming[0]*(numerator/denominator))/denominator; }
             incoming=final_bars;
         }
         const auto bars=differential::backward(args,arrays,i,j,p,incoming,consistent,geometry);

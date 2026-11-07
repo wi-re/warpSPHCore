@@ -3,7 +3,7 @@ import torch
 import warpSPHCore as sph
 
 
-def case(device, dimension=2, dtype=torch.float64, kernel=None):
+def case(device, dimension=2, dtype=torch.float64, kernel=None, *, consistency=False):
     # Every fluid reference estimates its volume against the boundary anchor.
     # This excludes self-pair singularities without modifying a kernel or its
     # reference formula. The moment cloud remains full rank in 1D-3D, including
@@ -34,6 +34,17 @@ def case(device, dimension=2, dtype=torch.float64, kernel=None):
             q = sph.ParticleState(x[0], x[2], torch.ones_like(x[2]), qkind, torch.ones_like(x[2]))
             r = sph.ParticleState(x[1], x[3], torch.ones_like(x[3]), rkind, torch.ones_like(x[3]))
             qt, rt = sph.ParticleTangentState(x[4], x[6], None), sph.ParticleTangentState(x[5], x[7], None)
+            if consistency:
+                if backend == 'native':
+                    from warpSPHCore.crk.native.nt_factors import prepareCRK
+                    prepared=prepareCRK(q,domain,kernel,sph.OperationDirection.TrueAllToToAll,graph,r,
+                        referenceVolumeMode=sph.OperationDirection.FluidToBoundary,referenceAdjacency=reference_graph)
+                    area,density,state=prepared.queryVolumes,prepared.consistencyDensity,prepared.crkState
+                else:
+                    from warpSPHCore.crk.crk_wrapper import computeCRKFactors
+                    area,density,state=computeCRKFactors(q,domain,kernel,sph.OperationDirection.TrueAllToToAll,graph,r,
+                        referenceVolumeMode=sph.OperationDirection.FluidToBoundary)
+                return area,density,state.A,state.B,state.gradA,state.gradB
             if backend == 'native':
                 from warpSPHCore.crk.native.nt_jvp import computeCRKFactorsJVP as compute
             else:

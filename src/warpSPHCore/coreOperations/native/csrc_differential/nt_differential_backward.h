@@ -48,6 +48,29 @@ template <class T,int D>
 SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         int64_t i,int64_t j,const Pair<T,D>& p,const T* bar,bool consistent,bool geometry) {
     PairBars<T,D> result{};
+    if(a.operation==Consistency) {
+        // The density ratio consumes only the corrected scalar value. Do not
+        // visit unused force-gradient/Hessian terms, especially 0*Inf paths.
+        const T bw=bar[0]*p.mass*p.volume+bar[1]*p.volume*p.volume;
+        result.add(MASS,0,bar[0]*p.volume*p.w);
+        result.add(VOLUME,0,bar[0]*p.mass*p.w+T(2)*bar[1]*p.volume*p.w);
+        result.add(A,0,bw*p.polynomial*p.raw_w);
+        const T bp=bw*p.coefficient_A*p.raw_w,raw_bw=bw*p.coefficient_A*p.polynomial;
+        T bx[D]={},bh=0;
+        for(int c=0;c<D;++c){result.add(B,c,bp*p.dx[c]);bx[c]+=bp*p.coefficient_B[c];}
+        if(geometry) {
+            warp_compat::value_pullback<T,D>(p.dx,p.distance,p.hj,a.kernel,raw_bw,bx,bh);
+            result.add(RH,0,bh);
+            for(int c=0;c<D;++c){
+                result.add(QX,c,bx[c]);result.add(RX,c,-bx[c]);
+                if(a.periodic[c]) {
+                    const T winding=T(round((a.qx[i*D+c]-a.rx[j*D+c]-p.dx[c])/(a.hi[c]-a.lo[c])));
+                    if(winding!=T(0)){result.add(LO,c,bx[c]*winding);result.add(HI,c,-bx[c]*winding);}
+                }
+            }
+        }
+        return result;
+    }
     result.reference_scalar_products=a.operation==4;
     auto coefficient_term=[&](T value) {return a.operation==4 ? warp_compat::rounded_scalar_term(value):value;};
     T clipped_bar[MaxOutputs]={};
