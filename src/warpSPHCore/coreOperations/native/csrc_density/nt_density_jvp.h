@@ -9,27 +9,7 @@
 
 namespace sph_native::density_jvp {
 using neighborhood::Owner;
-template<class T,int D> struct Kernel {
-    T x[D],r,h,w,g[D],wh,H[D*D],gh[D];
-    SPH_HD Kernel(const T (&dx)[D],T radius,T support,int name):r(radius),h(support),w(0),g{},wh(0),H{},gh{} {
-        for(int c=0;c<D;++c)x[c]=dx[c];
-        T wx[D]={};warp_compat::force_derivatives<T,D>(x,r,h,name,w,g,wx,wh,H,gh);
-        w=kernel_value<T,D>(r,h,name);wh=warp_compat::support_value<T,D>(r,h,name);
-    }
-    SPH_HD T tangent(const T (&dt)[D],T dh) const {
-        T dot=0;for(int c=0;c<D;++c)dot+=g[c]*dt[c];return dot+wh*dh;
-    }
-    SPH_HD void backward(int name,const T (&dt)[D],T dh,T bw,T bd,T (&bx)[D],T& bh,T (&btx)[D],T& bth) const {
-        warp_compat::support_pullback<T,D>(x,r,h,name,dh*bd,bx,bh);
-        for(int c=0;c<D;++c){
-            const T bg=dt[c]*bd;bh+=warp_compat::rounded_scalar_term(gh[c]*bg);
-            for(int e=0;e<D;++e)bx[e]+=H[c*D+e]*bg;
-            btx[c]+=g[c]*bd;
-        }
-        bth+=wh*bd;
-        warp_compat::value_pullback<T,D>(x,r,h,name,bw,bx,bh);
-    }
-};
+template<class T,int D>using Kernel=warp_compat::ValueProductKernel<T,D>;
 struct Buffers {OptionalTensors directions;Tensors transpose,outputs;Tensor cotangent;};
 template<class T,int D> struct Pair {
     RowArgs<T,D> a;const T *tq,*tr,*thq,*thr,*tm,*cot;

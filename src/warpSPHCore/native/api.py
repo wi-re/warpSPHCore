@@ -55,6 +55,8 @@ def nativeCapabilities():
                 density_adjoint_floating_atomics=False, density_fixed_csr_capture=True,
                 interpolation_reverse_kernels=tuple(k.name for k in KernelFunctions),
                 interpolation_forward_ad=True, interpolation_ad_order=1,
+                interpolation_explicit_jvp_reverse_order=1, interpolation_explicit_jvp_bounds_ad=False,
+                interpolation_field_only_jvp_bounds_ad=True,
                 interpolation_adjoint_deterministic=True, interpolation_adjoint_ownership='csr_csc',
                 interpolation_adjoint_floating_atomics=False, interpolation_fixed_csr_capture=True,
                 interpolation_packed_field_axes=True,

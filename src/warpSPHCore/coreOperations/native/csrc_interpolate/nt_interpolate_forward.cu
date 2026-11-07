@@ -83,3 +83,11 @@ void interpolate_corrected_forward_gpu(const Tensors& t, const OptionalTensors& 
             CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme);
 }
 } // namespace sph_native
+
+#include "nt_interpolate_jvp.h"
+namespace sph_native{
+void interpolate_product_gpu(const Tensors& t,const interpolate_jvp::Buffers& buffers,int support,int direction,int kernel){
+    const stable::accelerator::DeviceGuard guard(t[QX].get_device_index());
+    execute(interpolate_jvp::Rows{buffers},t,support,direction,1,GpuLauncher{current_stream(t[QX])},kernel);
+}
+}

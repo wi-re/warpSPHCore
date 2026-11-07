@@ -49,10 +49,25 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
     if operation==WarpOperation.Density:
         from .nt_density_jvp import compute
         return compute(queryParticles,reference,domain,properties,adjacency,queryTangentState,referenceTangentState)*factor
+    if operation==WarpOperation.Interpolate and not any(
+            getattr(state,name,None) is not None for state in (queryTangentState,referenceTangentState)
+            if state is not None for name in ('positions','supports','masses','densities')) and all(
+            x is None for x in (tangentQueryVolumes,tangentReferenceVolumes,crkTangentState)) and (
+            tangentReferenceValues is not None or tangentQueryValues is not None):
+        # Warp's field-only route is an ordinary interpolation of the field
+        # direction. It retains bound/CRK reverse, unlike its geometry launcher.
+        from .wrapper import sphOperation
+        field=tangentReferenceValues if tangentReferenceValues is not None else tangentQueryValues
+        return sphOperation(queryParticles,properties,domain,referenceValues=field,
+            queryVolumes=queryVolumes,referenceVolumes=referenceVolumes,adjacency=adjacency,
+            referenceParticles=reference,crkState=crkState,backend='native')*factor
     inputs,corrections,_=_prepare(queryParticles,reference,domain,properties,adjacency,
         queryValues,referenceValues,queryVolumes,referenceVolumes,crkState,gradHState,
         renormalizationState,consistent_divergence=consistentDivergence,allow_forward=True)
     flat=[*inputs,*corrections]
+    if operation==WarpOperation.Interpolate:
+        for slot in (7,8):flat[slot]=forward_ad.unpack_dual(flat[slot]).primal.detach()
+        flat[16]=None
     if any(t is not None and forward_ad.unpack_dual(t).tangent is not None for t in flat):
         raise NotImplementedError('Explicit native JVPs are first-order; dual-valued primals are unsupported')
     tangents=[None]*len(flat)
@@ -78,6 +93,9 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
         properties.kernel.value,properties.gradientMode.value,laplacian_policy(properties),
         properties.divergenceDotMode,consistentDivergence,False)
     _check_geometry(config,flat,tangents)
+    if operation==WarpOperation.Interpolate:
+        from .nt_interpolate_jvp import apply
+        return apply(config,flat,tangents,queryParticles.masses)*factor
     with torch.no_grad():
         if operation == WarpOperation.Interpolate:
             from .nt_interpolate_backward import product, used_slots
