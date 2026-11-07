@@ -75,6 +75,8 @@ def nativeCapabilities():
                 divergence_packed_field_axes=True,
                 curl_reverse_kernels=tuple(k.name for k in KernelFunctions),
                 curl_forward_ad=True, curl_ad_order=1,
+                curl_explicit_jvp_reverse_order=1, curl_explicit_jvp_bounds_ad=False,
+                curl_field_only_jvp_bounds_ad=True,
                 curl_adjoint_deterministic=True, curl_adjoint_ownership='csr_csc',
                 curl_adjoint_floating_atomics=False, curl_fixed_csr_capture=True,
                 curl_packed_field_layouts=True,

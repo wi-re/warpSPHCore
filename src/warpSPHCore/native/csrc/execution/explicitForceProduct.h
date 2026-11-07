@@ -76,6 +76,7 @@ template<class T,int D,int Operation>struct Pair{
     }
     template<bool Reverse>SPH_HD Bars<T,D> interact(int64_t i,int64_t j,T* sum)const{
         Bars<T,D> bars{};if(!query_allowed(a.qkind[i],a.direction)||!reference_allowed(a.rkind[j],a.direction))return bars;
+        if constexpr(Operation==4){if constexpr(D==1)return bars;else if(a.fields<D)return bars;}
         T x[D],dt[D];const T radius=QueryGeometry<T,D>(a.qx+i*D,a.lo,a.hi,a.periodic).distance(a.rx+j*D,x);
         for(int c=0;c<D;++c)dt[c]=tangent(0,i*D+c)-tangent(1,j*D+c);
         const T hi=a.qh[i],hj=a.rh[j],ti=tangent(2,i),tj=tangent(3,j);
@@ -139,7 +140,7 @@ template<class T,int D,int Operation>struct Pair{
                 const S coeff=fi*A+fj*B,dc=fi*dA+fj*dB,df=dfi*A+dfj*B;
                 for(int c=0;c<D;++c){const S result=dc*G[c]+coeff*dG[c]+df*G[c];
                     if constexpr(Reverse)result.seed(cot[(i*a.fields+f)*D+c]);else sum[f*D+c]+=result.v;}}
-        }else{
+        }else if constexpr(Operation==3){
             const S qomega=read(25,0,1);const int groups=a.fields/D;
             for(int group=0;group<groups;++group){S dc[D],coeff[D],df[D];
                 for(int c=0;c<D;++c){const int f=a.dot_mode?c*groups+group:group*D+c;
@@ -152,6 +153,23 @@ template<class T,int D,int Operation>struct Pair{
                 for(int c=0;c<D;++c)third+=df[c]*G[c];
                 const S result=first+second+third;
                 if constexpr(Reverse)result.seed(cot[i*groups+group]);else sum[group]+=result.v;}
+        }
+        if constexpr(Operation==4&&D>1){
+            const S qomega=read(25,0,1);const int groups=a.fields/D;
+            for(int group=0;group<groups;++group){S dc[D],coeff[D],df[D];
+                for(int c=0;c<D;++c){const int f=c*groups+group;
+                    const S fi=explicit_ad::divide(read(13,f),qomega),fj=explicit_ad::divide(read(14,f),omega);
+                    const S dfi=explicit_ad::divide(read(39,f),qomega),dfj=explicit_ad::divide(read(40,f),omega);
+                    coeff[c]=fi*A+fj*B;dc[c]=fi*dA+fj*dB;df[c]=dfi*A+dfj*B;}
+                if constexpr(D==2){
+                    const S result=G[0]*dc[1]-G[1]*dc[0]+dG[0]*coeff[1]-dG[1]*coeff[0]+G[0]*df[1]-G[1]*df[0];
+                    if constexpr(Reverse)result.seed(cot[i*groups+group]);else sum[group]+=result.v;
+                }else{
+                    for(int c=0;c<3;++c){const int e=(c+1)%3,f=(c+2)%3;
+                        const S result=G[e]*dc[f]-G[f]*dc[e]+dG[e]*coeff[f]-dG[f]*coeff[e]+G[e]*df[f]-G[f]*df[e];
+                        if constexpr(Reverse)result.seed(cot[i*a.fields+c*groups+group]);else sum[c*groups+group]+=result.v;}
+                }
+            }
         }
         if constexpr(Reverse){trace->reverse();T bw=0,bdw=0,bg[D]={},bdg[D]={};
             for(int k=0;k<trace->inputs;++k){const auto leaf=trace->leaves[k];const T bar=trace->nodes[leaf.node].bar;
@@ -173,7 +191,7 @@ template<class T,int D,int Operation>struct Pullback{Pair<T,D,Operation> p;
 };
 template<class T,int D,int Operation>struct ProductRow{Pair<T,D,Operation> p;SPH_HD void operator()(int64_t i)const{
     T sum[27]={};for(int64_t k=0;k<p.a.counts[i];++k)p.template interact<false>(i,p.a.neighbors[p.a.offsets[i]+k],sum);
-    const int width=Operation==2?p.a.fields*D:p.a.fields/D;for(int c=0;c<width;++c)p.a.output[i*width+c]=sum[c];}};
+    const int width=Operation==2?p.a.fields*D:Operation==3?p.a.fields/D:D==1?1:D==2?p.a.fields/2:p.a.fields;for(int c=0;c<width;++c)p.a.output[i*width+c]=sum[c];}};
 template<int Operation>struct Rows{const Buffers& b;template<class T,int D,class Launch>void operator()(int64_t n,RowArgs<T,D>a,const Launch&launch)const{
     Pair<T,D,Operation>p{a,{}, {},b.cotangent.defined()?ptr<T>(b.cotangent):nullptr,{},b.consistent};
     for(int k=0;k<Slots;++k){p.v[k]=b.flat[k]&&(b.flat[k]->scalar_type()==ScalarType::Float||b.flat[k]->scalar_type()==ScalarType::Double)?ptr<T>(*b.flat[k]):nullptr;p.t[k]=b.directions[k]?ptr<T>(*b.directions[k]):nullptr;}

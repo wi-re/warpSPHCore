@@ -31,3 +31,11 @@ void curl_corrected_forward_gpu(const Tensors& t, const OptionalTensors& correct
         CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
 }
 } // namespace sph_native
+
+#include "nt_curl_jvp.h"
+namespace sph_native{
+void curl_product_gpu(const Tensors& t,const curl_jvp::Buffers& b,int support,int direction,int kernel,int scheme){
+    const stable::accelerator::DeviceGuard guard(t[QX].get_device_index());
+    execute(curl_jvp::Rows{b},t,support,direction,4,GpuLauncher{current_stream(t[QX])},kernel,scheme);
+}
+}
