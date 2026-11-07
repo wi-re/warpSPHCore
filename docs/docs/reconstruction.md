@@ -116,7 +116,17 @@ not smooth derivative points.
 PolyFit geometry duals cover positions, supports, masses and densities of
 one physical particle population with plain `m/rho` volumes. Its tangent moves
 both query and reference roles. Combined field/geometry tangents use dedicated
-Warp JVP kernels with the same frozen kinds and `operationMode` as the primal.
+backend JVP kernels with the same frozen kinds and `operationMode` as the primal.
+The assembly backend follows `WARPSPHCORE_OPERATORS`. Native CPU/CUDA
+moments and RHS support all kernels and support schemes, supplied volumes,
+query-normalized monomials, deterministic ordinary reverse and dual products.
+Both the explicit geometry product and the native ordinary dual product have
+a first reverse through geometry, weights, fields and supplied directions.
+Ordinary Warp assembly has no automatic JVP registration; its separate explicit
+geometry helpers provide that product and its first reverse. These assembly
+rules are first order; the shared dense solve remains differentiable through
+its supported full-rank composition.
+
 Build and use a geometry-dual fit inside the same `forward_ad.dual_level`.
 The dense coefficient tangent assumes a full-rank selected system;
 rank-deficient geometry derivatives are not qualified.
@@ -134,6 +144,12 @@ tensors. Rebuild it after changes to positions, supports, mass/density volumes,
 kinds, interaction rules or neighborhood coverage. Changing only field values
 can reuse it. A supplied grid/list follows the search rebuild/capacity contract;
 particle IDs stay in caller order and pair extraction consumes live entries.
+Fixed-neighborhood native assembly and its reverse/product reverse pass
+capture/replay checks. The shared full-fit constructor fails capture with both
+Warp and native assembly because it copies host constants to the device;
+Torch's pseudoinverse also fails the direct capture probe in the tested runtime.
+These shared limitations do not add a native capture rejection.
+
 Eager CPU/CUDA execution is qualified; a completely captured constructor,
 nonlinear reconstruction or evolution is not a promised graph interface.
 
@@ -143,3 +159,10 @@ The production-path tests are `tests/operations/test_polyfit.py`,
 cubic MLS/LABFM advection ladder with analytic solution, conditioning, spatial
 residuals and weighted mass drift. Its short smooth run is separate from
 nonlinear discontinuity evolution or a conservative MFM/MFV scheme.
+
+Native assembly regressions live in
+`tests/native/torch/test_polyfit_contract.py`; direct Warp comparisons live in
+`tests/parity/test_polyfit_contract.py`. They cover scalar and weighted reverse,
+actual finite differences, sparse ownership, raw boundary categories, full-rank
+solve/tangent reverse and assembly capture. Near-pole viscosity comparisons
+also use independent 90-digit values and expanded roundoff bounds.

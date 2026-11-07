@@ -38,8 +38,8 @@ import torch.autograd.forward_ad as fwAD
 from ..dataTypes import DomainDescription, ParticleState, ParticleTangentState
 from ..enumTypes import OperationDirection, SupportScheme, KernelFunctions
 from ..dataTypes import OperationProperties
-from .._backend import BACKEND
-if BACKEND == 'native':
+from .._backend import OPERATORS
+if OPERATORS == 'native':
     from .native import (_computePolyMoments_stateBackend, _computePolyRHS_stateBackend,
                          computePolyMomentsGeometryJVP, computePolyRHSGeometryJVP)
 else:
