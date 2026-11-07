@@ -57,3 +57,11 @@ void gradient_corrected_forward_gpu(const Tensors& t, const OptionalTensors& cor
             CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme);
 }
 } // namespace sph_native
+
+#include "nt_gradient_jvp.h"
+namespace sph_native{
+void gradient_product_gpu(const Tensors& t,const gradient_jvp::Buffers& b,int support,int direction,int kernel,int scheme){
+    const stable::accelerator::DeviceGuard guard(t[QX].get_device_index());
+    execute(gradient_jvp::Rows{b},t,support,direction,2,GpuLauncher{current_stream(t[QX])},kernel,scheme);
+}
+}
