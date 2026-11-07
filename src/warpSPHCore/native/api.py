@@ -68,6 +68,8 @@ def nativeCapabilities():
                 gradient_packed_field_axes=True,
                 divergence_reverse_kernels=tuple(k.name for k in KernelFunctions),
                 divergence_forward_ad=True, divergence_ad_order=1,
+                divergence_explicit_jvp_reverse_order=1, divergence_explicit_jvp_bounds_ad=False,
+                divergence_field_only_jvp_bounds_ad=True,
                 divergence_adjoint_deterministic=True, divergence_adjoint_ownership='csr_csc',
                 divergence_adjoint_floating_atomics=False, divergence_fixed_csr_capture=True,
                 divergence_packed_field_axes=True,

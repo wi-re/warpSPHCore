@@ -31,3 +31,11 @@ void divergence_corrected_forward_gpu(const Tensors& t, const OptionalTensors& c
         CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
 }
 } // namespace sph_native
+
+#include "nt_divergence_jvp.h"
+namespace sph_native{
+void divergence_product_gpu(const Tensors& t,const divergence_jvp::Buffers& b,int support,int direction,int kernel,int scheme,bool dot){
+    const stable::accelerator::DeviceGuard guard(t[QX].get_device_index());
+    execute(divergence_jvp::Rows{b},t,support,direction,3,GpuLauncher{current_stream(t[QX])},kernel,scheme,2,dot);
+}
+}
