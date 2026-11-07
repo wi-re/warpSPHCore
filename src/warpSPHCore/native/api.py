@@ -80,5 +80,7 @@ def nativeCapabilities():
                 curl_adjoint_deterministic=True, curl_adjoint_ownership='csr_csc',
                 curl_adjoint_floating_atomics=False, curl_fixed_csr_capture=True,
                 curl_packed_field_layouts=True,
+                laplacian_explicit_jvp_reverse_order=1, laplacian_explicit_jvp_bounds_ad=False,
+                laplacian_field_only_jvp_bounds_ad=True,
                 explicit_jvp=True, density_position_hvp=True,
                 density_position_hvp_geometry_ad=False, density_position_hvp_vector_mass_ad_order=1)

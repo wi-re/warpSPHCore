@@ -48,3 +48,44 @@ STABLE_TORCH_LIBRARY_FRAGMENT(warpsph_native, m) {
     m.impl("laplacian_forward", TORCH_BOX(&laplacian_forward));
 }
 } // namespace sph_native
+
+#include "nt_laplacian_jvp.h"
+namespace sph_native{
+void laplacian_product_gpu(const Tensors&,const laplacian_jvp::Buffers&,int,int,int,int,int);
+Tensors laplacian_product(const OptionalTensors& flat,const OptionalTensors& directions,const std::optional<Tensor>& cotangent,
+        const Tensors& transpose,int64_t support,int64_t direction,int64_t kernel,int64_t scheme,int64_t lap){
+    STD_TORCH_CHECK(valid_kernel(kernel),"Unknown native kernel");STD_TORCH_CHECK(flat.size()==26&&directions.size()==26,"Laplacian JVP input layout");
+    OptionalTensors inputs(flat.begin(),flat.begin()+17),corrections(flat.begin()+17,flat.end());
+    auto t=prepare_corrected_operator(inputs,corrections,support,direction,5,scheme,lap,false,false,cotangent?&*cotangent:nullptr);
+    const auto& x=t[QX];const auto m=t[RX].size(0),d=x.size(1);
+    STD_TORCH_CHECK(field_components(t)>0&&field_components(t)<=d*d,"Laplacian JVP field block");
+    for(int k=0;k<26;++k)if(directions[k]){
+        STD_TORCH_CHECK(flat[k],"Laplacian JVP tangent requires a primal");tensor(*directions[k],x,x.scalar_type(),"Laplacian JVP tangent");
+        STD_TORCH_CHECK(directions[k]->sizes()==flat[k]->sizes(),"Laplacian JVP tangent shape");
+    }
+    Tensors output;
+    if(cotangent){
+        STD_TORCH_CHECK(transpose.size()==3,"Laplacian JVP reverse requires CSC");
+        vector(transpose[0],x,ScalarType::Long,m,"CSC offsets");vector(transpose[1],x,ScalarType::Int,m,"CSC counts");vector(transpose[2],x,ScalarType::Long,t[NEIGHBORS].numel(),"CSC IDs");
+        for(int k=0;k<52;++k){const auto& value=k<26?flat[k]:directions[k-26];
+            std::vector<int64_t> shape;
+            if(value&&(value->scalar_type()==ScalarType::Float||value->scalar_type()==ScalarType::Double)){for(int a=0;a<value->dim();++a)shape.push_back(value->size(a));}
+            else shape.push_back(0);
+            output.push_back(stable::new_zeros(x,shape));
+        }
+    }else output={t[OUTPUT]};
+    const laplacian_jvp::Buffers b{flat,directions,transpose,output,cotangent?*cotangent:Tensor{}};
+    if(x.is_cuda()){
+#ifdef WITH_CUDA
+        laplacian_product_gpu(t,b,support,direction,kernel,scheme,lap);
+#else
+        STD_TORCH_CHECK(false,"Native extension was built for CPU only");
+#endif
+    }else execute(laplacian_jvp::Rows{b},t,support,direction,5,CpuLauncher{},kernel,scheme,lap);
+    return output;
+}
+STABLE_TORCH_LIBRARY_FRAGMENT(warpsph_native,m){
+    m.def("laplacian_product(Tensor?[] flat, Tensor?[] directions, Tensor? cotangent, Tensor[] transpose, int support, int direction, int kernel, int scheme, int lap) -> Tensor[]");
+    m.impl("laplacian_product",TORCH_BOX(&laplacian_product));
+}
+}

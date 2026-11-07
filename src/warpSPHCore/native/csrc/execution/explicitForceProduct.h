@@ -5,9 +5,19 @@
 #include "math/queryGeometry.h"
 #include "kernels/explicit_force_derivatives.h"
 #include "util/directionality.h"
+#include <new>
 namespace sph_native::force_jvp {
 using neighborhood::Owner;
+template<class T,int D>struct LaplacianProductPolicy;
 constexpr int Slots=26,Capacity=1536;
+// The Laplacian field trace is consumed before its kernel pullback. Reuse its
+// storage for those later traces instead of stacking all estimator branches.
+template<class T>union LaplacianTraceStorage {
+    explicit_ad::Trace<T,Capacity> pair;
+    explicit_ad::Trace<T,768> laplacian;
+    explicit_ad::Trace<T,512> force;
+    SPH_HD LaplacianTraceStorage(){}
+};
 struct Buffers{OptionalTensors flat,directions;Tensors transpose,outputs;Tensor cotangent;bool consistent=false;};
 template<int D>struct Layout{
     SPH_HD static bool query(int k){k%=Slots;return !(k==1||k==3||k==4||k==14||k==15||k==18||k==23);}
@@ -51,24 +61,25 @@ template<class T,int D,int Operation>struct Pair{
             const T dh=a.support==11?ti:a.support==12?tj:a.support==13?(ti+tj)/T(2):hi>=hj?ti:tj;
             kernel_one(x,radius,h,dt,dh,w,dw,g,dg);}
     }
-    SPH_HD void reverse_one(const T(&x)[D],T radius,T h,const T(&dt)[D],T dh,T bw,T bdw,const T(&bg)[D],const T(&bdg)[D],
-            T(&bx)[D],T& bh,T(&bt)[D],T& bth)const{
+    template<bool Borrow=false>SPH_HD void reverse_one(const T(&x)[D],T radius,T h,const T(&dt)[D],T dh,T bw,T bdw,const T(&bg)[D],const T(&bdg)[D],
+            T(&bx)[D],T& bh,T(&bt)[D],T& bth,explicit_ad::Trace<T,512>* scratch=nullptr)const{
         if(!geometry()){
             warp_compat::force_pullback<T,D>(x,radius,h,a.kernel,T(0),bg,bx,bh);
             if(v[19])warp_compat::value_pullback<T,D>(x,radius,h,a.kernel,bw,bx,bh);
             return;
         }
-        warp_compat::force_product_pullback<T,D>(x,radius,h,a.kernel,dt,dh,bg,bdg,bx,bh,bt,bth);
+        if constexpr(Borrow)warp_compat::force_product_pullback<T,D>(x,radius,h,a.kernel,dt,dh,bg,bdg,bx,bh,bt,bth,*scratch);
+        else warp_compat::force_product_pullback<T,D>(x,radius,h,a.kernel,dt,dh,bg,bdg,bx,bh,bt,bth);
         if(v[19]){const warp_compat::ValueProductKernel<T,D> k(x,radius,h,a.kernel);k.backward(a.kernel,dt,dh,bw,bdw,bx,bh,bt,bth);}
     }
-    SPH_HD void reverse_kernel(const T(&x)[D],T radius,T hi,T hj,const T(&dt)[D],T ti,T tj,T bw,T bdw,const T(&bg)[D],const T(&bdg)[D],Bars<T,D>& bars)const{
+    template<bool Borrow=false>SPH_HD void reverse_kernel(const T(&x)[D],T radius,T hi,T hj,const T(&dt)[D],T ti,T tj,T bw,T bdw,const T(&bg)[D],const T(&bdg)[D],Bars<T,D>& bars,explicit_ad::Trace<T,512>* scratch=nullptr)const{
         T bx[D]={},bt[D]={},bhi=0,bhj=0,bti=0,btj=0;
         if(a.support==14||a.support==15){T bg2[D],bdg2[D];for(int c=0;c<D;++c){bg2[c]=bg[c]*T(.5);bdg2[c]=bdg[c]*T(.5);}
-            reverse_one(x,radius,hj,dt,tj,bw*T(.5),bdw*T(.5),bg2,bdg2,bx,bhj,bt,btj);
-            reverse_one(x,radius,hi,dt,ti,bw*T(.5),bdw*T(.5),bg2,bdg2,bx,bhi,bt,bti);
+            reverse_one<Borrow>(x,radius,hj,dt,tj,bw*T(.5),bdw*T(.5),bg2,bdg2,bx,bhj,bt,btj,scratch);
+            reverse_one<Borrow>(x,radius,hi,dt,ti,bw*T(.5),bdw*T(.5),bg2,bdg2,bx,bhi,bt,bti,scratch);
         }else{const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):hi>hj?hi:hj;
             const T dh=a.support==11?ti:a.support==12?tj:a.support==13?(ti+tj)/T(2):hi>=hj?ti:tj;
-            T bh=0,bth=0;reverse_one(x,radius,h,dt,dh,bw,bdw,bg,bdg,bx,bh,bt,bth);
+            T bh=0,bth=0;reverse_one<Borrow>(x,radius,h,dt,dh,bw,bdw,bg,bdg,bx,bh,bt,bth,scratch);
             if(a.support==11){bhi=bh;bti=bth;}else if(a.support==12){bhj=bh;btj=bth;}else if(a.support==13){bhi=bhj=bh/T(2);bti=btj=bth/T(2);}
             else{if(hi>hj)bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}}
         for(int c=0;c<D;++c){bars.add(0,c,a.fields,bx[c]);bars.add(1,c,a.fields,-bx[c]);bars.add(26,c,a.fields,bt[c]);bars.add(27,c,a.fields,-bt[c]);}
@@ -80,14 +91,18 @@ template<class T,int D,int Operation>struct Pair{
         T x[D],dt[D];const T radius=QueryGeometry<T,D>(a.qx+i*D,a.lo,a.hi,a.periodic).distance(a.rx+j*D,x);
         for(int c=0;c<D;++c)dt[c]=tangent(0,i*D+c)-tangent(1,j*D+c);
         const T hi=a.qh[i],hj=a.rh[j],ti=tangent(2,i),tj=tangent(3,j);
-        T w=0,dw=0,g[D]={},dg[D]={};kernel(x,radius,hi,hj,dt,ti,tj,w,dw,g,dg);
+        T w=0,dw=0,g[D]={},dg[D]={},lp=0,dlp=0;
+        if constexpr(Operation==5)LaplacianProductPolicy<T,D>::kernel(*this,x,radius,hi,hj,dt,ti,tj,w,dw,g,dg,lp,dlp);
+        else kernel(x,radius,hi,hj,dt,ti,tj,w,dw,g,dg);
         using S=pair_ad::Number<T,Reverse,Capacity>;using Trace=explicit_ad::Trace<T,Capacity>;
-        using Storage=std::conditional_t<Reverse,Trace,char>;Storage storage;Trace* trace=nullptr;if constexpr(Reverse)trace=&storage;
+        using ReverseStorage=std::conditional_t<Operation==5,LaplacianTraceStorage<T>,Trace>;
+        using Storage=std::conditional_t<Reverse,ReverseStorage,char>;Storage storage;Trace* trace=nullptr;
+        if constexpr(Reverse){if constexpr(Operation==5)trace=new(&storage.pair)Trace;else trace=&storage;}
         auto read=[&](int slot,int c,T fallback=T(0)){
             const int k=slot%Slots;const bool direction=slot>=Slots;const int width=Layout<D>::width(k,a.fields);
             const int64_t at=(Layout<D>::query(k)?i:j)*width+c;const T* data=direction?t[k]:v[k];
             return S::leaf(data?data[at]:fallback,0,trace,slot,c,Reverse&&data);};
-        auto raw=[&](T number,int slot,int c){const bool active=(slot!=53&&slot!=55)||geometry();return S::leaf(number,0,trace,slot,c,Reverse&&active);};
+        auto raw=[&](T number,int slot,int c){const bool active=(slot!=53&&slot!=55&&slot!=57)||geometry();return S::leaf(number,0,trace,slot,c,Reverse&&active);};
         S W=raw(w,52,0),dW=raw(dw,53,0),G[D],dG[D];for(int c=0;c<D;++c){G[c]=raw(g[c],54,c);dG[c]=raw(dg[c],55,c);}
         if(v[19]){
             const S A=read(19,0),dA=read(45,0);S B[D],dB[D],ga[D],dga[D],xx[D],dd[D],gb[D*D],dgb[D*D],poly(1),dp1(0),dp2(0);
@@ -165,11 +180,13 @@ template<class T,int D,int Operation>struct Pair{
                 if constexpr(Reverse)result.seed(cot[i*groups+group]);else sum[group]+=result.v;
             }
         }
-        if constexpr(Reverse){trace->reverse();T bw=0,bdw=0,bg[D]={},bdg[D]={};
+        if constexpr(Operation==5)LaplacianProductPolicy<T,D>::template field<Reverse,Capacity>(*this,read,raw,x,radius,hi,hj,lp,dlp,B,dB,omega,G,dG,i,sum);
+        if constexpr(Reverse){trace->reverse();T bw=0,bdw=0,bg[D]={},bdg[D]={},bl=0,bdl=0;
             for(int k=0;k<trace->inputs;++k){const auto leaf=trace->leaves[k];const T bar=trace->nodes[leaf.node].bar;
                 if(leaf.slot==52)bw+=bar;else if(leaf.slot==53)bdw+=bar;else if(leaf.slot==54)bg[leaf.at]+=bar;else if(leaf.slot==55)bdg[leaf.at]+=bar;
-                else bars.add(leaf.slot,leaf.at,a.fields,bar);}
-            reverse_kernel(x,radius,hi,hj,dt,ti,tj,bw,bdw,bg,bdg,bars);}
+                else if(leaf.slot==56)bl+=bar;else if(leaf.slot==57)bdl+=bar;else bars.add(leaf.slot,leaf.at,a.fields,bar);}
+            if constexpr(Operation==5)LaplacianProductPolicy<T,D>::backward(*this,x,radius,hi,hj,dt,ti,tj,bw,bdw,bg,bdg,bl,bdl,bars,storage);
+            else reverse_kernel(x,radius,hi,hj,dt,ti,tj,bw,bdw,bg,bdg,bars);}
         return bars;
     }
 };
@@ -185,7 +202,7 @@ template<class T,int D,int Operation>struct Pullback{Pair<T,D,Operation> p;
 };
 template<class T,int D,int Operation>struct ProductRow{Pair<T,D,Operation> p;SPH_HD void operator()(int64_t i)const{
     T sum[27]={};for(int64_t k=0;k<p.a.counts[i];++k)p.template interact<false>(i,p.a.neighbors[p.a.offsets[i]+k],sum);
-    const int width=Operation==2?p.a.fields*D:Operation==3?p.a.fields/D:D==1?1:D==2?p.a.fields/2:p.a.fields;for(int c=0;c<width;++c)p.a.output[i*width+c]=sum[c];}};
+    const int width=Operation==2?p.a.fields*D:Operation==3?p.a.fields/D:Operation==4?(D==1?1:D==2?p.a.fields/2:p.a.fields):p.a.fields;for(int c=0;c<width;++c)p.a.output[i*width+c]=sum[c];}};
 template<int Operation>struct Rows{const Buffers& b;template<class T,int D,class Launch>void operator()(int64_t n,RowArgs<T,D>a,const Launch&launch)const{
     Pair<T,D,Operation>p{a,{}, {},b.cotangent.defined()?ptr<T>(b.cotangent):nullptr,{},b.consistent};
     for(int k=0;k<Slots;++k){p.v[k]=b.flat[k]&&(b.flat[k]->scalar_type()==ScalarType::Float||b.flat[k]->scalar_type()==ScalarType::Double)?ptr<T>(*b.flat[k]):nullptr;p.t[k]=b.directions[k]?ptr<T>(*b.directions[k]):nullptr;}

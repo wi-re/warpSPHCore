@@ -6,10 +6,10 @@ namespace sph_native::warp_compat {
 // differentiated here; the ordinary gradient's custom Hessian stays separate.
 template<class T,int D>SPH_HD void force_product_pullback(
         const T (&x)[D],T r,T h,int name,const T (&dt)[D],T dh,
-        const T (&bg)[D],const T (&bdg)[D],T (&bx)[D],T& bh,T (&bt)[D],T& bth){
+        const T (&bg)[D],const T (&bdg)[D],T (&bx)[D],T& bh,T (&bt)[D],T& bth,explicit_ad::Trace<T,512>& trace){
     if(h<=T(0)||r>h)return;
     constexpr int C=512;using S=pair_ad::Number<T,true,C>;
-    explicit_ad::Trace<T,C> trace;S inputs[D+1],xx[D];
+    trace.count=trace.inputs=0;for(int k=0;k<C;++k)trace.division[k]=0;S inputs[D+1],xx[D];
     for(int c=0;c<D;++c)inputs[c]=xx[c]=S::leaf(x[c],0,&trace,0,c,true);
     inputs[D]=S::leaf(h,0,&trace,0,D,true);const S hh=inputs[D];
     const T eps=sizeof(T)==4?T(1e-7):T(1e-15),den=r>eps?r:eps;
@@ -50,5 +50,14 @@ template<class T,int D>SPH_HD void force_product_pullback(
     trace.reverse();
     for(int k=0;k<trace.inputs;++k){const auto leaf=trace.leaves[k];const T bar=trace.nodes[leaf.node].bar;
         if(leaf.at==D)bh+=bar;else bx[leaf.at]+=bar;}
+}
+}
+
+namespace sph_native::warp_compat {
+template<class T,int D>SPH_HD void force_product_pullback(
+        const T (&x)[D],T r,T h,int name,const T (&dt)[D],T dh,
+        const T (&bg)[D],const T (&bdg)[D],T (&bx)[D],T& bh,T (&bt)[D],T& bth){
+    explicit_ad::Trace<T,512> trace;
+    force_product_pullback(x,r,h,name,dt,dh,bg,bdg,bx,bh,bt,bth,trace);
 }
 }

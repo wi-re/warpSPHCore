@@ -295,7 +295,9 @@ def warpOperationJVP(
     geometry tangents (`queryTangentState`/`referenceTangentState`, each a
     `ParticleTangentState` bundling positions/supports/masses/densities);
     the return value is their sum** -- the
-    operator's full JVP in whatever combined direction you asked for. The
+    operator's full JVP in whatever combined direction you asked for.
+    Omitted field directions are zero; a query direction is not reused for
+    the reference role, including a self cloud. The
     value/geometry split below is this function's own internal bookkeeping
     (which piece was derived separately), not something a caller needs to
     know to use it correctly.
@@ -401,6 +403,23 @@ def warpOperationJVP(
         "referenceTangentState.densities": referenceTangentState.densities if referenceTangentState is not None else None,
     }
     providedGeometryTangents = [name for name, value in geometryTangentArgs.items() if value is not None]
+    if operationProperties.operation in _VALUE_JVP_OPERATIONS:
+        # Correction-only products use the same geometry launcher,
+        # including ordinary forward AD through a field-only JVP relaunch.
+        correctionTangents = {"tangentReferenceVolumes": tangentReferenceVolumes}
+        for name in ("A", "B", "gradA", "gradB"):
+            correctionTangents["crkTangentState." + name] = getattr(crkTangentState, name, None)
+        correctionTangents["renormalizationTangentState.renormalizationMatrices"] = getattr(
+            renormalizationTangentState, "renormalizationMatrices", None)
+        providedGeometryTangents.extend(name for name, value in correctionTangents.items() if value is not None)
+    if operationProperties.operation in _VALUE_JVP_OPERATIONS and (
+        tangentQueryValues is not None or tangentReferenceValues is not None
+    ):
+        from .coreOperations._jvpFields import field_directions
+        reference = referenceParticles if referenceParticles is not None else queryParticles
+        tangentQueryValues, tangentReferenceValues = field_directions(
+            len(queryParticles.positions), len(reference.positions), queryValues, referenceValues,
+            tangentQueryValues, tangentReferenceValues)
     # Local aliases so the rest of this function's scope-boundary checks and
     # dispatch-argument assembly below stay unchanged field-for-field --
     # only the two dataclass call sites (Density, the five value-having

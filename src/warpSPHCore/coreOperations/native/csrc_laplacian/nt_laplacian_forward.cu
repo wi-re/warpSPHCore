@@ -32,3 +32,11 @@ void laplacian_corrected_forward_gpu(const Tensors& t, const OptionalTensors& co
         CooperativeGpuLauncher<8>{current_stream(t[QX])}, kernel, scheme, lap, dot);
 }
 } // namespace sph_native
+
+#include "nt_laplacian_jvp.h"
+namespace sph_native{
+void laplacian_product_gpu(const Tensors& t,const laplacian_jvp::Buffers& b,int support,int direction,int kernel,int scheme,int lap){
+    const stable::accelerator::DeviceGuard guard(t[QX].get_device_index());
+    execute(laplacian_jvp::Rows{b},t,support,direction,5,GpuLauncher{current_stream(t[QX])},kernel,scheme,lap);
+}
+}

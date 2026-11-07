@@ -24,7 +24,7 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
     Unlike an implicit dual-valued call, this helper never aliases a query
     tangent into the reference role. It also works inside an existing dual level.
     Support selection, minimum-image winding and clipped branches stay fixed.
-    Density, interpolation, gradient, divergence and curl support the reference first reverse
+    Density, interpolation, gradient, divergence, curl and Laplacian support the reference first reverse
     of their explicit products.
     Other owners retain their individually documented derivative limits.
     """
@@ -56,7 +56,7 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
     if operation==WarpOperation.Density:
         from .nt_density_jvp import compute
         return compute(queryParticles,reference,domain,properties,adjacency,queryTangentState,referenceTangentState)*factor
-    if operation in (WarpOperation.Interpolate,WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl) and not any(
+    if operation in (WarpOperation.Interpolate,WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl,WarpOperation.Laplacian) and not any(
             getattr(state,name,None) is not None for state in (queryTangentState,referenceTangentState)
             if state is not None for name in ('positions','supports','masses','densities')) and all(
             x is None for x in (tangentQueryVolumes,tangentReferenceVolumes)) and not _active_correction_tangent(crkTangentState,renormalizationTangentState) and (
@@ -64,21 +64,23 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
         # Warp's field-only route relaunches the ordinary field operator.
         # It retains bound/correction reverse, unlike its geometry launcher.
         from .wrapper import sphOperation
-        field=tangentReferenceValues if tangentReferenceValues is not None else tangentQueryValues
-        return sphOperation(queryParticles,properties,domain,queryValues=tangentQueryValues,referenceValues=field,
+        from .._jvpFields import field_directions
+        query_direction,reference_direction=field_directions(len(queryParticles.positions),len(reference.positions),
+            queryValues,referenceValues,tangentQueryValues,tangentReferenceValues)
+        return sphOperation(queryParticles,properties,domain,queryValues=query_direction,referenceValues=reference_direction,
             queryVolumes=queryVolumes,referenceVolumes=referenceVolumes,adjacency=adjacency,
             referenceParticles=reference,crkState=crkState,gradHState=gradHState,renormalizationState=renormalizationState,consistentDivergence=consistentDivergence,backend='native')*factor
     inputs,corrections,_=_prepare(queryParticles,reference,domain,properties,adjacency,
         queryValues,referenceValues,queryVolumes,referenceVolumes,crkState,gradHState,
         renormalizationState,consistent_divergence=consistentDivergence,allow_forward=True)
     flat=[*inputs,*corrections]
-    if operation in (WarpOperation.Interpolate,WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl):
+    if operation in (WarpOperation.Interpolate,WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl,WarpOperation.Laplacian):
         for slot in (7,8):flat[slot]=forward_ad.unpack_dual(flat[slot]).primal.detach()
         if operation==WarpOperation.Interpolate:flat[16]=None
         # The reference launcher supplies zero defaults for absent, unused
         # density fields. Retain a provided density-direction tensor as its
         # state-aware zero-gradient dependency, even when that primal is absent.
-        if operation in (WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl) and not (operation==WarpOperation.Divergence and consistentDivergence) and properties.gradientMode!=GradientScheme.Symmetric and flat[16] is None and getattr(queryTangentState,'densities',None) is not None:
+        if operation in (WarpOperation.Gradient,WarpOperation.Divergence,WarpOperation.Curl,WarpOperation.Laplacian) and not (operation==WarpOperation.Divergence and consistentDivergence) and properties.gradientMode!=GradientScheme.Symmetric and flat[16] is None and getattr(queryTangentState,'densities',None) is not None:
             flat[16]=torch.zeros_like(flat[2])
         if flat[15] is None and flat[18] is not None and (operation==WarpOperation.Interpolate or properties.gradientMode!=GradientScheme.Symmetric) and not (operation==WarpOperation.Divergence and consistentDivergence) and getattr(referenceTangentState,'densities',None) is not None:
             flat[15]=torch.zeros_like(flat[3])
@@ -118,6 +120,9 @@ def warpOperationJVP(queryParticles, operationProperties, domain,
         return apply(config,flat,tangents,queryParticles.masses)*factor
     if operation==WarpOperation.Curl:
         from .nt_curl_jvp import apply
+        return apply(config,flat,tangents,queryParticles.masses)*factor
+    if operation==WarpOperation.Laplacian:
+        from .nt_laplacian_jvp import apply
         return apply(config,flat,tangents,queryParticles.masses)*factor
     with torch.no_grad():
         if operation == WarpOperation.Interpolate:
