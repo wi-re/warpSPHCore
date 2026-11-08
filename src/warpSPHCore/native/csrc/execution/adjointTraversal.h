@@ -122,8 +122,10 @@ template <class T, int D, class Pair> struct AdjointRow {
                 if (a.periodic[d]) {
                     T winding =
                         round((a.qx[i * D + d] - a.rx[j * D + d] - dx[d]) / (a.hi[d] - a.lo[d]));
-                    out.add(LO, d, bar * winding);
-                    out.add(HI, d, -bar * winding);
+                    if(winding!=T(0)) {
+                        out.add(LO, d, bar * winding);
+                        out.add(HI, d, -bar * winding);
+                    }
                 }
             }
         }

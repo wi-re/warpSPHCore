@@ -53,7 +53,7 @@ template<class T,int D,int Operation>struct Pair{
     }
     SPH_HD T relative_tangent(int64_t i,int64_t j,int c)const{
         T result=tangent(0,i*D+c)-tangent(1,j*D+c);
-        if(bounds_ad)result+=winding(i,j,c)*(tangent(7,c)-tangent(8,c));
+        if(bounds_ad){const T turns=winding(i,j,c);if(turns!=T(0))result+=turns*(tangent(7,c)-tangent(8,c));}
         return result;
     }
     SPH_HD T value(int slot,int64_t at,T fallback=T(0))const{return v[slot]?v[slot][at]:fallback;}

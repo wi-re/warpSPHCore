@@ -1344,3 +1344,13 @@ capacity. In-place rebuilds also retain compatible query/reference snapshot
 addresses, so captured validity checks stay bound to the current generation.
 The paired frontend's 120-step CompSPH and CRK eager/graph controls pass exactly
 with explicit native search; this includes the CompSPH recapture-budget check.
+
+
+## Periodic branch derivatives
+
+For a minimum-image displacement that takes the unwrapped branch, native reverse
+and forward AD record no box-bound dependency. NaN cotangents or unused bound
+directions therefore leave those bound gradients or displacement tangents zero.
+Wrapped pairs keep the selected winding times the box-length derivative. This
+applies to the shared differential, explicit force-product and polynomial paths;
+integer topology and branch choices remain fixed during differentiation.

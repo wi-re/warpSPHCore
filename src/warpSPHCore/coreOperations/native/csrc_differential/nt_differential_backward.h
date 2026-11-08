@@ -316,7 +316,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
             result.add(QX,d,b); result.add(RX,d,-b);
             if (a.periodic[d]) {
                 const T winding=T(round((a.qx[i*D+d]-a.rx[j*D+d]-p.dx[d])/(a.hi[d]-a.lo[d])));
-                result.add(LO,d,b*winding); result.add(HI,d,-b*winding);
+                if(winding!=T(0)){result.add(LO,d,b*winding); result.add(HI,d,-b*winding);}
             }
         }
     }

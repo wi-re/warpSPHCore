@@ -137,7 +137,8 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
         else {
             const T winding=args.periodic[d] ? T(round((args.qx[i*D+d]-args.rx[j*D+d]-dx[d])/(args.hi[d]-args.lo[d]))) : T(0);
             const auto q=read(QX,i*D+d),r=read(RX,j*D+d),lo=read(LO,d),hi=read(HI,d);
-            const T direction=q.tangent-r.tangent+winding*(lo.tangent-hi.tangent);
+            T direction=q.tangent-r.tangent;
+            if(winding!=T(0))direction+=winding*(lo.tangent-hi.tangent);
             p.dx[d]={dx[d],direction};
             if (distance>0) dr+=dx[d]*direction/distance;
         }

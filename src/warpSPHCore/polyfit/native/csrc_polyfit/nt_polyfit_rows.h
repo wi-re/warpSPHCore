@@ -88,7 +88,7 @@ template<class T,int D>struct Pair{
         if(!query_allowed(a.qkind[i],a.direction)||!reference_allowed(a.rkind[j],a.direction))return result;
         T x[D],dt[D],wind[D];const T r=QueryGeometry<T,D>(a.qx+i*D,a.lo,a.hi,a.periodic).distance(a.rx+j*D,x);
         for(int c=0;c<D;++c){wind[c]=a.periodic[c]?T(round((a.qx[i*D+c]-a.rx[j*D+c]-x[c])/(a.hi[c]-a.lo[c]))):T(0);
-            dt[c]=tangent(0,i*D+c)-tangent(1,j*D+c)-wind[c]*tangent(8,c);}
+            dt[c]=tangent(0,i*D+c)-tangent(1,j*D+c);if(wind[c]!=T(0))dt[c]-=wind[c]*tangent(8,c);}
         const T hi=a.qh[i],hj=a.rh[j],ti=tangent(2,i),tj=tangent(3,j);
         T raw=unit?T(0):kernel_value_pair(x,r,hi,hj),draw=0;
         if constexpr(Product)if(!unit&&geometry()){
