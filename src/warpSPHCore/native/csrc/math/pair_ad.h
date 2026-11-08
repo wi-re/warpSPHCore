@@ -1,5 +1,6 @@
 #pragma once
 #include "config.h"
+#include "util/support.h"
 #include <cassert>
 #include <cstdint>
 #include <cmath>
@@ -72,5 +73,11 @@ template<class T,bool R,int Capacity,int N>SPH_HD Number<T,R,Capacity> primitive
     for(int k=0;k<N;++k)if(x[k].node>=0)
         result=Number<T,R,Capacity>::binary(value,result,x[k],T(1),partial[k]);
     return result;
+}
+// Keep the selected dependency separate from the exact floating-point value:
+// signed-zero ties can select different operands in forward and adj_max.
+template<class T,bool R,int N>SPH_HD Number<T,R,N> maximum_support(Number<T,R,N> a,Number<T,R,N> b) {
+    auto result=maximum_support_query(a.v,b.v)?a:b;
+    result.v=sph_native::maximum_support(a.v,b.v);return result;
 }
 }

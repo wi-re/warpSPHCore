@@ -105,7 +105,7 @@ template <class T, int D, class Pair> struct AdjointRow {
             else if (a.support == 13) {
                 bhi += b.bh / T(2);
                 bhj += b.bh / T(2);
-            } else if ((a.operation == 1 || force_operation(a.operation) || a.operation == 6) ? a.qh[i] > a.rh[j] : a.qh[i] >= a.rh[j])
+            } else if (maximum_support_query(a.qh[i],a.rh[j],!(a.operation == 1 || force_operation(a.operation) || a.operation == 6)))
                 bhi += b.bh;
             else
                 bhj += b.bh;

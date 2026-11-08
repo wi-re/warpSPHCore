@@ -147,7 +147,7 @@ SPH_HD Pair<S,D> prepare(const RowArgs<T,D>& args, const Arrays<T>& arrays,
     else p.distance={distance,dr};
     p.hi=read(QH,i); p.hj=read(RH,j);
     p.h=args.support==11 ? p.hi : args.support==12 ? p.hj : args.support==13 ?
-        (p.hi+p.hj)/S(2) : ScalarValue<S>::get(p.hi)>=ScalarValue<S>::get(p.hj) ? p.hi : p.hj;
+        (p.hi+p.hj)/S(2) : maximum_support(p.hi,p.hj);
     if(args.operation==Consistency)density_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap,geometry);
     else if(args.operation==1||args.operation==6||args.operation==Volume)density_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap);
     else if(force_operation(args.operation)||args.operation==Moments)force_kernel<T,D>(p.dx,p.h,args.kernel,p.raw_w,p.raw_g,p.lap,geometry);

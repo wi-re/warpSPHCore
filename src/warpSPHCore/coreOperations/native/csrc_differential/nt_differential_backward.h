@@ -308,7 +308,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
         if (a.support==11) bhi+=bh;
         else if (a.support==12) bhj+=bh;
         else if (a.support==13) { bhi+=bh/T(2); bhj+=bh/T(2); }
-        else if ((a.operation==1||force_operation(a.operation)||a.operation==6||a.operation==Volume||a.operation==Moments) ? p.hi>p.hj : p.hi>=p.hj) bhi+=bh; else bhj+=bh;
+        else if (maximum_support_query(p.hi,p.hj,!(a.operation==1||force_operation(a.operation)||a.operation==6||a.operation==Volume||a.operation==Moments))) bhi+=bh; else bhj+=bh;
         result.add(QH,0,bhi); result.add(RH,0,bhj);
         for (int d=0; d<D; ++d) {
             const T radial=p.distance>T(0) ? (a.operation==5 ? T(2)*p.dx[d]*((T(.5)/p.distance)*br):br*p.dx[d]/p.distance):T(0);

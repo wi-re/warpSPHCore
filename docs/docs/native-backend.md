@@ -1354,3 +1354,26 @@ directions therefore leave those bound gradients or displacement tangents zero.
 Wrapped pairs keep the selected winding times the box-length derivative. This
 applies to the shared differential, explicit force-product and polynomial paths;
 integer topology and branch choices remain fixed during differentiation.
+
+
+## Maximum support and product branches
+
+Native pair supports use Warp's floating-point maximum: a single NaN selects the
+other value, while two NaNs remain NaN. CPU equal values keep the first signed
+zero; CUDA uses its native `fmax`. This applies to shared row geometry,
+polynomial assembly, and the separately assembled explicit product kernels.
+
+The value and its derivative selector are separate. Taped `adj_max` selects the
+finite input and sends finite ties to the reference. The inherited explicit
+`computePairwiseSupportJVP` uses `hi >= hj` to choose a support direction,
+including its existing NaN fallback; native products preserve that convention.
+Ordinary reverse and explicit-forward selection therefore differ at a tie.
+
+`tests/parity/test_maximum_support_contract.py` checks eleven affected core owners,
+scalar and weighted reverse, isolated support directions, two FP64 gradchecks,
+a fixed-geometry density position block, and explicit
+density/interpolation/gradient/Laplacian product reverses against a
+supported Warp Gather composition. The public Warp explicit wrappers reject
+PartialSymmetric; the composition independently reconstructs its maximum value
+and explicit direction selectors for one frozen pair. This is a branch parity
+correction, with no new higher-order or simulation AD claim.

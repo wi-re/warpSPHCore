@@ -21,7 +21,7 @@ template<class T,int D> struct Pair {
         for(int c=0;c<D;++c)dt[c]=direction(tq,i*D+c)-direction(tr,j*D+c);
         const T hi=a.qh[i],hj=a.rh[j],ti=direction(thq,i),tj=direction(thr,j),mass=a.mass[j],dm=direction(tm,j);
         const bool average=a.support==14||a.support==15;
-        const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):hi>hj?hi:hj;
+        const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):maximum_support(hi,hj);
         const T dh=a.support==11?ti:a.support==12?tj:a.support==13?(ti+tj)/T(2):hi>=hj?ti:tj;
         T w=0,dw=0,bx[D]={},btx[D]={},bhi=0,bhj=0,bti=0,btj=0;
         if(average){
@@ -41,7 +41,7 @@ template<class T,int D> struct Pair {
                 if(a.support==11){bhi=bh;bti=bth;}
                 else if(a.support==12){bhj=bh;btj=bth;}
                 else if(a.support==13){bhi=bhj=bh/T(2);bti=btj=bth/T(2);}
-                else{if(hi>hj)bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}
+                else{if(maximum_support_query(hi,hj))bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}
             }
         }
         if(reverse){

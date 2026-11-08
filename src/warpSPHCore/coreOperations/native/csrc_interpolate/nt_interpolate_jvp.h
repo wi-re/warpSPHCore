@@ -32,7 +32,7 @@ template<class T,int D>struct Pair{
             T dl=0,dr=0;for(int c=0;c<D;++c){dl+=l.g[c]*dt[c];dr+=q.g[c]*dt[c];}
             return ((dl+dr)+l.wh*ti+q.wh*tj)*T(.5);
         }
-        const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):hi>hj?hi:hj;
+        const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):maximum_support(hi,hj);
         const T dh=a.support==11?ti:a.support==12?tj:a.support==13?(ti+tj)/T(2):hi>=hj?ti:tj;
         const warp_compat::ValueProductKernel<T,D> k(dx,r,h,a.kernel);w=k.w;return k.tangent(dt,dh);
     }
@@ -43,13 +43,13 @@ template<class T,int D>struct Pair{
             q.backward(a.kernel,dt,tj,bw/T(2),bd*T(.5),bx,bhj,bt,btj);
             l.backward(a.kernel,dt,ti,bw/T(2),bd*T(.5),bx,bhi,bt,bti);
         }else{
-            const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):hi>hj?hi:hj;
+            const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):maximum_support(hi,hj);
             const T dh=a.support==11?ti:a.support==12?tj:a.support==13?(ti+tj)/T(2):hi>=hj?ti:tj;
             const warp_compat::ValueProductKernel<T,D> k(dx,r,h,a.kernel);T bh=0,bth=0;
             k.backward(a.kernel,dt,dh,bw,bd,bx,bh,bt,bth);
             if(a.support==11){bhi=bh;bti=bth;}else if(a.support==12){bhj=bh;btj=bth;}
             else if(a.support==13){bhi=bhj=bh/T(2);bti=btj=bth/T(2);}
-            else{if(hi>hj)bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}
+            else{if(maximum_support_query(hi,hj))bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}
         }
         for(int c=0;c<D;++c){bars.add(0,c,bx[c]);bars.add(1,c,-bx[c]);bars.add(10,c,bt[c]);bars.add(11,c,-bt[c]);}
         bars.add(2,0,bhi);bars.add(3,0,bhj);bars.add(12,0,bti);bars.add(13,0,btj);

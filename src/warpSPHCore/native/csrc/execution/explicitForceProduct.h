@@ -80,7 +80,7 @@ template<class T,int D,int Operation>struct Pair{
             w=(ki.w+kj.w)*T(.5);dw=((di+dj)+ki.wh*ti+kj.wh*tj)*T(.5);
             for(int c=0;c<D;++c){T hdi=0,hdj=0;for(int e=0;e<D;++e){hdi+=ki.H[c*D+e]*dt[e];hdj+=kj.H[c*D+e]*dt[e];}
                 g[c]=(gi[c]+gj[c])*T(.5);dg[c]=((hdi+hdj)+ki.gh[c]*ti+kj.gh[c]*tj)*T(.5);}
-        }else{const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):hi>hj?hi:hj;
+        }else{const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):maximum_support(hi,hj);
             const T dh=a.support==11?ti:a.support==12?tj:a.support==13?(ti+tj)/T(2):hi>=hj?ti:tj;
             kernel_one(x,radius,h,dt,dh,w,dw,g,dg);}
     }
@@ -100,11 +100,11 @@ template<class T,int D,int Operation>struct Pair{
         if(a.support==14||a.support==15){T bg2[D],bdg2[D];for(int c=0;c<D;++c){bg2[c]=bg[c]*T(.5);bdg2[c]=bdg[c]*T(.5);}
             reverse_one<Borrow>(x,radius,hj,dt,tj,bw*T(.5),bdw*T(.5),bg2,bdg2,bx,bhj,bt,btj,scratch);
             reverse_one<Borrow>(x,radius,hi,dt,ti,bw*T(.5),bdw*T(.5),bg2,bdg2,bx,bhi,bt,bti,scratch);
-        }else{const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):hi>hj?hi:hj;
+        }else{const T h=a.support==11?hi:a.support==12?hj:a.support==13?(hi+hj)/T(2):maximum_support(hi,hj);
             const T dh=a.support==11?ti:a.support==12?tj:a.support==13?(ti+tj)/T(2):hi>=hj?ti:tj;
             T bh=0,bth=0;reverse_one<Borrow>(x,radius,h,dt,dh,bw,bdw,bg,bdg,bx,bh,bt,bth,scratch);
             if(a.support==11){bhi=bh;bti=bth;}else if(a.support==12){bhj=bh;btj=bth;}else if(a.support==13){bhi=bhj=bh/T(2);bti=btj=bth/T(2);}
-            else{if(hi>hj)bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}}
+            else{if(maximum_support_query(hi,hj))bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}}
         for(int c=0;c<D;++c){bars.add(0,c,a.fields,bx[c]);bars.add(1,c,a.fields,-bx[c]);bars.add(26,c,a.fields,bt[c]);bars.add(27,c,a.fields,-bt[c]);}
         bars.add(2,0,a.fields,bhi);bars.add(3,0,a.fields,bhj);bars.add(28,0,a.fields,bti);bars.add(29,0,a.fields,btj);
     }

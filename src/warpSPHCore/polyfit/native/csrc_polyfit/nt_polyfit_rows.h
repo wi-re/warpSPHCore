@@ -59,23 +59,23 @@ template<class T,int D>struct Pair{
     SPH_HD T kernel_product(const T(&x)[D],T r,T hi,T hj,const T(&dt)[D],T ti,T tj,T& w)const{
         auto one=[&](T h,T dh,T& value){LiteralKernel<T,D> k{x,r,h,args.kernel};value=k.value();return k.tangent(dt,dh);};
         if(args.support==14||args.support==15){T wi,wj;const T di=one(hi,ti,wi),dj=one(hj,tj,wj);w=(wi+wj)/T(2);return(di+dj)/T(2);}
-        return one(args.support==11?hi:args.support==12?hj:args.support==13?(hi+hj)/T(2):hi>hj?hi:hj,
+        return one(args.support==11?hi:args.support==12?hj:args.support==13?(hi+hj)/T(2):maximum_support(hi,hj),
             args.support==11?ti:args.support==12?tj:args.support==13?(ti+tj)/T(2):hi>=hj?ti:tj,w);
     }
     SPH_HD T kernel_value_pair(const T(&x)[D],T r,T hi,T hj)const{
         auto one=[&](T h){return LiteralKernel<T,D>{x,r,h,args.kernel}.value();};
         if(args.support==14||args.support==15)return(one(hi)+one(hj))/T(2);
-        return one(args.support==11?hi:args.support==12?hj:args.support==13?(hi+hj)/T(2):hi>hj?hi:hj);
+        return one(args.support==11?hi:args.support==12?hj:args.support==13?(hi+hj)/T(2):maximum_support(hi,hj));
     }
     SPH_HD void kernel_reverse(const T(&x)[D],T r,T hi,T hj,const T(&dt)[D],T ti,T tj,T bw,T bd,bool product,interpolate_jvp::Bars<T,D>& bars)const{
         T bx[D]={},bt[D]={},bhi=0,bhj=0,bti=0,btj=0;
         auto one=[&](T h,T dh,T wb,T db,T& bh,T& bth){LiteralKernel<T,D> k{x,r,h,args.kernel};
             if(product)k.backward(dt,dh,wb,db,bx,bh,bt,bth);else k.value_reverse(wb,bx,bh);};
         if(args.support==14||args.support==15){one(hj,tj,bw/T(2),bd/T(2),bhj,btj);one(hi,ti,bw/T(2),bd/T(2),bhi,bti);}
-        else{T bh=0,bth=0;one(args.support==11?hi:args.support==12?hj:args.support==13?(hi+hj)/T(2):hi>hj?hi:hj,
+        else{T bh=0,bth=0;one(args.support==11?hi:args.support==12?hj:args.support==13?(hi+hj)/T(2):maximum_support(hi,hj),
                 args.support==11?ti:args.support==12?tj:args.support==13?(ti+tj)/T(2):hi>=hj?ti:tj,bw,bd,bh,bth);
             if(args.support==11){bhi=bh;bti=bth;}else if(args.support==12){bhj=bh;btj=bth;}
-            else if(args.support==13){bhi=bhj=bh/T(2);bti=btj=bth/T(2);}else{if(hi>hj)bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}}
+            else if(args.support==13){bhi=bhj=bh/T(2);bti=btj=bth/T(2);}else{if(maximum_support_query(hi,hj))bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}}
         for(int c=0;c<D;++c){bars.add(0,c,bx[c]);bars.add(1,c,-bx[c]);bars.add(10,c,bt[c]);bars.add(11,c,-bt[c]);}
         bars.add(2,0,bhi);bars.add(3,0,bhj);bars.add(12,0,bti);bars.add(13,0,btj);
     }

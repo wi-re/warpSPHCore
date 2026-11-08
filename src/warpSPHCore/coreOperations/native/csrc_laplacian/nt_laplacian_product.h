@@ -13,7 +13,7 @@ template<class T,int D>struct LaplacianProductPolicy {
     }
     template<class PairType>SPH_HD static void lap_kernel(const PairType& p,const T(&x)[D],T r,T hi,T hj,const T(&dt)[D],T ti,T tj,T& L,T& dL){
         if(p.a.support==15){T li=0,lj=0,di=0,dj=0,si=0,sj=0;lap_one(p,x,r,hi,dt,ti,li,di,si);lap_one(p,x,r,hj,dt,tj,lj,dj,sj);L=(li+lj)*T(.5);dL=(di+si+dj+sj)*T(.5);}
-        else{const T h=p.a.support==11?hi:p.a.support==12?hj:p.a.support==13?(hi+hj)/T(2):hi>hj?hi:hj;
+        else{const T h=p.a.support==11?hi:p.a.support==12?hj:p.a.support==13?(hi+hj)/T(2):maximum_support(hi,hj);
             const T dh=p.a.support==11?ti:p.a.support==12?tj:p.a.support==13?(ti+tj)/T(2):hi>=hj?ti:tj;
             T dot=0,support=0;lap_one(p,x,r,h,dt,dh,L,dot,support);dL=dot+support;}
     }
@@ -24,11 +24,11 @@ template<class T,int D>struct LaplacianProductPolicy {
             else{laplacian_pullback<T,D>(x,r,h,p.a.kernel,bL*weight,bx,bh);warp_compat::laplacian_clipped_replay<T,D>(x,r,h,p.a.kernel,bx,bh,trace);}
         };
         if(p.a.support==15){one(hj,tj,T(.5),bhj,btj);one(hi,ti,T(.5),bhi,bti);}
-        else{const T h=p.a.support==11?hi:p.a.support==12?hj:p.a.support==13?(hi+hj)/T(2):hi>hj?hi:hj;
+        else{const T h=p.a.support==11?hi:p.a.support==12?hj:p.a.support==13?(hi+hj)/T(2):maximum_support(hi,hj);
             const T dh=p.a.support==11?ti:p.a.support==12?tj:p.a.support==13?(ti+tj)/T(2):hi>=hj?ti:tj;
             T bh=0,bth=0;one(h,dh,T(1),bh,bth);
             if(p.a.support==11){bhi=bh;bti=bth;}else if(p.a.support==12){bhj=bh;btj=bth;}else if(p.a.support==13){bhi=bhj=bh/T(2);bti=btj=bth/T(2);}
-            else{if(hi>hj)bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}}
+            else{if(maximum_support_query(hi,hj))bhi=bh;else bhj=bh;if(hi>=hj)bti=bth;else btj=bth;}}
         for(int c=0;c<D;++c){bars.add(0,c,p.a.fields,bx[c]);bars.add(1,c,p.a.fields,-bx[c]);bars.add(26,c,p.a.fields,bt[c]);bars.add(27,c,p.a.fields,-bt[c]);}
         bars.add(2,0,p.a.fields,bhi);bars.add(3,0,p.a.fields,bhj);bars.add(28,0,p.a.fields,bti);bars.add(29,0,p.a.fields,btj);
     }
@@ -56,7 +56,7 @@ template<class T,int D>struct LaplacianProductPolicy {
         S xx[D],squared(0);for(int c=0;c<D;++c){xx[c]=read(0,c)-read(1,c);xx[c].v=x[c];squared+=xx[c]*xx[c];}
         S rr=pair_ad::sqrt(squared);rr.v=radius;
         const S hi_value=read(2,0),hj_value=read(3,0);
-        const S h=p.a.support==11?hi_value:p.a.support==12?hj_value:p.a.support==13?(hi_value+hj_value)/S(2):hi>hj?hi_value:hj_value;
+        const S h=p.a.support==11?hi_value:p.a.support==12?hj_value:p.a.support==13?(hi_value+hj_value)/S(2):maximum_support(hi_value,hj_value);
         const S den=rr+S(1e-8)*h;S normal[D];for(int c=0;c<D;++c)normal[c]=explicit_ad::matrix_divide(xx[c],den);
         S projection(0);
         if(p.a.laplacian_mode==4){const S second=rr+S(1e-12)*h;for(int c=0;c<D;++c)projection+=explicit_ad::matrix_divide(normal[c],second)*G[c];}
@@ -95,7 +95,7 @@ template<class T,int D>struct LaplacianProductPolicy {
                 S rr=pair_ad::sqrt(squared);rr.v=radius;
                 S dr(0);for(int c=0;c<D;++c)dr+=xx[c]*dd[c];dr=explicit_ad::divide(dr,rr);
                 const S hqi=read(2,0),hrj=read(3,0),tqi=read(28,0),trj=read(29,0);
-                const S h=p.a.support==11?hqi:p.a.support==12?hrj:p.a.support==13?(hqi+hrj)/S(2):hi>hj?hqi:hrj;
+                const S h=p.a.support==11?hqi:p.a.support==12?hrj:p.a.support==13?(hqi+hrj)/S(2):maximum_support(hqi,hrj);
                 const S dh=p.a.support==11?tqi:p.a.support==12?trj:p.a.support==13?(tqi+trj)/S(2):hi>=hj?tqi:trj;
                 const S den=rr+S(1e-8)*h,dden=dr+S(1e-8)*dh;S n[D],dn[D];
                 for(int c=0;c<D;++c)n[c]=explicit_ad::matrix_divide(xx[c],den);
