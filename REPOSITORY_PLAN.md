@@ -113,3 +113,19 @@ retain no bound dependency. CPU tensor/Warp/operator/import/whole-run gates pass
 CUDA and final installed gates are being completed in the paired plan. Keep
 existing half-box conventions, reference floors, rank/cutoff policies and the
 FP32 determinant repair. See the paired frontend native port plan and handoff.
+
+
+### Native periodic geometry combined qualification — 9 November 2026
+
+Core e16abb4 and frontend2737857 pass the declared CPU/CUDA geometry/runtime
+matrix. CUDA Warp geometry/search/motion and fixed-image bounds:49 passes per
+precision; native standalone:10 passes plus expanded direct/prepared geometry.
+Source launch/import rejection and actual isolated installed-without-Warp runs
+pass separately. Cold/final installed CUDA:49 pass/one skip/strict inherited
+checkpoint xfail FP32,50 pass/one skip FP64; both Scene precisions pass.
+Combined owners retain three exact inherited CUDA FP32 CompSPH failures;
+a broader follow-up reproduces four additional CPU FP32 Inutsuka comparisons
+identically before distance integration. No failure waiver or main merge.
+Continue the bounded shared quotient/acoustic/native-spectrum FP32 range repairs
+in the paired frontend M3 plan. CPU receipt is finalized; CUDA receipt is the
+single-use frontend-native-periodic-integration-cuda-20261109-r1 archive.
