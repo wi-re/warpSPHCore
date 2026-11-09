@@ -33,7 +33,10 @@ template<class T,int D,int Task,bool Reverse>struct ProductRow {
    partial[D]=-C*(T(D)*radial.v+q*first)/(hd*h.v);
   }
   S inputs[D+1];for(int c=0;c<D;++c)inputs[c]=dx[c];inputs[D]=h;const S weight=pair_ad::primitive(w,inputs,partial);
-  S value[3][D*D]={};
+  // NVCC can value-initialize later subarrays of a defaulted AD Number
+  // constructor with node=0 rather than its inactive node=-1. That seeds
+  // an unrelated position leaf. Construct every accumulator explicitly.
+  S value[3][D*D];for(int output=0;output<3;++output)for(int c=0;c<D*D;++c)value[output][c]=S(T(0));
   if constexpr(Task==Moments){value[0][0]=weight;for(int c=0;c<D;++c)for(int d=0;d<D;++d)value[1][c*D+d]=dx[c]*dx[d]*weight;}
   else if constexpr(Task==Gradients){
    const S dr=field(Rho,j)-field(Rho,i),dp=field(Pressure,j)-field(Pressure,i);

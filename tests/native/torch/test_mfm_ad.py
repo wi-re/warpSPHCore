@@ -320,3 +320,37 @@ def test_riemann_equal_sound_speed_uses_declared_second_operand(device,dtype):
     expected=products(-area*pressure*contact,(rho,pres),torch.ones((),device=device,dtype=dtype))
     tol=4e-5 if dtype==torch.float32 else 5e-10
     for a,b in zip(actual,expected):torch.testing.assert_close(a,b,rtol=tol,atol=tol)
+
+
+@pytest.mark.parametrize('dim',[1,2,3])
+@pytest.mark.parametrize('dtype',[torch.float32,torch.float64])
+def test_constant_field_gradient_accumulators_do_not_seed_positions(device,dim,dtype):
+    values,run,_=fixture(device,dim,dtype)
+    values=(*values[:4],*(torch.ones_like(t).requires_grad_() for t in values[4:]))
+    for output in (3,4,5):
+        value=run(values)[output]
+        assert value.count_nonzero()==0
+        seed=torch.linspace(-.2,.8,value.numel(),device=device,dtype=dtype).reshape_as(value)
+        derivative=torch.autograd.grad(value,values[:4],seed,allow_unused=True)
+        for tensor in derivative:
+            if tensor is not None:torch.testing.assert_close(tensor,torch.zeros_like(tensor),rtol=0,atol=0)
+
+
+@pytest.mark.parametrize('mode',['MFM','MFV'])
+@pytest.mark.parametrize('dtype',[torch.float32,torch.float64])
+def test_positions_velocity_and_density_pressure_true_input_aliases(device,mode,dtype):
+    values,run=rates_fixture(device,2,dtype,mode,2)
+    unique=values[:5]
+    # Three position roles (query/reference/velocity) and two thermodynamic
+    # roles share actual Tensor objects, not just equal numerical values.
+    def alias(v,reference=False):return run((*v,v[0],v[4]),reference)
+    a,b=alias(unique),alias(unique,True)
+    tol=4e-5 if dtype==torch.float32 else 5e-10
+    torch.testing.assert_close(a,b,atol=tol,rtol=tol)
+    seed=torch.linspace(-.2,.8,a.numel(),device=device,dtype=dtype).reshape_as(a)
+    ga,gb=products(a,unique,seed),products(b,unique,seed)
+    for g,e in zip(ga,gb):torch.testing.assert_close(g,e,atol=tol,rtol=tol)
+    directions=tuple(.001*t.detach().cos() for t in unique)
+    with forward_ad.dual_level():
+        tangent=forward_ad.unpack_dual(alias(tuple(forward_ad.make_dual(t,d) for t,d in zip(unique,directions)))).tangent
+    torch.testing.assert_close((tangent*seed).sum(),sum((g*d).sum() for g,d in zip(gb,directions)),atol=tol,rtol=tol)
