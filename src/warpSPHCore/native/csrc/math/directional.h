@@ -1,6 +1,8 @@
 #pragma once
 #include "config.h"
 #include "util/support.h"
+#include <cmath>
+#include <limits>
 namespace sph_native {
 // A first-order scalar direction used only inside a single particle pair.
 // There is no tape, heap allocation, or cross-operation differentiation graph.
@@ -14,7 +16,17 @@ template <class T> struct Directional {
 template <class T> SPH_HD Directional<T> operator+(Directional<T> a, Directional<T> b) { return {a.value+b.value,a.tangent+b.tangent}; }
 template <class T> SPH_HD Directional<T> operator-(Directional<T> a, Directional<T> b) { return {a.value-b.value,a.tangent-b.tangent}; }
 template <class T> SPH_HD Directional<T> operator*(Directional<T> a, Directional<T> b) { return {a.value*b.value,a.tangent*b.value+a.value*b.tangent}; }
-template <class T> SPH_HD Directional<T> operator/(Directional<T> a, Directional<T> b) { return {a.value/b.value,(a.tangent*b.value-a.value*b.tangent)/(b.value*b.value)}; }
+template <class T> SPH_HD Directional<T> operator/(Directional<T> a, Directional<T> b) {
+ if constexpr(sizeof(T)==sizeof(float)){
+  const T square=b.value*b.value,value=a.value/b.value;
+  if(b.value!=T(0)&&std::isfinite(a.value)&&std::isfinite(b.value)&&std::isfinite(value)&&
+     (!std::isfinite(square)||std::abs(square)<std::numeric_limits<T>::min())){
+   const double den=double(b.value);
+   return {value,T((double(a.tangent)*den-double(a.value)*double(b.tangent))/(den*den))};
+  }
+ }
+ return {a.value/b.value,(a.tangent*b.value-a.value*b.tangent)/(b.value*b.value)};
+}
 template <class S> struct ScalarValue { using Type = S; SPH_HD static S get(S a) { return a; } };
 template <class T> struct ScalarValue<Directional<T>> { using Type = T; SPH_HD static T get(Directional<T> a) { return a.value; } };
 // Explicit Warp support JVP deliberately uses >=, even for NaN inputs.

@@ -1,5 +1,8 @@
 #pragma once
 #include "math/distance.h"
+#include <cmath>
+#include <limits>
+#include <type_traits>
 
 namespace sph_native {
 // Jacobi rotations on a padded 3x3 matrix. This is shared numerical code:
@@ -8,12 +11,18 @@ template<class T> struct SymmetricSpectrum {
     T values[3]={}, vectors[9]={};
 };
 template<class T,int D> SPH_HD SymmetricSpectrum<T> symmetric_spectrum(const T* input) {
+    T scale=T(1);
+    if constexpr(std::is_same_v<T,float>){
+        T largest=T(0);bool finite=true;
+        for(int k=0;k<D*D;++k){finite=finite&&std::isfinite(input[k]);const T magnitude=std::abs(input[k]);if(magnitude>largest)largest=magnitude;}
+        if(finite&&largest>std::numeric_limits<T>::max()/T(16))scale=largest;
+    }
     T matrix[9]={};
     SymmetricSpectrum<T> result;
     for (int row=0;row<3;++row) {
         result.vectors[row*3+row]=T(1);
         for (int col=0;col<3;++col)
-            if (row<D && col<D) matrix[row*3+col]=(input[row*D+col]+input[col*D+row])/T(2);
+            if (row<D && col<D) matrix[row*3+col]=scale==T(1)?(input[row*D+col]+input[col*D+row])/T(2):(input[row*D+col]/scale+input[col*D+row]/scale)/T(2);
     }
     for (int sweep=0;sweep<8;++sweep) for (int pair=0;pair<3;++pair) {
         const int p=pair==2 ? 1:0, q=pair==0 ? 1:2;
@@ -35,7 +44,7 @@ template<class T,int D> SPH_HD SymmetricSpectrum<T> symmetric_spectrum(const T* 
             next[i*3+j]+=rotation[k*3+i]*product[k*3+j];
         for (int i=0;i<9;++i) {matrix[i]=next[i];result.vectors[i]=vectors[i];}
     }
-    for (int i=0;i<3;++i) result.values[i]=matrix[i*3+i];
+    for (int i=0;i<3;++i) result.values[i]=matrix[i*3+i]*scale;
     return result;
 }
 template<class T,int D> SPH_HD void symmetric_inverse(const T* input,T rtol,T* output) {

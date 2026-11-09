@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cmath>
+#include <limits>
 
 namespace sph_native::pair_ad {
 // The trace is local to one pair, independent of neighborhood/population size.
@@ -66,7 +67,21 @@ template<class T,bool R,int Capacity>SPH_HD Number<T,R,Capacity> operator+(Numbe
 template<class T,bool R,int Capacity>SPH_HD Number<T,R,Capacity> operator-(Number<T,R,Capacity>a,Number<T,R,Capacity>b){return Number<T,R,Capacity>::binary(a.v-b.v,a,b,T(1),T(-1));}
 template<class T,bool R,int Capacity>SPH_HD Number<T,R,Capacity> operator-(Number<T,R,Capacity>a){return Number<T,R,Capacity>::unary(-a.v,a,T(-1));}
 template<class T,bool R,int Capacity>SPH_HD Number<T,R,Capacity> operator*(Number<T,R,Capacity>a,Number<T,R,Capacity>b){return Number<T,R,Capacity>::binary(a.v*b.v,a,b,b.v,a.v);}
-template<class T,bool R,int Capacity>SPH_HD Number<T,R,Capacity> operator/(Number<T,R,Capacity>a,Number<T,R,Capacity>b){return Number<T,R,Capacity>::binary(a.v/b.v,a,b,T(1)/b.v,-a.v/(b.v*b.v));}
+template<class T,bool R,int Capacity>SPH_HD Number<T,R,Capacity> operator/(Number<T,R,Capacity>a,Number<T,R,Capacity>b){
+ if constexpr(sizeof(T)==sizeof(float)){
+  const T square=b.v*b.v,value=a.v/b.v;
+  if(b.v!=T(0)&&std::isfinite(a.v)&&std::isfinite(b.v)&&std::isfinite(value)&&
+     (!std::isfinite(square)||std::abs(square)<std::numeric_limits<T>::min())){
+   auto result=Number<T,R,Capacity>::binary(value,a,b,T(1)/b.v,-value/b.v);
+   if constexpr(!R)if(result.node>=0){
+    const double da=a.node>=0?double(a.d):0.,db=b.node>=0?double(b.d):0.,den=double(b.v);
+    result.d=T((da*den-double(a.v)*db)/(den*den));
+   }
+   return result;
+  }
+ }
+ return Number<T,R,Capacity>::binary(a.v/b.v,a,b,T(1)/b.v,-a.v/(b.v*b.v));
+}
 #define CRK_COMPARE(OP) template<class T,bool R,int Capacity>SPH_HD bool operator OP(Number<T,R,Capacity>a,Number<T,R,Capacity>b){return a.v OP b.v;}
 CRK_COMPARE(<) CRK_COMPARE(>) CRK_COMPARE(<=) CRK_COMPARE(>=) CRK_COMPARE(==) CRK_COMPARE(!=)
 #undef CRK_COMPARE

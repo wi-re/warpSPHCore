@@ -117,7 +117,7 @@ FP32 determinant repair. See the paired frontend native port plan and handoff.
 
 ### Native periodic geometry combined qualification — 9 November 2026
 
-Core e16abb4 and frontend2737857 pass the declared CPU/CUDA geometry/runtime
+Core e16abb4 and frontend `2737857` pass the declared CPU/CUDA geometry/runtime
 matrix. CUDA Warp geometry/search/motion and fixed-image bounds:49 passes per
 precision; native standalone:10 passes plus expanded direct/prepared geometry.
 Source launch/import rejection and actual isolated installed-without-Warp runs
@@ -129,3 +129,23 @@ identically before distance integration. No failure waiver or main merge.
 Continue the bounded shared quotient/acoustic/native-spectrum FP32 range repairs
 in the paired frontend M3 plan. CPU receipt is finalized; CUDA receipt is the
 single-use frontend-native-periodic-integration-cuda-20261109-r1 archive.
+
+
+### Qualified bounded FP32 scalar ranges — 9 November 2026
+
+Generic Number/Directional quotient AD avoids the squared-denominator range
+failure for finite FP32 quotients, preserving normal/FP64 replay and trace layout.
+Only exceptional JVP scalar intermediates widen locally; tensor/Jacobian storage
+stays FP32. Native general symmetric-spectrum primals scale large finite FP32
+matrices before symmetrization/Jacobi, preserving cutoffs and sweep count.
+Paired frontend normalizes exceptional acoustic impedance products before tracing.
+Fresh complete CPU/CUDA libraries, Core/frontend standalone scalar paths 12/2,
+Core dense/geometry products 44/45 plus four public large-matrix cases per device,
+and installed no-Warp matrices pass. CPU CompSPH profiles180 each precision;
+CUDA retains the exact three inherited FP32 failures (177/180 passes).
+Four broader CPU Inutsuka failures also reproduce identically before integration.
+No tolerance waiver or main merge: strict Warp/independent references conflict
+for one CompSPH component. Torch spectral AD and manual derivative quotient range
+limits remain separate. See paired frontend M3 report and immutable
+frontend-native-fp32-ranges-20261109-r1 evidence. The preserved native pinv facade
+patch is separately checkpointed at `2268211` with CPU/CUDA32/64 dispatch tests.
