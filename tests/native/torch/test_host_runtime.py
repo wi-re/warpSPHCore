@@ -88,3 +88,23 @@ else:
     raise AssertionError('native-only process admitted a Warp reference')
 assert 'warp' not in __import__('sys').modules
 ''', 'native')
+
+
+def test_native_scalar_argument_keeps_storage_and_gradient_without_warp():
+    run('''
+import torch
+from warpSPHCore import asScalarArg
+from warpSPHCore.autograd import asScalarArg as same
+assert same is asScalarArg
+x = torch.tensor(2.5, dtype=torch.float64, requires_grad=True)
+y = asScalarArg(x, device='cpu')
+assert y.shape == (1,) and y.data_ptr() == x.data_ptr()
+assert torch.autograd.grad((3 * y).sum(), x)[0].item() == 3
+assert asScalarArg(1.25, device='cpu').tolist() == [1.25]
+try:
+    asScalarArg(torch.ones(2), device='cpu')
+except ValueError:
+    pass
+else:
+    raise AssertionError('non-scalar argument admitted')
+''', 'native')

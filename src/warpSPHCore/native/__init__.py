@@ -91,3 +91,6 @@ __all__ += ["sphKernelScale", "sphKernel_xi"]
 # Keep the public per-call backend keyword at the native package boundary.
 from ..radiusSearch.dispatch import (buildVerletList, filterVerletList, verletStaleFlag,
                                      verletUsage, deferVerletChecks)
+
+from ..autograd.scalar_arg import asScalarArg
+__all__ += ["asScalarArg"]
