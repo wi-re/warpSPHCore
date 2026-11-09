@@ -17,8 +17,12 @@ template<class T> SPH_HD T scalar_power(T value,T exponent) {
     if constexpr(sizeof(T)==4) return ::powf(value,exponent);
     else return ::pow(value,exponent);
 }
+// Scalar dispatch lets local AD reuse the literal pair algebra unchanged.
+template<class T,int D>struct KernelPair {
+    SPH_HD static void evaluate(T r,T h,int kernel,T& w,T& g){kernel_pair_value<T,D>(r,h,kernel,w,g);}
+};
 template<class T,int D> SPH_HD T weight(const SmallVector<T,D>& d,T h,int kernel) {
-    T w,g;kernel_pair_value<T,D>(length(d),h,kernel,w,g);return w;
+    T w,g;KernelPair<T,D>::evaluate(length(d),h,kernel,w,g);return w;
 }
 template<class T,int D> SPH_HD SmallVector<T,D> guarded_face(const SmallVector<T,D>& d,T Vi,T Vj,
         const SmallMatrix<T,D>& Ei,const SmallMatrix<T,D>& Ej,T hi,T hj,bool badI,bool badJ,int kernel,bool centred,bool areaCap) {
@@ -30,7 +34,7 @@ template<class T,int D> SPH_HD SmallVector<T,D> guarded_face(const SmallVector<T
     }
     auto face=(wti*Wi)*(Ei*d)+(wtj*Wj)*(Ej*d);
     if (badI || badJ || dot(face,d)<T(0) || !finite(length(face))) {
-        T wi,gi,wj,gj;kernel_pair_value<T,D>(r,hi,kernel,wi,gi);kernel_pair_value<T,D>(r,hj,kernel,wj,gj);
+        T wi,gi,wj,gj;KernelPair<T,D>::evaluate(r,hi,kernel,wi,gi);KernelPair<T,D>::evaluate(r,hj,kernel,wj,gj);
         // radial is (dW/dr)/r. Retain the reference's finite origin limit.
         face=(-(wti*Vi*gi*r+wtj*Vj*gj*r)/maximum(r,tiny))*d;
         face=face*warp_compat::gradient_scale(r);

@@ -54,7 +54,7 @@ template<class T,int D,int Task> struct Row {
         const Vec normal=face/area,va=vector(Velocity,a),vb=vector(Velocity,b);
         const T fraction=args.rh[a]/(args.rh[a]+args.rh[b]);
         Vec halfA=va,halfB=vb;
-        if(options.order>=2 && dt>0 && options.timeCentred) {
+        if(options.order>=2 && dt>T(0) && options.timeCentred) {
             const auto da=time_derivative(scalar(Rho,a),va,scalar(Pressure,a),scalar(AlphaRho,a)*vector(GradientRho,a),
                 limited_gradient(matrix(GradientVelocity,a),vector(AlphaVelocity,a)),scalar(AlphaPressure,a)*vector(GradientPressure,a),gamma(a));
             const auto db=time_derivative(scalar(Rho,b),vb,scalar(Pressure,b),scalar(AlphaRho,b)*vector(GradientRho,b),
@@ -82,7 +82,7 @@ template<class T,int D,int Task> struct Row {
                 }
             }
         }
-        if(options.mode==1 && options.massLimit>0 && dt>0) {
+        if(options.mode==1 && options.massLimit>0 && dt>T(0)) {
             const T mass=area*result.mass*T(dt);
             const auto donor=mass<T(0) ? b:a;
             const T cap=T(options.massLimit)*scalar(Rho,donor)*scalar(Volume,donor);

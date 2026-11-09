@@ -74,12 +74,13 @@ def test_meshless_closure_multigrid_and_captured_rates(device):
     assert torch.isfinite(plain.lam).all()
 
 
-def test_meshless_forward_only_boundary_and_torch_reference_ad(device):
+def test_meshless_ad_and_explicit_projection_boundary(device):
     state,domain=particles(device,1,torch.float64)
     native=MeshlessNative.build(state.positions,state.supports,domain,sph.KernelFunctions.Wendland2,closure='none')
     rho=torch.ones_like(state.supports,requires_grad=True)
-    with pytest.raises(NotImplementedError,match='forward-only'):
-        native.rates(rho,torch.zeros_like(state.positions),rho,1.4)
+    rate=native.rates(rho,torch.zeros_like(state.positions),rho,1.4)
+    gradient,=torch.autograd.grad(rate.square().sum(),rho)
+    assert torch.isfinite(gradient).all()
     with forward_ad.dual_level():
         dual=forward_ad.make_dual(state.positions,torch.ones_like(state.positions))
         with pytest.raises(NotImplementedError,match='forward-only'):

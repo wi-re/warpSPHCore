@@ -43,14 +43,18 @@ class PreparedLauncher:
         query=context.query
         reference=query if context.reference is None else context.reference
         self.properties,domain=context.properties,context.domain
-        check_execution(query.positions,reference.positions,query.supports,reference.supports,domain.min,domain.max)
-        geometry=prepare_geometry(query,reference,domain)
+        check_execution(query.positions,reference.positions,query.supports,reference.supports,domain.min,domain.max,allow_reverse=True,allow_forward=True)
+        geometry=prepare_geometry(query,reference,domain,allow_reverse=True,allow_forward=True)
         adjacency=prepare_adjacency(query,reference,domain,self.properties,context.adjacency)
+        from ...native._topology import CSRTopology
+        self.topology=CSRTopology(adjacency)
         self.inputs=[*geometry[:4],reference.masses,query.kinds,reference.kinds,*geometry[4:],
                      adjacency.edgeOffsets,adjacency.numNeighbors,adjacency.paddedJ,None,None,None,None]
 
     def launch(self,spec,**extras):
         if self._chunks is not None:
+            check_execution(self.context.query.positions,self.context.query.supports,
+                            self.context.domain.min,self.context.domain.max,*extras.values())
             if self.context.adjacency is not self._adjacency:
                 raise ValueError('Build a new prepared launcher after replacing its chunked adjacency')
             from ...autograd.row_dispatch import launchRowChunks
@@ -62,7 +66,11 @@ class PreparedLauncher:
 
     def _launch(self,task,extras):
         from ...native._build import build
-        check_execution(*(value for value in extras.values() if isinstance(value,torch.Tensor)))
+        from .nt_mfm_ad import active, apply, Options, SUPPORTED_TASKS
+        differentiated = active((*self.inputs, *extras.values()))
+        if differentiated and task not in SUPPORTED_TASKS:
+            raise NotImplementedError('This native meshless pass is forward-only')
+        sources = tuple(v for v in (*self.inputs, *extras.values()) if isinstance(v,torch.Tensor))
         extras = dict(extras)
         if isinstance(extras.get('gamma'),torch.Tensor):
             extras['gammas']=extras.pop('gamma')
@@ -74,7 +82,11 @@ class PreparedLauncher:
         tensors = [None if extras.get(name) is None else extras[name].contiguous() for name in _FIELDS]
         floats = [float(extras.get(name,default)) for name,default in _FLOATS.items()]
         integers = [int(extras.get(name,default)) for name,default in _INTS.items()]
-        result = build().meshless(self.inputs,tensors,floats,integers,int(task),self.properties.kernel.value)
+        if differentiated:
+            options=Options(tuple(floats),tuple(integers),int(task),self.properties.kernel.value,self.topology,sources)
+            result=apply(options,self.inputs,tensors)
+        else:
+            result = build().meshless(self.inputs,tensors,floats,integers,int(task),self.properties.kernel.value)
         return result[0] if len(result)==1 else tuple(result)
 
 

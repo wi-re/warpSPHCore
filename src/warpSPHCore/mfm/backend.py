@@ -148,6 +148,7 @@ class Meshless:
                  adjacency, kernel: KernelFunctions, dim: int, *, backend=None):
         self.particles, self.props, self.domain, self.adjacency = particles, props, domain, adjacency
         self.kernel, self.dim = kernel, dim
+        self._closure_mode = None
         # every kernel of this geometry runs on the same particles / adjacency: the operator ABI prefix is
         # built once (fastLaunch.py) instead of on every launch
         from .._backend import resolve_backend
@@ -181,7 +182,10 @@ class Meshless:
               backend=None) -> "Meshless":
         from .._backend import resolve_backend
         selected = resolve_backend(backend)
-        _forwardOnly(positions, supports, domain.min, domain.max, lam0)
+        if selected != 'native' or closure != 'none':
+            _forwardOnly(positions, supports, domain.min, domain.max, lam0)
+        else:
+            _forwardOnly(lam0)
         if closure not in ("project", "none"):
             raise ValueError("closure must be 'project' or 'none'")
         N, dim = positions.shape
@@ -191,7 +195,12 @@ class Meshless:
         if adjacency is None:
             if selected == 'native':
                 from ..radiusSearch.native import radiusSearch
-                adjacency = radiusSearch(P, domain, mode=SupportScheme.SuperSymmetric, backend='native')
+                # Membership is discrete; continuous geometry remains on P.
+                from dataclasses import replace
+                search_particles=replace(P,positions=positions.detach(),supports=supports.detach())
+                search_domain=replace(domain,min=domain.min.detach(),max=domain.max.detach())
+                with torch.no_grad():
+                    adjacency = radiusSearch(search_particles, search_domain, mode=SupportScheme.SuperSymmetric, backend='native')
                 if storeI:
                     adjacency.paddedI = adjacency.cooRows(backend='native')
             else:
@@ -213,6 +222,7 @@ class Meshless:
         props = OperationProperties(kernel=kernel, supportMode=SupportScheme.Gather,
                                     operationMode=OperationDirection.AllToAll)
         self = cls(P, props, domain, adjacency, kernel, dim, backend=selected)
+        self._closure_mode = closure
 
         omega, Ehat, cnt = self._fast.launch(self._operators._MOMENTS_SPEC, rowStart=0)
         h = supports
@@ -224,6 +234,10 @@ class Meshless:
         self.cond = cond
         self.deficient = (cnt < dim + 1) | (self.cond > cond_max) | ~torch.isfinite(self.cond)
         self.volume = 1.0 / omega
+        if selected == 'native' and closure == 'none':
+            from .native.nt_mfm_ad import active
+            if active((positions,supports,domain.min,domain.max)) and bool(self.deficient.any()):
+                raise NotImplementedError('Native meshless geometry AD currently requires full-rank nondeficient moments')
         self.closure_power = closure_power
         self.guards, self.centred, self.areaCap = bool(guards), int(bool(guards and centred_weights)), int(bool(guards and area_cap))
         if face_cond_max is None:
@@ -488,7 +502,8 @@ class Meshless:
     # ------------------------------------------------------------------
     def gradients(self, rho: torch.Tensor, vel: torch.Tensor, pres: torch.Tensor):
         """Matrix least-squares gradients ``(grad rho (N,d), grad v (N,d,d), grad P (N,d))``."""
-        self._checkForwardOnly(rho, vel, pres)
+        if self.execution_backend != 'native' or self._closure_mode != 'none' or _isChunked(self.adjacency):
+            self._checkForwardOnly(rho, vel, pres)
         return self._fast.launch(self._operators._GRADIENTS_SPEC, rho=rho.contiguous(), vel=vel.contiguous(), pres=pres.contiguous(),
                                  Einv=self.Einv, deficient=self.deficient.to(torch.int32), rowStart=0)
 
@@ -497,7 +512,8 @@ class Meshless:
               cond_crit: float = 100.0, psi1: float = 0.5, psi2: float = 0.25, timeCentredFrame: bool = True,
               retry: bool = True, massFluxLimit: float = 0.1, faceGuard: int = 0):
         """``dQ/dt`` of shape ``(N, 2 + dim)`` for ``Q = (m, m v, m e_tot)``, as ``scheme.mfmRates``."""
-        self._checkForwardOnly(rho, vel, pres)
+        if self.execution_backend != 'native' or self._closure_mode != 'none' or _isChunked(self.adjacency):
+            self._checkForwardOnly(rho, vel, pres)
         mode = mode.upper()
         if mode not in ("MFM", "MFV"):
             raise ValueError("mode must be 'MFM' or 'MFV'")

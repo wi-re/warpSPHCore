@@ -51,6 +51,22 @@ def _quintic(q, dim):
     return _c(1 - q, 5) - 6 * _c(2.0 / 3.0 - q, 5) + 15 * _c(1.0 / 3.0 - q, 5)
 
 
+def _b7(q, dim):
+    # D&A's order-7 B-spline (degree 6), with its exact even central
+    # polynomial to retain the smooth origin in either working precision.
+    q2=q*q
+    center=3364/16807+q2*(-660/343+q2*(60/7-20*q2))
+    outer=(1-q).clamp_min(0)**6-7*(5/7-q).clamp_min(0)**6+21*(3/7-q).clamp_min(0)**6-35*(1/7-q).clamp_min(0)**6
+    return torch.where(q<1/7,center,outer)
+
+
+def _d_b7(q, dim):
+    q2=q*q
+    center=q*(-1320/343+q2*(240/7-120*q2))
+    outer=-6*((1-q).clamp_min(0)**5-7*(5/7-q).clamp_min(0)**5+21*(3/7-q).clamp_min(0)**5-35*(1/7-q).clamp_min(0)**5)
+    return torch.where(q<1/7,center,outer)
+
+
 def _d_wendland2(q, dim):
     return -12 * q * _c(1 - q, 2) if dim == 1 else -20 * q * _c(1 - q, 3)
 
@@ -83,12 +99,13 @@ _KERNELS = {
     KernelFunctions.Wendland6: (_wendland6, (55 / 32, 78 / (7 * _PI), 1365 / (64 * _PI))),
     KernelFunctions.CubicSpline: (_cubic, (8 / 3, 80 / (7 * _PI), 16 / _PI)),
     KernelFunctions.QuinticSpline: (_quintic, (243 / 40, 15309 / (478 * _PI), 2187 / (40 * _PI))),
+    KernelFunctions.B7: (_b7, (823543/92160,5764801/(113149*_PI),5764801/(61440*_PI))),
 }
 SUPPORTED_KERNELS = tuple(_KERNELS)
 _DERIVATIVES = {
     KernelFunctions.Wendland2: _d_wendland2, KernelFunctions.Wendland4: _d_wendland4,
     KernelFunctions.Wendland6: _d_wendland6, KernelFunctions.CubicSpline: _d_cubic,
-    KernelFunctions.QuinticSpline: _d_quintic,
+    KernelFunctions.QuinticSpline: _d_quintic, KernelFunctions.B7: _d_b7,
 }
 
 

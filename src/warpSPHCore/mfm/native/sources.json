@@ -1,1 +1,12 @@
-{"cpu": ["csrc_mfm/nt_mfm.cpp", "csrc_closure/nt_closure.cpp"], "gpu": ["csrc_mfm/nt_mfm.cu", "csrc_closure/nt_closure.cu"]}
+{
+  "cpu": [
+    "csrc_mfm/nt_mfm.cpp",
+    "csrc_closure/nt_closure.cpp",
+    "csrc_mfm/nt_mfm_products.cpp"
+  ],
+  "gpu": [
+    "csrc_mfm/nt_mfm.cu",
+    "csrc_closure/nt_closure.cu",
+    "csrc_mfm/nt_mfm_products.cu"
+  ]
+}
