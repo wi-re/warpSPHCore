@@ -26,3 +26,6 @@ from .stationary import CheckSchedule, RESIDUAL_STATISTICS, StationaryResult, re
 
 __all__ = ['applyPinv', 'pinvSymmetric', 'symmetricPinv3', 'loadPadded3x3',
            'bicg', 'bicgstab', 'cg', 'gmres', 'minres', 'richardson', 'LinearOperator', 'RestrictedSystem', 'NullspaceSystem', 'NullspaceRhs', 'NullspaceResiduals', 'DiagonalPreconditioner', 'BlockJacobiPreconditioner', 'CGWorkspace', 'BiCGStabWorkspace', 'SolveResult', 'Status', 'CheckSchedule', 'RESIDUAL_STATISTICS', 'StationaryResult', 'residualStatistic', 'runStationary']
+
+from .adjoint import AdjointOptions, AdjointReport, ResidualActions, fixedIterations, implicitSolve
+__all__ += ["AdjointOptions", "AdjointReport", "ResidualActions", "fixedIterations", "implicitSolve"]
