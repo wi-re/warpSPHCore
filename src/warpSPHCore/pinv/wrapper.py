@@ -1,10 +1,14 @@
 import torch
+from .._backend import OPERATORS
 from .wp_pinv1x1 import pinv1x1
 from .wp_pinv2x2 import pinv2x2_warpBackend
 from .symmetric import selectedSymmetricInverse
 # from .wp_pinv3x3 import pinv3x3_warpBackend
 
 def pinv_warp(C: torch.Tensor, numNbrs: torch.Tensor, *, symmetric: bool = False) -> torch.Tensor:
+    if OPERATORS == 'native':
+        from .native.nt_pinv import pinv_warp as native_pinv
+        return native_pinv(C, numNbrs, symmetric=symmetric)
     if C.shape[1] == 1 and C.shape[2] == 1:
         return pinv1x1(C)
     elif C.shape[1] == 2 and C.shape[2] == 2:
