@@ -20,13 +20,13 @@ warpSPHCore is a Warp- and PyTorch-based backend for core Smoothed Particle Hydr
 Install the package in editable mode while developing:
 
 ```bash
-pip install -e .
+pip install -e ".[warp]"
 ```
 
 If you want to run the example notebooks in `notebooks/`, install the notebook extras as well:
 
 ```bash
-pip install -e ".[notebooks]"
+pip install -e ".[warp,notebooks]"
 ```
 
 For packaging and publishing, install the development extras or at least `build` and `twine`:
@@ -42,7 +42,9 @@ The experimental native backend executes without importing Warp. Install `.[nati
 kernel families, seven standard SPH operators, and manual first-order JVP/VJP
 passes for smooth kernels in 1D/2D/3D, float32/float64. CPU and GPU launches use
 the same C++ numerical implementations. The default backend remains Warp,
-included in every package installation.
+installed through the optional `warp` extra. The base/native dependency graph
+does not require Warp. Native selection remains explicit; backend defaults and
+numerical settings are unchanged.
 
 ```bash
 pip install -e ".[native]"
@@ -82,7 +84,7 @@ every Python version in that metadata range are not individually qualified.
 See [qualification and development records](docs/docs/development-artifacts.md).
 
 Notebook and plotting extras used by `notebooks/` (all installed by
-`pip install -e ".[notebooks]"`):
+`pip install -e ".[warp,notebooks]"`):
 
 - matplotlib, ipywidgets, ipympl — used across the notebook set
 - pandas, seaborn, tqdm — used by `warp_profile.ipynb` specifically
@@ -90,7 +92,7 @@ Notebook and plotting extras used by `notebooks/` (all installed by
 GPU notes:
 
 - For GPU execution, use a CUDA-capable PyTorch build and a compatible NVIDIA driver.
-- A separate CUDA toolkit installation is not required for this package.
+- The Warp backend does not require a separate CUDA toolkit installation; native source/JIT builds require a compatible toolkit and compiler.
 - Warp still needs to be initialized once per process with `wp.init()`.
 
 ## Precision and index configuration
