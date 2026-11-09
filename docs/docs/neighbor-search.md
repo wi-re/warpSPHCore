@@ -90,8 +90,11 @@ The stages (all in `radiusSearch/compactHash/`):
 
 ### 2. Z-order sort
 
-- On periodic axes the (query and reference) positions are wrapped
-  into the domain with `torch.remainder` first.
+- On periodic axes positions outside the domain are wrapped with
+  `torch.remainder`. Coordinates already inside it retain their stored bits;
+  subtracting and restoring the origin can otherwise change support-cutoff
+  membership. Shared `math.periodic.periodic_positions` handles the eager,
+  fixed-shape, small and chunked Warp search preparations.
 - Each reference particle's cell index is
   $\lfloor (x - q_{\min})/h_{\mathrm{cell}}\rfloor$ clamped to
   $[0, n_{\mathrm{cells}}-1]$; periodic axes use a *floor* cell count

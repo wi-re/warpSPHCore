@@ -87,6 +87,16 @@ mirrors it).
 plain difference $dx_i - dx_j$ (periodic-wrap discontinuity is out of
 scope for the JVPs, per `warpier_adjoint.md` Tier 2.1).
 
+Periodic pair arithmetic preserves the direct subtraction when it already lies
+in `[-L/2, L/2)`. It does not add and subtract half a box around a small
+separation: that round trip loses FP32 bits before kernel evaluation. Nonlocal
+pairs reduce coordinates separately before selecting an image, so widely
+separated image translations do not discard the smaller coordinate. The
+positive half-box tie maps to the negative half-box. Nonperiodic components
+remain ordinary subtraction. Native direct and prepared traversal share this
+contract; it is an arithmetic correction, so old trajectories need their pinned
+source runtime for exact replay.
+
 ### The building blocks
 
 | Function | Computes | Notes |
@@ -177,3 +187,10 @@ the lattice factor to both primal and tangent.
 [Support schemes in the operator pages](operations/gradient) ·
 [CRK corrected kernel](crk/crk-overview#the-corrected-kernel-and-gradient) ·
 [Renormalization](renorm) · [Lattice calibration](lattice-calibration)
+
+The periodic Warp helpers use explicit fixed-image pullbacks: away from image
+ties, `dx = x-y-n*(upper-lower)` has position derivatives `(+1,-1)` and bound
+derivatives `(+n,-n)`. The remainder primitive alone does not carry that period
+derivative. A local pair with `n=0` does not touch bound adjoints, including
+nonfinite cotangents on the position output. Native pair products use the same
+fixed-image rule.

@@ -25,6 +25,7 @@ from typing import Optional, Tuple
 
 import math
 import numpy as np
+from ...math.periodic import periodic_positions
 import torch
 
 from ...type_config import *
@@ -57,6 +58,7 @@ class HashMapSlots:
     # domain constants on the device
     qMin: torch.Tensor
     qMax: torch.Tensor
+    periodicT: torch.Tensor
     numCellsT: torch.Tensor
     cellOffsets: torch.Tensor
     # input slots
@@ -100,7 +102,7 @@ def makeHashMapSlots(n: int, domain: DomainDescription, radius: float, *, device
     f = dict(device=device, dtype=dtype)
     return HashMapSlots(
         n=n, dim=dim, hashMapLength=length, radius=float(radius), hCell=hCell, numCells=tuple(counts), periodic=periodic,
-        mode=mode, qMin=qMin, qMax=qMax, numCellsT=torch.tensor(counts, dtype=torch.int32, device=device),
+        mode=mode, qMin=qMin, qMax=qMax, periodicT=torch.tensor(periodic, dtype=torch.bool, device=device), numCellsT=torch.tensor(counts, dtype=torch.int32, device=device),
         cellOffsets=padded,
         positions=torch.zeros((n, dim), **f), supports=torch.zeros((n,), **f),
         sortedPositions=torch.zeros((n, dim), **f), sortedSupports=torch.zeros((n,), **f),
@@ -126,8 +128,7 @@ def buildFixed(s: HashMapSlots, *, backend=None) -> CompactHashMap:
     dev = s.positions.device
     stream = wp.stream_from_torch(torch.cuda.current_stream(dev)) if backend == 'warp' and dev.type == 'cuda' else None
     with record_function("neighborSearch - buildFixed"):
-        x = torch.stack([torch.remainder(s.positions[:, d] - s.qMin[d], s.qMax[d] - s.qMin[d]) + s.qMin[d] if s.periodic[d]
-                         else s.positions[:, d] for d in range(dim)], dim=1)
+        x = periodic_positions(s.positions, s.periodicT, s.qMin, s.qMax)
         if n == 0:
             s.fits.fill_(True)
         else:

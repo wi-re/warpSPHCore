@@ -149,3 +149,10 @@ def test_low_neighbour_fallback_still_replaces_those_rows(particle_case):
         assert torch.equal(result[i], identity)
     for i in (3, 4):
         assert torch.equal(result[i], C[i])
+
+
+def test_verlet_motion_keeps_local_ulp_displacement():
+    a=torch.tensor([[.25]],dtype=torch.float32)
+    b=torch.nextafter(a,torch.full_like(a,float('inf')))
+    actual=_minimum_image_delta(b,a,torch.tensor([True]),a.new_tensor([-.5]),a.new_tensor([.5]))
+    assert torch.equal(actual,b-a)

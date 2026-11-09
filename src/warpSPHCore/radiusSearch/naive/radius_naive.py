@@ -1,5 +1,6 @@
 from typing import Optional, List
 import torch
+from ...math.periodic import periodic_positions
 
 # @torch.jit.script
 def mod(x, min : float, max : float):
@@ -9,8 +10,8 @@ def mod(x, min : float, max : float):
 def radiusNaive(x, y, hx, hy, periodic : Optional[torch.Tensor] = None, minDomain = None, maxDomain = None, mode : str = 'gather'):
     periodicity = torch.tensor([False] * x.shape[1], dtype = torch.bool, device = x.device) if periodic is None else periodic
     
-    pos_x = torch.stack([x[:,i] if not periodic_i else torch.remainder(x[:,i] - minDomain[i], maxDomain[i] - minDomain[i]) + minDomain[i] for i, periodic_i in enumerate(periodicity)], dim = 1)
-    pos_y = torch.stack([y[:,i] if not periodic_i else torch.remainder(y[:,i] - minDomain[i], maxDomain[i] - minDomain[i]) + minDomain[i] for i, periodic_i in enumerate(periodicity)], dim = 1)
+    pos_x = periodic_positions(x, periodicity, minDomain, maxDomain) if minDomain is not None else x
+    pos_y = periodic_positions(y, periodicity, minDomain, maxDomain) if minDomain is not None else y
     
     distanceMatrices = torch.stack([pos_x[:,i] - pos_y[:,i,None] if not periodic_i else mod(pos_x[:,i] - pos_y[:,i,None], minDomain[i], maxDomain[i]) for i, periodic_i in enumerate(periodicity)], dim = -1)
     distanceMatrix = torch.sqrt(torch.sum(distanceMatrices**2, dim = -1))
@@ -50,8 +51,8 @@ def radiusNaive(x, y, hx, hy, periodic : Optional[torch.Tensor] = None, minDomai
 def radiusNaiveFixed(x, y, h : torch.Tensor, periodic : Optional[torch.Tensor] = None, minDomain = None, maxDomain = None):
     periodicity = torch.tensor([False] * x.shape[1], dtype = torch.bool, device = x.device) if periodic is None else periodic
     
-    pos_x = torch.stack([x[:,i] if not periodic_i else torch.remainder(x[:,i] - minDomain[i], maxDomain[i] - minDomain[i]) + minDomain[i] for i, periodic_i in enumerate(periodicity)], dim = 1)
-    pos_y = torch.stack([y[:,i] if not periodic_i else torch.remainder(y[:,i] - minDomain[i], maxDomain[i] - minDomain[i]) + minDomain[i] for i, periodic_i in enumerate(periodicity)], dim = 1)
+    pos_x = periodic_positions(x, periodicity, minDomain, maxDomain) if minDomain is not None else x
+    pos_y = periodic_positions(y, periodicity, minDomain, maxDomain) if minDomain is not None else y
     
     distanceMatrices = torch.stack([pos_x[:,i] - pos_y[:,i,None] if not periodic_i else mod(pos_x[:,i] - pos_y[:,i,None], minDomain[i], maxDomain[i]) for i, periodic_i in enumerate(periodicity)], dim = -1)
     distanceMatrix = torch.sum(distanceMatrices**2, dim = -1)

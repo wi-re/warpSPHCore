@@ -107,14 +107,9 @@ def warp_radius_search_small(queryPositions, referencePositions, supportX, suppo
     N, M = queryPositions.shape[0], referencePositions.shape[0]
     validateParticleCounts(N, M)
     minD, maxD = domainDescription.min, domainDescription.max
-    flags = periodicity.tolist()
-    def wrapped(positions):
-        return torch.vstack([component if not periodic else
-            torch.remainder(component - minD[d], maxD[d] - minD[d]) + minD[d]
-            for d, (component, periodic) in enumerate(zip(positions.mT, flags))]).mT
-    # Kernel x/hx are queries; y/hy are references, including unequal populations.
-    x_warp = castTorchToWarp(wrapped(queryPositions))
-    y_warp = castTorchToWarp(wrapped(referencePositions))
+    # Preserve in-domain coordinate bits before pair-distance evaluation.
+    x_warp = castTorchToWarp(periodic_positions(queryPositions, periodicity, minD, maxD))
+    y_warp = castTorchToWarp(periodic_positions(referencePositions, periodicity, minD, maxD))
     common = [x_warp, y_warp, castTorchToWarp(supportX), castTorchToWarp(supportsY),
               castTorchToWarp(minD), castTorchToWarp(maxD), castTorchToWarp(periodicity),
               wp.uint32(supportSchemeToUint(mode))]

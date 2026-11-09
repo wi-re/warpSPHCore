@@ -87,3 +87,29 @@ reference remain available. Final focused core contracts: 125 passed, 12 skipped
 At the user’s request, temporarily prioritize shared core register pressure over solver-specific register tuning. Use the existing operator evaluation suite for bounded, source-matched experiments on static dimensions, traversal specialization and accumulator lifetimes. Preserve forward and derivative contracts; adopt changes only with numerical and measured throughput evidence. Track results in `docs/regression/core_register_pass_2026_10_21.md`. This explicitly reopens timing optimization for this pass.
 
 The shared register screen retained static tensor extents in outer products, divergence and raw CRK moments. Repeated CSR moment timings improve 17–33% in 2D FP32 and 12–16% in 3D FP64; NCU identifies reduced local tensor traffic despite higher register allocation. Blanket register caps, traversal/policy specialization and static distance changes remain experimental because some workloads regress. See `docs/regression/core_register_pass_2026_10_21.md`; MFM/MFV staged consumer qualification is complete; the companion report records saved-state and daemon/video controls, modest MFV improvements and neutral MFM timing. Focused tuning remains deferred.
+
+### Periodic geometry arithmetic — 8 November 2026
+
+An isolated correction from the ACSPH FP32 investigation is prepared on
+`codex/stable-periodic-distance`. Shared Warp displacement preserves local bits;
+native direct/prepared traversal uses the same image rule. Tensor motion checks
+and search preparation also preserve local differences/in-domain coordinates.
+A new negative control proves old preparation can drop a pair inside its support
+cutoff. Focused CPU, Warp CUDA graph/derivative and standalone native CPU checks
+pass. Installed Core is unchanged. Native CUDA and evolving consumer qualification,
+frontend copies and pinned historical-control integration remain before rollout.
+Stable round-based reconstruction helpers retain their existing half-box policy.
+
+### Native periodic geometry integration — 9 November 2026
+
+The uncommitted `codex/stable-periodic-distance` correction is reconciled on
+`codex/native-periodic-integration` with the current native runtime and import
+selection. The source worktree remains unchanged. Tensor search preparation and
+Verlet motion retain local bits; native direct/prepared geometry also retains
+large-image coordinate remainders. Frontend wrapping/coverage and the CRK AD
+caller are reconciled in the paired checkout. Explicit Warp fixed-image
+pullbacks restore box-bound derivatives omitted by `wp.mod`; unwrapped pairs
+retain no bound dependency. CPU tensor/Warp/operator/import/whole-run gates pass;
+CUDA and final installed gates are being completed in the paired plan. Keep
+existing half-box conventions, reference floors, rank/cutoff policies and the
+FP32 determinant repair. See the paired frontend native port plan and handoff.

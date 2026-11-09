@@ -14,6 +14,7 @@ import math
 
 import torch
 import torch.autograd.forward_ad as fwAD
+from ..math.periodic import periodic_positions
 from .._backend import BACKEND, resolve_backend
 from ..dataTypes import AdjacencyList, DomainDescription, ParticleState
 from ..enumTypes import SupportScheme
@@ -307,8 +308,7 @@ def _search(q, r, qh, rh, domain, *, policy, mode, storeI, numOwners, owner,
                 if a<b:grid.apply(q[a:b],qh[a:b],counts[a:b])
             return grid,grid.nbytes,None,None
         grid = buildCompactHashMap(q, r, qh, rh, domain.periodic, domain, mode, len(q) + 1)
-        y = torch.vstack([part if not periodic else torch.remainder(part - domain.min[d], domain.max[d] - domain.min[d]) + domain.min[d]
-                          for d, (part, periodic) in enumerate(zip(q.mT, domain.periodic.tolist()))]).mT.contiguous()
+        y = periodic_positions(q, domain.periodic, domain.min, domain.max).contiguous()
         shared = [castTorchToWarp(t) for t in (grid.sortedPositions, grid.sortedSupports,
                   grid.hashTable, grid.sortedCellTable, grid.qMin)]
         shared += [scalar_t(grid.hCell), grid.D, castTorchToWarp(grid.cellOffsets), castTorchToWarp(grid.numCells),

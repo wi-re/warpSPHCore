@@ -1,6 +1,7 @@
 """Compact hash-map construction with unchanged Torch layout/order operations."""
 from __future__ import annotations
 from typing import Any, Optional, Union, Tuple, List
+from ...math.periodic import periodic_positions
 import numpy as np
 import torch
 from ..._backend import OPERATORS
@@ -48,11 +49,8 @@ def buildCompactHashMap(
             minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
 
         with record_function("neighborSearch - sortParticles"):
-            # print(f'Periodicity: {periodicity}')
-            # the periodic flags read to the host once (iterating the device tensor synced per axis)
-            periodicHost = periodicity.tolist() if isinstance(periodicity, torch.Tensor) else list(periodicity)
-            x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicHost))]).mT
-            y = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicHost))]).mT
+            x = periodic_positions(referencePositions, periodicity, minD, maxD)
+            y = periodic_positions(queryPositions, periodicity, minD, maxD)
 
             sortedLinear, sortIndex, numCells, qMin, qMax, hCell = sortReferenceParticles(x, hMax, minD, maxD, periodicity)
             # The grid scalars the host needs (search radius, cell counts,

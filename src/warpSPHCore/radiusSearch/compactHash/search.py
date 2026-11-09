@@ -1,3 +1,4 @@
+from ...math.periodic import periodic_positions
 import warp as wp
 import torch 
 from ...type_config import *
@@ -58,11 +59,8 @@ def radiusSearchOnCompactHashMap(
     minD, maxD = getDomainExtents(referencePositions, minDomain, maxDomain)
     # periodicity = domainDescription.periodicity if domainDescription.periodicity is not None else [False] * referencePositions.shape[1]
 
-    # the periodic flags read to the host once (iterating the device tensor synced per axis)
-    periodicHost = periodicity.tolist() if isinstance(periodicity, torch.Tensor) else list(periodicity)
-    x = torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(referencePositions.mT, periodicHost))]).mT
     # Spatial kernels read the already wrapped/sorted reference positions.
-    y = queryPositions if spatial else torch.vstack([component if not periodic else torch.remainder(component - minD[i], maxD[i] - minD[i]) + minD[i] for i, (component, periodic) in enumerate(zip(queryPositions.mT, periodicHost))]).mT
+    y = queryPositions if spatial else periodic_positions(queryPositions, periodicity, minD, maxD)
     
     sortedPositions = datastructure.sortedPositions
     sortedSupports = datastructure.sortedSupports

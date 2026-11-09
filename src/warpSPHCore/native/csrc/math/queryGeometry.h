@@ -1,8 +1,8 @@
 #pragma once
 #include "math/distance.h"
 namespace sph_native {
-// Cache query coordinates and box lengths once per CSR row. Wrap relative
-// displacements directly so projection does not erase close edge pairs.
+// Cache query coordinates and domain metadata, not rounded wrapped positions.
+// Direct and prepared traversal share the same precision and half-box contract.
 template <class T, int D> struct QueryGeometry {
     T position[D], length[D];
     bool periodic[D];
@@ -16,13 +16,8 @@ template <class T, int D> struct QueryGeometry {
     SPH_HD T distance(const T *reference, T (&dx)[D]) const {
         T squared = T(0);
         for (int d = 0; d < D; ++d) {
-            T y = reference[d];
-            if (periodic[d]) {
-                const T delta = position[d] - y;
-                dx[d] = minimum_image_delta(delta, length[d]);
-            } else {
-                dx[d] = position[d] - y;
-            }
+            dx[d] = periodic[d] ? minimum_image_component(position[d], reference[d], length[d])
+                                : position[d] - reference[d];
             squared += dx[d] * dx[d];
         }
         return scalar_sqrt(squared);

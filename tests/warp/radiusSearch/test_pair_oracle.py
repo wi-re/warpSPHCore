@@ -68,3 +68,27 @@ def test_search_matches_independent_pairs(device, dim, periodic, mode):
                 torch.testing.assert_close(adjacency.numNeighbors, expected.sum(-1).to(torch.int32))
                 assert bool((adjacency.paddedI[adjacency.numEdges:] == -1).all())
                 assert bool((adjacency.paddedJ[adjacency.numEdges:] == -1).all())
+
+
+def test_in_domain_projection_does_not_change_cutoff_membership(device):
+    # The query's one-ulp offset used to disappear in (x-lower)+lower.
+    # That made this physical pair fall outside a just-under-.125 cutoff.
+    from warpSPHCore.radiusSearch.small.wp_radius_small import warp_radius_search_small
+    from warpSPHCore.radiusSearch.naive.radius_naive import radiusNaive
+    dtype=get_torch_precision()
+    a=torch.tensor(.25,dtype=dtype,device=device)
+    q=torch.nextafter(a,torch.full_like(a,float('inf'))).reshape(1,1)
+    r=q.new_tensor([[.375]])
+    h=torch.nextafter(q.new_tensor([.125]),q.new_zeros(1))
+    flags=torch.ones(1,dtype=torch.bool,device=device)
+    lo=q.new_tensor([-.5]);hi=q.new_tensor([.5])
+    domain=DomainDescription(min=lo,max=hi,periodic=flags,dim=1)
+    assert (r.double()-q.double()).abs().item()<h.double().item()
+    for collection in ('fused','split'):
+        adjacency=radiusSearchCompactHashMap_(q,r,h,h,flags,domain,SupportScheme.Gather,
+                                             hashMapLength=7,collection=collection)
+        assert adjacency.numEdges==1
+    adjacency=warp_radius_search_small(q,r,h,h,flags,domain,SupportScheme.Gather)
+    assert adjacency.numEdges==1
+    i,j=radiusNaive(q,r,h,h,flags,lo,hi)
+    assert len(i)==len(j)==1

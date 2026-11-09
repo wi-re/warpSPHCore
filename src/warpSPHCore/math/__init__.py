@@ -68,3 +68,7 @@ else:
     __all__.extend(["computeDotLaplacian", "computeLaplacianDot2"])
     from .wp_dot import positiveDotProduct
     __all__.extend(["positiveDotProduct"])
+
+# Tensor geometry is shared by both execution backends.
+from .periodic import minimum_image_displacement, periodic_difference, periodic_positions
+__all__.extend(["minimum_image_displacement", "periodic_difference", "periodic_positions"])

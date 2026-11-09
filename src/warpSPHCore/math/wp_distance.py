@@ -50,18 +50,65 @@ def computeCartesianDistance(
 
 @wp.func 
 def mod_warp(x : scalar_t, min: scalar_t, max: scalar_t):
+    # Preserve a local displacement verbatim. Shifting it by half a box and
+    # shifting back discards low bits even when no periodic image is needed.
     h = max - min
     half = h / scalar_t(2.0)
-    # Keep the displacement as the quantity being wrapped. Adding half a box
-    # and subtracting it again can erase close pairs and break odd symmetry.
-    # The half-open convention is unchanged: +half maps to -half.
-    if x >= -half and x < half:
-        return x
-    if x >= half and x < h:
-        return x - h
-    if x < -half and x >= -h:
-        return x + h
-    return x - wp.floor((x + half) / h) * h
+    result = x
+    if x >= half or x < -half:
+        result = wp.mod(x, h)
+        if result >= half:
+            result = result - h
+        elif result < -half:
+            result = result + h
+    return result
+
+@wp.func
+def moduloDistanceComponent(
+    x: scalar_t, y: scalar_t, periodic: bool, min: scalar_t, max: scalar_t
+):
+    delta = x - y
+    if periodic:
+        length = max - min
+        half = length / scalar_t(2.0)
+        if delta >= half or delta < -half:
+            # Reduce coordinates separately only for a nonlocal pair. This
+            # also retains the smaller coordinate when x-y would round it away
+            # after a very large image translation. The domain origin cancels.
+            delta = mod_warp(wp.mod(x, length) - wp.mod(y, length), min, max)
+    return delta
+
+
+@wp.func_grad(mod_warp)
+def adj_mod_warp(x: scalar_t, min: scalar_t, max: scalar_t, adj_ret: scalar_t):
+    # wp.mod does not propagate its period derivative. The image winding is
+    # discrete; away from ties d(x-nL)=dx-n*dL.
+    wp.adjoint[x] += adj_ret
+    length = max - min
+    half = length / scalar_t(2.0)
+    if x >= half or x < -half:
+        winding = wp.round((x - mod_warp(x, min, max)) / length)
+        if winding != scalar_t(0.0):
+            wp.adjoint[min] += winding * adj_ret
+            wp.adjoint[max] -= winding * adj_ret
+
+
+@wp.func_grad(moduloDistanceComponent)
+def adj_moduloDistanceComponent(x: scalar_t, y: scalar_t, periodic: bool,
+                               min: scalar_t, max: scalar_t, adj_ret: scalar_t):
+    wp.adjoint[x] += adj_ret
+    wp.adjoint[y] -= adj_ret
+    if periodic:
+        length = max - min
+        half = length / scalar_t(2.0)
+        delta = x - y
+        if delta >= half or delta < -half:
+            wrapped = moduloDistanceComponent(x, y, periodic, min, max)
+            winding = wp.round((delta - wrapped) / length)
+            if winding != scalar_t(0.0):
+                wp.adjoint[min] += winding * adj_ret
+                wp.adjoint[max] -= winding * adj_ret
+
 
 @wp.func
 def moduloDistanceWarp(xij:wp.array(dtype = scalar_t), domainState: domainData):
@@ -74,7 +121,11 @@ def moduloDistanceWarp(xij:wp.array(dtype = scalar_t), domainState: domainData):
     return result
 @wp.func
 def minimumImageDistanceWarp(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t), domainState: domainData):
-    return moduloDistanceWarp(x - y, domainState)
+    result = wp.zeros_like(x)
+    for i in range(domainState.periodicity.shape[0]):
+        result[i] = moduloDistanceComponent(x[i], y[i], domainState.periodicity[i],
+                                           domainState.domainMin[i], domainState.domainMax[i])
+    return result
 
 @wp.func 
 def computeDistance(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t), domainState: domainData):
@@ -90,16 +141,6 @@ def project_mod(x : scalar_t, min: scalar_t, max: scalar_t):
     h = max - min
     return x - h * wp.floor((x - min) / h)
 
-@wp.func
-def moduloDistanceComponent(
-    x: scalar_t, y: scalar_t, periodic: bool, min: scalar_t, max: scalar_t
-):
-    if periodic:
-        # Wrapping each position first can itself erase a small separation
-        # across the edge (e.g. -2**-26 and 0 in a unit FP32 box).
-        return mod_warp(x - y, min, max)
-    else:
-        return x - y
 
 from typing import Any
 @wp.func
