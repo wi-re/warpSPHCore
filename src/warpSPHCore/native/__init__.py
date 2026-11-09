@@ -81,3 +81,13 @@ __all__ += ['warpOperationHVP','sphOperation_warp','sampleDensestLattice','Latti
 
 from ..math.prime import getNextPrime
 __all__ += ['getNextPrime']
+
+from ..autograd.cache import getCachedDummyTensor, getCachedIdentityMatrices, clearDummyTensorCache
+__all__ += ["getCachedDummyTensor", "getCachedIdentityMatrices", "clearDummyTensorCache"]
+
+from ..kernels.host_properties import sphKernelScale, sphKernel_xi
+__all__ += ["sphKernelScale", "sphKernel_xi"]
+
+# Keep the public per-call backend keyword at the native package boundary.
+from ..radiusSearch.dispatch import (buildVerletList, filterVerletList, verletStaleFlag,
+                                     verletUsage, deferVerletChecks)

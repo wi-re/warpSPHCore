@@ -1,10 +1,11 @@
 from .._backend import BACKEND
 
 if BACKEND == "native":
+    from .cache import getCachedDummyTensor, getCachedIdentityMatrices, clearDummyTensorCache
     from .compileGlue import compileGlue,compileGlueEnabled,markDynamic,setCompileGlue
     from .operator_spec import (OperatorSpec,SPHContext,Corrections,EMPTY_CORRECTIONS,
                                 OutputSpec,ExtraSpec,ExtraKind,RowRole,ShapeOf,ThreadSpec,JVPSpec,launchOperator)
-    __all__ = ["OperatorSpec","SPHContext","Corrections","EMPTY_CORRECTIONS","OutputSpec", "ExtraSpec",
+    __all__ = ["getCachedDummyTensor", "getCachedIdentityMatrices", "clearDummyTensorCache", "OperatorSpec","SPHContext","Corrections","EMPTY_CORRECTIONS","OutputSpec", "ExtraSpec",
                "ExtraKind","RowRole","ShapeOf","ThreadSpec","JVPSpec","launchOperator","compileGlue","compileGlueEnabled","markDynamic","setCompileGlue"]
 else:
 

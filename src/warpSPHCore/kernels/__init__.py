@@ -1,7 +1,8 @@
 from .._backend import BACKEND
 if BACKEND == "native":
     from .native import evaluateKernel, KernelEvaluation
-    __all__ = ["evaluateKernel", "KernelEvaluation"]
+    from .host_properties import sphKernelScale, sphKernel_xi
+    __all__ = ["evaluateKernel", "KernelEvaluation", "sphKernelScale", "sphKernel_xi"]
 else:
     __all__ = []
 

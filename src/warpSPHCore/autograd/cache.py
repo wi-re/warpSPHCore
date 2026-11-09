@@ -1,4 +1,6 @@
-import warp as wp
+from .._backend import BACKEND
+if BACKEND == 'warp':
+    import warp as wp
 import torch
 from ..type_config import *
 
@@ -54,8 +56,6 @@ def clearDummyTensorCache() -> None:
 
 
 from ..profiling import record_function
-from ..util.cast import castTorchToWarpAsBuiltins, castWarpToTorch
-from ..util.fieldRegistry import acquireView
 
 
 def getCachedWarpArray(t: torch.Tensor, use_cache: bool = False) -> "wp.array":
@@ -75,6 +75,8 @@ def getCachedWarpArray(t: torch.Tensor, use_cache: bool = False) -> "wp.array":
     call, so caching against a pre-detached tensor would never hit. Both
     branches below detach internally, at the point of actual conversion.
     """
+    from ..util.cast import castTorchToWarpAsBuiltins
+    from ..util.fieldRegistry import acquireView
     if use_cache:
         return acquireView(t)
     return castTorchToWarpAsBuiltins(t.detach().contiguous())
