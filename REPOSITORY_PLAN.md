@@ -149,3 +149,24 @@ for one CompSPH component. Torch spectral AD and manual derivative quotient rang
 limits remain separate. See paired frontend M3 report and immutable
 frontend-native-fp32-ranges-20261109-r1 evidence. The preserved native pinv facade
 patch is separately checkpointed at `2268211` with CPU/CUDA32/64 dispatch tests.
+
+## Native meshless and solve AD follow-up — 9 November 2026
+
+Paired frontend plan: /home/lu26029/.codex/worktrees/native-meshless-solve-ad/warpSPH/NATIVE_MESHLESS_SOLVE_AD_PLAN.md.
+This explicitly authorized follow-up starts from merged Core c2b8aaf. A1 exposed
+a Warp reference bridge issue: mutable scalar parameter structs remain live in a
+tape, changing prior backward branch decisions during composed Godunov passes.
+First bounded Core change: snapshot scalar-only additional struct arguments for
+AD calls, with a deterministic composed scalar-map regression. Native execution
+and numerical values are unchanged. Meshless/solve phases follow the frontend
+phase table; no performance campaign, merge or push. Core artifact rules apply.
+
+A1 CPU checkpoint: scalar-only struct snapshots are taken only for AD launches;
+array-bearing records keep their existing tensor/field contract and inference
+launches avoid the copy. The composed map regression fails on c2b8aaf and passes
+CPU FP32/FP64. Actual frontend Godunov/Inutsuka composition also passes. Frontend
+full CPU owner qualification and independent equations pass after the capture
+repair; CUDA remains queued under the shared lock. No native C++ source changed.
+Required repository layout check passes. Evidence is /tmp/native-ad-core-capture-*
+pending the paired follow-up receipt. Next: CUDA capture qualification with A1,
+then dependency-ordered actual MFM/MFV AD and solve residual/transpose foundations.

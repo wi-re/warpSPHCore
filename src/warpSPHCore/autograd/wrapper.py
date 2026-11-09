@@ -22,6 +22,23 @@ def _isInertTensor(t: torch.Tensor) -> bool:
     return tangent is None and not t.requires_grad
 
 
+def _snapshotScalarStruct(value):
+    """Capture a scalar parameter record by value for delayed Warp replay.
+
+    Array-bearing structs remain governed by their existing tensor/field
+    contracts. Only scalar-only configuration records are copied here.
+    """
+    if not wp.types.is_struct(value):
+        return value
+    record = value._cls
+    if not all(wp.types.type_is_scalar(var.type) or var.type is wp.bool
+               for var in record.vars.values()):
+        return value
+    captured = record()
+    captured.assign(value)
+    return captured
+
+
 def _launch(
     launcher,
     kernel,
@@ -64,11 +81,13 @@ def _launch(
         # --- split additionalArguments into tensors and non-tensors ---
         add_tensor_pos = []   # (original_index, tensor)
         add_scalar_map = {}   # original_index -> scalar value
+        capture_scalars = any(isinstance(t, torch.Tensor) and t.requires_grad
+                              for t in (*flat_state_tensors, *additionalArguments))
         for i, arg in enumerate(additionalArguments):
             if isinstance(arg, torch.Tensor):
                 add_tensor_pos.append((i, arg))
             else:
-                add_scalar_map[i] = arg
+                add_scalar_map[i] = _snapshotScalarStruct(arg) if capture_scalars else arg
 
         add_tensors = [t for _, t in add_tensor_pos]
         n_add       = len(additionalArguments)
