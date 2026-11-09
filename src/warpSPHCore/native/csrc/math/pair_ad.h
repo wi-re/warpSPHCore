@@ -29,6 +29,17 @@ template<class T,int Capacity=DefaultNodes>struct Trace {
             if(x.b>=0)nodes[x.b].bar+=x.db*x.bar;
         }
     }
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
+    // CPU owners may seed external, wider bars without changing scalar
+    // values, local Jacobians, the default trace layout or its replay.
+    template<class Accumulator>void reverse(Accumulator* bars)const {
+        for(int n=count-1;n>=0;--n) {
+            const auto x=nodes[n];
+            if(x.a>=0)bars[x.a]+=Accumulator(x.da)*bars[n];
+            if(x.b>=0)bars[x.b]+=Accumulator(x.db)*bars[n];
+        }
+    }
+#endif
 };
 template<class T,bool Reverse,int Capacity=DefaultNodes>struct Number {
     T v=0,d=0;int node=-1;Trace<T,Capacity>* trace=nullptr;
