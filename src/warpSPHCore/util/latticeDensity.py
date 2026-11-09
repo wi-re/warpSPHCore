@@ -116,8 +116,11 @@ def _evaluators():
             x = torch.zeros((1, dim), dtype=torch.float64)
             x[0, 0] = q
             return evaluateKernel(x, torch.ones(1, dtype=x.dtype), KernelFunctions(kern)).radial[0]
-        return (lambda q, dim, kern: float(radial(float(q), dim, kern)[0]),
-                lambda dim, kern: float(radial(0., dim, kern)[4]))
+        from ..kernels.host_wendland import radial as host_radial, coefficient
+        return (lambda q, dim, kern: host_radial(q, dim, kern) if kern in (0, 1, 2)
+                else float(radial(float(q), dim, kern)[0]),
+                lambda dim, kern: coefficient(dim, kern) if kern in (0, 1, 2)
+                else float(radial(0., dim, kern)[4]))
     from .. import type_config
     from ..kernels.eval_kernel import eval_k, eval_C_d
     scalar = type_config.scalar_t

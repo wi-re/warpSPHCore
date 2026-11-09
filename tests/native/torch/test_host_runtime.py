@@ -108,3 +108,22 @@ except ValueError:
 else:
     raise AssertionError('non-scalar argument admitted')
 ''', 'native')
+
+
+@pytest.mark.parametrize('precision', ['float32', 'float64'])
+def test_host_wendland_lattice_calibration_matches_reference_exactly(precision):
+    script = """
+import json
+from warpSPHCore.util.latticeDensity import latticeDensityFactor
+from warpSPHCore import KernelFunctions
+rows = [[latticeDensityFactor(k, h, dim) for h in (2., 3.5, 4.)]
+        for k in (KernelFunctions.Wendland2, KernelFunctions.Wendland4, KernelFunctions.Wendland6)
+        for dim in (1, 2, 3)]
+print('RESULT ' + json.dumps(rows))
+"""
+    values = {}
+    for runtime in ('warp', 'native'):
+        output = run(script, runtime, precision)
+        values[runtime] = json.loads(next(line[7:] for line in output.splitlines()
+                                         if line.startswith('RESULT ')))
+    assert values['native'] == values['warp']
