@@ -94,3 +94,7 @@ from ..radiusSearch.dispatch import (buildVerletList, filterVerletList, verletSt
 
 from ..autograd.scalar_arg import asScalarArg
 __all__ += ["asScalarArg"]
+
+
+from ..radiusSearch import buildCompactHashMap, HashMapSlots, makeHashMapSlots, buildFixed, GraphedBuild
+__all__ += ['buildCompactHashMap', 'HashMapSlots', 'makeHashMapSlots', 'buildFixed', 'GraphedBuild']

@@ -26,18 +26,19 @@ from typing import Optional, Tuple
 import math
 import numpy as np
 import torch
-import warp as wp
 
 from ...type_config import *
-from ...util import *
 from ...dataTypes import *
 from ..csr import validateParticleCounts
 from ...enumTypes import *
 from ...profiling import record_function
-from ..._backend import resolve_backend
+from ..._backend import resolve_backend, BACKEND
+if BACKEND == 'warp':
+    import warp as wp
+    from ...util import castTorchToWarp, allocateTorchWarp
+    from .wp_hashCells import hashCells
+    from .wp_index import indexCells
 from .grid import compute_h
-from .wp_hashCells import hashCells
-from .wp_index import indexCells
 
 __all__ = ['HashMapSlots', 'makeHashMapSlots', 'buildFixed', 'GraphedBuild']
 

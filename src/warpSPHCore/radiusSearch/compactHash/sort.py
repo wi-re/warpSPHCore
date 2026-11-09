@@ -1,17 +1,8 @@
-import warp as wp
-import torch 
-from ...type_config import *
-from typing import NamedTuple, Union, Tuple, List, Optional, Any
-from warp.types import vector, matrix
-from ...math import *
-from ...util import *
-
-# Convert Warp arrays back to PyTorch tensors using wp.to_torch() for direct GPU access
-from ...dataTypes import *
-from ...enumTypes import *
-from .grid import *
-from .indexing import *
-from .wp_index import indexCells
+"""Stable particle sorting using the selected compact-grid key kernel."""
+from typing import Optional
+import torch
+from ..._backend import OPERATORS
+from .grid import compute_h
 
 def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, domainMax, periodicity: Optional[torch.Tensor] = None):
     """
@@ -59,23 +50,31 @@ def sortReferenceParticles(referenceParticles, referenceSupport, domainMin, doma
     
     # print('Cell count:', cellCount, 'Cell size:', hCell, 'Domain extent:', qExtent)
     # print('indices:', indices.contiguous())
-    warp_indices = castTorchToWarp(indices)
+    if OPERATORS == 'native':
+        from ...native._build import build
+        linearIndices = torch.empty(len(indices), device=indices.device, dtype=torch.int64)
+        build().fixed_grid_keys(indices.contiguous(), cellCount, linearIndices, 0)
+    else:
+        import warp as wp
+        from ...util import castTorchToWarp, allocateTorchWarp
+        from .wp_index import indexCells
+        warp_indices = castTorchToWarp(indices)
 
-    linearIndices, out = allocateTorchWarp((indices.shape[0],), wp.int64, warp_indices.device)
-    warp_cell_count = castTorchToWarp(cellCount)
-    # Pin to torch's current stream (matching buildHashmap.hashCells) so the warp
-    # write of linearIndices is ordered after the torch ops that wrote `indices`
-    # and before the torch argsort below. On warp's default stream this is an
-    # unsynchronised cross-stream read/write race.
-    torchDevice = indices.device
-    wp.launch(
-        indexCells,
-        dim=indices.shape[0],
-        inputs=[warp_indices, warp_cell_count, out],
-        device=warp_indices.device,
-        stream=wp.stream_from_torch(torch.cuda.current_stream(torchDevice)) if torchDevice.type == 'cuda' else None,
-    )
-    # linearIndices = linearIndexing(indices, cellCount)
+        linearIndices, out = allocateTorchWarp((indices.shape[0],), wp.int64, warp_indices.device)
+        warp_cell_count = castTorchToWarp(cellCount)
+        # Pin to torch's current stream (matching buildHashmap.hashCells) so the warp
+        # write of linearIndices is ordered after the torch ops that wrote `indices`
+        # and before the torch argsort below. On warp's default stream this is an
+        # unsynchronised cross-stream read/write race.
+        torchDevice = indices.device
+        wp.launch(
+            indexCells,
+            dim=indices.shape[0],
+            inputs=[warp_indices, warp_cell_count, out],
+            device=warp_indices.device,
+            stream=wp.stream_from_torch(torch.cuda.current_stream(torchDevice)) if torchDevice.type == 'cuda' else None,
+        )
+        # linearIndices = linearIndexing(indices, cellCount)
     # with record_function("neighborSearch - sortReferenceParticles[argsort]"): 
     sortingIndices = torch.argsort(linearIndices, stable=True)   # ties keep particle order: a reproducible CSR order
     # with record_function("neighborSearch - sortReferenceParticles[resort]"): 

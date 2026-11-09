@@ -1,22 +1,17 @@
-import warp as wp
-import torch 
-from ...type_config import *
-from typing import NamedTuple, Union, Tuple, List, Optional, Any
-from warp.types import vector, matrix
-from ...math import *
-from ...util import *
-
-# Convert Warp arrays back to PyTorch tensors using wp.to_torch() for direct GPU access
-from ...dataTypes import *
-from ...enumTypes import *
-
-from ...profiling import record_function
-from .grid import *
-from .sort import *
-from .indexing import *
-from .wp_hashCells import *
+"""Compact hash-map construction with unchanged Torch layout/order operations."""
+from __future__ import annotations
+from typing import Any, Optional, Union, Tuple, List
 import numpy as np
+import torch
+from ..._backend import OPERATORS
+from ...type_config import get_torch_precision, get_torch_index_dtype
+from ...dataTypes.hashMap_t import CompactHashMap
+from ...dataTypes import DomainDescription
+from ...enumTypes import SupportScheme
+from ...profiling import record_function
 from ..csr import validateParticleCounts
+from .grid import computeGridSupport, getDomainExtents, delinearizeIndices
+from .sort import sortReferenceParticles
 
 def buildCompactHashMap(
     queryPositions: torch.Tensor,
@@ -28,12 +23,16 @@ def buildCompactHashMap(
     mode: SupportScheme = SupportScheme.Gather,
     hashMapLength: int = 4096
 ):
+    if OPERATORS == 'warp':
+        import warp as wp
+        from ...util import castTorchToWarp, allocateTorchWarp
+        from .wp_hashCells import hashCells
     validateParticleCounts(queryPositions.shape[0], referencePositions.shape[0])
     if hashMapLength <= 0:
         raise ValueError('hashMapLength must be positive, including for empty populations.')
     with record_function("warpNeighborSearch - buildCompactHashMap"):
         with record_function("neighborSearch - preprocess"):
-            mode_uint = wp.uint32(mode.value)
+            mode_uint = int(mode.value) if OPERATORS == 'native' else wp.uint32(mode.value)
             # mode_map = {'gather': 1, 'scatter': 2, 'symmetric': 3, 'superSymmetric': 4, ''}
             # mode_uint = mode_map.get(mode, 0)
             # if mode_uint == 0:
@@ -94,34 +93,40 @@ def buildCompactHashMap(
             cellTable = torch.stack((cellIndices, cumCell, cellCounters), dim = 1)
     
         with record_function("neighborSearch - buildHashMap"):
-            warpDevice = castTorchToWarp(queryPositions).device
-            torchDevice = queryPositions.device
+            if OPERATORS == 'native':
+                from ...native._build import build
+                hashed64 = torch.empty(len(cellGridIndices), device=cellGridIndices.device, dtype=torch.int64)
+                build().fixed_grid_keys(cellGridIndices.contiguous(), numCells, hashed64, hashMapLength)
+                hashedIndices = hashed64.to(torch.int32)
+            else:
+                warpDevice = castTorchToWarp(queryPositions).device
+                torchDevice = queryPositions.device
 
-            cellGridIndices_warp = castTorchToWarp(cellGridIndices)
-            # wp.dtype_to_torch(wp.uint32) is torch.int32 (torch has no native
-            # uint32), so this already gives us an int32 tensor directly --
-            # matches the .to(torch.int32) the old wp.to_torch() path needed.
-            hashedIndices, hashedIndices_warp = allocateTorchWarp(cellGridIndices.shape[0], wp.uint32, warpDevice)
-            # launched on torch's current stream, so the torch ops below are
-            # ordered after it without the device-wide wp.synchronize() this
-            # used to need (nor the unused torch reference hash it computed)
-            wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice,
-                      stream=wp.stream_from_torch(torch.cuda.current_stream(torchDevice)) if torchDevice.type == 'cuda' else None)
-            # if not torch.equal(hashedIndices, referenceHashedIndices):
-            #     mismatch = torch.nonzero(hashedIndices != referenceHashedIndices, as_tuple=False).flatten()
-            #     sample = mismatch[:8]
-            #     details = []
-            #     for idx in sample:
-            #         i = int(idx.item())
-            #         c = cellGridIndices[i].tolist()
-            #         got = int(hashedIndices[i].item())
-            #         exp = int(referenceHashedIndices[i].item())
-            #         details.append(f"cell={c}, got={got}, expected={exp}")
-            #     raise RuntimeError(
-            #         "Warp hash assignment mismatch detected for occupied cells. "
-            #         f"mismatches={int(mismatch.numel())}, sample=[" + "; ".join(details) + "]"
-            #     )
-            # print(hashedIndices_warp)
+                cellGridIndices_warp = castTorchToWarp(cellGridIndices)
+                # wp.dtype_to_torch(wp.uint32) is torch.int32 (torch has no native
+                # uint32), so this already gives us an int32 tensor directly --
+                # matches the .to(torch.int32) the old wp.to_torch() path needed.
+                hashedIndices, hashedIndices_warp = allocateTorchWarp(cellGridIndices.shape[0], wp.uint32, warpDevice)
+                # launched on torch's current stream, so the torch ops below are
+                # ordered after it without the device-wide wp.synchronize() this
+                # used to need (nor the unused torch reference hash it computed)
+                wp.launch(hashCells, dim=cellGridIndices.shape[0], inputs=[cellGridIndices_warp, wp.uint32(hashMapLength), hashedIndices_warp], device=warpDevice,
+                          stream=wp.stream_from_torch(torch.cuda.current_stream(torchDevice)) if torchDevice.type == 'cuda' else None)
+                # if not torch.equal(hashedIndices, referenceHashedIndices):
+                #     mismatch = torch.nonzero(hashedIndices != referenceHashedIndices, as_tuple=False).flatten()
+                #     sample = mismatch[:8]
+                #     details = []
+                #     for idx in sample:
+                #         i = int(idx.item())
+                #         c = cellGridIndices[i].tolist()
+                #         got = int(hashedIndices[i].item())
+                #         exp = int(referenceHashedIndices[i].item())
+                #         details.append(f"cell={c}, got={got}, expected={exp}")
+                #     raise RuntimeError(
+                #         "Warp hash assignment mismatch detected for occupied cells. "
+                #         f"mismatches={int(mismatch.numel())}, sample=[" + "; ".join(details) + "]"
+                #     )
+                # print(hashedIndices_warp)
 
             sortedSupports = referenceSupports[sortIndex] if referenceSupports is not None else None
 

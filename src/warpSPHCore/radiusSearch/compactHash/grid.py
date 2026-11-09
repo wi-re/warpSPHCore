@@ -1,14 +1,7 @@
-import warp as wp
-import torch 
-from ...type_config import *
-from typing import NamedTuple, Union, Tuple, List, Optional, Any
-from warp.types import vector, matrix
-from ...math import *
-from ...util import *
-
-# Convert Warp arrays back to PyTorch tensors using wp.to_torch() for direct GPU access
-from ...dataTypes import *
-from ...enumTypes import *
+"""Pure host/Torch compact-grid geometry, shared by both runtimes."""
+from typing import Optional
+import torch
+from ...enumTypes import SupportScheme
 
 def computeGridSupport(supportsX, supportsY, scheme: SupportScheme):
     # The maximum of an empty role contributes zero to the radius bound.
@@ -54,8 +47,6 @@ def getDomainExtents(y, minDomain: Optional[torch.Tensor], maxDomain: Optional[t
         return minD, maxD
 
 
-
-# @torch.jit.script
 def compute_h(qMin, qMax, referenceSupport): 
     """
     Compute the smoothing length (h) based on the given minimum and maximum coordinates (qMin and qMax)
@@ -87,3 +78,19 @@ def compute_h(qMin, qMax, referenceSupport):
     h = torch.where(torch.any(torch.ceil(qExtent / h) > qExtent / h), h * (1e-4 + 1), h)
 
     return torch.max(h)
+
+
+
+def delinearizeIndices(linearIndices: torch.Tensor, cellCounts: torch.Tensor, D: int,
+                       cellCountsHost=None) -> torch.Tensor:
+    """Recover D-dimensional cell indices from x-major linear indices.
+
+    This keeps hashing and lookup consistent with getLinearIndex64/getLinearIndex.
+    """
+    linear = linearIndices.to(torch.int64).clone()
+    grid = torch.zeros((linear.shape[0], D), dtype=torch.int32, device=linear.device)
+    for d in range(D):
+        cd = int(cellCountsHost[d]) if cellCountsHost is not None else int(cellCounts[d].item())
+        grid[:, d] = torch.remainder(linear, cd).to(torch.int32)
+        linear = torch.div(linear, cd, rounding_mode="floor")
+    return grid
