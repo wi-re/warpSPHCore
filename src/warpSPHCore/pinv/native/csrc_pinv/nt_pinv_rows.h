@@ -28,7 +28,15 @@ template<class T,int D> struct InverseRow {
                     spectrum[0]=big;spectrum[1]=small;
                     const T threshold=T(1e-6)*absolute(big);
                     if (absolute(big)>T(1e-12) && absolute(small)>threshold) {
-                        const T determinant=a*d-b*b;
+                        T determinant=a*d-b*b;
+                        if constexpr(sizeof(T)==sizeof(float)) {
+                            // Recover the rounding of b*b before the cancelled
+                            // subtraction. Two FP32 FMAs retain the determinant
+                            // of the stored inputs without changing rank policy.
+                            const T square=b*b;
+                            if(std::isfinite(a*d)&&std::isfinite(square))
+                                determinant=std::fma(a,d,-square)+std::fma(-b,b,square);
+                        }
                         inverse[0]=d/determinant;inverse[1]=inverse[2]=-b/determinant;inverse[3]=a/determinant;
                     } else {
                         // Preserve the reference's separate dominant absolute

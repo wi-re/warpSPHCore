@@ -159,3 +159,41 @@ def test_general_square_pinv_products_match_torch(device,dimension,branch):
     a=torch.autograd.grad((actual*bar).sum(),matrix,retain_graph=True)[0]
     b=torch.autograd.grad((expected*bar).sum(),matrix)[0]
     torch.testing.assert_close(a,b,rtol=2e-11,atol=2e-11)
+
+
+def test_fp32_renormalization_inverse_cancelling_determinant(device):
+    """Retained directions use the determinant of the actual stored inputs."""
+    angle=torch.tensor(.4,dtype=torch.float64,device=device)
+    v=torch.stack((angle.cos(),angle.sin()));w=torch.stack((-angle.sin(),angle.cos()))
+    matrices=[]
+    for condition in (1e2,1e3,1e4,1e5,3e5):
+        for sign in (-1,1):
+            matrices.append(v[:,None]*v[None,:]+sign*w[:,None]*w[None,:]/condition)
+    matrix=torch.stack(matrices).float().requires_grad_()
+    counts=torch.full((len(matrix),),8,dtype=torch.int32,device=device)
+    inverse,_=sph.pinv2x2_warpBackend(matrix,counts)
+    reference=torch.linalg.inv(matrix.detach().double()).float()
+    torch.testing.assert_close(inverse,reference,rtol=3e-5,atol=3e-5)
+    direction=torch.ones_like(matrix)*1e-4
+    expected=-(reference.double()@direction.double()@reference.double()).float()
+    with forward_ad.dual_level():
+        dual,_=sph.pinv2x2_warpBackend(forward_ad.make_dual(matrix,direction),counts)
+        tangent=forward_ad.unpack_dual(dual).tangent
+    torch.testing.assert_close(tangent,expected,rtol=3e-5,atol=3e-5)
+    cotangent=torch.ones_like(matrix)*1e-4
+    gradient,=torch.autograd.grad((inverse*cotangent).sum(),matrix)
+    torch.testing.assert_close(gradient,expected,rtol=3e-5,atol=3e-5)
+    if device != 'cpu':
+        # Replay must read the changed matrix, including its compensated
+        # determinant, on the caller's stream.
+        current=matrix.detach().clone()
+        stream=torch.cuda.Stream();stream.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(stream):
+            sph.pinv2x2_warpBackend(current,counts)
+            graph=torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph):
+                captured,_=sph.pinv2x2_warpBackend(current,counts)
+            current.mul_(2)
+            graph.replay()
+        torch.cuda.current_stream().wait_stream(stream)
+        torch.testing.assert_close(captured,reference/2,rtol=3e-5,atol=3e-5)
