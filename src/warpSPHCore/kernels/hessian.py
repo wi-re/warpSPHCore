@@ -36,6 +36,38 @@ def sphKernelHessian_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kern
     hessian = factorA * k2 + factorB * k1
     return hessian
     
+# AD-only stable evaluation of the same declared regularized partial.
+# The public derivative-valued forward operator retains its prior arithmetic.
+@wp.func
+def _sphKernelHessianAD_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
+    r = vectorNorm_warp(x)
+    dim = wp.int32(x.length)
+    q = r / h
+    eps = get_epsilon(r)
+    if q > scalar_t(1.0):
+        return type(wp.outer(x, x))(scalar_t(0.0))
+
+    k1 = eval_dkdq(q, dim, kernel)   * eval_C_d(dim, kernel) / iPow(h, dim + 1)
+    k2 = eval_d2kdq2(q, dim, kernel) * eval_C_d(dim, kernel) / iPow(h, dim + 2)
+    s = (iPow(r, 2) + iPow(eps,2) *iPow(h,2))
+    
+    factorA = wp.outer(x, x) / s
+    if q < eps:
+        for i in range(dim):
+            factorA[i,i] = scalar_t(1.0)
+    
+    factorB = - wp.outer(x,x) /  (iPow(r, 3) + iPow(eps, 3) *iPow(h, 3))
+    factorB += warp_eye(x) / (r + iPow(eps, 2) * h)
+    
+    if wp.static(scalar_t == wp.float32):
+        if dim == 1 and q >= eps and wp.isfinite(r) and wp.isfinite(h) and h > scalar_t(0.0):
+            rd, hd, e = wp.float64(r), wp.float64(h), wp.float64(eps)
+            e2h = e * e * hd
+            factorB[0,0] = scalar_t(e2h * (e * hd * hd - rd * rd) / ((rd * rd * rd + e * e * e * hd * hd * hd) * (rd + e2h)))
+
+    hessian = factorA * k2 + factorB * k1
+    return hessian
+    
 @wp.func
 def sphKernelHessian(
     xi: vector(dtype=scalar_t, length=dim_t),

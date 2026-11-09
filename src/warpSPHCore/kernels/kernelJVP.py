@@ -27,8 +27,8 @@ from ..dataTypes.domain_t import domainData
 from ..dataTypes.kernelState_t import kernelState
 from .kernel import sphKernel_
 from .gradient import sphGradient_
-from .gradH import sphKernelDkDh_, sphGradientDkDh_
-from .hessian import sphKernelHessian_
+from .gradH import sphKernelDkDh_, _sphGradientDkDhAD_ as sphGradientDkDh_
+from .hessian import _sphKernelHessianAD_ as sphKernelHessian_
 from .laplacian import sphKernelLaplacian_, sphKernelLaplacianGradient_, sphKernelLaplacianDkDh_
 
 

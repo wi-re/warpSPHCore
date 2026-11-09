@@ -11,8 +11,8 @@ from .kernelFunctions import *
 from ..util.support import computePairwiseSupport
 from ..dataTypes.domain_t import domainData
 from ..dataTypes.kernelState_t import kernelState
-from .hessian import sphKernelHessian_
-from .gradH import sphGradientDkDh_
+from .hessian import _sphKernelHessianAD_ as sphKernelHessian_
+from .gradH import _sphGradientDkDhAD_ as sphGradientDkDh_
 
 # `sphGradient_` needs a custom reverse-mode adjoint (see adj_sphGradient_'s
 # docstring below), and Warp's @wp.func_grad rejects functions with a

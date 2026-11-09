@@ -170,3 +170,29 @@ repair; CUDA remains queued under the shared lock. No native C++ source changed.
 Required repository layout check passes. Evidence is /tmp/native-ad-core-capture-*
 pending the paired follow-up receipt. Next: CUDA capture qualification with A1,
 then dependency-ordered actual MFM/MFV AD and solve residual/transpose foundations.
+
+A1 differential checkpoint: the paired independent Godunov equations expose
+1D cancellation in the viscosity mixed support partial and in the regularized
+Hessian's B coefficient. Stable equivalent evaluation is confined to AD helpers;
+public derivative-valued Warp forward functions retain their original bodies.
+Native kernel-derivative metadata supports the original scalar regularization
+when a wider pair trace is used. The standalone conditioned-kernel regression
+passes; both paired frontend native/Warp CPU independent products pass. Focused
+CUDA Godunov owners now pass both precisions, including exact/rounded clamp
+contacts (frontend owns the bounded near-contact differential convention).
+Complete current-library GPU qualification is active under the shared lock.
+
+A2 working checkpoint: native first-order products now cover actual moments,
+least-squares gradients, selected-extrema limiter and material-aware Riemann
+flux/conserved rates. Original primal passes are retained. CSR membership and
+branch/extrema choices are controls; x/h/domain/volume/inverse/condition inputs
+remain continuous. Current complete CPU library passes77 meshless tests across
+FP32/FP64, independent equations, numerical products, conservation, lifetimes
+and explicit unsupported scopes. Source import rejection passes77; separate
+Warp-runtime launch rejection passes36 FP32/40 FP64 checks. Native-supported
+initial public scope is full-rank closure-none CSR, six smooth kernels, fixed
+external timestep; projected/chunked/distributed geometry and automatic timestep
+AD remain explicit. Frontend prepareStage and two-step package-owned temporal
+maps pass CPU numerical checks. CUDA/graphs and real installed gates remain
+pending; this is not a full meshless-AD closeout. Native source/library evidence
+is `/tmp/native-ad-current-full-*` and `/tmp/native-ad-a2-*`, pending a new receipt.

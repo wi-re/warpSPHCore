@@ -46,7 +46,7 @@ SPH_HD void value_derivatives(const T (&dx)[D],T r,T h,int kernel,
 
 // Use the reference's custom gradient adjoint, including its near-origin
 // Hessian regularization, while sharing core radial values and derivatives.
-template<class T,int D>
+template<class T,int D,class Regularization=T>
 SPH_HD void kernel_derivatives(const T (&dx)[D],T r,T h,int kernel,
     T& w,T (&g)[D],T (&wx)[D],T& wh,T (&gx)[D*D],T (&gh)[D]) {
     if(h<=T(0)||r>h)return;
@@ -54,7 +54,7 @@ SPH_HD void kernel_derivatives(const T (&dx)[D],T r,T h,int kernel,
     const T C=normalization<T,D>(kernel),hd=power<T,D>(h,D);
     const T kd1=gradient_shape_derivative<T,D>(r/h,kernel,f.d1);
     const T k1=C*kd1/(hd*h),k2=C*f.d2/(hd*h*h);
-    const T eps=sizeof(T)==4?T(1e-7):T(1e-15),den=r>eps?r:eps;
+    const T eps=sizeof(Regularization)==4?T(1e-7):T(1e-15),den=r>eps?r:eps;
     const T value_d1=value_shape_derivative<T,D>(r/h,kernel,f.d1);
     w=C*f.v/hd;wh=-C*(T(D)*f.v+(r/h)*value_d1)/(hd*h);
     for(int a=0;a<D;++a) {
@@ -69,14 +69,24 @@ SPH_HD void kernel_derivatives(const T (&dx)[D],T r,T h,int kernel,
         else support_shape=__dadd_rn(__dmul_rn(r/h,f.d2),__dmul_rn(T(D+1),kd1));
 #else
         volatile T support_left=(r/h)*f.d2,support_right=T(D+1)*kd1;
-        const T support_shape=support_left+support_right;
+        T support_shape=support_left+support_right;
 #endif
+        // In 1D viscosity, the singular +/-1/q^2 terms cancel exactly.
+        // Form their reduced equation before rounding, preserving q=0 controls.
+        if constexpr(D==1)if(kernel==40 && r>T(0) && h>T(0))
+            support_shape=T(6)*(r/h)*(T(1)-r/h);
         gh[a]=-dx[a]/den*C*support_shape/(hd*h*h);
         for(int b=0;b<D;++b) {
             T A=dx[a]*dx[b]/(r*r+eps*eps*h*h);
             if(r/h<eps&&a==b)A=T(1);
-            const T B=-dx[a]*dx[b]/(r*r*r+eps*eps*eps*h*h*h)
+            T B=-dx[a]*dx[b]/(r*r*r+eps*eps*eps*h*h*h)
                        +(a==b?T(1)/(r+eps*eps*h):T(0));
+            if constexpr(D==1 && sizeof(Regularization)==4)if(r/h>=eps && std::isfinite(r) && std::isfinite(h) && h>T(0)) {
+                // Same regularized Hessian, factored before subtracting two
+                // O(1/r) terms. Central linear kernels otherwise acquire noise.
+                const double rd=r,hd=h,e=eps,e2h=e*e*hd;
+                B=T(e2h*(e*hd*hd-rd*rd)/((rd*rd*rd+e*e*e*hd*hd*hd)*(rd+e2h)));
+            }
             #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
             // Warp keeps the first matrix product materialized when the
             // radial second derivative overflows; fusing it would turn its
