@@ -1,12 +1,13 @@
 from .._backend import BACKEND
 
 if BACKEND == "native":
+    from .hashMap_t import CompactHashMap
     from ..enumTypes import ExecutionMode
     from .._models import (ParticleState, ParticleTangentState, PointCloud,
                            DomainDescription, OperationProperties, AdjacencyList,
                            CapacityPolicy, DEFAULT_CAPACITY, CRKState, CRKTangentState,
                            GradHState, RenormalizationState, RenormalizationTangentState)
-    __all__ = ['ExecutionMode','ParticleState', 'ParticleTangentState', 'PointCloud',
+    __all__ = ['CompactHashMap', 'ExecutionMode','ParticleState', 'ParticleTangentState', 'PointCloud',
                'DomainDescription', 'OperationProperties', 'AdjacencyList',
                'CapacityPolicy', 'DEFAULT_CAPACITY', 'CRKState', 'CRKTangentState',
                'GradHState', 'RenormalizationState', 'RenormalizationTangentState']
