@@ -10,6 +10,39 @@ def particles(x, h):
                              torch.zeros(len(x), dtype=torch.int32, device=x.device), torch.ones_like(h))
 
 
+@pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
+def test_forward_geometry_survives_discrete_search_lifecycle(device, dtype):
+    """Search/filter/control snapshots consume primals; the density keeps JVP."""
+    from torch.autograd import forward_ad
+    x = torch.tensor([[.02], [.23], [.46], [.72], [.96]], device=device, dtype=dtype)
+    q = particles(x, x.new_full((5,), .34))
+    domain = sph.DomainDescription(x.new_zeros(1), x.new_ones(1),
+                                  torch.ones(1, device=device, dtype=torch.bool), 1)
+    adjacency = sph.radiusSearch(q, domain)
+    props = sph.OperationProperties(sph.KernelFunctions.Wendland2,
+                                   operation=sph.WarpOperation.Density)
+    with forward_ad.dual_level():
+        dual = lambda v, d: forward_ad.make_dual(v, torch.full_like(v, d))
+        positions = forward_ad.make_dual(x, .01 * x.cos())
+        live = replace(q, positions=positions, supports=dual(q.supports, .02))
+        bounds = replace(domain, min=dual(domain.min, .003), max=dual(domain.max, .007))
+        searched = sph.radiusSearch(live, bounds)
+        torch.testing.assert_close(searched.paddedJ, adjacency.paddedJ)
+        built = sph.buildVerletList(live, bounds, 1.4, storeI=False)
+        assert sph.buildVerletList(live, bounds, 1.4, priorNeighborhood=built, storeI=False) is built
+        filtered = sph.filterVerletList(live, bounds, built, capacity=None, storeI=False)
+        torch.testing.assert_close(filtered.paddedJ, searched.paddedJ)
+        for owner in (built, filtered):
+            for name in ('queryPositions', 'referencePositions', 'querySupports', 'referenceSupports'):
+                assert forward_ad.unpack_dual(getattr(owner, name)).tangent is None
+        assert forward_ad.unpack_dual(live.positions).tangent is not None
+        actual = forward_ad.unpack_dual(sph.warpOperation(live, props, bounds, adjacency=filtered))
+        fixed = forward_ad.unpack_dual(sph.warpOperation(live, props, bounds, adjacency=adjacency))
+        torch.testing.assert_close(actual.primal, fixed.primal)
+        torch.testing.assert_close(actual.tangent, fixed.tangent)
+        assert bool(actual.tangent.abs().max() > 0)
+
+
 def displacement(a, b, domain):
     delta = a - b
     length = domain.max - domain.min

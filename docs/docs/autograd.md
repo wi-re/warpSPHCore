@@ -419,3 +419,15 @@ records use the [external development archive](development-artifacts.md).
 `extractStateInfo`) · `warpier_adjoint.md` (the JVP derivations) ·
 `warpier_fields.md` (the state-object design record the caching layers
 implement)
+
+## Native search in differentiated trajectories
+
+Native radius and Verlet search accept reverse inputs and classic forward-AD
+dual geometry. Neighbour membership, reuse decisions and retained search
+snapshots are discrete control data: these consume detached primal values at
+the search boundary. `torch.no_grad()` alone does not remove forward tangents.
+The caller's positions, supports and other continuous fields stay live and
+feed the subsequent SPH operators, so freezing membership does not freeze
+geometry. Derivatives describe the selected topology and branches, not changes
+in neighbour count or rebuild decisions. This also applies when a trajectory
+rebuilds its native CSR lists on successive timesteps.

@@ -66,8 +66,8 @@ def verletValidityMetrics(queryPositions, referencePositions, priorQueryPosition
     scale = scale.reshape(1).contiguous()
     from ...native._build import build
     flag, values = build().verlet_metrics(
-        [queryPositions, referencePositions, querySupports, referenceSupports, domainMin, domainMax, periodicity],
-        priorQueryPositions, priorReferencePositions, supports_a, supports_b, scale,
+        [v.detach() for v in (queryPositions, referencePositions, querySupports, referenceSupports, domainMin, domainMax, periodicity)],
+        priorQueryPositions.detach(), priorReferencePositions.detach(), supports_a.detach(), supports_b.detach(), scale,
         support_case, rebuildSlack, same)
     return flag, *values.unbind()
 
@@ -182,6 +182,7 @@ def buildVerletList(queryParticles, domain, verletScale=1., supportMode=SupportS
                 and (prior.queryPositions is prior.referencePositions) == same
                 and (prior.querySupports is prior.referenceSupports) == same else None)
     def snapshot(name, value):
+        value = value.detach()  # a control snapshot, never a differentiable field
         held = None if retained is None else getattr(retained, name)
         if held is not None and held.shape == value.shape and held.dtype == value.dtype and held.device == value.device:
             held.copy_(value)
@@ -212,10 +213,13 @@ def filterVerletList(queryParticles, domain, adjacency, supportMode=SupportSchem
         raise ValueError('Verlet filtering requires an existing candidate list')
     source = prepare_adjacency(queryParticles, reference, domain, None, adjacency)
     neighbors, counts, offsets = build().verlet_filter(
-        list(prepare_geometry(queryParticles, reference, domain, allow_reverse=True)),
+        [t.detach() for t in prepare_geometry(queryParticles, reference, domain,
+                                              allow_reverse=True, allow_forward=True)],
         source.paddedJ, source.numNeighbors, source.edgeOffsets, supportMode.value)
     result = _storage(neighbors, counts, offsets, queryParticles, reference, capacity, None, storeI)
     result.searchBackend = "native"
-    result.queryPositions, result.referencePositions = queryParticles.positions, reference.positions
-    result.querySupports, result.referenceSupports = queryParticles.supports, reference.supports
+    result.queryPositions = queryParticles.positions.detach()
+    result.referencePositions = result.queryPositions if reference is queryParticles else reference.positions.detach()
+    result.querySupports = queryParticles.supports.detach()
+    result.referenceSupports = result.querySupports if reference is queryParticles else reference.supports.detach()
     return result

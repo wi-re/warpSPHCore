@@ -11,7 +11,11 @@ def radiusSearch(queryParticles: ParticleState, domain: DomainDescription,
     from ...native._build import build
     from ...native._inputs import prepare_geometry
     reference = referenceParticles if referenceParticles is not None else queryParticles
-    args = prepare_geometry(queryParticles, reference, domain, allow_reverse=True)
+    # Membership is discrete in both AD modes. no_grad alone does not remove
+    # classic forward tangents; consume primal geometry only at this search
+    # boundary, leaving the caller's live geometry attached to later operators.
+    args = tuple(t.detach() for t in prepare_geometry(
+        queryParticles, reference, domain, allow_reverse=True, allow_forward=True))
     if not isinstance(mode, SupportScheme):
         raise TypeError('mode must be a SupportScheme')
     neighbors, counts, offsets = build().radius(*args, mode.value)
