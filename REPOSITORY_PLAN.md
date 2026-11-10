@@ -152,6 +152,22 @@ patch is separately checkpointed at `2268211` with CPU/CUDA32/64 dispatch tests.
 
 ## Native meshless and solve AD follow-up — 9 November 2026
 
+### Local-main integration — 10 November 2026
+
+User authorized merging this work into local main. Main fast-forwarded from
+c2b8aaf to2054c77, incorporating all six qualified implementation commits.
+This closeout supersedes the earlier A1/A2 working and no-merge entries below.
+The paired frontend integrates its AD branch with the independent ACSPH main
+history; current plans/handoffs are under /home/lu26029/dev/warpSPH, particularly
+NATIVE_MESHLESS_SOLVE_AD_HANDOFF.md and NATIVE_INVERSE_VALIDATION_HANDOFF.md.
+CPU/CUDA FP32/FP64 qualification scope and separate launch/import/real-no-Warp
+installation evidence are recorded there. Fresh main-source integration checks
+are recorded in the frontend local-merge closeout; no new capability or widened
+scope is inferred from merging. Large pressure solves, physical obstacle design,
+long chaotic gradients and statistical-response methods retain their restrictions.
+Research/evidence remain external, old sealed archives unchanged. No push.
+
+
 Paired frontend plan: /home/lu26029/.codex/worktrees/native-meshless-solve-ad/warpSPH/NATIVE_MESHLESS_SOLVE_AD_PLAN.md.
 This explicitly authorized follow-up starts from merged Core c2b8aaf. A1 exposed
 a Warp reference bridge issue: mutable scalar parameter structs remain live in a
