@@ -4,6 +4,7 @@
 #include <cstring>
 #include <limits>
 #include <utility>
+#include <new>
 
 namespace sph_native::compact {
 namespace {
@@ -22,8 +23,8 @@ void domain(const Context &context, const Problem &problem, Grid &grid) {
         numeric(problem, [&](auto scalar, auto dimension) {
             using T = decltype(scalar);
             for (int axis = 0; axis < dimension; ++axis) {
-                grid.lower[axis] = static_cast<const T *>(problem.domain.min.data)[axis];
-                grid.upper[axis] = static_cast<const T *>(problem.domain.max.data)[axis];
+                grid.real<T>().lower[axis] = static_cast<const T *>(problem.domain.min.data)[axis];
+                grid.real<T>().upper[axis] = static_cast<const T *>(problem.domain.max.data)[axis];
                 const auto flag = static_cast<const uint8_t *>(problem.domain.periodic.data)[axis];
                 require(flag <= 1, "Invalid domain periodicity");
                 grid.periodic[axis] = bool(flag);
@@ -32,13 +33,13 @@ void domain(const Context &context, const Problem &problem, Grid &grid) {
     }
 #ifdef SPH_COMPACT_HAS_GPU
     else
-        gpu_domain(context, problem, grid.lower, grid.upper, grid.periodic);
+        gpu_domain(context, problem, grid);
 #endif
     numeric(problem, [&](auto scalar, auto dimension) {
         using T = decltype(scalar);
         for (int axis = 0; axis < dimension; ++axis) {
-            const T extent = T(grid.upper[axis]) - T(grid.lower[axis]);
-            require(finite(grid.lower[axis]) && finite(grid.upper[axis]) && finite(extent) &&
+            const T extent = T(grid.real<T>().upper[axis]) - T(grid.real<T>().lower[axis]);
+            require(finite(grid.real<T>().lower[axis]) && finite(grid.real<T>().upper[axis]) && finite(extent) &&
                         extent > 0,
                     "Invalid domain extent");
         }
@@ -54,16 +55,11 @@ Summary summary(const Context &context, const Problem &problem) {
 #endif
     return result;
 }
-double radius_bound(const Problem &problem, Summary maxima) {
-    if (!problem.query.count || !problem.reference.count)
-        return 0;
-    double radius = 0;
-    numeric(problem, [&](auto scalar, auto) {
-        using T = decltype(scalar);
-        radius = pairwise_support(T(maxima.query_max), T(maxima.reference_max),
-                                  int(problem.properties.support));
-    });
-    require(finite(radius) && radius >= 0, "Invalid or overflowing search radius");
+template <class T> T radius_bound(const Problem &problem, const Summary &maxima) {
+    if (!problem.query.count || !problem.reference.count) return T(0);
+    const auto &values = maxima.real<T>();
+    const T radius = pairwise_support(values.query_max, values.reference_max, int(problem.properties.support));
+    require(finite(radius) && radius >= T(0), "Invalid or overflowing search radius");
     return radius;
 }
 } // namespace
@@ -184,7 +180,8 @@ SearchStatistics CompactHash::statistics() const {
     const auto &data = compact::Access::get(*this);
     return {data.references,   data.occupied,
             data.grid.buckets, {data.grid.cells[0], data.grid.cells[1], data.grid.cells[2]},
-            data.grid.width,   data.radius_bound};
+            data.precision == Precision::Float32 ? double(data.grid.real<float>().width) : data.grid.real<double>().width,
+            data.precision == Precision::Float32 ? double(data.grid.real<float>().radius_bound) : data.grid.real<double>().radius_bound};
 }
 CompactHash build_compact_hash(const Context &context, const Problem &problem,
                                SearchOptions options) {
@@ -200,28 +197,28 @@ CompactHash build_compact_hash(const Context &context, const Problem &problem,
     data.precision = problem.precision;
     data.dimension = problem.dimension;
     data.references = problem.reference.count;
+    numeric(problem, [&](auto scalar, auto) {
+        using T = decltype(scalar);
+        new (&data.grid.real<T>()) GridReal<T>{};
+    });
     domain(context, problem, data.grid);
     const auto maxima = summary(context, problem);
-    double width = radius_bound(problem, maxima), largest_extent = 0;
-    for (int axis = 0; axis < problem.dimension; ++axis)
-        largest_extent = std::max(largest_extent, data.grid.upper[axis] - data.grid.lower[axis]);
-    // Cap each conceptual axis at 2^20 cells: 3D keys then fit int64 without
-    // allocating a dense grid. Tiny supports remain correct with larger cells.
-    const double epsilon = problem.precision == Precision::Float32 ? FLT_EPSILON : DBL_EPSILON;
-    // Squared distances can underflow in the established scalar predicate.
-    // Coarsen tiny grids so indexing cannot discard those accepted pairs.
-    const double minimum_normal = problem.precision == Precision::Float32 ? FLT_MIN : DBL_MIN;
-    width = std::max({width, largest_extent / 1048576.0, std::sqrt(minimum_normal)});
-    data.radius_bound = width;
-    // Keep this rounding reserve separate from the reusable support bound;
-    // callers cannot consume it by gradually increasing their supports.
-    data.grid.width = std::nextafter(width + 128 * epsilon * largest_extent, DBL_MAX);
-    require(finite(data.grid.width) && data.grid.width > 0, "Invalid cell width");
-    for (int axis = 0; axis < problem.dimension; ++axis) {
-        const double ratio = (data.grid.upper[axis] - data.grid.lower[axis]) / data.grid.width;
-        data.grid.cells[axis] = std::max<int64_t>(
-            1, int64_t(data.grid.periodic[axis] ? std::floor(ratio) : std::ceil(ratio)));
-    }
+    numeric(problem, [&](auto scalar, auto) {
+        using T = decltype(scalar);
+        auto &real = data.grid.real<T>();
+        T width = radius_bound<T>(problem, maxima), largest_extent = 0;
+        for (int axis = 0; axis < problem.dimension; ++axis)
+            largest_extent = std::max(largest_extent, real.upper[axis] - real.lower[axis]);
+        constexpr T epsilon = std::numeric_limits<T>::epsilon();
+        width = std::max({width, largest_extent / T(1048576), std::sqrt(std::numeric_limits<T>::min())});
+        real.radius_bound = width;
+        real.width = std::nextafter(width + T(128) * epsilon * largest_extent, std::numeric_limits<T>::max());
+        require(finite(real.width) && real.width > T(0), "Invalid cell width");
+        for (int axis = 0; axis < problem.dimension; ++axis) {
+            const T ratio = (real.upper[axis] - real.lower[axis]) / real.width;
+            data.grid.cells[axis] = std::max<int64_t>(1, int64_t(data.grid.periodic[axis] ? std::floor(ratio) : std::ceil(ratio)));
+        }
+    });
     data.grid.buckets =
         options.hash_buckets ? options.hash_buckets : std::max<int64_t>(1, data.references);
     require(uint64_t(data.references) <= SIZE_MAX / sizeof(ParticleKey) &&

@@ -2,8 +2,9 @@
 #include "radiusSearch/native/csrc_radius/nt_radius_dispatch.h"
 #include "radiusSearch/native/csrc_compact/nt_compact_backend.h"
 namespace sph_native::search_index {
-enum Metadata { Version,Dimension,PrecisionBits,SupportMode,References,Occupied,Buckets,CellWidth,
-                Lower=8,Upper=11,Cells=14,Periodic=17,RadiusBound=20,MetadataSize=21 };
+enum Metadata { Version,Dimension,PrecisionBits,SupportMode,References,Occupied,Buckets,
+                Cells=7,Periodic=10,MetadataSize=13 };
+enum Reals { CellWidth,Lower=1,Upper=4,RadiusBound=7,RealsSize=8 };
 // The retained index is ordinary Torch storage, not a custom class or global
 // handle table. Fixed host metadata describes its three device-owned arrays.
 template<class Index> struct FillRows {

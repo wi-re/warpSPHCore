@@ -19,9 +19,12 @@ template <class Row> void parallel(const Context &context, int64_t rows, Row row
 Summary cpu_summary(const Problem &problem) {
     Summary summary{};
     numeric(problem, [&](auto scalar, auto dimension) {
-        const auto args = arguments<decltype(scalar), decltype(dimension)::value>(problem);
+        using T = decltype(scalar);
+        SummaryReal<T> result{};
+        const auto args = arguments<T, decltype(dimension)::value>(problem);
         for (int64_t i = 0; i < std::max(problem.query.count, problem.reference.count); ++i)
-            summary = combine(summary, support_bounds(args, problem.query.count, i));
+            result = combine(result, support_bounds(args, problem.query.count, i));
+        summary.set(result);
     });
     return summary;
 }

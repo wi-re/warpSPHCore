@@ -14,7 +14,6 @@ struct Data {
     int dimension;
     int64_t references, occupied = 0;
     Grid grid;
-    double radius_bound = 0;
     ParticleKey *particles = nullptr;
     Cell *cells = nullptr;
     Bucket *buckets = nullptr;
@@ -34,7 +33,7 @@ void cpu_build(const Context &, const Problem &, Data &);
 void cpu_search(const Context &, const Problem &, const Data &, Buffer, bool);
 #ifdef SPH_COMPACT_HAS_GPU
 Summary gpu_summary(const Context &, const Problem &);
-void gpu_domain(const Context &, const Problem &, double *, double *, bool *);
+void gpu_domain(const Context &, const Problem &, Grid &);
 void *gpu_allocate(const Context &, size_t);
 void gpu_free(const Context &, void *) noexcept;
 void gpu_build(const Context &, const Problem &, Data &);

@@ -28,8 +28,8 @@ template <class Row> void launch(int64_t count, Row row, NativeStream stream) {
     rows<<<blocks, block_size, 0, stream>>>(count, row);
     check(GPU(GetLastError)());
 }
-__device__ Summary block_summary(Summary value) {
-    __shared__ double query[block_size], reference[block_size];
+template <class T> __device__ SummaryReal<T> block_summary(SummaryReal<T> value) {
+    __shared__ T query[block_size], reference[block_size];
     const int lane = threadIdx.x;
     query[lane] = value.query_max;
     reference[lane] = value.reference_max;
@@ -45,8 +45,8 @@ __device__ Summary block_summary(Summary value) {
     return {query[0], reference[0]};
 }
 template <class T, int D>
-__global__ void summarize_inputs(RowArgs<T, D> args, int64_t queries, Summary *partials) {
-    Summary value{};
+__global__ void summarize_inputs(RowArgs<T, D> args, int64_t queries, SummaryReal<T> *partials) {
+    SummaryReal<T> value{};
     const int64_t count = queries > args.references ? queries : args.references;
     for (int64_t i = int64_t(blockIdx.x) * blockDim.x + threadIdx.x; i < count;
          i += int64_t(blockDim.x) * gridDim.x)
@@ -55,8 +55,8 @@ __global__ void summarize_inputs(RowArgs<T, D> args, int64_t queries, Summary *p
     if (!threadIdx.x)
         partials[blockIdx.x] = result;
 }
-__global__ void summarize_partials(const Summary *partials, int count, Summary *output) {
-    const auto result = block_summary(threadIdx.x < count ? partials[threadIdx.x] : Summary{});
+template <class T> __global__ void summarize_partials(const SummaryReal<T> *partials, int count, SummaryReal<T> *output) {
+    const auto result = block_summary(threadIdx.x < count ? partials[threadIdx.x] : SummaryReal<T>{});
     if (!threadIdx.x)
         *output = result;
 }
@@ -76,8 +76,7 @@ void gpu_free(const Context &context, void *allocation) noexcept {
         (void)GPU(Free)(allocation);
     (void)GPU(SetDevice)(previous);
 }
-void gpu_domain(const Context &context, const Problem &problem, double *lower, double *upper,
-                bool *periodic) {
+void gpu_domain(const Context &context, const Problem &problem, Grid &grid) {
     Guard guard(context.device_index);
     const auto stream = static_cast<NativeStream>(context.stream);
     numeric(problem, [&](auto scalar, auto dimension) {
@@ -95,9 +94,9 @@ void gpu_domain(const Context &context, const Problem &problem, double *lower, d
         for (int axis = 0; axis < D; ++axis) {
             if (flags[axis] > 1)
                 throw std::invalid_argument("Invalid domain periodicity");
-            lower[axis] = lo[axis];
-            upper[axis] = hi[axis];
-            periodic[axis] = bool(flags[axis]);
+            grid.real<T>().lower[axis] = lo[axis];
+            grid.real<T>().upper[axis] = hi[axis];
+            grid.periodic[axis] = bool(flags[axis]);
         }
     });
 }
@@ -110,18 +109,21 @@ Summary gpu_summary(const Context &context, const Problem &problem) {
     const int blocks = int(std::min<int64_t>((count - 1) / block_size + 1, block_size));
     Data scratch{};
     scratch.context = context;
-    auto *partials = static_cast<Summary *>(scratch.allocate(size_t(blocks) * sizeof(Summary)));
-    auto *result = static_cast<Summary *>(scratch.allocate(sizeof(Summary)));
+    Summary host{};
     numeric(problem, [&](auto scalar, auto dimension) {
-        const auto args = arguments<decltype(scalar), decltype(dimension)::value>(problem);
+        using T = decltype(scalar);
+        auto *partials = static_cast<SummaryReal<T> *>(scratch.allocate(size_t(blocks) * sizeof(SummaryReal<T>)));
+        auto *result = static_cast<SummaryReal<T> *>(scratch.allocate(sizeof(SummaryReal<T>)));
+        const auto args = arguments<T, decltype(dimension)::value>(problem);
         summarize_inputs<<<blocks, block_size, 0, stream>>>(args, problem.query.count, partials);
         check(GPU(GetLastError)());
+        summarize_partials<<<1, block_size, 0, stream>>>(partials, blocks, result);
+        check(GPU(GetLastError)());
+        SummaryReal<T> value{};
+        check(GPU(MemcpyAsync)(&value, result, sizeof(value), GPU(MemcpyDeviceToHost), stream));
+        check(GPU(StreamSynchronize)(stream));
+        host.set(value);
     });
-    summarize_partials<<<1, block_size, 0, stream>>>(partials, blocks, result);
-    check(GPU(GetLastError)());
-    Summary host{};
-    check(GPU(MemcpyAsync)(&host, result, sizeof(host), GPU(MemcpyDeviceToHost), stream));
-    check(GPU(StreamSynchronize)(stream));
     return host;
 }
 void gpu_build(const Context &context, const Problem &problem, Data &data) {

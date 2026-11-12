@@ -1,5 +1,6 @@
 #pragma once
 #include "api.h"
+#include <new>
 #include "dataTypes/state.h"
 #include "execution/atomic.h"
 #include "execution/compactTraversal.h"
@@ -9,14 +10,28 @@ namespace sph_native::compact {
 // its full volume, even for sparse 3D domains.
 // Support maxima are required to choose the search cell width. No geometry or
 // index verification is folded into this reduction.
+template <class T> struct SummaryReal { T query_max = 0, reference_max = 0; };
 struct Summary {
-    double query_max = 0, reference_max = 0;
+    union { SummaryReal<float> f32; SummaryReal<double> f64; };
+    Summary() : f64{} {}
+    template <class T> void set(const SummaryReal<T> &value) {
+        if constexpr (std::is_same_v<T,float>) new (&f32) SummaryReal<float>(value);
+        else new (&f64) SummaryReal<double>(value);
+    }
+    template <class T> auto &real() {
+        if constexpr (std::is_same_v<T,float>) return f32;
+        else return f64;
+    }
+    template <class T> const auto &real() const {
+        if constexpr (std::is_same_v<T,float>) return f32;
+        else return f64;
+    }
 };
 template <class T, int D>
-SPH_HD Summary support_bounds(RowArgs<T, D> args, int64_t queries, int64_t i) {
-    return {i < queries ? double(args.qh[i]) : 0, i < args.references ? double(args.rh[i]) : 0};
+SPH_HD SummaryReal<T> support_bounds(RowArgs<T, D> args, int64_t queries, int64_t i) {
+    return {i < queries ? args.qh[i] : T(0), i < args.references ? args.rh[i] : T(0)};
 }
-SPH_HD inline Summary combine(Summary left, Summary right) {
+template <class T> SPH_HD inline SummaryReal<T> combine(SummaryReal<T> left, SummaryReal<T> right) {
     return {left.query_max > right.query_max ? left.query_max : right.query_max,
             left.reference_max > right.reference_max ? left.reference_max : right.reference_max};
 }

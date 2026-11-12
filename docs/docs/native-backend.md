@@ -297,6 +297,15 @@ The native cutoff remains strict (`distance < support`), including zero-radius
 rows. Warp's compact search uses an inclusive cutoff; exact boundary membership
 therefore retains the established backend distinction.
 
+Grid real storage, support maxima and coordinate/padding arithmetic follow
+`Problem.precision`; FP32 search does not widen its grid to double. The private
+Torch retained descriptor uses separate int64 and input-precision real CPU
+metadata (version 2); private older descriptors require rebuilding. The public
+C++ statistics API still exports double-valued diagnostic scalars, which search
+arithmetic does not consume. Exact membership and selected-branch AD policy are
+unchanged. Retained-index capture on a warmed producer stream uses its FIFO
+ordering; cross-stream readiness waits and storage ownership remain explicit.
+
 Build a reusable index, count, scan, allocate and collect:
 
 ```cpp

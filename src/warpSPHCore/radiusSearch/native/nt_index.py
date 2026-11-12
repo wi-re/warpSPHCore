@@ -6,13 +6,16 @@ class SearchIndex:
     def __init__(self,q,r,qh,rh,domain,mode):
         from ...native._build import build
         self.reference,self.referenceSupports,self.domain,self.mode = r,rh,domain,mode
-        self.metadata = torch.empty(21,dtype=torch.float64,device='cpu')
+        self.metadata = [torch.empty(13,dtype=torch.int64,device='cpu'),
+                         torch.empty(8,dtype=q.dtype,device='cpu')]
         self.arrays = build().search_index([q,r,qh,rh,domain.min,domain.max,domain.periodic],self.metadata,mode.value)
         self._ready = None
+        self._producer = None
         self._sortIndex = None
         if q.is_cuda:
             self._ready = torch.cuda.Event()
-            self._ready.record(torch.cuda.current_stream(q.device))
+            self._producer = torch.cuda.current_stream(q.device)
+            self._ready.record(self._producer)
 
     @property
     def sortIndex(self):
@@ -22,12 +25,15 @@ class SearchIndex:
 
     @property
     def nbytes(self):
-        return self.metadata.numel()*self.metadata.element_size()+sum(t.numel()*t.element_size() for t in self.arrays)
+        return sum(t.numel()*t.element_size() for t in [*self.metadata,*self.arrays])
 
     def _wait(self):
         if self._ready is not None:
             stream = torch.cuda.current_stream(self.reference.device)
-            stream.wait_event(self._ready)
+            # FIFO ordering already protects use on the producer stream. A
+            # redundant wait on its pre-capture event is invalid during capture.
+            if stream != self._producer:
+                stream.wait_event(self._ready)
             for tensor in self.arrays:tensor.record_stream(stream)
 
     def apply(self,query,supports,counts,offsets=None,neighbors=None):
