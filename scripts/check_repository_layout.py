@@ -6,6 +6,7 @@ because documentation and tests legitimately use those formats.
 """
 from pathlib import Path, PurePosixPath
 import subprocess
+import json
 import sys
 
 RESEARCH_ROOTS = {'experiments', 'scratch', 'tmp', '.tmp', 'runs', 'artifacts',
@@ -40,6 +41,13 @@ def main():
     root = Path(__file__).resolve().parents[1]
     paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
     problems = violations(path for path in paths if path)
+    for name in paths:
+        if not name.endswith('.ipynb') or not (root / name).is_file():
+            continue
+        notebook = json.loads((root / name).read_text())
+        if any(cell.get('outputs') or cell.get('execution_count') is not None
+               for cell in notebook.get('cells', []) if cell.get('cell_type') == 'code'):
+            problems.append(f'{name}: notebook execution outputs or counts')
     if problems:
         print('Keep research source and generated runs outside the core checkout:', file=sys.stderr)
         print('\n'.join(f'  {problem}' for problem in problems), file=sys.stderr)

@@ -1156,7 +1156,7 @@ path. FP64 SPH and CPU implementations remain unchanged. The report covers
 limits, independent primal/VJP tests, offline HIP compilation and raw evidence.
 
 
-The [cell-to-cell interpolation study](https://github.com/wi-re/warpSPHCore/blob/main/docs/regression/native_backend_cell_tiles_2026_10_31.md)
+The cell-to-cell interpolation study (historical Git `warpSPHCore@02dfc282c48d:docs/regression/native_backend_cell_tiles_2026_10_31.md`)
 implements a separate Morton-sorted CUDA toy with bounded tasks and shared-memory
 reference tiles. At 1M particles and n_h=4, FP32 interpolation improves 1.58× in
 2D and 1.47× in 3D over already-sorted native CSR. Fresh 3D planning plus
@@ -1288,7 +1288,7 @@ A native wheel loads without compiler helpers; a source wheel uses the JIT path.
 The local CPU/CUDA qualification does not qualify GH200 hardware or an AMD runtime.
 Build a Grace/H100 wheel on the target aarch64 system with `--cpu-arch native`
 and `--gpu-arch 90`; AMD support remains experimental with compile-only evidence.
-See the [final core qualification](https://github.com/wi-re/warpSPHCore/blob/main/docs/regression/native_core_merge_2026_11_03.md).
+See the final core qualification (historical Git `warpSPHCore@02dfc282c48d:docs/regression/native_core_merge_2026_11_03.md`).
 
 ## Periodic displacement arithmetic
 

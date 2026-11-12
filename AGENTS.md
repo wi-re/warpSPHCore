@@ -27,3 +27,8 @@
 Read `docs/docs/development-artifacts.md` for locations and provenance. Run
 `python scripts/check_repository_layout.py` before committing. CI checks tracked
 paths; `.gitignore` alone cannot prevent accidentally force-added artifacts.
+
+Commit notebooks without execution outputs or execution counts. Historical
+campaign/merge receipts belong in the external evidence workspace; a Git
+revision is sufficient to cite retired records. Keep ordinary validation
+independent of archived experiment sources and outputs.
