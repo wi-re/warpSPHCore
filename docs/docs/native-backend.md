@@ -306,6 +306,12 @@ arithmetic does not consume. Exact membership and selected-branch AD policy are
 unchanged. Retained-index capture on a warmed producer stream uses its FIFO
 ordering; cross-stream readiness waits and storage ownership remain explicit.
 
+Integer-only consumers can include `math/gridKeys.h` and use `compact::GridShape`
+without depending on the real grid descriptor or coordinate precision. The typed
+scalar predicate is in `math/finite.h`; `math/grid.h` includes both for native
+coordinate traversal. These source headers ship in the ordinary Core wheel and
+standalone include tree. Key arithmetic and collision resolution are unchanged.
+
 Build a reusable index, count, scan, allocate and collect:
 
 ```cpp
