@@ -181,3 +181,6 @@ All in [`dataTypes`](data-types) / [`enumTypes`](data-types#enums):
 ## Version
 
 `warpSPHCore.__version__` — 0.5.0.
+
+The [typed Warp grid](typed-warp-grid.md) documents the device-parameter fixed-slot
+producer used by FluxBridge, its ownership and explicit unsupported consumers.

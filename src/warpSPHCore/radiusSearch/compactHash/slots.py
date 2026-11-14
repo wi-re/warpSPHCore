@@ -77,6 +77,9 @@ class HashMapSlots:
 def makeHashMapSlots(n: int, domain: DomainDescription, radius: float, *, device, dtype=None,
                      mode: SupportScheme = SupportScheme.SuperSymmetric, hashMapLength: Optional[int] = None) -> HashMapSlots:
     """Slots for `n` particles in `domain`, with the grid built for supports up to `radius`."""
+    if BACKEND == 'warp' and (isinstance(radius,wp.array) or isinstance(domain.min,wp.array) or isinstance(domain.max,wp.array)):
+        from ._warp_slots import WarpHashMapSlots
+        return WarpHashMapSlots(n,domain,radius,device=device,dtype=dtype,mode=mode,hashMapLength=hashMapLength)
     validateParticleCounts(n, n)
     device = torch.device(device)
     dtype = dtype or get_torch_precision()
@@ -124,6 +127,9 @@ def buildFixed(s: HashMapSlots, *, backend=None) -> CompactHashMap:
     """Build the hash map for the positions / supports in `s`'s input slots, into `s`'s buffers. No host reads,
     no allocation that depends on the data; capturable."""
     backend = resolve_backend(backend)
+    if getattr(s,'resident_warp',False):
+        if backend!='warp':raise ValueError('typed Warp slots require backend=warp')
+        return s.build()
     n, H, dim = s.n, s.hashMapLength, s.dim
     dev = s.positions.device
     stream = wp.stream_from_torch(torch.cuda.current_stream(dev)) if backend == 'warp' and dev.type == 'cuda' else None
@@ -205,6 +211,17 @@ class GraphedBuild:
 
     def replay(self) -> CompactHashMap:
         s = self.slots
+        if getattr(s,'resident_warp',False):
+            if self.backend!='warp':raise ValueError('typed Warp slots require backend=warp')
+            if not s.device.is_cuda or s.device.is_capturing:return buildFixed(s,backend='warp')
+            if self.calls==0:
+                self.calls=1
+                return buildFixed(s,backend='warp')
+            if self.graph is None:
+                with wp.ScopedCapture(device=s.device) as capture:buildFixed(s,backend='warp')
+                self.graph=capture.graph
+            wp.capture_launch(self.graph)
+            return s.hashMap
         if s.positions.device.type != 'cuda' or torch.cuda.is_current_stream_capturing():
             return buildFixed(s, backend=self.backend)               # (inside an outer capture the body is recorded inline: a graph cannot replay inside a capture)
         if self.graph is None:
