@@ -98,8 +98,9 @@ def test_typed_slot_guards_recover_without_partial_cast(device,precision):
     pointer=s.positions.ptr
     with pytest.raises(ValueError):s.update_device(wp.zeros((3,2),dtype=wp.float64 if real==wp.float32 else wp.float32,device=device),h)
     assert s.positions.ptr==pointer
-    d.periodic.fill_(True);invalid=makeHashMapSlots(3,d,wp.ones(1,dtype=real,device=device),device=device);invalid.update_device(x,h)
-    with pytest.raises(NotImplementedError):invalid.check()
+    d.periodic.fill_(True);periodic=makeHashMapSlots(3,d,wp.ones(1,dtype=real,device=device),device=device);periodic.update_device(x,h);periodic.check()
+    x.fill_(real(8.2));periodic.update_device(x,h);periodic.check()
+    np.testing.assert_allclose(periodic.sortedPositions.numpy(),.2,atol=1e-6 if precision=='float32' else 1e-14)
 
 
 @pytest.mark.parametrize('precision',['float32','float64'])
