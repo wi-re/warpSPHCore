@@ -13,6 +13,7 @@ from numbers import Integral
 import warp as wp
 from ._warp_integer import Scan64,StablePairs
 from .slots import HashMapSlots
+from ...math.wp_distance import project_mod
 
 wp.set_module_options({'enable_backward':False,'fuse_fp':False})
 
@@ -96,7 +97,7 @@ def kernels(precision,dimension=2):
             if periodic[j]:
                 extent=qmax[j]-qmin[j];ratio=(value-qmin[j])/extent
                 valid=valid and wp.isfinite(ratio) and wp.abs(ratio)<=real(max_cells)
-                if wp.isfinite(ratio):value=qmin[j]+(value-qmin[j]-wp.floor(ratio)*extent)
+                if wp.isfinite(ratio):value=project_mod(value,qmin[j],qmax[j])
             t=(value-qmin[j])/width[0]
             valid=valid and wp.isfinite(q[i,j]) and wp.isfinite(t)
             if wp.isfinite(t):cell[j]=int(wp.clamp(wp.floor(t),real(0.0),real(cells[j]-1)))
@@ -113,7 +114,7 @@ def kernels(precision,dimension=2):
             value=q[source,j]
             if periodic[j]:
                 extent=qmax[j]-qmin[j];ratio=(value-qmin[j])/extent
-                if wp.isfinite(ratio):value=qmin[j]+(value-qmin[j]-wp.floor(ratio)*extent)
+                if wp.isfinite(ratio):value=project_mod(value,qmin[j],qmax[j])
             sorted_q[i,j]=value
         sorted_h[i]=h[source];sort_index[i]=source
         flag=wp.int64(1)

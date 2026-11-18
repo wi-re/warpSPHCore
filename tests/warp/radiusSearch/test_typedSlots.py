@@ -120,3 +120,27 @@ def test_grid_parameters_keep_the_input_precision(device,precision):
     expected=np.maximum(1,np.ceil((high-low)/h-np.asarray(1e-6,dtype=precision))).astype(np.int32)
     np.testing.assert_array_equal(s.hCell.numpy(),[h]);np.testing.assert_array_equal(s.numCellsT.numpy(),expected)
     for k,v in oracle(q,r,low=low,width=h,cells=expected).items():np.testing.assert_array_equal(getattr(grid,k).numpy(),v)
+
+
+@pytest.mark.parametrize('real', [wp.float32, wp.float64])
+def test_periodic_slots_keep_local_coordinates_and_wrap_both_edges(device, real):
+    device = wp.get_device(str(device))
+    bounds = SimpleNamespace(
+        dim=2,
+        min=wp.full(2, -0.5, dtype=real, device=device),
+        max=wp.full(2, 0.5, dtype=real, device=device),
+        periodic=wp.array([True, False], dtype=bool, device=device),
+    )
+    points = [[0.01, 0.01], [-0.625, 0.0], [0.625, 0.0], [0.5, 0.0], [-0.5, 0.0]]
+    expected = [[0.01, 0.01], [0.375, 0.0], [-0.375, 0.0], [-0.5, 0.0], [-0.5, 0.0]]
+    positions = wp.array(points, dtype=real, device=device)
+    supports = wp.full(len(points), 0.125, dtype=real, device=device)
+    slots = makeHashMapSlots(
+        len(points), bounds, wp.full(1, 0.25, dtype=real, device=device), device=device,
+    )
+    grid = slots.update_device(positions, supports)
+    slots.check()
+    sorted_positions = grid.sortedPositions.numpy()
+    np.testing.assert_array_equal(
+        sorted_positions, np.asarray(expected, dtype=sorted_positions.dtype)[grid.sortIndex.numpy()],
+    )

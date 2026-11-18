@@ -49,11 +49,11 @@ def computeCartesianDistance(
 
 
 @wp.func 
-def mod_warp(x : scalar_t, min: scalar_t, max: scalar_t):
+def _mod_warp_value(x: Any, min: Any, max: Any):
     # Preserve a local displacement verbatim. Shifting it by half a box and
     # shifting back discards low bits even when no periodic image is needed.
     h = max - min
-    half = h / scalar_t(2.0)
+    half = h / type(x)(2.0)
     result = x
     if x >= half or x < -half:
         result = wp.mod(x, h)
@@ -64,19 +64,32 @@ def mod_warp(x : scalar_t, min: scalar_t, max: scalar_t):
     return result
 
 @wp.func
-def moduloDistanceComponent(
-    x: scalar_t, y: scalar_t, periodic: bool, min: scalar_t, max: scalar_t
+def _modulo_distance_value(
+    x: Any, y: Any, periodic: bool, min: Any, max: Any
 ):
     delta = x - y
     if periodic:
         length = max - min
-        half = length / scalar_t(2.0)
+        half = length / type(x)(2.0)
         if delta >= half or delta < -half:
             # Reduce coordinates separately only for a nonlocal pair. This
             # also retains the smaller coordinate when x-y would round it away
             # after a very large image translation. The domain origin cancels.
-            delta = mod_warp(wp.mod(x, length) - wp.mod(y, length), min, max)
+            delta = _mod_warp_value(wp.mod(x, length) - wp.mod(y, length), min, max)
     return delta
+
+
+# Both the historical configured-type functions and selected-type consumers
+# share these primal expressions. Existing custom gradients keep their original
+# configured-type signatures; no additional AD scope is introduced here.
+@wp.func
+def mod_warp(x: scalar_t, min: scalar_t, max: scalar_t):
+    return _mod_warp_value(x, min, max)
+
+
+@wp.func
+def moduloDistanceComponent(x: scalar_t, y: scalar_t, periodic: bool, min: scalar_t, max: scalar_t):
+    return _modulo_distance_value(x, y, periodic, min, max)
 
 
 @wp.func_grad(mod_warp)
@@ -135,11 +148,15 @@ def computeDistance(x: wp.array(dtype = scalar_t), y: wp.array(dtype = scalar_t)
 
 
 @wp.func
-def project_mod(x : scalar_t, min: scalar_t, max: scalar_t):
-    # return torch.remainder(x - min, max - min) + min
-    # we need to implement this manually because torch.remainder does not work in warp and warp has no remainder
-    h = max - min
-    return x - h * wp.floor((x - min) / h)
+def project_mod(x: Any, min: Any, max: Any):
+    # Source-typed specialization of the existing position projection. Like
+    # periodic_positions, preserve an in-domain coordinate verbatim. Callers
+    # validate matching scalar types and a positive finite domain extent.
+    result = x
+    if x < min or x >= max:
+        h = max - min
+        result = x - h * wp.floor((x - min) / h)
+    return result
 
 
 from typing import Any
