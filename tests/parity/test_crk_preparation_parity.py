@@ -16,7 +16,7 @@ from warpSPHCore.type_config import get_torch_precision
 def primal_modules():
     modules = ['warpSPHCore.crk.crk_volume', 'warpSPHCore.crk.crk_moments',
                'warpSPHCore.crk.crk_density']
-    options = [wp.get_module_options(module=name) for name in modules]
+    options = [wp.get_module_options(module=name).copy() for name in modules]
     for name in modules: wp.set_module_options({'enable_backward': False}, module=name)
     yield
     for name, previous in zip(modules, options): wp.set_module_options(previous, module=name)

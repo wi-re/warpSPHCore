@@ -85,7 +85,8 @@ jobs:
       - name: Install CPU Torch and test dependencies
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install -e ".[native]" pytest pyyaml
+          # The native host tests run separate Warp reference subprocesses.
+          pip install -e ".[native,warp]" pytest pyyaml
       - name: Qualify the Torch adapter
         env:
           WARPSPHCORE_NATIVE_BUILD: cpu

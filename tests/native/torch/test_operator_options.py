@@ -17,17 +17,23 @@ def test_normalization_calibration_all_ops_and_covariance_counts(device):
     ratio=nodes.norm(dim=-1)/n_h
     lattice=(normalization(sph.KernelFunctions.Wendland4,2)/n_h**2*
              torch.where(ratio<=1,shape(ratio,sph.KernelFunctions.Wendland4,2),0.)).sum()
+    # Calibration uses the configured host precision even with float64 fields.
+    # Check its rounding separately from the float64 operator equations.
+    calibration_rtol = 4 * torch.finfo(sph.get_torch_precision()).eps
     for op in OPS:
         props=sph.OperationProperties(sph.KernelFunctions.Wendland4,operation=op,
-            gradientMode=sph.GradientScheme.Difference,calibrateNormalization=True,n_h=n_h)
-        actual=sph.warpOperation(q,props,domain,qf,rf,referenceParticles=r)
-        expected=dense(q,r,domain,props,qf,rf)/lattice
-        torch.testing.assert_close(actual,expected,rtol=3e-9,atol=3e-9)
-    covariance=replace(props,operation=sph.WarpOperation.Covariance)
-    value,counts=sph.warpOperation(q,covariance,domain,qf,rf,referenceParticles=r,covarianceReturnNumNeighbors=True)
-    plain,plain_counts=sph.warpOperation(q,replace(covariance,calibrateNormalization=False),domain,
+            gradientMode=sph.GradientScheme.Difference)
+        plain = sph.warpOperation(q, props, domain, qf, rf, referenceParticles=r)
+        torch.testing.assert_close(plain, dense(q, r, domain, props, qf, rf), rtol=3e-9, atol=3e-9)
+        calibrated = replace(props, calibrateNormalization=True, n_h=n_h)
+        actual = sph.warpOperation(q, calibrated, domain, qf, rf, referenceParticles=r)
+        torch.testing.assert_close(actual, plain / lattice, rtol=calibration_rtol, atol=0)
+    covariance = replace(props, operation=sph.WarpOperation.Covariance)
+    value,counts=sph.warpOperation(q,replace(covariance,calibrateNormalization=True,n_h=n_h),
+        domain,qf,rf,referenceParticles=r,covarianceReturnNumNeighbors=True)
+    plain,plain_counts=sph.warpOperation(q,covariance,domain,
         qf,rf,referenceParticles=r,covarianceReturnNumNeighbors=True)
-    torch.testing.assert_close(value,plain/lattice)
+    torch.testing.assert_close(value,plain/lattice,rtol=calibration_rtol,atol=0)
     torch.testing.assert_close(counts,plain_counts)
 
 

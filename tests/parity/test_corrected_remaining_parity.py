@@ -12,7 +12,7 @@ from _support.operators import fixture
 def primal_reference_modules():
     modules = ['warpSPHCore.coreOperations.native.wp_' + name
                for name in ('divergence', 'curl', 'laplacian', 'covariance')]
-    previous = [wp.get_module_options(module=name) for name in modules]
+    previous = [wp.get_module_options(module=name).copy() for name in modules]
     for name in modules: wp.set_module_options({'enable_backward': False}, module=name)
     yield
     for name, options in zip(modules, previous): wp.set_module_options(options, module=name)

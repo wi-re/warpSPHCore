@@ -8,6 +8,7 @@ if sph.backend != 'native':
 
 from _support.kernels import shape
 from _support.operators import normalization, OPS
+from _support.periodic import exact
 
 @pytest.mark.gpu
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
@@ -150,10 +151,10 @@ def test_periodic_halfbox_ties_and_images(device, dtype, operation):
         gradientMode=sph.GradientScheme.Naive, operationMode=sph.OperationDirection.TrueAllToToAll)
     actual = sph.warpOperation(query, properties, domain, positions.new_zeros(nq),
                                positions.new_ones(1), referenceParticles=reference, adjacency=adjacency)
-    # Keep the shifted scalar when selecting the integer wrap. It captures the
-    # existing rounding convention immediately adjacent to the half-box tie.
-    projected = positions[:, 0] - length * torch.floor(positions[:, 0] / length)
-    dx = projected - length * torch.floor((projected + half) / length)
+    # Use the exact half-box decision for the supplied coordinates. Adding
+    # half first can round the predecessor of the tie onto the tie itself.
+    dx = exact(positions.cpu(), reference.positions.cpu().expand_as(positions),
+               domain.periodic.cpu(), length[None].cpu())[:, 0].to(device)
     t = 1 - dx.abs() / qh
     if operation == sph.WarpOperation.Interpolate:
         expected = 1.25 * t.pow(3) * (1 + 3 * dx.abs() / qh) / qh

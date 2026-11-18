@@ -15,7 +15,7 @@ def primal_reference_modules():
     # This process compares primal values only. Avoid compiling Warp's large
     # reverse programs for every tensor rank; native VJPs have separate AD oracles.
     modules=[f'warpSPHCore.coreOperations.native.wp_{op.name.lower()}' for op in OPS]
-    previous=[wp.get_module_options(module=name) for name in modules]
+    previous=[wp.get_module_options(module=name).copy() for name in modules]
     for name in modules:wp.set_module_options({'enable_backward':False},module=name)
     yield
     for name,options in zip(modules,previous):wp.set_module_options(options,module=name)
