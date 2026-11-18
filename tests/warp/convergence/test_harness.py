@@ -382,6 +382,7 @@ def test_renorm_value_scalar_and_vector_broadcast():
 # particle sets: build_case_from_positions round-trip (GPU)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.gpu
 def test_build_case_from_positions_roundtrip():
     # build_case_from_positions must reproduce exactly the probe case
     # (densities, adjacency, domain) that build_case produces for the same
@@ -426,6 +427,7 @@ def test_build_case_from_positions_roundtrip():
         f"stderr:\n{proc.stderr[-2000:]}")
 
 
+@pytest.mark.gpu
 def test_build_case_from_positions_on_saved_tgv_data():
     # The saved TGV distributions (disordered, and with positions drifted
     # outside the box -- the code never re-wraps) must load through
@@ -483,17 +485,17 @@ def test_build_case_from_positions_on_saved_tgv_data():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session")
-def smoke_run():
+def smoke_run(tmp_path_factory, device):
+    out_root = tmp_path_factory.mktemp("baseline-smoke")
     env = dict(os.environ, warpSPHCore_PRECISION="float64",
                OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4",
                MKL_NUM_THREADS="4")
     proc = subprocess.run(
-        [sys.executable, str(DRIVER), "--smoke"],
+        [sys.executable, str(DRIVER), "--smoke", "--device", str(device), "--out", str(out_root)],
         env=env, cwd=str(HARNESS_DIR),
         capture_output=True, text=True, timeout=1200,
     )
-    # the driver writes its verdict next to itself (results/, git-ignored)
-    written = HARNESS_DIR / "results" / "smoke_verdict.json"
+    written = out_root / "results" / "smoke_verdict.json"
     payload = json.loads(written.read_text()) if written.exists() else {}
     return proc, payload
 
@@ -526,29 +528,30 @@ def test_smoke_verdict_ok(smoke_run):
 # ---------------------------------------------------------------------------
 
 DISORDER_DRIVER = HARNESS_DIR / "run_disorder_probe.py"
-DISORDER_VERDICT = HARNESS_DIR / "results" / "disorder_probe_verdict.json"
 
 
 @pytest.fixture(scope="session")
-def disorder_smoke_run():
+def disorder_smoke_run(tmp_path_factory):
     if not torch.cuda.is_available():
         pytest.skip("disorder probe smoke requires a CUDA device")
-    data = HARNESS_DIR / "data" / "tgv2d_noshift_nx128.npz"
-    if not data.exists():
+    data = HARNESS_DIR / "data"
+    if not all((data / name).is_file() for name in ("tgv2d_noshift_nx128.npz", "tgv2d_fullshift_nx128.npz")):
         pytest.skip("saved TGV test data not present")
+    out = tmp_path_factory.mktemp("disorder-smoke")
     env = dict(os.environ, warpSPHCore_PRECISION="float64",
                OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4",
                MKL_NUM_THREADS="4")
     proc = subprocess.run(
-        [sys.executable, str(DISORDER_DRIVER), "--smoke"],
+        [sys.executable, str(DISORDER_DRIVER), "--smoke", "--out", str(out)],
         env=env, cwd=str(HARNESS_DIR),
         capture_output=True, text=True, timeout=1200,
     )
-    payload = json.loads(DISORDER_VERDICT.read_text()) \
-        if DISORDER_VERDICT.exists() else {}
+    verdict = out / "results" / "disorder_probe_verdict.json"
+    payload = json.loads(verdict.read_text()) if verdict.is_file() else {}
     return proc, payload
 
 
+@pytest.mark.gpu
 def test_disorder_probe_smoke_exits_zero(disorder_smoke_run):
     proc, _payload = disorder_smoke_run
     assert proc.returncode == 0, (
@@ -556,6 +559,7 @@ def test_disorder_probe_smoke_exits_zero(disorder_smoke_run):
         f"stdout:\n{proc.stdout[-3000:]}\nstderr:\n{proc.stderr[-3000:]}")
 
 
+@pytest.mark.gpu
 def test_disorder_probe_smoke_verdict_ok(disorder_smoke_run):
     # The headline invariants of TGV_NOTES.md section 7.5: CRK interpolate
     # is distribution-independent (glass vs strongly disordered within 2x),
@@ -576,24 +580,25 @@ def test_disorder_probe_smoke_verdict_ok(disorder_smoke_run):
 # ---------------------------------------------------------------------------
 
 FROZEN_DRIVER = HARNESS_DIR / "run_frozen.py"
-FROZEN_VERDICT = HARNESS_DIR / "results" / "frozen_verdict_smoke.json"
 
 
 @pytest.fixture(scope="session")
-def frozen_smoke_run():
+def frozen_smoke_run(tmp_path_factory):
     if not torch.cuda.is_available():
         pytest.skip("frozen-leg smoke requires a CUDA device")
+    out = tmp_path_factory.mktemp("frozen-smoke")
     env = dict(os.environ, warpSPHCore_PRECISION="float64",
                OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4",
                MKL_NUM_THREADS="4")
-    proc = subprocess.run([sys.executable, str(FROZEN_DRIVER), "--smoke"],
+    proc = subprocess.run([sys.executable, str(FROZEN_DRIVER), "--smoke", "--out", str(out)],
                           env=env, cwd=str(HARNESS_DIR),
                           capture_output=True, text=True, timeout=900)
-    payload = (json.loads(FROZEN_VERDICT.read_text())
-               if FROZEN_VERDICT.exists() else None)
+    verdict = out / "results" / "frozen_verdict_smoke.json"
+    payload = json.loads(verdict.read_text()) if verdict.is_file() else None
     return proc, payload
 
 
+@pytest.mark.gpu
 def test_frozen_smoke_ok(frozen_smoke_run):
     proc, payload = frozen_smoke_run
     assert proc.returncode == 0, (

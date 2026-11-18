@@ -92,7 +92,7 @@ follows a fixed structure:
    grad-h the kernel reads, in which order.
 4. **JVP / HVP** — the value- and geometry-tangent formulas, and which
    combinations `warpOperationJVP` accepts for this operator.
-5. **Tests** — the files under `tests/operations/` that pin each claim,
+5. **Tests** — the files under `tests/warp/operations/` that pin each claim,
    so a reader can verify a statement by running it.
 
 Design decisions, derivations, and the history of each piece — all done and
@@ -103,11 +103,10 @@ closed, kept for the "why is this shaped this way" record — live in
 [`warpier_adjoint.md`](https://github.com/wi-re/warpSPHCore/blob/main/docs/historic_plans/warpier_adjoint.md)
 (JVP derivations, tier by tier), and
 [`warpier_fields.md`](https://github.com/wi-re/warpSPHCore/blob/main/docs/historic_plans/warpier_fields.md)
-(state objects, caching, the declared ABI). The still-open punch list is
-[`warpier_residual_open_problems_plan.md`](https://github.com/wi-re/warpSPHCore/blob/main/warpier_residual_open_problems_plan.md)
-(repo root). The higher-order study and its capability updates are in
-[`higher_order.md`](https://github.com/wi-re/warpSPHCore/blob/main/higher_order.md)
-(repo root). Warp-kernel authoring gotchas that
+(state objects, caching, the declared ABI). The higher-order study and its
+remaining comparisons are in the
+[research backlog](https://github.com/wi-re/warpSPHCore/tree/main/higherOrderSPH).
+Warp-kernel authoring gotchas that
 bit the implementations are logged in
 [`docs/lessons_learned.md`](https://github.com/wi-re/warpSPHCore/blob/main/docs/lessons_learned.md);
 Historical small measurement reports remain under `docs/regression/`; new raw

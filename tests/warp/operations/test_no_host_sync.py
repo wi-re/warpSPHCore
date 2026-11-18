@@ -67,6 +67,7 @@ requiresCuda = pytest.mark.skipif(not torch.cuda.is_available(),
                                   reason="host-readback stalls only exist on a device")
 
 
+@pytest.mark.gpu
 @requiresCuda
 def test_minimum_image_delta_does_not_read_back():
     """Was 11.5 readbacks per step -- the single largest source in a real step --
@@ -102,6 +103,7 @@ def test_minimum_image_delta_measures_through_the_nearest_image(periodic):
     assert delta.item() == pytest.approx(expected, abs=1e-6)
 
 
+@pytest.mark.gpu
 @requiresCuda
 def test_renormalization_does_not_read_back(particle_case):
     """Was 2 readbacks per step from `if torch.any(lowNbrMask):` guarding a masked

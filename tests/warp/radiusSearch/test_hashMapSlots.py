@@ -77,6 +77,7 @@ def test_fitsFlagFalseWhenASupportOutgrowsTheRadius(device):
     assert not bool(slots.fits)
 
 
+@pytest.mark.gpu
 def test_graphedReplayMatchesEagerAfterTheParticlesMove():
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")
@@ -99,6 +100,7 @@ def test_graphedReplayMatchesEagerAfterTheParticlesMove():
     assert graphed.graph is not None
 
 
+@pytest.mark.gpu
 def test_graphedBuildRecordsInlineInsideAnOuterCapture():
     """A graph cannot replay inside another capture: `GraphedBuild.replay` records the body inline instead,
     and the outer graph's replays follow the particles like the eager build does."""

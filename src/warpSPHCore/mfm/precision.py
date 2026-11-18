@@ -4,7 +4,7 @@ GIZMO's thresholds (``N_cond > 1e6`` for the face fallback, ``rtol`` 1e-12 in th
 are tuned for double precision. How far a condition number can be trusted is a statement about
 ``eps``, not about the physics: the moment matrix ``E`` is formed by sums of ``O(30)`` terms in the
 working precision, and for an anisotropy that is *not* aligned with the coordinate axes its small
-eigenvalue comes out of a cancellation. Measured (``higher_order.md`` Phase 8, strips of particles
+eigenvalue comes out of a cancellation. Measured (``dcb14a7:higher_order.md`` Phase 8, strips of particles
 squeezed along a rotated line, float32 against float64): the relative error of both ``N_cond`` and
 the matrix gradient is ``~0.4 eps N_cond`` -- 2e-4 at ``N_cond`` = 5e3, 2e-3 at 4e4, 2e-2 at 5e5, 15 %
 at 4e6 -- whereas for an axis-aligned anisotropy float32 stays accurate to ``N_cond`` = 4e6 (the

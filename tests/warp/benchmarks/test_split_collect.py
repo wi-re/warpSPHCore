@@ -66,6 +66,7 @@ def test_split_search_exact_arrays(prototype,device,dim,periodic,modeName):
         torch.testing.assert_close(reused.paddedJ,expected.paddedJ,rtol=0,atol=0)
 
 
+@pytest.mark.gpu
 def test_nondefault_stream_replay_changed_rows(prototype):
     if not torch.cuda.is_available(): pytest.skip('CUDA required')
     from warpSPHCore.autograd.stream import torchWarpCapture,torchWarpStream,currentTorchWarpStream

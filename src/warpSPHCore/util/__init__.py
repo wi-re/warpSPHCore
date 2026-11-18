@@ -11,22 +11,7 @@ if BACKEND == "native":
         'kernelFourierTransform', 'epsteinZeta', 'shellCounts', 'jacobiR2', 'WENDLAND_TAIL_COEFFICIENTS',
         'volumeToSupport', 'volumeToSupport_tensor', 'n_h_to_nH', 'nH_to_n_h']
 else:
-    from .wp_util import (
-    #     clearDummyTensorCache,
-    #     getCachedDummyTensor,
-    #     getCachedIdentityMatrices,
-    #     getCachedWarpArray,
-    #     clearWarpArrayCache,
-        generateNeighborTestData
-    )
-    # from .wp_autograd import (
-    #     WarpFunctionWrapper,
-    #     warpWrapper,
-    #     launch_kernel,
-    #     clearKernelArgsCache,
-    #     StateAwareWarpFunction
-    # )
-
+    from .wp_util import generateNeighborTestData
     from .support import volumeToSupport, volumeToSupport_tensor, n_h_to_nH, volumeToSupport_warp, computePairwiseSupport, nH_to_n_h
     from .latticeDensity import (
         latticeDensity, latticeDensityFactor,
@@ -44,15 +29,6 @@ else:
         "castTorchToWarp",
         "castWarpToTorch",
         "castTorchToWarpAsBuiltins",
-        # "clearDummyTensorCache",
-        # "getCachedDummyTensor",
-        # "getCachedIdentityMatrices",
-        # "getCachedWarpArray",
-        # "clearWarpArrayCache",
-        # "clearKernelArgsCache",
-        # "WarpFunctionWrapper",
-        # "warpWrapper",
-        # "launch_kernel",
         "volumeToSupport",
         "volumeToSupport_tensor",
         "n_h_to_nH",
@@ -74,8 +50,6 @@ else:
         "applyDensityCorrection",
         "selfTermW0",
         "densityCorrectionConstants",
-
-        # "StateAwareWarpFunction"
     ]
 
 

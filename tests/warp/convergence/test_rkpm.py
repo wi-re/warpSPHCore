@@ -242,13 +242,13 @@ def test_interface_states_exact_for_polynomials_through_order(constant):
 # harness integration smoke (subprocess, float64; warp CPU or CUDA)
 # ---------------------------------------------------------------------------
 
-def test_run_rkpm_smoke_exits_zero():
+def test_run_rkpm_smoke_exits_zero(device):
     """`run_rkpm.py --smoke`: exact degree-p reproduction for p = 1..3
     through the registered harness modes (interior + boundary band) and the
     rkpm1 == crk value identity."""
     import subprocess
     driver = REPO_ROOT / "higherOrderSPH" / "harness" / "run_rkpm.py"
-    proc = subprocess.run([sys.executable, str(driver), "--smoke"],
+    proc = subprocess.run([sys.executable, str(driver), "--smoke", "--device", str(device)],
                           capture_output=True, text=True, timeout=900)
     assert proc.returncode == 0, (
         f"smoke exited {proc.returncode}\nstdout:\n{proc.stdout[-3000:]}\n"

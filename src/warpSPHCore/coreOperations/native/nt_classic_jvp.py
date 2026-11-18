@@ -4,6 +4,27 @@ import torch
 from .._jvpFields import field_directions
 
 
+def packed_operator_jvp(ctx, _config, _topology, *tangents):
+    """Dispatch one packed operator block, including native-only directions."""
+    inputs, example = ctx.saved_tensors[:-1], ctx.saved_tensors[-1]
+    result = product(ctx.config, inputs, tangents)
+    if result is not None:
+        return result
+
+    from ...native._build import build
+    from ...native._differential import _FirstOrderTangent
+
+    directions = [t.contiguous() if slot in ctx.used and t is not None else None
+                  for slot, t in enumerate(tangents[:26])]
+    with torch.no_grad():
+        result = build().corrected_jvp(list(inputs[:26]), directions, example, *ctx.config[:8])
+    dependencies = [value for value in (*inputs, *tangents)
+                    if value is not None and value.requires_grad]
+    if torch.is_grad_enabled() and dependencies:
+        result = _FirstOrderTangent.apply(result, *dependencies)
+    return result
+
+
 def product(config,inputs,tangents):
     operation=config[0];width=17 if operation==6 else 26
     flat=list(inputs[:width]);directions=list(tangents[:width])

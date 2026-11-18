@@ -294,6 +294,7 @@ def test_mutating_frozen_kinds_before_backward_is_detected(device, role):
         result.sum().backward()
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA stream/capture')
 def test_kind_masks_follow_current_stream_and_captured_updates():
     q, r, domain, adjacency = cloud(torch.device('cuda'))

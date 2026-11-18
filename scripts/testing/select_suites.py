@@ -11,11 +11,11 @@ KEYS = ('python', 'warp', 'native', 'torch', 'torch_full', 'packaging', 'parity'
 def select(paths):
     selected = set()
     for path in paths:
-        if path.startswith(('docs/', 'higherOrderSPH/')) or path.endswith('.md'):
+        if path.startswith('docs/') or path.endswith('.md'):
             continue
         if path in ('pyproject.toml', 'CMakeLists.txt') or path.startswith(('.github/', 'cmake/', 'scripts/testing/', 'tests/conftest.py')):
             selected.update(KEYS)
-        elif path.startswith(('tests/python/', 'tests/verify/')):
+        elif path == 'scripts/check_repository_layout.py' or path.startswith(('tests/python/', 'tests/verify/')):
             selected.add('python')
         elif path.startswith('tests/warp/'):
             selected.add('warp')
@@ -26,9 +26,13 @@ def select(paths):
         elif path.startswith('tests/native/torch/'):
             selected.update(('torch', 'torch_full'))
         elif path.startswith('tests/_support/'):
-            selected.update(('native', 'torch', 'torch_full', 'parity'))
+            selected.update(('python', 'warp', 'native', 'torch', 'torch_full', 'parity'))
+        elif path.startswith('higherOrderSPH/harness/'):
+            selected.add('warp')
         elif path.startswith('scripts/packaging/'):
             selected.update(('python', 'packaging'))
+        elif path.startswith('scripts/examples/'):
+            selected.update(('warp', 'packaging'))
         elif path.startswith('scripts/'):
             selected.add('warp')
         elif path.startswith('src/'):
@@ -38,7 +42,7 @@ def select(paths):
             elif '/native/csrc/runtime/' in path:
                 selected.add('native')
             elif '/native/' in path and path.endswith(('.h', '.cuh', '.cpp', '.cu')):
-                selected.update(('native', 'torch'))
+                selected.update(('native', 'torch', 'packaging'))
                 if any(part in path for part in ('/kernels/', '/csrc_', '/math/',
                                                   '/execution/compactTraversal.h', '/dataTypes/compactHash.h')):
                     selected.add('parity')
@@ -46,6 +50,8 @@ def select(paths):
                 selected.update(('python', 'torch', 'torch_full'))
                 if Path(path).name.startswith(('_build', '_loader', '_sources', 'sources.json')):
                     selected.add('packaging')
+                if Path(path).name == 'sources.json':
+                    selected.add('parity')
             elif any(f'/{part}/' in path for part in ('math', 'kernels', 'radiusSearch', 'linalg', 'crk', 'renorm')):
                 # Shared search, algebra and solver controllers serve both
                 # backends; backend-owned wp_/native files were handled above.
@@ -67,8 +73,11 @@ def main():
         if not base or set(base) == {'0'}:
             result = dict.fromkeys(KEYS, True)
         else:
-            paths = subprocess.check_output(['git', 'diff', '--name-only', base, 'HEAD'], text=True).splitlines()
-            result = select(paths)
+            # A move can remove a file from one owner and add it to another.
+            paths = subprocess.check_output([
+                'git', 'diff', '--name-only', '--no-renames', '-z', base, 'HEAD', '--',
+            ])
+            result = select(os.fsdecode(path) for path in paths.split(b'\0') if path)
     else:
         result = select(paths)
     for key, enabled in result.items():

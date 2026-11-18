@@ -49,8 +49,9 @@ failed controls alongside passing runs; do not overwrite prior evidence.
 
 `AGENTS.md` applies this rule to agent work. `.gitignore` discourages local run
 directories, and `python scripts/check_repository_layout.py` checks the Git index
-in CI without loading Torch/Warp. The guard rejects tracked experiment/run paths
-and simulation/profiler files, with explicit exceptions for maintained fixtures.
+in CI without loading Torch/Warp. The guard checks notebook contents in the
+index and rejects tracked experiment paths, generated builds, logs and
+simulation/profiler files. Maintained fixtures have explicit exceptions.
 It is a layout check, not a substitute for reviewing whether a new script has a
 maintained consumer. Tests, builds and public examples need no research checkout.
 

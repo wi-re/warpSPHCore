@@ -58,5 +58,15 @@ def test_shared_device_scan_reaches_both_native_consumers():
 
 def test_shared_grid_math_runs_native_search_parity():
     result = selection.select(['src/warpSPHCore/native/csrc/math/grid.h'])
-    assert result['native'] and result['torch'] and result['parity']
+    assert result['native'] and result['torch'] and result['parity'] and result['packaging']
     assert not result['warp']
+
+
+@pytest.mark.parametrize(('path', 'owners'), [
+    ('higherOrderSPH/harness/operators.py', {'warp'}),
+    ('tests/_support/periodic.py', {'python', 'warp', 'parity'}),
+    ('scripts/examples/native_core.py', {'packaging'}),
+    ('src/warpSPHCore/crk/native/sources.json', {'packaging', 'torch', 'parity'}),
+])
+def test_indirect_test_inputs_reach_their_consumers(path, owners):
+    assert owners <= {owner for owner, enabled in selection.select([path]).items() if enabled}

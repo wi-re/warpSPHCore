@@ -14,6 +14,7 @@ def test_capture_requires_cuda():
         CGWorkspace(torch.ones(4), 8, capture=True)
 
 
+@pytest.mark.gpu
 @requiresCuda
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
 @pytest.mark.parametrize('history', [True, False])
@@ -49,6 +50,7 @@ def test_changed_contents_replay_and_owned_results(dtype, history, preconditione
     assert ws.captureBuilds == builds
 
 
+@pytest.mark.gpu
 @requiresCuda
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
 def test_breakdown_threshold_zero_rhs_and_nonfinite_after_capture(dtype):
@@ -75,6 +77,7 @@ def test_breakdown_threshold_zero_rhs_and_nonfinite_after_capture(dtype):
     torch.testing.assert_close(result.x, b)
 
 
+@pytest.mark.gpu
 @requiresCuda
 def test_strict_budget_tail_callback_replacement_and_clear():
     b = torch.ones(32, device='cuda', dtype=torch.float64)
@@ -107,6 +110,7 @@ def test_strict_budget_tail_callback_replacement_and_clear():
     torch.testing.assert_close(result.x, b / 4)
 
 
+@pytest.mark.gpu
 @requiresCuda
 def test_supplied_output_restarts_history_and_nondefault_stream(monkeypatch):
     b = torch.ones(4, device='cuda')
@@ -133,6 +137,7 @@ def test_supplied_output_restarts_history_and_nondefault_stream(monkeypatch):
     torch.testing.assert_close(result.x, saved, rtol=0, atol=0)
 
 
+@pytest.mark.gpu
 @requiresCuda
 def test_nested_stream_scopes_preserve_conditional_capture():
     # A temporary wrapper of an already-selected external stream used to
@@ -152,6 +157,7 @@ def test_nested_stream_scopes_preserve_conditional_capture():
     side.synchronize()
 
 
+@pytest.mark.gpu
 @requiresCuda
 def test_initial_only_paths_do_not_build_graphs():
     b = torch.ones(2, device='cuda')
@@ -172,6 +178,7 @@ def test_initial_only_paths_do_not_build_graphs():
     assert ws.captureBuilds == 0
 
 
+@pytest.mark.gpu
 @requiresCuda
 @pytest.mark.filterwarnings('ignore:The CUDA Graph is empty:UserWarning')
 def test_setup_avoids_global_sync_and_restores_gc_after_capture_error(monkeypatch):
@@ -199,6 +206,7 @@ def test_setup_avoids_global_sync_and_restores_gc_after_capture_error(monkeypatc
     torch.testing.assert_close(result.x, b / 2)
 
 
+@pytest.mark.gpu
 @requiresCuda
 def test_native_small_matrix_preconditioner_composes_with_capture():
     from warpSPHCore.linalg import applyPinv

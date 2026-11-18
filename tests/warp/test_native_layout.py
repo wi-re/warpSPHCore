@@ -5,9 +5,10 @@ import warpSPHCore as sph
 def test_common_wrapper_owns_high_level_warp_dispatch():
     if sph.backend != 'warp': pytest.skip('Warp process only')
     from warpSPHCore.coreOperations.native import computeDensity, computeGradient
-    from warpSPHCore import coreOperations, operations
-    assert operations._computeSPHDensity_stateBackend is computeDensity
-    assert operations._computeSPHGradient_stateBackend is computeGradient
+    from warpSPHCore import coreOperations, operations, wp_operations
+    assert operations.warpOperation is wp_operations.warpOperation
+    assert wp_operations._computeSPHDensity_stateBackend is computeDensity
+    assert wp_operations._computeSPHGradient_stateBackend is computeGradient
     assert coreOperations._computeSPHDensity_stateBackend is computeDensity
 
 

@@ -1,7 +1,7 @@
 # Design note — D&A 2012 eq. 18/19 density self-term correction ("renorm ε")
 
 > **BUILT — closeout item 7 (2026-09-19); item 4 scoped it.** Originally
-> written to answer the six questions in `closeout_plan.md` item 4; the
+> written to answer the six questions in item 4 of the closeout plan at Core revision `dcb14a7`; the
 > build then followed this note (warpSPHCore `bf14e56` + warpSPH
 > `3de37e7`). Where the build deviated from the scope, the section says
 > so. `REPORT.md` (item 6) carries a summary + recommendation; this file

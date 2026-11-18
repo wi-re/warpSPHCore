@@ -24,7 +24,7 @@ The SPH operators should only operate on semantic state objects and should not n
 
 This section captures current implementation status relative to the target architecture. Last verified against the repo on 2026-08-07.
 
-Detailed bug-fix narratives that used to live in this section (AD-bridge reentrancy, grid-path float64/1D bugs, curl's compile failure, renormalization instabilities, the gradcheck rollout, CI wiring) have been distilled into forward-looking rules in [`docs/lessons_learned.md`](docs/lessons_learned.md) and trimmed out of here to keep this plan focused and short. Read that file before touching kernel code, the AD bridge, or CI/test tooling again — it captures the *why*, not just the *what*. Git history (commits around 2026-08-05 to 2026-08-06) has the original investigation narrative if ever needed.
+Detailed bug-fix narratives that used to live in this section (AD-bridge reentrancy, grid-path float64/1D bugs, curl's compile failure, renormalization instabilities, the gradcheck rollout, CI wiring) have been distilled into forward-looking rules in [`docs/lessons_learned.md`](../lessons_learned.md) and trimmed out of here to keep this plan focused and short. Read that file before touching kernel code, the AD bridge, or CI/test tooling again — it captures the *why*, not just the *what*. Git history (commits around 2026-08-05 to 2026-08-06) has the original investigation narrative if ever needed.
 
 ## Module Layout After the Repository Restructuring (2026-08-06)
 
@@ -349,7 +349,7 @@ The big remaining piece, in priority order — no re-investigation needed, this 
    `StateAwareWarpFunction` delegating to those same flat-tensor functions
    (`warpier_unified_operator_wrapper_plan.md`, done 2026-08-24). `Field.tangent` was never written to
    by any of this and has been removed as dead code (`dataTypes/field_t.py`) — see
-   `warpier_residual_open_problems_plan.md`'s "Context" section for the full account.
+   the "Context" section of `dcb14a7:warpier_residual_open_problems_plan.md` for the full account.
 
 Smaller open items, independent of the above, each already root-caused (no re-investigation needed, just implementation):
 

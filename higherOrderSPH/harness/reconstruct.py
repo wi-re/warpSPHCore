@@ -40,7 +40,7 @@ used regardless.
 
 Pure torch, scalar fields, uniform particle volume (the harness lattices);
 2-D and 1-D. The Riemann coupling is NOT here -- these are reconstruction
-states only (see `higher_order.md`, Phase 6).
+states only (see `dcb14a7:higher_order.md`, Phase 6).
 """
 
 from __future__ import annotations

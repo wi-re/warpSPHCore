@@ -29,7 +29,7 @@ H_i/h = 1/(2 sqrt(sigma2/H2)) from the shape's normalised moments
 for the non-normalised special-purpose kernels). NOTE: the code ships
 kernelScale = 1.0 for all five (h_code = H), which does NOT follow
 that convention (e.g. poly6's shape gives H/h = 1.6583) -- recorded
-in the PLAN.md findings log, not changed here (src/ decisions are
+in REPORT.md, not changed here (src/ decisions are
 Phase 8).
 
 The viscosity kernel is singular at the origin (f ~ 0.5/q); the FT and

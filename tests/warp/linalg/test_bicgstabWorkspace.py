@@ -183,6 +183,7 @@ def test_ill_conditioned_success_is_independently_verified(device, capture, seed
     assert result.x.isfinite().all() and result.loopIterations <= 160
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(),reason='requires CUDA')
 def test_capture_invalidation_contents_streams_and_failure_recovery(monkeypatch):
     import gc

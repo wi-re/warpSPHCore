@@ -282,6 +282,7 @@ def test_reduced_action_vector_reverse_and_forward_ad(device, dtype):
         close(result.tangent, A[free[:, None], free] @ tangent)
 
 
+@pytest.mark.gpu
 def test_cuda_device_validation_and_current_stream():
     if not torch.cuda.is_available():
         pytest.skip('CUDA unavailable')
@@ -301,6 +302,7 @@ def test_cuda_device_validation_and_current_stream():
     assert result.statusInt() >= 0 and residual < 1e-10
 
 
+@pytest.mark.gpu
 def test_cuda_reduced_application_replays_changed_vectors():
     if not torch.cuda.is_available():
         pytest.skip('CUDA unavailable')

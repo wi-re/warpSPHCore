@@ -30,10 +30,11 @@ def test_import_time_integer_widths_are_independent(monkeypatch,index,offset,pre
 
 
 def test_python_preconfiguration_takes_precedence(monkeypatch):
-    for setting,value in [('INDEX_DTYPE','int32'),('OFFSET_DTYPE','int32'),('PRECISION','float32')]:
-        monkeypatch.setenv('warpSPHCore_'+setting,value)
+    for setting in ('INDEX_DTYPE', 'OFFSET_DTYPE', 'PRECISION', 'DIM'):
+        monkeypatch.setenv('warpSPHCore_' + setting, 'invalid')
     config=types.ModuleType('warpSPHCore_config')
     config.index_dtype='int64';config.offset_dtype='int64';config.precision='double'
+    config.dim=3
     monkeypatch.setitem(sys.modules,'warpSPHCore_config',config)
     name='_python_index_config_probe'
     spec=importlib.util.spec_from_file_location(name,SOURCE)
@@ -42,11 +43,13 @@ def test_python_preconfiguration_takes_precedence(monkeypatch):
     spec.loader.exec_module(module)
     assert module.index_t==module.offset_t==wp.int64
     assert module.scalar_t==wp.float64
+    assert module.dim_t==3
 
 
 @pytest.mark.parametrize('setting',['INDEX_DTYPE','OFFSET_DTYPE'])
-def test_invalid_integer_width_is_rejected_at_import(monkeypatch,setting):
-    monkeypatch.setenv('warpSPHCore_'+setting,'uint32')
+@pytest.mark.parametrize('invalid',['float32','uint32','int16','banana'])
+def test_invalid_integer_width_is_rejected_at_import(monkeypatch,setting,invalid):
+    monkeypatch.setenv('warpSPHCore_'+setting,invalid)
     spec=importlib.util.spec_from_file_location('_invalid_index_config_probe',SOURCE)
     module=importlib.util.module_from_spec(spec)
     with pytest.raises(ValueError,match=setting):spec.loader.exec_module(module)

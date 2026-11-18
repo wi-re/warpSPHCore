@@ -168,10 +168,9 @@ Verified output (warp 1.17.0):
   by name (see `kernels/kernelFunctions/B7.py` knot constants) or
   full-precision literals. Inexact literals such as `wp.float64(0.6)`
   are fine (0.6's double passes through exactly).
-- Remaining unfixed instance of the same class:
-  `src/warpSPHCore/util/support.py:86` (`wp.pow(... , scalar_t(1.0/3.0))`
-  and `scalar_t(np.pi * 3.0 /4.0)`) — tracked in the D&A 2012 replication
-  findings log (`higherOrderSPH/.../PLAN.md`), Phase 8 decision.
+- `volumeToSupport_warp` defines the cube-root exponent and sphere-volume
+  coefficient before tracing. The 3D coefficient is `4π/3`, verified against
+  the unit-ball volume in `tests/warp/kernels/test_support.py`.
 - Related earlier instance (fixed 2026-09-18): `sphKernelN_H` in
   `kernels/properties.py` would not even compile under float64 for the
   same reason (bare `np.pi` constant binops + `pow(float64, int32)`).

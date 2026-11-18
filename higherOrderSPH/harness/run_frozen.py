@@ -18,7 +18,7 @@ high-order operator (Phase 4 MLS, Phase 5 LABFM) can have spectrum with a
 positive real part, which a static patch test never sees and which blows up
 here (the hyperviscosity question of `king_lind_2020_labfm`). The Pass-2 PDE
 suite cannot answer this: its orders are capped at ~2 by floors unrelated to
-the operator (`higher_order.md`, Verification pass finding 6).
+the operator (`dcb14a7:higher_order.md`, Verification pass finding 6).
 
 Time integration is classical RK4 at ``dt = cfl * dx / |a|`` (advection) or
 ``dt = cfl * dx^2 / nu`` (diffusion), clipped to land exactly on `t_end`.
@@ -55,9 +55,6 @@ import torch
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
-
-RESULTS = HERE / "results"
-REPORT = HERE / "REPORT_frozen.md"
 
 BLOWUP = 1e3             # |u| growth factor that counts as a divergence
 DEFAULT_LADDER = (576, 1152, 2304, 4608, 9216)
@@ -237,6 +234,7 @@ def main(argv=None):
     p.add_argument("--cfl", type=float, default=0.2)
     p.add_argument("--cfl-diffusion", type=float, default=0.1)
     p.add_argument("--device", default="cuda:0")
+    p.add_argument("--out", type=Path, default=HERE)
     p.add_argument("--smoke", action="store_true",
                    help="tiny CI run: 2-point ladder, t_end 0.05, writes "
                         "*_smoke artifacts")
@@ -255,20 +253,21 @@ def main(argv=None):
                       f"err_l2={r.error_l2:.3e} diverged={r.diverged} "
                       f"wall={r.wall_s}s", flush=True)
 
-    RESULTS.mkdir(parents=True, exist_ok=True)
+    results = args.out / "results"
+    results.mkdir(parents=True, exist_ok=True)
     suffix = "_smoke" if args.smoke else ""
     import csv
-    with (RESULTS / f"frozen_rows{suffix}.csv").open("w") as fh:
+    with (results / f"frozen_rows{suffix}.csv").open("w") as fh:
         w = csv.DictWriter(fh, fieldnames=list(asdict(rows[0])))
         w.writeheader()
         for r in rows:
             w.writerow(asdict(r))
-    report = HERE / f"REPORT_frozen{suffix}.md"
+    report = args.out / f"REPORT_frozen{suffix}.md"
     report.write_text(render(rows, args))
     verdict = {"ok": all(math.isfinite(r.error_l2) or r.diverged for r in rows),
                "n_rows": len(rows),
                "diverged": [f"{r.equation}/{r.mode}/{r.N}" for r in rows if r.diverged]}
-    (RESULTS / f"frozen_verdict{suffix}.json").write_text(json.dumps(verdict, indent=2))
+    (results / f"frozen_verdict{suffix}.json").write_text(json.dumps(verdict, indent=2))
     print(f"wrote {report}")
     return 0
 

@@ -1,4 +1,4 @@
-"""Capacity-padded adjacency (ADJACENCY_CAPACITY_PLAN.md): the flat pair arrays are `paddedI` / `paddedJ`,
+"""Capacity-padded adjacency: the flat pair arrays are `paddedI` / `paddedJ`,
 longer than the real edge count, with -1 in both beyond `numEdges`; the CSR view never touches the padding and
 `livePairs()` is the exact unpadded list."""
 
@@ -135,6 +135,7 @@ def test_inPlaceRebuildWritesTheReferenceSnapshotInPlaceToo(device):
     assert torch.allclose(second.querySupports, moved.supports * 1.4)
 
 
+@pytest.mark.gpu
 def test_capturedValidityFollowsAnInPlaceRebuild():
     if not torch.cuda.is_available():
         pytest.skip("CUDA not available")

@@ -1,7 +1,7 @@
 # Baseline findings (first pass 2026-09-22; Phase 3 `renormVal` 2026-09-23; CRK gradient fix 2026-09-26)
 
 Curated interpretation of [`REPORT.md`](REPORT.md) — the frozen "before"
-column for the higher-order phases (parent plan `../../higher_order.md`).
+column for the higher-order phases (parent plan `dcb14a7:higher_order.md`).
 Wendland2, float64, jitter 0.3, default target neighbors 40
 (h/Δx ≈ 3.57 in 2D at N = 1152). Re-run the driver to regenerate the
 tables; update this file when the baseline changes (a harness change is a

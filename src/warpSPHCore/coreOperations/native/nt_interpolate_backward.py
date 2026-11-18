@@ -10,6 +10,7 @@ from torch.autograd import forward_ad
 from torch.autograd.function import once_differentiable
 from ..._models import AdjacencyList
 from ...native._topology import CSRTopology
+from .nt_classic_jvp import packed_operator_jvp
 
 
 def used_slots(flat):
@@ -100,25 +101,7 @@ class _Interpolate(torch.autograd.Function):
             result.append(gradient)
         return (None, None, *result)
 
-    @staticmethod
-    def jvp(ctx, _config, _topology, *tangents):
-        from .nt_classic_jvp import product as classic_product
-        inputs=ctx.saved_tensors[:-1]
-        result=classic_product(ctx.config,inputs,tangents)
-        if result is not None:
-            return result
-        from ...native._build import build
-        from ...native._differential import _FirstOrderTangent
-        inputs, example = ctx.saved_tensors[:-1], ctx.saved_tensors[-1]
-        directions = [t.contiguous() if slot in ctx.used and t is not None else None
-                      for slot, t in enumerate(tangents[:26])]
-        with torch.no_grad():
-            result = build().corrected_jvp(list(inputs[:26]), directions, example, *ctx.config[:8])
-        dependencies = [value for value in (*inputs, *tangents)
-                        if value is not None and value.requires_grad]
-        if torch.is_grad_enabled() and dependencies:
-            result = _FirstOrderTangent.apply(result, *dependencies)
-        return result
+    jvp = staticmethod(packed_operator_jvp)
 
 
 def apply(inputs, properties, corrections=None, query_mass=None, ignored=(), topology=None):

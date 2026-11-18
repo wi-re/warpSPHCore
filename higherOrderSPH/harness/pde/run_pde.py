@@ -50,10 +50,6 @@ from metrics import error_norms                      # noqa: E402
 from report_pde import (merge_rows, observed_orders,  # noqa: E402
                         render_report)
 
-RESULTS = HERE / "results"
-REPORT = HERE / "REPORT_pde.md"
-
-
 def build_spec(case, entry, nx: int, device: str) -> CaseSpec:
     spec = CaseSpec(caseName=entry.name, scheme=entry.scheme or case.scheme,
                     params={**dict(case.params), **entry.params})
@@ -221,6 +217,7 @@ def main(argv=None):
     p.add_argument("--cases", nargs="+", default=list(CASES),
                    choices=list(CASES))
     p.add_argument("--device", default="cuda:0")
+    p.add_argument("--out", type=Path, default=HERE)
     p.add_argument("--smoke", action="store_true",
                    help="run only the lowest resolution of each case (CI gate)")
     args = p.parse_args(argv)
@@ -253,14 +250,15 @@ def main(argv=None):
 
     # Smoke runs (the CI gate) write their own artifacts so they never
     # clobber the full-suite results file.
-    report = HERE / ("REPORT_pde_smoke.md" if args.smoke else "REPORT_pde.md")
+    results = args.out / "results"
+    report = args.out / ("REPORT_pde_smoke.md" if args.smoke else "REPORT_pde.md")
     csv_name = "pde_rows_smoke.csv" if args.smoke else "pde_rows.csv"
     if not args.smoke:
-        all_rows = merge_rows(RESULTS / csv_name, all_rows, args.cases,
+        all_rows = merge_rows(results / csv_name, all_rows, args.cases,
                               order=list(CASES))
     orders = observed_orders(all_rows)
+    results.mkdir(parents=True, exist_ok=True)
     report.write_text(render_report(all_rows, orders))
-    RESULTS.mkdir(parents=True, exist_ok=True)
     # For the PDE suite we write a plain flat CSV of the row dicts
     # (self-describing). The union of keys is used because analytic and
     # reference rows carry different optional columns.
@@ -270,14 +268,14 @@ def main(argv=None):
             for k in r:
                 if k not in cols:
                     cols.append(k)
-        with (RESULTS / csv_name).open("w") as fh:
+        with (results / csv_name).open("w") as fh:
             import csv as _csv
             w = _csv.DictWriter(fh, fieldnames=cols)
             w.writeheader()
             for r in all_rows:
                 w.writerow({k: (f"{v:.10g}" if isinstance(v, float) else v)
                             for k, v in r.items()})
-    print(f"wrote {report} and {RESULTS / csv_name}")
+    print(f"wrote {report} and {results / csv_name}")
     return 0
 
 

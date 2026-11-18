@@ -15,7 +15,7 @@ states at all pair midpoints (`reconstruct.py`) and measure
   superposed on the step, over pairs >= 2 spacings from the jump, next to the
   same error without the step (how far the discontinuity's influence reaches:
   a dissipation proxy; the true head-to-head dissipation comparison needs the
-  Riemann-SPH solver, see higher_order.md Phase 6).
+  Riemann-SPH solver, see dcb14a7:higher_order.md Phase 6).
 
 Plain MLS (`mlsP`) is the unlimited reference. Matched formal order: TENO O4
 (central degree 3) vs WENO M=3 vs mls3; TENO O5/O6 vs WENO M=4/5.

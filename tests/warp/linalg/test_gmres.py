@@ -276,6 +276,7 @@ def test_operator_out_callback_contract():
         plain.applyAdjoint(b)
 
 
+@pytest.mark.gpu
 def test_cuda_current_stream():
     if not torch.cuda.is_available():
         pytest.skip('CUDA not available')

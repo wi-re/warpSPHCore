@@ -37,7 +37,7 @@ def _resolve_precision(value: str | None):
     if value is None:
         return wp.float32
 
-    key = value.strip().lower()
+    key = str(value).strip().lower()
     if key == "":
         return wp.float32
 
@@ -90,19 +90,12 @@ def _resolve_integer_type(value: str | None, setting: str):
     return wp.int32 if key == 'int32' else wp.int64
 
 
-scalar_t: type = _resolve_precision(os.getenv("warpSPHCore_PRECISION"))
-scalar: type = scalar_t
-
-dim_t: int | Any = _resolve_dim(os.getenv("warpSPHCore_DIM"))
-index_t: type = _resolve_integer_type(os.getenv('warpSPHCore_INDEX_DTYPE'), 'warpSPHCore_INDEX_DTYPE')
-offset_t: type = _resolve_integer_type(os.getenv('warpSPHCore_OFFSET_DTYPE'), 'warpSPHCore_OFFSET_DTYPE')
-neighbor_count_t: type = wp.int32
-
-
 def _load_pythonic_preconfig():
     try:
         cfg = importlib.import_module("warpSPHCore_config")
-    except ModuleNotFoundError:
+    except ModuleNotFoundError as error:
+        if error.name != "warpSPHCore_config":
+            raise
         return None, None, None, None
 
     precision = getattr(cfg, "precision", None)
@@ -112,17 +105,16 @@ def _load_pythonic_preconfig():
 
 _pre_precision, _pre_dim, _pre_index, _pre_offset = _load_pythonic_preconfig()
 
-if _pre_precision is not None:
-    scalar_t = _resolve_precision(str(_pre_precision))
-    scalar = scalar_t
-
-if _pre_dim is not None:
-    dim_t = _resolve_dim(_pre_dim)
-
-if _pre_index is not None:
-    index_t = _resolve_integer_type(_pre_index, 'index_dtype')
-if _pre_offset is not None:
-    offset_t = _resolve_integer_type(_pre_offset, 'offset_dtype')
+scalar_t: type = _resolve_precision(
+    _pre_precision if _pre_precision is not None else os.getenv("warpSPHCore_PRECISION"))
+dim_t: int | Any = _resolve_dim(_pre_dim if _pre_dim is not None else os.getenv("warpSPHCore_DIM"))
+index_t: type = _resolve_integer_type(
+    _pre_index if _pre_index is not None else os.getenv('warpSPHCore_INDEX_DTYPE'),
+    'index_dtype' if _pre_index is not None else 'warpSPHCore_INDEX_DTYPE')
+offset_t: type = _resolve_integer_type(
+    _pre_offset if _pre_offset is not None else os.getenv('warpSPHCore_OFFSET_DTYPE'),
+    'offset_dtype' if _pre_offset is not None else 'warpSPHCore_OFFSET_DTYPE')
+neighbor_count_t: type = wp.int32
 
 
 def get_type_config() -> dict[str, object]:

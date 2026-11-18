@@ -4,10 +4,10 @@
 import argparse
 import os
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
 import zipfile
+
+from _wheel_check import run_wheel_python
 
 
 def main():
@@ -22,14 +22,11 @@ def main():
             archive.extractall(directory)
         code = '''
 import importlib.metadata
-from pathlib import Path
-import sys
-sys.path.insert(0, sys.argv[1])
 import torch
 import warpSPHCore as core
+assert_from_wheel(core)
 from warpSPHCore.linalg import (BiCGStabWorkspace, CGWorkspace, LinearOperator, DiagonalPreconditioner,
                                 BlockJacobiPreconditioner, RestrictedSystem, NullspaceSystem, bicgstab, cg, gmres, minres, richardson)
-assert Path(core.__file__).resolve().is_relative_to(Path(sys.argv[1]))
 assert core.__version__ == importlib.metadata.version('warpSPHCore')
 b = torch.ones(3)
 result = cg(lambda v: 2 * v, b, rtol=0, atol=0)
@@ -141,22 +138,18 @@ if torch.cuda.is_available():
         core.setNeighborLanes(None)
 print('Isolated wheel import/solvers/reconstruction/MFM and available CUDA tiled checks passed:', core.__version__)
 '''
-        subprocess.run([sys.executable, '-I', '-c', code, directory], cwd=directory, check=True)
-        # -I ignores PYTHONPATH and editable-checkout entries. Only the unpacked
-        # wheel is prepended; example files themselves remain external clients.
+        env = dict(os.environ, WARPSPHCORE_BACKEND='warp', WARPSPHCORE_OPERATORS='warp')
+        run_wheel_python(directory, code, env=env)
         example_code = '''
-from pathlib import Path
 import runpy
 import sys
-sys.path.insert(0, sys.argv[1])
 import warpSPHCore as core
-assert Path(core.__file__).resolve().is_relative_to(Path(sys.argv[1]))
+assert_from_wheel(core)
 runpy.run_path(sys.argv[2])['run'](sys.argv[3], sys.argv[4])
 '''
         for precision in ('float32', 'float64'):
-            env = dict(os.environ, warpSPHCore_PRECISION=precision)
-            subprocess.run([sys.executable, '-I', '-c', example_code, directory,
-                            str(examples), args.device, precision], cwd=directory, env=env, check=True)
+            run_wheel_python(directory, example_code, str(examples), args.device, precision,
+                             env=dict(env, warpSPHCore_PRECISION=precision))
 
 
 if __name__ == '__main__':

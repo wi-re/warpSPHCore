@@ -83,10 +83,7 @@ def getCachedWarpArray(t: torch.Tensor, use_cache: bool = False) -> "wp.array":
 
 
 def clearWarpArrayCache() -> None:
-    """No-op: the wp.array identity cache has been removed.
-
-    Kept for backward compatibility with existing call sites.
-    """
+    """Deprecated compatibility no-op for the removed global Warp array cache."""
     pass
 
 def getCachedDummyTensor(
@@ -149,8 +146,5 @@ def getCachedIdentityMatrices(
 
 
 def clearKernelArgsCache() -> None:
-    """No-op: the kernel-args/wrapper-args caches have been removed.
-
-    Kept for backward compatibility with existing call sites.
-    """
+    """Deprecated compatibility no-op for the removed kernel-argument cache."""
     pass

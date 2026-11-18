@@ -3,10 +3,10 @@ import argparse
 import json
 import os
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
 import zipfile
+
+from _wheel_check import run_wheel_python
 
 
 def main():
@@ -38,8 +38,8 @@ import os
 from pathlib import Path
 import runpy
 import sys
-sys.path.insert(0, sys.argv[1])
 os.environ['WARPSPHCORE_BACKEND'] = 'native'
+os.environ['WARPSPHCORE_OPERATORS'] = 'native'
 os.environ['WARPSPHCORE_NATIVE_LOAD'] = 'prebuilt'
 os.environ['WARPSPHCORE_NATIVE_BUILD'] = 'auto'
 class NoCompilerOrWarp(importlib.abc.MetaPathFinder):
@@ -48,7 +48,7 @@ class NoCompilerOrWarp(importlib.abc.MetaPathFinder):
             raise ImportError('Compiler/Warp import forbidden in prebuilt-wheel check: ' + fullname)
 sys.meta_path.insert(0, NoCompilerOrWarp())
 import warpSPHCore as sph
-assert Path(sph.__file__).is_relative_to(sys.argv[1])
+assert_from_wheel(sph)
 metadata = json.loads((Path(sph.__file__).parent / 'native/_lib/build.json').read_text())
 assert metadata['stable_abi'] == '2.10'
 os.environ['WARPSPHCORE_NATIVE_BUILD'] = 'cpu' if metadata['backend'] == 'cpu' else 'gpu'
@@ -67,9 +67,9 @@ if tests:
     raise SystemExit(pytest.main([str(Path(tests) / 'native/torch'), '--suite', 'torch',
                                  '--device', device, '-k', 'not imports_with_warp_blocked', '-q', '-x']))
 '''
-        subprocess.run([sys.executable, '-c', code, directory, str(example), args.device,
-                        str(Path(__file__).resolve().parents[2] / 'tests') if args.tests else ''],
-                       cwd=directory, env=env, check=True)
+        tests = Path(__file__).resolve().parents[2] / 'tests'
+        run_wheel_python(directory, code, str(example), args.device,
+                         str(tests) if args.tests else '', env=env)
 
 
 if __name__ == '__main__':

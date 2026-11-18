@@ -149,6 +149,7 @@ def test_empty_density_dual_and_position_hvp(device, sizes, dim):
     assert hvp.shape == q.positions.shape and torch.count_nonzero(hvp) == 0
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA capture/replay')
 @pytest.mark.parametrize('sizes', [(0, 5), (3, 0), (0, 0)])
 @pytest.mark.parametrize('traversal', ['csr', 'grid'])

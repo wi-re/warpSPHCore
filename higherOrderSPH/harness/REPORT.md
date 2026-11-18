@@ -2,7 +2,7 @@
 
 Generated 2026-10-09 10:59 by `run_baseline.py` (float64, kernels: Wendland2, jitter 0.3, default target neighbors 40, patch N target 1152).
 
-Frozen reference for the higher-order phases (parent plan `../../higher_order.md`): later phases diff against these numbers and do not re-baseline silently. A harness change is a versioning event that re-runs every phase.
+Frozen reference for the higher-order phases (parent plan `dcb14a7:higher_order.md`): later phases diff against these numbers and do not re-baseline silently. A harness change is a versioning event that re-runs every phase.
 
 ## 1. Monomial patch tests -- open domain, interior
 

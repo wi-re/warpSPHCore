@@ -15,10 +15,8 @@ The field is biharmonic (nabla^2 v = 0), so the Laplacian probe has a zero
 target and is skipped.
 
 Distributions (all N = 16384, h = 4 dx, box [0, 2 pi]^2 periodic):
-  jitter        the case IC minus the shuffle relaxation: the frontend's
-                regular lattice (sampleRegularParticles) + the same Gaussian
-                jitter shuffleParticles applies (sigma = 1.0 * h), seed 42
-                (the real run's global RNG state is unknowable)
+  jitter        regular, cell-centered square lattice with Gaussian jitter
+                (sigma = 1.0 * h), seed 42
   noshift_t0    saved: reference glass (128 iters of 1/8-strength relaxation)
   noshift_t2    saved: uncorrected flow end state (disorder accumulated)
   fullshift_t0  saved: over-mixed lattice (full-strength relaxation)
@@ -57,7 +55,6 @@ import warp as wp
 wp.init()
 torch.set_grad_enabled(False)
 
-from warpSPHCore import DomainDescription
 from warpSPHCore.enumTypes import KernelFunctions
 
 from distribution import anisotropy_summary, distribution_moments
@@ -68,7 +65,6 @@ from pde_cases import tgv_analytic_velocity
 from test_fields import Field
 
 DATA = HERE / "data"
-RESULTS = HERE / "results"
 
 L = 2.0 * np.pi
 NX = 128
@@ -151,25 +147,17 @@ def load_saved(npz_name: str, tag: str, device: str):
 
 
 def baseline_jitter(device: str):
-    # The case IC minus the shuffle relaxation: the same regular lattice the
-    # frontend sampler builds (half-cell offset, uniform mass = cell volume),
-    # plus the same Gaussian jitter shuffleParticles applies (sigma = h).
-    from warpSPH.sample.regular import sampleRegularParticles
-    domain = DomainDescription(
-        torch.zeros(2, dtype=torch.float64, device=device),
-        torch.full((2,), L, dtype=torch.float64, device=device),
-        torch.ones(2, dtype=torch.bool, device=device), 2)
-    pc = sampleRegularParticles(NX, domain, TARGET_NEIGHBORS, jitter=0.0)
-    pos = pc.positions
-    assert pos.shape[0] == NX * NX, \
-        f"lattice gave {pos.shape[0]} particles, want {NX * NX}"
+    # Fixed square fixture in the same xy order as the TGV case sampler.
+    axis = torch.linspace(DX / 2, L - DX / 2, NX, dtype=torch.float64, device=device)
+    pos = torch.stack(torch.meshgrid(axis, axis, indexing="xy"), dim=-1).reshape(-1, 2)
+    masses = pos.new_full((len(pos),), DX**2)
     torch.manual_seed(JITTER_SEED)
     pos = pos + torch.randn_like(pos) * H
-    mom = distribution_moments(pos.cpu(), pc.masses.cpu(), h=H,
+    mom = distribution_moments(pos.cpu(), masses.cpu(), h=H,
                                L=torch.tensor([L, L], dtype=torch.float64),
                                dim=2, kernel="wendland4", periodic=True)
-    summ = {k: anisotropy_summary(mom)[k] for k in SUMMARY_KEYS}
-    return pos, pc.masses, H, summ
+    summary = anisotropy_summary(mom)
+    return pos, masses, H, {key: summary[key] for key in SUMMARY_KEYS}
 
 
 def build_dists(names: list[str], device: str) -> list[tuple]:
@@ -306,6 +294,7 @@ def smoke_verdict(rows: list[dict], grad_check: float) -> dict:
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--device", default="cuda:0")
+    p.add_argument("--out", type=Path, default=HERE)
     p.add_argument("--dists", nargs="+", default=[
         "jitter", "noshift_t0", "noshift_t2", "fullshift_t0", "fullshift_t2"],
         choices=["jitter", "noshift_t0", "noshift_t2",
@@ -336,14 +325,15 @@ def main(argv=None) -> int:
 
     csv_name = "disorder_probe_rows_smoke.csv" if args.smoke \
         else "disorder_probe_rows.csv"
-    write_rows(rows, RESULTS / csv_name)
-    print(f"\nwrote {RESULTS / csv_name}", flush=True)
+    results = args.out / "results"
+    write_rows(rows, results / csv_name)
+    print(f"\nwrote {results / csv_name}", flush=True)
     print_pivot(rows, dists, args.kernels)
 
     if args.smoke:
         verdict = smoke_verdict(rows, grad_check)
         ok = verdict.pop("ok")
-        verdict_path = RESULTS / "disorder_probe_verdict.json"
+        verdict_path = results / "disorder_probe_verdict.json"
         verdict_path.parent.mkdir(parents=True, exist_ok=True)
         # same {ok, checks} shape as run_baseline.py's smoke_verdict.json
         verdict_path.write_text(json.dumps({"ok": ok, "checks": verdict},

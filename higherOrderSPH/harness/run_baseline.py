@@ -3,7 +3,7 @@
 
 Runs the Phase 1 (standard SPH) and Phase 2 (CRKSPH) baselines -- plus
 the renorm (Bonet-Lok-style covariance correction) reference column --
-against the static test matrix of `PLAN.md`, and writes:
+against the static test matrix documented in README.md, and writes:
 
 * `results/baseline_rows.csv`  -- every measurement, flat
 * `results/cond_<kernel>.csv`  -- condition-number statistics
@@ -60,8 +60,6 @@ from test_fields import (
 )
 
 HERE = Path(__file__).resolve().parent
-RESULTS = HERE / "results"
-FIGURES = HERE / "figures"
 
 DEFAULT_N_TARGET = 1152
 DEFAULT_JITTER = 0.3
@@ -304,7 +302,7 @@ def write_report(path: Path, patch_rows: list[Row],
         f"default target neighbors {DEFAULT_TARGET_NEIGHBORS}, "
         f"patch N target {DEFAULT_N_TARGET}).\n")
     add("Frozen reference for the higher-order phases (parent plan "
-        "`../../higher_order.md`): later phases diff against these numbers "
+        "`dcb14a7:higher_order.md`): later phases diff against these numbers "
         "and do not re-baseline silently. A harness change is a "
         "versioning event that re-runs every phase.\n")
 
@@ -363,7 +361,7 @@ def write_report(path: Path, patch_rows: list[Row],
 # smoke (CI gate)
 # ---------------------------------------------------------------------------
 
-def run_smoke(device: str, kernel: KernelFunctions) -> dict:
+def run_smoke(device: str, kernel: KernelFunctions, out_root: Path = HERE) -> dict:
     verdict: dict = {"checks": {}, "thresholds": {}}
     ok = True
 
@@ -435,8 +433,8 @@ def run_smoke(device: str, kernel: KernelFunctions) -> dict:
     ok &= np.isfinite(cond_mean) and cond_mean < 10.0
     verdict["ok"] = bool(ok)
 
-    RESULTS.mkdir(parents=True, exist_ok=True)
-    out = RESULTS / "smoke_verdict.json"
+    out = out_root / "results" / "smoke_verdict.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(verdict, indent=2))
     print(json.dumps(verdict, indent=2))
     return verdict
@@ -451,6 +449,7 @@ def parse_args(argv=None):
         description="Convergence harness baseline driver")
     p.add_argument("--smoke", action="store_true",
                    help="run the minimal CI-gate matrix and exit")
+    p.add_argument("--device", help="execution device (default: CUDA if available)")
     p.add_argument("--dim", type=int, default=2, choices=(1, 2, 3))
     p.add_argument("--kernels", nargs="+", default=["Wendland2"],
                    help="KernelFunctions member name(s)")
@@ -465,15 +464,15 @@ def parse_args(argv=None):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = args.device or ("cuda" if torch.cuda.is_available() else "cpu")
     wp.init()
     torch.set_grad_enabled(False)
 
+    out_root = Path(args.out)
     if args.smoke:
-        return 0 if run_smoke(device, KernelFunctions[args.kernels[0]])["ok"] \
+        return 0 if run_smoke(device, KernelFunctions[args.kernels[0]], out_root)["ok"] \
             else 1
 
-    out_root = Path(args.out)
     suites = [s.strip() for s in args.suites.split(",") if s.strip()]
     all_rows: list[Row] = []
     cond_records: list[dict] = []

@@ -177,6 +177,7 @@ def test_operator_metadata_and_callback_validation():
         richardson(lambda v: v.double(), b)
 
 
+@pytest.mark.gpu
 def test_cuda_current_stream():
     if not torch.cuda.is_available():
         pytest.skip('CUDA unavailable')

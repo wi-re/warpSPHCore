@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Merge the experimental native backend while retaining Warp as a required
-  dependency and the default backend; require Torch >=2.10 for native stable ABI
+- Merge the experimental native backend while retaining Warp as the default
+  backend via the `warp` extra. Require Torch >=2.10 for native stable ABI
   support. Shared numerical Python changes select both backend test suites.
 
 - Qualify complete native core distributions: universal source/JIT wheels, platform CPU/CUDA wheels, experimental HIP compilation and retained standalone compatibility; exclude local build artifacts from source wheels.
@@ -32,6 +32,8 @@
   retain failed FP32 projection controls explicitly in the qualification report.
 - Add benchmark-only exclusive frontend stage profiling and stacked CPU/CUDA
   charts, distinguishing remaining Warp kernels from native operators and scaffolding.
+- Fix the Warp 3D support-volume conversion and harden wheel verification
+  against editable-install redirection.
 
 ## 0.7.1 — 2026-11-03
 
@@ -47,4 +49,5 @@ Coordinated GitHub checkpoint with warpSPH and warpSPHIntegrators 0.7.1.
 
 The separate native C++ backend branch is excluded from this checkpoint.
 Chunked AD/graphs and configurations outside the documented eager support matrix
-remain unsupported. See CHUNKED_NEIGHBORS_MULTI_GPU_PLAN.md for qualification.
+remain unsupported. See the [owned-row integration record](docs/regression/multigpu_source_integration_2026_11_03.md)
+for qualification.

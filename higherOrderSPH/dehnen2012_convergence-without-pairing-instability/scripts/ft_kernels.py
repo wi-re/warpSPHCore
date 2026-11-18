@@ -17,7 +17,7 @@ Two evaluations, cross-checking each other:
   by exact antiderivatives (repeated integration by parts) on each piece.
   The piecewise transcription is validated against the shipped shapes
   before use. This supersedes the paper's eq. 15, whose PDF
-  transcription is garbled (see the PLAN.md findings log).
+  transcription is garbled (see REPORT.md).
 
 The Gaussian (truncated at 16 sigma) is numerical only: its closed form
 involves the imaginary error function, and the truncation error is

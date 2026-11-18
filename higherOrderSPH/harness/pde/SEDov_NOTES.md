@@ -96,7 +96,7 @@ non-monotonicity is confined to the common-cells ensemble (finding 2).
    `error_l2_exact`, volume-weighted, 4-point fit incl. nx=1600) gives
    **L1 order 1.03 (r² 0.993)** and **L2 0.59 (r² 0.987)** — exactly the
    first-order shock-capturing signature (L1 ~ dx, L2 ~ √dx). (Pre-CRK-fix
-   run; see `higher_order.md` Phase 2 — to be re-read after the re-run.)
+   run; see `dcb14a7:higher_order.md` Phase 2 — to be re-read after the re-run.)
    A same-day caveat here had claimed the opposite: fitting the
    finite-reference model e = C(h^p − h_ref^p) to the reference-metric L1
    gave p ≈ 0.23, "below first order". **That was wrong** — the model

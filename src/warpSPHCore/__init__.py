@@ -21,15 +21,16 @@ Or import subpackages directly:
 
 from ._backend import BACKEND as backend, OPERATORS as operator_backend
 
+__version__ = "0.7.1"
+
 if backend == "native":
     from .native import *
     from .native import __all__
-    __version__ = "0.7.1"
 else:
     import importlib.util as _import_util
     if _import_util.find_spec("warp") is None:
         raise ImportError(
-            "The default backend requires warp-lang; install warpSPHCore, "
+            "The default backend requires warp-lang; install warpSPHCore[warp], "
             "or select WARPSPHCORE_BACKEND=native before import for the native backend."
         )
     # Convenience re-exports of the most commonly used symbols
@@ -82,9 +83,6 @@ else:
     submodules.append(pinv)
     from .linalg import *
     submodules.append(linalg)
-
-    # Set version
-    __version__ = "0.7.1"
 
     __all__ = []
 

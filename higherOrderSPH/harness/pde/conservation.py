@@ -175,7 +175,7 @@ def ke_rebound(kinetic_energy) -> float:
     The final-state `ke_drift` cannot see this when an early dissipative dip
     and a later spin-up partly cancel -- the CRKSPH Gresho vortex dips -3.8%
     and then gains +7.3% (nx=64), which went unnoticed until this check
-    (`higher_order.md`, Phase 1). Returns nan for an empty / zero-KE series.
+    (`dcb14a7:higher_order.md`, Phase 1). Returns nan for an empty / zero-KE series.
     """
     ke = [float(k) for k in kinetic_energy]
     if not ke or ke[0] == 0.0:

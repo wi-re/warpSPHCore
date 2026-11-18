@@ -1,57 +1,25 @@
-# Higher-Order SPH — paper replications
+# Higher-order SPH research
 
-Purpose: before building the higher-order kernels in `../higher_order.md`,
-validate the current `warpSPHCore` kernel stack by replicating published
-results and evaluations. A replication proves two things at once:
+- [Convergence harness](harness/README.md) covers static operator accuracy,
+  reference reconstruction and PDE comparisons. Its frozen SPH, CRKSPH and
+  Bonet–Lok baselines are the comparison points for future runs.
+- [Dehnen & Aly 2012 replication](dehnen2012_convergence-without-pairing-instability/README.md)
+  covers kernel identity, density and linear stability. Pairing relaxation,
+  3D Gresho and Sod, and relative step cost remain open.
 
-1. the kernels we ship are *exactly* the kernels of the reference paper
-   (functional form, normalization, scale convention), and
-2. the kernels *behave* as the paper claims (density estimates, stability,
-   sound speed, dynamics tests) when used the way the paper uses them.
+The [reconstruction documentation](../docs/docs/reconstruction.md) covers the
+production MLS/LABFM and TENO/WENO paths and their derivative contracts. Core
+qualification includes cubic MLS/LABFM frozen advection. The maintained
+[MFM/MFV documentation](../docs/docs/mfm.md) covers the Core kernels, and the
+frontend has a registered meshless step.
 
-Each replication lives in its own subfolder named after the PDF file name
-(no extension) from the literature collection at
-`/home/lu26029/dev/warpSPH/literature/`.
+Remaining research includes matched frozen diffusion and full-scheme
+comparisons, LABFM boundary/disorder and hyperviscosity behavior, reconstruction
+inside Riemann-SPH stages, and MFM/MFV face consistency and disorder. Keep
+matched inputs, reference methods and evidence with each comparison. The
+former study plan is available at `dcb14a7:higher_order.md`.
 
-## Folders
-
-| Subfolder | Paper | Status |
-|---|---|---|
-| `dehnen2012_convergence-without-pairing-instability/` | Dehnen & Aly 2012, MNRAS 425, 1068 (arXiv:1204.2471) — Wendland kernels, pairing instability, kernel-NH evaluation | Phases 0–6 + 8 done (closeout 2026-09-20, `REPORT.md`); Phase 7 (dynamic tests) open |
-| `harness/` | — (shared infrastructure, not a paper) | Phase 0 (static) convergence harness + Phase 1/2 baselines for `../higher_order.md`; first pass implemented 2026-09-22 (`PLAN.md`, `REPORT.md` + `FINDINGS.md` = frozen before column) |
-
-The dehnen2012 replication also carries scope beyond the paper itself:
-a repo-level **kernel onboarding/audit pipeline** (`scripts/kernels/` +
-`tests/kernels/`), **Gaussian + HOCT4 kernels added to the core library**,
-and the **C&D 2010 / R&H 2012 dissipation build-out in the `warpSPH`
-frontend**. See the replication's `PLAN.md` for the phase structure.
-
-## Conventions (all replication folders)
-
-- Python: conda env `warp` — `/home/lu26029/miniconda3/envs/warp/bin/python`
-  (Python 3.13, NumPy 2.x, warp, torch).
-- The box is shared: cap BLAS threads before any numerics-heavy command:
-  `export OMP_NUM_THREADS=4 OPENBLAS_NUM_THREADS=4 MKL_NUM_THREADS=4 VECLIB_MAXIMUM_THREADS=4 NUMEXPR_NUM_THREADS=4`
-- Replication code imports kernels from the installed `warpSPHCore` package
-  (`from warpSPHCore.kernels.eval_kernel import ...`,
-  `from warpSPHCore.enumTypes import KernelFunctions`) — it must never
-  re-implement a kernel that exists in `src/`. Kernels that exist only in
-  the paper (Gaussian, HOCT4) are defined locally in the replication folder
-  and clearly marked as such.
-- Each paper folder contains:
-  - `README.md` — paper identity, why we replicate it, status.
-  - `paper_notes.md` — extracted content: definitions, tables, key equations,
-    a figure-by-figure inventory of what each figure evaluates.
-  - `PLAN.md` — the replication plan with phases and acceptance criteria.
-  - `scripts/` — deterministic replication code, one per figure/table.
-  - `notebooks/` — exploratory notebooks (optional per figure).
-  - `data/` — reference values transcribed from the paper (single source of
-    truth, machine-readable).
-  - `figures/`, `results/` — outputs (git-ignored).
-- Findings that contradict the shipped code are recorded in the plan's
-  findings log, not fixed silently — kernel constants are only changed in
-  `src/` as a deliberate, separate step after a discrepancy is confirmed.
-- Kernels added to `src/` (by any replication) go through the onboarding
-  pipeline: `kernelFunctions/<name>.py` + enum + dispatch + entry in
-  `scripts/kernels/kernel_specs.yaml` + green `kernel_audit.py` + CI test.
-  See `scripts/kernels/README.md` once it exists (dehnen2012 Phase 1).
+Use the installed kernels and the [kernel audit](../scripts/kernels/README.md)
+when checking a reference paper. Record discrepancies and the exact source
+revision before changing kernel data. Save new results under the shared
+[development workspace](../docs/docs/development-artifacts.md).

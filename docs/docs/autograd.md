@@ -315,7 +315,7 @@ finite constants before singular algebra, preventing an inactive division
 by zero from contaminating backward with NaNs. Cutoff crossings themselves
 remain nonsmooth.
 
-`tests/operations/test_kind_directions.py` checks mixed categories and all
+`tests/warp/operations/test_kind_directions.py` checks mixed categories and all
 interaction modes against the masked primal, including correction chains,
 Torch duals, reverse-over-JVP, HVP finite differences, saved-kind mutation
 checks and CUDA stream/capture replay.
@@ -344,6 +344,9 @@ it ends. This prevents older Warp resources from being freed during capture;
 empty Density/JVP replay is qualified through that boundary.
 
 ## Caching layers
+
+`clearWarpArrayCache()` and `clearKernelArgsCache()` are deprecated
+compatibility no-ops. Remove calls to them when updating clients.
 
 Three deliberately-separated layers, all keyed to *tensor identity*,
 never to storage address:
@@ -379,7 +382,7 @@ functions does not work through the bridge (the tape cannot see through
 the `Function` boundary the way a torch-native HVP recipe needs). It is
 its own dedicated Warp kernel (with the exact self-pair term — see the
 [Density](operations/density) page), pinned by
-`tests/operations/test_forward_mode_tier2_density_hvp_self_pair.py`.
+`tests/warp/operations/test_forward_mode_tier2_density_hvp_self_pair.py`.
 
 ## The no-host-sync invariant
 
@@ -388,7 +391,7 @@ launch) performs **no GPU→CPU synchronization** on the CUDA path —
 the one sync in the whole machinery is `jvp()`'s batched liveness mask,
 and only when forward-mode AD is actually in use. This is a standing
 invariant with a census, not a hope:
-`tests/operations/test_no_host_sync.py` counts readbacks on specific
+`tests/warp/operations/test_no_host_sync.py` counts readbacks on specific
 modules, `scripts/benchmarks/count_host_syncs.py` does the whole-repo census, and
 the historical before/after audit remains in `docs/regression/` (the
 [renormalization](renorm) fallback is the canonical example). New detailed
@@ -396,21 +399,21 @@ records use the [external development archive](development-artifacts.md).
 
 ## Tests
 
-- `tests/operations/test_gradcheck_scripts.py` — gates the
+- `tests/warp/operations/test_gradcheck_scripts.py` — gates the
   `scripts/gradcheck/gradcheck_*.py` float64 `torch.autograd.gradcheck` suites
   (reverse mode through the full bridge, every operator × correction
   combination).
-- `tests/operations/test_forward_mode_value_jvp.py`,
+- `tests/warp/operations/test_forward_mode_value_jvp.py`,
   `test_forward_mode_geometry_jvp_*.py` — the JVP paths, including
   through the dual-tensor bridge.
-- `tests/operations/test_forward_mode_dual_wrapper.py` — the bridge's
+- `tests/warp/operations/test_forward_mode_dual_wrapper.py` — the bridge's
   `jvp()` dispatch itself (live-mask, raise-on-unregistered, zeros).
-- `tests/operations/test_field_abstraction.py`,
+- `tests/warp/operations/test_field_abstraction.py`,
   `test_null_field_wiring.py` — the Field/null-field registry
   semantics.
-- `tests/operations/test_state_bundle.py`, `test_view_reuse.py` — the
+- `tests/warp/operations/test_state_bundle.py`, `test_view_reuse.py` — the
   two caching layers and their gates.
-- `tests/operations/test_no_host_sync.py` — the sync invariant.
+- `tests/warp/operations/test_no_host_sync.py` — the sync invariant.
 
 ## See also
 

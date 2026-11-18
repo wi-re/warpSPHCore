@@ -1,6 +1,7 @@
 """Small/filtered CSR producers follow asynchronous writes on Torch's stream."""
 import pytest
 import torch
+import warp as wp
 
 from warpSPHCore import DomainDescription, SupportScheme
 from warpSPHCore.type_config import get_torch_precision
@@ -10,9 +11,11 @@ from warpSPHCore.radiusSearch.small.wp_radius_small import warp_radius_search_sm
 from warpSPHCore.radiusSearch.verlet.filter import filterVerletList_
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(),reason='CUDA stream ownership')
 @pytest.mark.parametrize('producer',['small','filtered'])
 def test_asynchronous_positions_and_supports_on_nondefault_stream(producer):
+    wp.init()
     dtype=get_torch_precision()
     p=torch.tensor([[0.],[.2],[.7]],dtype=dtype,device='cuda')
     h=torch.full((3,),.9,dtype=dtype,device='cuda')

@@ -9,6 +9,7 @@ Two layers, mirroring tests/convergence/test_harness.py:
    the report + CSV.
 """
 
+from importlib.util import find_spec
 import os
 import subprocess
 import sys
@@ -21,11 +22,7 @@ import torch
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PDE_DIR = REPO_ROOT / "higherOrderSPH" / "harness" / "pde"
 DRIVER = PDE_DIR / "run_pde.py"
-REPORT = PDE_DIR / "REPORT_pde.md"
-ROWS_CSV = PDE_DIR / "results" / "pde_rows.csv"
-# smoke writes its own artifacts so it never clobbers the full-suite results
-SMOKE_REPORT = PDE_DIR / "REPORT_pde_smoke.md"
-SMOKE_CSV = PDE_DIR / "results" / "pde_rows_smoke.csv"
+FULL_RESULTS_SENTINEL = b"full-suite results\n"
 
 sys.path.insert(0, str(PDE_DIR))
 
@@ -524,46 +521,56 @@ def test_sedov_exact_density_shock_state():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="session")
-def smoke_run():
+def smoke_run(tmp_path_factory):
     if not torch.cuda.is_available():
         pytest.skip("PDE smoke requires a CUDA device")
+    if find_spec("warpSPH") is None:
+        pytest.skip("PDE smoke requires the optional warpSPH frontend")
+    out = tmp_path_factory.mktemp("pde-smoke")
+    results = out / "results"
+    results.mkdir()
+    (results / "pde_rows.csv").write_bytes(FULL_RESULTS_SENTINEL)
     env = dict(os.environ, warpSPHCore_PRECISION="float64",
                OMP_NUM_THREADS="4", OPENBLAS_NUM_THREADS="4",
                MKL_NUM_THREADS="4")
     proc = subprocess.run(
-        [sys.executable, str(DRIVER), "--smoke", "--cases", "linearWave"],
+        [sys.executable, str(DRIVER), "--smoke", "--cases", "linearWave", "--out", str(out)],
         env=env, cwd=str(PDE_DIR),
         capture_output=True, text=True, timeout=900,
     )
-    return proc
+    return proc, out
 
 
+@pytest.mark.gpu
 def test_pde_smoke_exits_zero(smoke_run):
-    proc = smoke_run
+    proc, _ = smoke_run
     assert proc.returncode == 0, (
         f"smoke exited {proc.returncode}\nstdout:\n{proc.stdout[-3000:]}\n"
         f"stderr:\n{proc.stderr[-3000:]}")
 
 
+@pytest.mark.gpu
 def test_pde_smoke_writes_outputs(smoke_run):
-    if smoke_run.returncode != 0:
+    proc, out = smoke_run
+    if proc.returncode != 0:
         pytest.skip("smoke did not succeed")
-    assert SMOKE_REPORT.exists() and SMOKE_REPORT.stat().st_size > 0
-    assert SMOKE_CSV.exists()
-    with SMOKE_CSV.open() as fh:
+    assert (out / "REPORT_pde_smoke.md").stat().st_size > 0
+    with (out / "results" / "pde_rows_smoke.csv").open() as fh:
         lines = [ln for ln in fh.read().splitlines() if ln.strip()]
     # header + exactly one row (smoke = single lowest resolution)
     assert len(lines) == 2, f"expected 2 CSV lines, got {len(lines)}"
     assert "linearWave" in lines[1]
 
 
+@pytest.mark.gpu
 def test_pde_smoke_measures_initial_state(smoke_run):
     # The driver must measure the t=0 conserved quantities on the real state
     # (it used to zero-fill momentum/angmom and copy the final mass) and
     # record the scheme the case actually ran.
-    if smoke_run.returncode != 0:
+    proc, out = smoke_run
+    if proc.returncode != 0:
         pytest.skip("smoke did not succeed")
-    (row,) = load_rows(SMOKE_CSV)
+    (row,) = load_rows(out / "results" / "pde_rows_smoke.csv")
     assert row["scheme"] == "CRKSPH"          # linearWave's frontend default
     assert "momentum_drift_abs" in row and "angmom_drift_abs" in row
     # 1D periodic acoustic wave: CRKSPH conserves momentum to round-off
@@ -571,15 +578,10 @@ def test_pde_smoke_measures_initial_state(smoke_run):
     assert row["mass_drift"] == pytest.approx(0.0, abs=1e-14)
 
 
+@pytest.mark.gpu
 def test_pde_smoke_does_not_clobber_full_suite_results(smoke_run):
-    # A smoke run must not overwrite the full-suite results file (it used
-    # to, silently destroying the committed local results on every CI run).
-    if smoke_run.returncode != 0:
-        pytest.skip("smoke did not succeed")
-    if not ROWS_CSV.exists():
-        pytest.skip("no full-suite results file present")
-    assert ROWS_CSV.read_bytes() != SMOKE_CSV.read_bytes(), (
-        "smoke run clobbered the full-suite pde_rows.csv")
+    _, out = smoke_run
+    assert (out / "results" / "pde_rows.csv").read_bytes() == FULL_RESULTS_SENTINEL
 
 
 # ---------------------------------------------------------------------------

@@ -27,7 +27,7 @@ Primary curve: numerical FT, composite Simpson in r (n = 20001; the
 Simpson error at kappa-hat <= 12 is ~1e-14, far below the plot scale).
 Cross-check: exact closed form for the 7 piecewise-polynomial kernels,
 derived from the piecewise definitions (supersedes the paper's eq. 15,
-whose PDF transcription is garbled -- see PLAN.md findings log). The
+whose PDF transcription is garbled -- see REPORT.md). The
 Gaussian (truncated at 16 sigma) is numerical only.
 
 Checks (assert, exit non-zero on failure):

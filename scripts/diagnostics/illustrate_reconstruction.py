@@ -61,7 +61,6 @@ def main():
 
     def save(fig, name):
         fig.savefig(args.output / (name + '.svg'), bbox_inches='tight')
-        fig.savefig(args.output / (name + '.png'), dpi=170, bbox_inches='tight')
         plt.close(fig)
 
     data = {'precision': 'float64', 'device': 'cpu', 'kernel': 'Wendland2',

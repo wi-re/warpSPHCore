@@ -1,16 +1,16 @@
 # Convergence harness
 
-Shared (non-paper) infrastructure for the higher-order effort in
-`../../higher_order.md`: the Phase 0 evaluation harness plus the
-Phase 1 (standard SPH), Phase 2 (CRKSPH), and Phase 3 (Bonet–Lok /
-`renormVal`) baselines. Read `PLAN.md` for scope, components, and
-success criteria.
+The [higher-order study](../README.md) uses this harness for static,
+frozen-particle and PDE comparisons. [REPORT.md](REPORT.md) and
+[FINDINGS.md](FINDINGS.md) preserve the frozen standard SPH, CRKSPH and
+Bonet–Lok baselines. Add comparison modes without rebaselining the original
+results. If a fixture or harness rule changes, record a new baseline version
+and rerun the affected comparisons.
 
-Status: **first pass implemented 2026-09-22** (components + CI gate);
-**Phase 3 `renormVal` mode added 2026-09-23** (additive versioning
-event — the three prior modes are byte-identical). `REPORT.md` +
-`FINDINGS.md` are the frozen "before column", generated/curated by the
-driver.
+Set `--out` on the baseline, disorder, frozen and PDE drivers to select a
+temporary directory for smoke checks or a new run in the
+[shared evidence workspace](../../docs/docs/development-artifacts.md).
+The PDE driver imports the optional `warpSPH` frontend.
 
 ## Layout
 
@@ -60,7 +60,7 @@ dev/test path.
 
 ## Phases 4-7: high-order operators and reconstruction (`rkpm.py`, `reconstruct.py`)
 
-Added 2026-10-09 (parent plan `../../higher_order.md`, Phases 4-7). These are
+Added 2026-10-09. These are
 **pure-torch reference implementations** (CPU-testable, float64-native); they
 do not touch `src/warpSPHCore` and do not change any frozen baseline output.
 
@@ -77,7 +77,7 @@ do not touch `src/warpSPHCore` and do not change any frozen baseline output.
 | `gizmo_gresho.py`, `gizmo_wave.py` | matched numerical comparison of the core MFM / MFV against GIZMO (`~/dev/gizmo`, built in a scratch copy: serial HDF5, GSL headers from `apt download libgsl-dev`; `Config.sh` from the test plus `INPUT_IN_DOUBLEPRECISION`, `KERNEL_FUNCTION=7` (Wendland C4, Gresho) / `6` (C2, wave), `EOS_GAMMA`): same particles, kernel and neighbour number, GIZMO's own effective volumes for the masses, the same error metric on both snapshots; `--h-iters` (driver `h <-> V` iterations), `--static` (uniform state on jittered particles), `--closures project none` |
 | `run_advection.py` -> `REPORT_advection.md` | the core `Reconstructor` (MLS / TENO / WENO) inside a time loop: linear advection on frozen jittered particles, upwind flux, smooth waves + top hat; **solver-light** (the exact Riemann solution of advection is the upwind state) |
 
-CI: `tests/convergence/test_rkpm.py`, `tests/convergence/test_reconstruct.py`.
+CI: `tests/warp/convergence/test_rkpm.py`, `tests/warp/convergence/test_reconstruct.py`.
 
 ## Conventions
 
@@ -91,5 +91,5 @@ CI: `tests/convergence/test_rkpm.py`, `tests/convergence/test_reconstruct.py`.
 
 Like the replications, code here imports the installed `warpSPHCore`
 package and never re-implements a kernel or operator from `src/`.
-CI gate: `tests/convergence/test_harness.py` (repo root) -- pure-module
+CI gate: `tests/warp/convergence/test_harness.py` (repo root) -- pure-module
 unit tests plus a session-scoped `--smoke` subprocess run.

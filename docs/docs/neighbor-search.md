@@ -20,9 +20,8 @@ There are three ways an operator gets its neighbors:
 
 Both traversal modes (1 and 2) run the *same* operator kernel — every
 operator is a dual-path kernel pair (`_Func_i` / `_Func_Adjacency` /
-`_Kernel`) and `getIndexRange` abstracts the "where is particle $i$'s
-neighbor block" question. Parity between the two is pinned by
-`tests/operations/test_grid_modes.py`.
+`_Kernel`) and `getIndexRange` finds particle $i$'s neighbor block.
+Parity between the two is pinned by `tests/warp/operations/test_grid_modes.py`.
 
 ## The compact-hash pipeline (main path)
 
@@ -44,9 +43,27 @@ The grid remains valid with a positive cell size and no occupied reference cells
 Verlet rebuilds handle particle-count changes into and out of empty populations.
 An unchanged empty pair domain needs no movement/support rebuild and reports
 finite zero validity metrics. A count change invalidates the prior list.
-In-place capacity reuse retains addresses only while the allocation fits;
-captures must be rebuilt after a shape/address change. Fixed grid slots support
-zero reference particles, including CUDA build replay at that fixed size.
+### Capacity and graph reuse
+
+`CapacityPolicy` defaults to 10% headroom and keeps an existing capacity while
+the live count is between 50% and 100% of that capacity. `inPlace=True` allows
+rebuilds to overwrite and share the previous list's buffers when the capacity,
+layout and dtypes are compatible. Cached pair data and retained older lists can
+then observe new contents. Rebuilds size edges eagerly. Re-capture when a
+buffer or shape baked into the graph changes.
+
+CSR consumers follow `edgeOffsets` and `numNeighbors`. Raw pair consumers
+must check for the `-1` sentinel before gathering. The host count `numEdges`
+and the changing shape of `livePairs()` are for eager access. Set
+`storeI=False` to omit COO rows on compact-hash and Verlet searches.
+`paddedI` is then `None` and `cooRows()` or `livePairs()` materializes
+temporary rows on demand. Filtering preserves the input representation.
+
+`makeHashMapSlots` allocates fixed-shape grid storage for a fixed reference
+count and radius bound. `buildFixed` updates the grid in place and
+`GraphedBuild` can replay it on CUDA, including for zero reference particles.
+Check the slots' validity after updating inputs. Changing the shape or radius
+bound requires new slots and a new capture.
 
 All three entry points accept keyword-only `collection` and `queryOrder` options;
 the same options are forwarded by `buildVerletList` and its raw-tensor variant.
@@ -177,10 +194,9 @@ time-stepping path:
 - reuses a `priorNeighborhood` when the particle counts match and the
   prior list is still valid (a validity check against the stored
   query/reference positions), otherwise rebuilds,
-- `wp_updateVerlet`/`wp_countVerlet` then add newly-entered pairs
-  incrementally between steps instead of rebuilding, and `filter`
-  drops pairs that left the *true* support; `_verlet_validity_metrics`
-  / `validCheck.py` quantify whether a list is still usable.
+- `filterVerletList` collects the pairs within the current support from
+  the retained superset. `validCheck.py` measures whether particle motion
+  or support growth has consumed the skin and requires an eager rebuild.
 
 Use it when positions move a small fraction of the support per step
 (the skin pays off); use a fresh `radiusSearchCompactHashMap` (or
@@ -197,7 +213,7 @@ Use it when positions move a small fraction of the support per step
 
 `generateNeighborTestData(nx, targetNumNeighbors, dim, periodic,
 device)` (in `util/wp_util.py`) builds the standard test case used by
-the notebooks and most of `tests/operations/`: an $n_x^d$ lattice in
+the notebooks and most of `tests/warp/operations/`: an $n_x^d$ lattice in
 $[-1, 1]^d$ with spacing $dx$, support $h$ chosen so the lattice has
 ~`targetNumNeighbors` neighbors via `volumeToSupport`:
 

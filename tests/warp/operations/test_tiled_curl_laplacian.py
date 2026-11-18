@@ -13,7 +13,7 @@ from warpSPHCore.enumTypes import (GradientScheme, KernelFunctions, LaplacianSch
 from warpSPHCore.type_config import get_torch_precision
 
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason='tiled kernels require CUDA')
+pytestmark = [pytest.mark.gpu, pytest.mark.skipif(not torch.cuda.is_available(), reason='tiled kernels require CUDA')]
 
 
 @pytest.fixture(autouse=True)

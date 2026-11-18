@@ -328,8 +328,8 @@ def linear_matrix_field(case: Case) -> torch.Tensor:
     """M(x)_pq = A[p,q] * (coeffs . x), per particle -- a matrix field whose
     every entry is linear in x, sharing A/coeffs with the vector/scalar
     fields above. dM[p,q]/dx_d = A[p,q]*coeffs[d], so:
-      * divergenceDotMode=True  (contracts M's 2nd index): (div M)_i = (A @ coeffs)[i]
-      * divergenceDotMode=False (contracts M's 1st index): (div M)_i = (A.mT @ coeffs)[i]
+      * divergenceDotMode=False (contracts M's last index): (div M)_i = (A @ coeffs)[i]
+      * divergenceDotMode=True (contracts M's first index): (div M)_i = (A.mT @ coeffs)[i]
     """
     A = _coeff_matrix(case.dim, case.device, case.particles.positions.dtype)
     coeffs = _coeff_vector(case.dim, case.device, case.particles.positions.dtype)
@@ -553,16 +553,8 @@ def build_rows(case: Case, threshold: float, band_cells: float):
                              gradient_mode=scheme, expected=div_expected, divergenceDotMode=True)
         rows.append((f"Divergence[{scheme.name}]", div_cell))
 
-    # Divergence layout check: matrix field, verifies the fix for the div/dot
-    # -mode bug documented in warpier_core.md. `OperationProperties.divergenceDotMode`
-    # exposes the flag that used to be hardcoded to False: with the field
-    # laid out as-is, `divergenceDotMode=True` should match the true tensor
-    # divergence directly; with the field pre-transposed (the old workaround
-    # from warp_divergence.ipynb), `divergenceDotMode=False` (the old
-    # hardcoded default) should match it instead -- both reduce to the same
-    # (A @ coeffs) expected value for linear_matrix_field's construction (see
-    # its docstring). Both are expected to pass now -- this row exists to
-    # catch a regression in either convention, not to demonstrate a bug.
+    # Check both contraction axes against A @ coeffs. The first-axis
+    # contraction acts on the transposed field.
     mat_field = linear_matrix_field(case)
     mat_div_expected = (A @ coeffs).unsqueeze(0).expand(mat_field.shape[0], dim_).contiguous()
     # Use a tight threshold here regardless of the global one: the point of
@@ -572,8 +564,8 @@ def build_rows(case: Case, threshold: float, band_cells: float):
     # the difference between the two conventions.
     mat_threshold = min(threshold, 0.05)
     mat_div_variants = (
-        ("as-is/dotMode=True", mat_field, True),
-        ("mT/dotMode=False", mat_field.mT.contiguous(), False),
+        ("as-is/dotMode=False", mat_field, False),
+        ("mT/dotMode=True", mat_field.mT.contiguous(), True),
     )
     for label, field, dot_mode in mat_div_variants:
         def mat_div_cell(traversal, correction, crk_state, renorm_state, field=field, dot_mode=dot_mode):

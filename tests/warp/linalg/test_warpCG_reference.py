@@ -26,6 +26,7 @@ def test_portable_independent_verification(reference, dtype):
     assert not bad.verified
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='requires CUDA')
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
 @pytest.mark.parametrize('schedule', ['eager', 'internal', 'cached'])

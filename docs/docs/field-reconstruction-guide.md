@@ -414,7 +414,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src OMP_NUM_THREADS=2 \
 ```
 
 The script sets float64 before importing the core package. It writes the four
-SVG/PNG pairs and [raw numerical data](./assets/reconstruction/examples.json)
+SVG figures and [raw numerical data](./assets/reconstruction/examples.json)
 beside this page's assets, with runtime versions and source hashes. It checks
 resolved MLS stencils, constant/linear CRK reproduction, quadratic MLS
 reproduction, LABFM anchoring, smooth interface accuracy, and the two jump

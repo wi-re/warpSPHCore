@@ -9,6 +9,7 @@ from warpSPHCore.autograd.compileGlue import compileGlueEnabled, setCompileGlue
 from warpSPHCore.linalg import Status, cg
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA compiler gate')
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
 def test_compiled_cg_verified_solution_and_failure_cases(dtype):

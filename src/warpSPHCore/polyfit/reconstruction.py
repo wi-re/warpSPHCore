@@ -27,7 +27,7 @@ where ``1/(beta + 1e-12)^6`` overflows), which is algebraically the same.
 
 Where the papers are not explicit (flagged for review; see
 ``higherOrderSPH/harness/reconstruct.py`` for the pure-torch reference this was
-ported from, and ``higher_order.md`` Phase 6): (a) the TENO ``beta`` sums all
+ported from, and ``dcb14a7:higher_order.md`` Phase 6): (a) the TENO ``beta`` sums all
 partial derivatives of order 1..p with unit weight over the square
 ``[-sqrt(V), sqrt(V)]^d`` common to every stencil; (b) a hard radius around
 ``sqrt(V)`` selects the stencil members; (c) the interface point is Eq. 25 with

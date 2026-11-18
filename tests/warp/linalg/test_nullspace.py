@@ -332,6 +332,7 @@ def test_projection_and_action_vector_ad(device, dtype):
             close(forward_ad.unpack_dual(action(dual)).tangent, action(w))
 
 
+@pytest.mark.gpu
 def test_cuda_current_stream_capture_and_device_validation():
     if not torch.cuda.is_available():
         pytest.skip('CUDA unavailable')

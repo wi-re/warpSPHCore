@@ -92,6 +92,7 @@ def test_workspace_validation_and_autograd():
     assert result.statusInt() >= 0
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='requires CUDA')
 @pytest.mark.parametrize('dtype', [torch.float32, torch.float64])
 def test_nondefault_stream(device, dtype, monkeypatch):

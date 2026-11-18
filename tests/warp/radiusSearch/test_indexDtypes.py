@@ -6,7 +6,7 @@ import warp as wp
 
 from warpSPHCore import DomainDescription, SupportScheme, CapacityPolicy
 from warpSPHCore.type_config import (index_t, offset_t, get_torch_precision,
-    get_torch_index_dtype, get_torch_offset_dtype, get_type_config, _resolve_integer_type)
+    get_torch_index_dtype, get_torch_offset_dtype, get_type_config)
 from warpSPHCore.radiusSearch.csr import (buildCSROffsets, validateEdgeCount,
     validateEdgeCapacity, validateParticleCounts, WARP_ARRAY_MAX)
 from warpSPHCore.radiusSearch.grid_util import laneSubRange
@@ -29,8 +29,6 @@ def test_configuration_roles():
     assert config['neighbor_count_t']==wp.int32
     assert wp.dtype_to_torch(index_t)==get_torch_index_dtype()
     assert wp.dtype_to_torch(offset_t)==get_torch_offset_dtype()
-    for invalid in ('float32','uint32','int16','banana'):
-        with pytest.raises(ValueError):_resolve_integer_type(invalid,'offset_dtype')
 
 
 @pytest.mark.parametrize('values',[[],[0],[0,0,0],[3,0,2],[2**31-3,2,0]])

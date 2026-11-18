@@ -189,6 +189,7 @@ def test_residual_drift_cannot_certify_an_ill_conditioned_solution(device):
     assert result.statusInt() < 0 or actual <= 1e-6*b.norm()
 
 
+@pytest.mark.gpu
 def test_cuda_current_stream():
     if not torch.cuda.is_available():
         pytest.skip('CUDA unavailable')

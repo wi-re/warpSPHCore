@@ -10,7 +10,7 @@ from warpSPHCore.autograd.launcher import launch_kernel
 from warpSPHCore.autograd.stateAwareWarpFunction import StateAwareWarpFunction
 from warpSPHCore.autograd.stateLessWarpFunction import warpWrapper
 
-pytestmark = pytest.mark.skipif(not torch.cuda.is_available(), reason='requires CUDA')
+pytestmark = [pytest.mark.gpu, pytest.mark.skipif(not torch.cuda.is_available(), reason='requires CUDA')]
 
 
 @wp.kernel

@@ -67,6 +67,7 @@ def test_split_wrapper_forwarding(device):
     torch.testing.assert_close(raw.paddedJ, wrapped.paddedJ, rtol=0, atol=0)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA stream/replay ownership')
 def test_production_row_fill_replay_on_nondefault_stream():
     from warpSPHCore.autograd.stream import torchWarpCapture, torchWarpStream
@@ -99,6 +100,7 @@ def test_production_row_fill_replay_on_nondefault_stream():
             assert bool((result[len(expected):] == -1).all())
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA stream ownership')
 def test_split_search_follows_nondefault_stream():
     stream = torch.cuda.Stream()

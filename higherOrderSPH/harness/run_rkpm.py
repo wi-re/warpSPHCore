@@ -172,6 +172,7 @@ def run_smoke(device, kernel) -> bool:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--smoke", action="store_true")
+    ap.add_argument("--device", help="execution device (default: CUDA if available)")
     ap.add_argument("--dim", type=int, default=2, choices=(1, 2, 3))
     ap.add_argument("--kernel", default="Wendland2")
     ap.add_argument("--orders", type=int, nargs="+", default=[1, 2, 3])
@@ -181,7 +182,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out", default=str(HERE))
     a = ap.parse_args(argv)
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = a.device or ("cuda" if torch.cuda.is_available() else "cpu")
     wp.init()
     torch.set_grad_enabled(False)
     kernel = KernelFunctions[a.kernel]

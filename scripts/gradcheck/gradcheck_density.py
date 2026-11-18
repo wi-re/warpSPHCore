@@ -7,7 +7,7 @@ backward-mode counterpart to scripts/diagnostics/operation_matrix.py, which only
 forward values. Run as its own process:
 
     python scripts/gradcheck/gradcheck_density.py
-    python scripts/gradcheck/gradcheck_density.py --line-n 9 --plot
+    python scripts/gradcheck/gradcheck_density.py --line-n 9 --plot /tmp/density-line.png
 
 --------------------------------------------------------------------------
 Precision note
@@ -55,7 +55,9 @@ import os
 os.environ.setdefault("warpSPHCore_PRECISION", "float64")
 
 import argparse
+from pathlib import Path
 import sys
+import tempfile
 
 import torch
 import warp as wp
@@ -228,13 +230,15 @@ def run_line_case(n, xmin=-1.0, xmax=1.0, plot=False):
     for i in range(n):
         print(f"    i={i}: self={self_term[i].item(): .6f}  sum_j!=i={off_diag_sum[i].item(): .6f}")
 
+    if plot is True:
+        plot = Path(tempfile.mkdtemp(prefix="warpsph-density-gradcheck-")) / "gradcheck_density_line.png"
     if plot:
-        _plot_line_case(positions, supports, masses, dpos)
+        _plot_line_case(positions, supports, masses, dpos, Path(plot))
 
     return all_ok
 
 
-def _plot_line_case(positions, supports, masses, warp_dpos):
+def _plot_line_case(positions, supports, masses, warp_dpos, out_path):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -269,8 +273,9 @@ def _plot_line_case(positions, supports, masses, warp_dpos):
     axes[1].legend()
 
     fig.tight_layout()
-    out_path = os.path.join(os.path.dirname(__file__), "gradcheck_density_line.png")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150)
+    plt.close(fig)
     print(f"  Saved plot to {out_path}")
 
 
@@ -278,7 +283,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--line-n", type=int, default=7, help="number of particles in the line case (default: 7)")
     parser.add_argument("--h", type=float, default=1.0, help="support radius for the single-particle case (default: 1.0)")
-    parser.add_argument("--plot", action="store_true", help="save a self/non-self gradient comparison plot for the line case")
+    parser.add_argument("--plot", nargs="?", const=True, type=Path, metavar="PATH",
+                        help="save the line-case gradient plot (default path is in a temporary directory)")
     args = parser.parse_args()
 
     wp.init()

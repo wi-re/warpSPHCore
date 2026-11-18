@@ -2,13 +2,10 @@
 
 **Paper:** *Improving convergence in SPH simulations without pairing
 instability*, Dehnen & Aly 2012, MNRAS 425(2), 1068 (arXiv:1204.2471).
-**Status:** Phases 0–6 of `PLAN.md` complete (2026-09-17 … 2026-09-20);
-closeout items 1–7 complete (2026-09-20, `closeout_plan.md`). Phase 7
-(dynamic tests, Figs 7–13) remains — separate effort, §8.
-**Re-read first:** `paper_notes.md` (notation map incl. the h/H clash,
-Tables 1–2, equations, figure inventory), `PLAN.md` (phase status +
-findings log), `phase5_stability_log.md` (stability work, entries a–n),
-`closeout_plan.md` (closeout items + progress log).
+**Status** Static studies and closeout completed on 20 September 2026.
+Dynamic tests for Figures 7–13 remain open (§8).
+See [paper notes](paper_notes.md) for notation, tables and equations and
+[stability notes](phase5_stability_log.md) for the phase derivation.
 
 ---
 
@@ -28,7 +25,7 @@ one wrong kernel identity/scale) or in **paper presentation choices**
 (the Fig.-2 axis, the hidden long-λ region, the Sod IC), not in the
 kernels — see the discrepancy table, §3.
 
-Success-criteria scorecard (`PLAN.md`):
+Static-study results:
 
 | # | Criterion | Status |
 |---|---|---|
@@ -206,8 +203,8 @@ lowest)**. Acceptance: cubic few-% error ✓, quartic (N_H = 60) < 1 %
 
 ## 3. Discrepancy log (findings → root cause → resolution)
 
-Consolidated from the `PLAN.md` findings log, `phase5_stability_log.md`,
-`closeout_plan.md`, and the warpSPH Phase-6 log.
+Consolidated from the stability notes, the original plan and closeout at
+Core revision `dcb14a7`, and the frontend Phase 6 log.
 
 | # | Finding | Root cause | Status |
 |---|---|---|---|
@@ -352,8 +349,9 @@ even in float64 builds (same bug class as the B7 knot) — corrupting the
 constants + an explicit `scalar_t(targetNeighbors)` cast. The fix also
 exposed that the function did not compile in *any* build (no
 int32×float64 mul overload) — the bug was latent behind that. Verified
-exact (0.0 rel) in float64, ~7.5e-8 (f32 round-off) in float32; full
-suite 451 passed / 1 skipped.
+at the time against the then-current expression. The November 2026
+maintenance sweep corrected the separate sphere-volume coefficient error
+and added an independent 1D/2D/3D regression in the Warp suite.
 
 ### 7.2 `sampleOptimal` (item 3, warpSPH)
 See §3 row 11 / §6.
@@ -399,7 +397,7 @@ delivered and validated (§6). Open items carried into Phase 7:
   recompute; `check_stability_boundaries.py` reprocesses the cached
   fields with different thresholds/island criteria.
 - **Audit pipeline:** `warpSPHCore/scripts/kernels/` (specs + battery +
-  onboarding checklist), CI-gated via `tests/kernels/`.
+  onboarding checklist), CI-gated via `tests/warp/kernels/`.
 - **Environment:** conda env `warp`; cap BLAS threads
   (`OMP_NUM_THREADS=2`) for all numerics (shared box); Phases 1–6 ran
   on CPU. Scratch files in the repo's `.tmp/` (gitignored).

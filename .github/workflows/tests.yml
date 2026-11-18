@@ -137,6 +137,8 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install -e ".[dev]"
       - name: Qualify Warp backend
+        env:
+          GLOO_SOCKET_IFNAME: lo
         run: pytest --suite warp --device cpu -q
       - name: Check integer widths independently of precision
         run: python scripts/diagnostics/qualify_index_types.py --device cpu --output /tmp/index-types.json

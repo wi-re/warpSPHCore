@@ -224,6 +224,7 @@ def test_application_vector_derivatives(device, dtype, block):
         close(tangent, precond(torch.ones_like(v)))
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize('kind', ['diagonal', 'block', 'block_native'])
 def test_cuda_capture_updates_and_current_stream(kind):
     if not torch.cuda.is_available():
@@ -250,6 +251,7 @@ def test_cuda_capture_updates_and_current_stream(kind):
                 precond.update(coefficients)
 
 
+@pytest.mark.gpu
 @pytest.mark.parametrize('application', ['torch', 'native'])
 def test_cached_cg_sees_same_address_preconditioner_update(application):
     if not torch.cuda.is_available():

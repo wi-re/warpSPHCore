@@ -62,6 +62,7 @@ def test_half_precision_local_solve_preserves_tangent_dtype(device, dim):
     torch.testing.assert_close(result, torch.full_like(C, -.25), rtol=0, atol=0)
 
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason='CUDA capture')
 def test_projected_derivative_capture_replays_changed_tangent():
     C = torch.diag(torch.tensor([2., 0.], device='cuda'))[None]

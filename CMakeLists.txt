@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(warpSPHCore LANGUAGES NONE)
+project(warpSPHCore VERSION 0.7.1 LANGUAGES NONE)
 option(WARPSPHCORE_BUILD_NATIVE "Compile the native backend instead of a source/JIT wheel" OFF)
 set(WARPSPHCORE_NATIVE_BACKEND "cpu" CACHE STRING "cpu, cuda or hip")
 set_property(CACHE WARPSPHCORE_NATIVE_BACKEND PROPERTY STRINGS cpu cuda hip)
