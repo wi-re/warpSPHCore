@@ -268,7 +268,7 @@ SPH_HD PairBars<T,D> backward(const RowArgs<T,D>& a,const Arrays<T>& arrays,
                 T w=0,wx[D]={},wh=0;
                 warp_compat::value_derivatives<T,D>(p.dx,p.distance,h,a.kernel,w,wx,wh);
                 for(int d=0;d<D;++d)bx[d]+=bar*wx[d];
-                if(a.operation==Volume && !std::isfinite(bar)) {
+                if(a.operation==Volume && !std::isfinite(bar) && !std::isnan(h)) {
                     // The reciprocal can overflow its adjoint while its value
                     // remains finite. Warp tapes the support normalization and
                     // shape terms separately: opposing infinite bars are NaN.

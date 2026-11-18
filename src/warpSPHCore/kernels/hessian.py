@@ -39,6 +39,26 @@ def sphKernelHessian_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kern
 # AD-only stable evaluation of the same declared regularized partial.
 # The public derivative-valued forward operator retains its prior arithmetic.
 @wp.func
+def _hessian_transverse_factor_ad(
+    x: vector(dtype=scalar_t, length=dim_t), r: scalar_t, h: scalar_t, q: scalar_t, eps: scalar_t,
+):
+    if wp.static(scalar_t == wp.float32):
+        if wp.int32(x.length) == 1 and q >= eps and wp.isfinite(r) and wp.isfinite(h) and h > scalar_t(0.0):
+            rd, hd, e = wp.float64(r), wp.float64(h), wp.float64(eps)
+            e2h = e * e * hd
+            radial_cube = rd * rd * rd + e * e * e * hd * hd * hd
+            value = e2h * (e * hd * hd - rd * rd) / (radial_cube * (rd + e2h))
+            if r < eps:
+                # The clamped norm's adjoint differs from that of |x|.
+                # Keep the dependence on x as well as r below the clamp.
+                xd = wp.float64(x[0])
+                value += (rd * rd - xd * xd) / radial_cube
+            # Return the selected factor without tracing an overwritten matrix.
+            return type(wp.outer(x, x))(scalar_t(value))
+    return -wp.outer(x, x) / (iPow(r, 3) + iPow(eps, 3) * iPow(h, 3)) + warp_eye(x) / (r + iPow(eps, 2) * h)
+
+
+@wp.func
 def _sphKernelHessianAD_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, kernel: wp.int32):
     r = vectorNorm_warp(x)
     dim = wp.int32(x.length)
@@ -56,14 +76,7 @@ def _sphKernelHessianAD_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, k
         for i in range(dim):
             factorA[i,i] = scalar_t(1.0)
     
-    factorB = - wp.outer(x,x) /  (iPow(r, 3) + iPow(eps, 3) *iPow(h, 3))
-    factorB += warp_eye(x) / (r + iPow(eps, 2) * h)
-    
-    if wp.static(scalar_t == wp.float32):
-        if dim == 1 and q >= eps and wp.isfinite(r) and wp.isfinite(h) and h > scalar_t(0.0):
-            rd, hd, e = wp.float64(r), wp.float64(h), wp.float64(eps)
-            e2h = e * e * hd
-            factorB[0,0] = scalar_t(e2h * (e * hd * hd - rd * rd) / ((rd * rd * rd + e * e * e * hd * hd * hd) * (rd + e2h)))
+    factorB = _hessian_transverse_factor_ad(x, r, h, q, eps)
 
     hessian = factorA * k2 + factorB * k1
     return hessian
@@ -84,4 +97,3 @@ def sphKernelHessian(
     if kernelProperties.supportMode == wp.static(SupportScheme.SuperSymmetric.value): # SuperSymmetric
         return norm * ((sphKernelHessian_(xij,hi,kernelProperties.kernelFunction) + sphKernelHessian_(xij,hj,kernelProperties.kernelFunction))/scalar_t(2.0))
     return norm * (sphKernelHessian_(xij, hij, kernelProperties.kernelFunction))
-    

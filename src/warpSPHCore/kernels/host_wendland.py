@@ -6,7 +6,7 @@ plain Python float; subsequent plain-float products use Python arithmetic.
 Those boundaries differ from a compiled float64 radial kernel. Keep them here
 for C2/C4/C6 calibration without importing any kernel DSL or changing device
 kernel arithmetic. Leaf expressions and iPow/cpow match kernelFunctions and
-math/wp_pow; exact host parity is checked for both supported precisions.
+math/wp_pow; host parity checks allow one float32 step for host power rounding.
 """
 import numpy as np
 import torch

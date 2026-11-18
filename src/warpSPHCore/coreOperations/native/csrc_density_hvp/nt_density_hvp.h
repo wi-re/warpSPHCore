@@ -16,7 +16,7 @@ template <class T,int D>
 SPH_HD void hessian(const T (&dx)[D],T r,T h,int kernel,T (&out)[D*D]) {
     for (int c=0;c<D*D;++c) out[c]=T(0);
     T w=0,g[D]={},wx[D]={},wh=0,gh[D]={};
-    warp_compat::kernel_derivatives<T,D>(dx,r,h,kernel,w,g,wx,wh,out,gh);
+    warp_compat::kernel_derivatives<T,D,T,false>(dx,r,h,kernel,w,g,wx,wh,out,gh);
 }
 
 template <class T,int D> struct Pair {

@@ -9,10 +9,10 @@ from warpSPHCore.radiusSearch import (RowChunkPolicy, buildChunkedVerletList,
     rowChunkCheckpointState, restoreRowChunkCheckpointState)
 
 
-def scene(device, dim=2):
+def scene(device, dim=2, *, dtype=torch.float32):
     g=torch.Generator().manual_seed(293)
-    x=torch.rand((47,dim),generator=g).to(device)*3-1
-    h=.2+torch.rand(47,generator=g).to(device)*.4
+    x=torch.rand((47,dim),generator=g).to(device=device,dtype=dtype)*3-1
+    h=.2+torch.rand(47,generator=g).to(device=device,dtype=dtype)*.4
     return SimpleNamespace(positions=x,supports=h), sph.DomainDescription(
         x.new_zeros(dim),x.new_ones(dim),torch.tensor([True]+[False]*(dim-1),device=device),dim)
 
@@ -100,7 +100,7 @@ def test_fixed_shape_native_grid_matches_warp_keys_and_capture(device,monkeypatc
 
 def test_backend_transition_and_version1_checkpoint(device):
     wp.init()
-    q,d=scene(device)
+    q,d=scene(device,dtype=sph.get_torch_precision())
     w=sph.buildVerletList(q,d,1.4,sph.SupportScheme.SuperSymmetric,backend='warp')
     n=sph.buildVerletList(q,d,1.4,sph.SupportScheme.SuperSymmetric,priorNeighborhood=w,backend='native')
     assert n is not w and n.searchBackend=='native'

@@ -12,7 +12,7 @@ from _support.interpolate_explicit_contract import case
 def reference_runtime():wp.init()
 
 
-def compare(values,functions,tolerance):
+def compare(values,functions,tolerance,support_oracle=None):
     for weighted in (False,True):
         actual=functions('native')(*values);expected=functions('warp')(*values)
         torch.testing.assert_close(actual,expected,rtol=tolerance,atol=tolerance,equal_nan=True)
@@ -20,6 +20,11 @@ def compare(values,functions,tolerance):
         inputs=[x for x in values if x.requires_grad]
         a=torch.autograd.grad(actual,inputs,seed,allow_unused=True);b=torch.autograd.grad(expected,inputs,seed,allow_unused=True)
         for slot,(x,y,z) in enumerate(zip(a,b,inputs)):
+            if support_oracle is not None and z is values[2]:
+                target, bound = support_oracle(seed)
+                for bar in (x, y):
+                    assert bool(((bar.double() - target).abs() <= bound).all())
+                continue
             torch.testing.assert_close(torch.zeros_like(z) if x is None else x,torch.zeros_like(z) if y is None else y,
                 rtol=tolerance,atol=tolerance,equal_nan=True,msg=lambda msg:f'product reverse role {slot}: {msg}')
 
@@ -68,11 +73,14 @@ def test_boundary_product_reverse_and_support_ties(device,kernel,dimension,suppo
 @pytest.mark.parametrize('volume',[False,True])
 @pytest.mark.parametrize('separation',['self','clamped','cutoff','interior'])
 def test_crk_extension_boundary_composition(device,kernel,volume,separation):
-    from _support.interpolate_explicit_contract import boundary_case
+    from _support.interpolate_explicit_contract import boundary_case, viscosity_crk_support_oracle
     dtype=get_torch_precision();eps=1e-7 if dtype==torch.float32 else 1e-15
     delta={'self':0.,'clamped':eps*.85,'cutoff':.8,'interior':.56}[separation]
     v,functions=boundary_case(device,1,dtype,kernel,sph.SupportScheme.Gather,delta,volume,True)
-    compare(v,functions,4e-3 if dtype==torch.float32 else 3e-7)
+    support_oracle = None
+    if separation == 'clamped' and kernel == sph.KernelFunctions.ViscosityKernel:
+        support_oracle = lambda seed: viscosity_crk_support_oracle(v, seed, volume)
+    compare(v,functions,4e-3 if dtype==torch.float32 else 3e-7,support_oracle)
 
 
 @pytest.mark.parametrize('volume',[False,True])

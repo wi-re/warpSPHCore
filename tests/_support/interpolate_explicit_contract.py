@@ -77,3 +77,46 @@ def boundary_case(device,dimension,dtype,kernel,support,delta,volume=False,crk=F
             if k not in active:v[k]=torch.zeros_like(v[k])
     v=tuple(x.detach().clone().requires_grad_(k not in (5,6)) for k,x in enumerate(v))
     return v,functions
+
+
+def viscosity_crk_support_oracle(values, seed, volume):
+    """Query-support bar and roundoff bound for the one-edge 1D Gather fixture."""
+    from .operators import normalization
+
+    n = len(values[0])
+    v = [x.detach()[:n].double() for x in values]
+    x, dt = (v[0] - v[1]).flatten(), (v[14] - v[15]).flatten()
+    h, dh = v[2], v[16]
+    q = x.abs() / h
+    norm = float(values[0].new_tensor(normalization(sph.KernelFunctions.ViscosityKernel, 1)))
+    eps = float(values[0].new_tensor(1e-7 if values[0].dtype == torch.float32 else 1e-15))
+    poly = 1 + v[12].flatten() * x
+    C = v[11] * poly
+    dC = v[22] * poly + v[11] * (v[23].flatten() * x + v[12].flatten() * dt)
+    f, df = v[10].reshape(n, -1), v[20].reshape(n, -1)
+    cot = seed.detach().double().reshape(n, -1)
+    V = v[13] if volume else v[4] / v[9]
+    dV = v[21] if volume else v[18] / v[9] - v[4] * v[19] / v[9].square()
+    dV_bound = dV.abs() if volume else v[18].abs() / v[9] + v[4].abs() * v[19].abs() / v[9].square()
+    F = C[:, None] * f
+    dF = C[:, None] * df + dC[:, None] * f
+    bw = ((V[:, None] * dF + dV[:, None] * F) * cot).sum(-1)
+    bdw = V * (F * cot).sum(-1)
+    # The 1/(2r) term of W is independent of h. Cancel it analytically first.
+    wh = norm / h.square() * (2 * q**3 - 3 * q.square() + 1)
+    whh = norm / h**3 * (-10 * q**3 + 12 * q.square() - 2)
+    gh = -x / x.abs().clamp_min(eps) * norm / h**3 * (6 * q * (1 - q))
+    expected = bw * wh + bdw * (gh * dt + whh * dh)
+    # The implemented reverse evaluates the singular terms separately.
+    # Bound their positive paths before cancellation.
+    shape = q**3 / 2 + q.square() + .5 / q + 1
+    first = 1.5 * q.square() + .5 / q.square() + 2 * q
+    second = 1 / q**3 + 3 * q + 2
+    wh_bound = norm / h.square() * (shape + q * first)
+    whh_bound = norm / h**3 * (2 * shape + 4 * q * first + q.square() * second)
+    dF_bound = C.abs()[:, None] * df.abs() + dC.abs()[:, None] * f.abs()
+    bw_bound = ((V.abs()[:, None] * dF_bound + dV_bound[:, None] * F.abs()) * cot.abs()).sum(-1)
+    bdw_bound = V.abs() * (F.abs() * cot.abs()).sum(-1)
+    unit = torch.finfo(values[0].dtype).eps
+    gamma = 256 * unit / (1 - 256 * unit)
+    return expected, gamma * (bw_bound * wh_bound + bdw_bound * ((gh * dt).abs() + whh_bound * dh.abs()))

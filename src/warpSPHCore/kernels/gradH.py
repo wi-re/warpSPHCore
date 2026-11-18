@@ -101,13 +101,14 @@ def _sphGradientDkDhAD_(x: vector(dtype=scalar_t, length=dim_t), h: scalar_t, ke
         return type(x)(scalar_t(0.0))
 
     direction = vectorNormalize_warp(input=x)
-    dkdq = eval_dkdq(q, dim, kernel)
-    d2kdq2 = eval_d2kdq2(q, dim, kernel)
     normConstant = - eval_C_d(dim, kernel) / iPow(h, dim + 2)
 
-    supportShape = q * d2kdq2 + scalar_t(dim + 1) * dkdq
     if dim == 1 and kernel == 40 and r > scalar_t(0.0) and h > scalar_t(0.0):
         supportShape = scalar_t(6.0) * q * (scalar_t(1.0) - q)
+    else:
+        dkdq = eval_dkdq(q, dim, kernel)
+        d2kdq2 = eval_d2kdq2(q, dim, kernel)
+        supportShape = q * d2kdq2 + scalar_t(dim + 1) * dkdq
     return direction * (normConstant * supportShape)
 
 

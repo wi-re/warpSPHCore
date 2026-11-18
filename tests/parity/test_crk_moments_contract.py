@@ -84,7 +84,8 @@ def test_raw_boundary_values_and_reverse(device, kernel, dimension, explicit, se
     values[1] = torch.zeros_like(values[1]); values[2] = torch.full_like(values[2], .8); values[3] = torch.full_like(values[3], .8)
     values = tuple(x.detach().requires_grad_(k not in (5, 6) or not explicit) for k, x in enumerate(values))
     bound = reverse_bound = None
-    if kernel == sph.KernelFunctions.ViscosityKernel and separation in ('epsilon', 'near'):
+    near_pole = separation in ('epsilon', 'near') or (separation == 'clamped' and not explicit)
+    if kernel == sph.KernelFunctions.ViscosityKernel and near_pole:
         from _support.crk_moments_roundoff import viscosity_path_bounds, viscosity_decimal_values
         bound = viscosity_path_bounds(values, kernel, explicit=explicit)
         reverse_bound = None if explicit else lambda seeds: viscosity_path_bounds(values, kernel, seeds)

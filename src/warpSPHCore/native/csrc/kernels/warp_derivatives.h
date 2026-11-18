@@ -44,9 +44,24 @@ SPH_HD void value_derivatives(const T (&dx)[D],T r,T h,int kernel,
     for(int d=0;d<D;++d)wx[d]=dx[d]/den*C*d1/(hd*h);
 }
 
+template<class T>
+SPH_HD bool use_conditioned_hessian(T r,T h,T eps) {
+    return r/h>=eps && std::isfinite(r) && std::isfinite(h) && h>T(0);
+}
+
+// In 1D, factor the regularized Hessian before subtracting two O(1/r) terms.
+struct ConditionedHessianFactor {
+    double r,h,eps;
+    SPH_HD double numerator() const {return eps*eps*h*(eps*h*h-r*r);}
+    SPH_HD double denominator() const {
+        return (r*r*r+eps*eps*eps*h*h*h)*(r+eps*eps*h);
+    }
+    SPH_HD double value() const {return numerator()/denominator();}
+};
+
 // Use the reference's custom gradient adjoint, including its near-origin
 // Hessian regularization, while sharing core radial values and derivatives.
-template<class T,int D,class Regularization=T>
+template<class T,int D,class Regularization=T,bool Conditioned=true>
 SPH_HD void kernel_derivatives(const T (&dx)[D],T r,T h,int kernel,
     T& w,T (&g)[D],T (&wx)[D],T& wh,T (&gx)[D*D],T (&gh)[D]) {
     if(h<=T(0)||r>h)return;
@@ -73,7 +88,7 @@ SPH_HD void kernel_derivatives(const T (&dx)[D],T r,T h,int kernel,
 #endif
         // In 1D viscosity, the singular +/-1/q^2 terms cancel exactly.
         // Form their reduced equation before rounding, preserving q=0 controls.
-        if constexpr(D==1)if(kernel==40 && r>T(0) && h>T(0))
+        if constexpr(Conditioned && D==1)if(kernel==40 && r>T(0) && h>T(0))
             support_shape=T(6)*(r/h)*(T(1)-r/h);
         gh[a]=-dx[a]/den*C*support_shape/(hd*h*h);
         for(int b=0;b<D;++b) {
@@ -81,12 +96,9 @@ SPH_HD void kernel_derivatives(const T (&dx)[D],T r,T h,int kernel,
             if(r/h<eps&&a==b)A=T(1);
             T B=-dx[a]*dx[b]/(r*r*r+eps*eps*eps*h*h*h)
                        +(a==b?T(1)/(r+eps*eps*h):T(0));
-            if constexpr(D==1 && sizeof(Regularization)==4)if(r/h>=eps && std::isfinite(r) && std::isfinite(h) && h>T(0)) {
-                // Same regularized Hessian, factored before subtracting two
-                // O(1/r) terms. Central linear kernels otherwise acquire noise.
-                const double rd=r,hd=h,e=eps,e2h=e*e*hd;
-                B=T(e2h*(e*hd*hd-rd*rd)/((rd*rd*rd+e*e*e*hd*hd*hd)*(rd+e2h)));
-            }
+            if constexpr(Conditioned && D==1 && sizeof(Regularization)==4)
+                if(use_conditioned_hessian(r,h,eps))
+                    B=T(ConditionedHessianFactor{double(r),double(h),double(eps)}.value());
             #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
             // Warp keeps the first matrix product materialized when the
             // radial second derivative overflows; fusing it would turn its
